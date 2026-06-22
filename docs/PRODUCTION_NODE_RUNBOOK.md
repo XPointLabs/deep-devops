@@ -140,6 +140,10 @@ Deployment facts:
 - ServiceNodeRewards proxy: `0xc52284b7aBAebbEF7BdE0E1ca8251B44AeA12F5f`.
 - ServiceNodeContributionFactory proxy: `0x289d88A8C06881634Fb619Ec528361C7b88521f1`.
 - Staking requirement: `25,000 XPNT`.
+- Owner / deployer: `0x62174f6e6a25E7D8135Bd172C1053D7ABd7D2750`.
+- `ServiceNodeRewards.isStarted` was `false` in the post-deploy snapshot; start
+  it only after the production bootstrap flow is chosen.
+- Subscription contracts were intentionally not deployed in this staking run.
 
 The active rewards path uses `BLS12-381` (`contracts/libraries/BLS12381.sol`) and the EIP-2537 precompiles available on Arbitrum One. Legacy `BN256*` libraries are not imported by production contracts.
 
