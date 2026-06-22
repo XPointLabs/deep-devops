@@ -1,0 +1,218 @@
+﻿name: unit
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout devops
+        uses: actions/checkout@v4
+        with:
+          path: deep-devops
+
+      - name: Checkout Deep repos
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/xnode
+          token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
+          path: xnode
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/deep-registry-api
+          token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
+          path: deep-registry-api
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/xpoint-staking-backend
+          token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
+          path: xpoint-staking-backend
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/deep-protocol
+          token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
+          path: deep-protocol
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/xpoint-staking-contracts
+          token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
+          path: xpoint-staking-contracts
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/deep-tests-e2e
+          token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
+          path: deep-tests-e2e
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            10.0.x
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Unit tests
+        shell: pwsh
+        run: |
+          dotnet test xnode/XNode.slnx --configuration Release --logger "trx;LogFileName=xnode.trx"
+          dotnet test deep-registry-api/Deep.Registry.Api.slnx --configuration Release --logger "trx;LogFileName=registry.trx"
+          dotnet test xpoint-staking-backend/XPoint.Staking.Backend.slnx --configuration Release --logger "trx;LogFileName=staking-backend.trx"
+          dotnet test deep-protocol/Deep.Protocol.slnx --configuration Release --logger "trx;LogFileName=protocol.trx"
+          cd deep-tests-e2e
+          npm run fixtures:validate
+          npm run compat
+
+      - name: Upload unit artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-artifacts
+          path: |
+            **/TestResults/**
+            **/artifacts/**
+
+  security-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout devops
+        uses: actions/checkout@v4
+        with:
+          path: deep-devops
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/deep-protocol
+          token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
+          path: deep-protocol
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/xnode
+          token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
+          path: xnode
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/deep-registry-api
+          token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
+          path: deep-registry-api
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/xpoint-staking-backend
+          token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
+          path: xpoint-staking-backend
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/xpoint-staking-contracts
+          token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
+          path: xpoint-staking-contracts
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/deep-client-shared
+          token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
+          path: deep-client-shared
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/deep-client-maui
+          token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
+          path: deep-client-maui
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/deep-tests-e2e
+          token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
+          path: deep-tests-e2e
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            10.0.x
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Restore MAUI workloads for dependency audit
+        run: dotnet workload restore deep-client-maui/src/Deep.Client.Maui/Deep.Client.Maui.csproj
+
+      - name: Run security gate
+        run: node deep-devops/scripts/security-gate.mjs
+
+      - name: Upload security artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-gate-artifacts
+          path: deep-devops/artifacts/security/**
+
+  release-gate-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout devops
+        uses: actions/checkout@v4
+        with:
+          path: deep-devops
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/xnode
+          token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
+          path: xnode
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/deep-registry-api
+          token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
+          path: deep-registry-api
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/deep-client-shared
+          token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
+          path: deep-client-shared
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/deep-client-maui
+          token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
+          path: deep-client-maui
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Check release gate scripts
+        run: node --check deep-devops/scripts/release-gate-contracts.mjs
+
+      - name: Validate production readiness evidence templates
+        run: node deep-devops/scripts/release-gate-contracts.mjs
+        env:
+          DEEP_RELEASE_CONTRACT_ARTIFACT_ROOT: ${{ runner.temp }}/deep-release-gate-contracts
+
+      - name: Upload release gate contract artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-gate-contract-artifacts
+          path: ${{ runner.temp }}/deep-release-gate-contracts/**

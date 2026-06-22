@@ -1,0 +1,110 @@
+﻿name: deep-node-prod
+
+services:
+  xnode:
+    image: ${XNODE_IMAGE:?set XNODE_IMAGE}
+    restart: unless-stopped
+    stop_grace_period: 30s
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://0.0.0.0:8080
+
+      Node__ApiListenUrl: http://0.0.0.0:8080
+      Node__DataDirectory: /var/lib/xnode
+      Node__RouterId: ${DEEP_NODE_ED25519_PUBLIC_KEY:?set DEEP_NODE_ED25519_PUBLIC_KEY}
+      Node__Ed25519PrivateKeyPath: /run/secrets/node-ed25519-private-key
+      Node__IsRelay: "true"
+      Node__Network: ${DEEP_NETWORK:-mainnet}
+      Node__PublicHost: ${DEEP_NODE_PUBLIC_HOST:?set DEEP_NODE_PUBLIC_HOST}
+      Node__PublicPort: ${DEEP_NODE_PUBLIC_PORT:-443}
+      Node__PublicRpcEndpoint: ${DEEP_NODE_RPC_ENDPOINT:?set DEEP_NODE_RPC_ENDPOINT}
+
+      Runtime__BootstrapFromStorage: ${DEEP_NODE_BOOTSTRAP_FROM_STORAGE:-true}
+      Runtime__HeartbeatInterval: ${DEEP_NODE_RUNTIME_HEARTBEAT_INTERVAL:-00:00:30}
+      Runtime__RequireSignedRelayContacts: "true"
+
+      RegistryBootstrap__BaseUrl: ${DEEP_REGISTRY_URL:?set DEEP_REGISTRY_URL}
+      StorageRpc__BaseUrl: ${DEEP_STORAGE_RPC_URL:?set DEEP_STORAGE_RPC_URL}
+
+      Vless__Enabled: "true"
+      Vless__MockProcess: "false"
+      Vless__XrayExecutablePath: /usr/local/bin/xray
+      Vless__GeneratedConfigPath: /etc/xnode/xray.generated.json
+      Vless__WorkingDirectory: /var/lib/xnode/xray
+      Vless__InboundListenHost: 0.0.0.0
+      Vless__InboundListenPort: "443"
+      Vless__PublicHost: ${DEEP_NODE_PUBLIC_HOST:?set DEEP_NODE_PUBLIC_HOST}
+      Vless__PublicPort: ${DEEP_NODE_PUBLIC_PORT:-443}
+      Vless__ApiIngressHost: 127.0.0.1
+      Vless__ApiIngressPort: "8080"
+      Vless__ClientId: ${DEEP_NODE_VLESS_CLIENT_ID:?set DEEP_NODE_VLESS_CLIENT_ID}
+      Vless__MaskDomain: ${DEEP_NODE_MASK_DOMAIN:-www.microsoft.com}
+      Vless__TransportMode: Reality
+      Vless__Reality__ServerName: ${DEEP_NODE_REALITY_SERVER_NAME:-www.microsoft.com}
+      Vless__Reality__PublicKey: ${DEEP_NODE_REALITY_PUBLIC_KEY:?set DEEP_NODE_REALITY_PUBLIC_KEY}
+      Vless__Reality__PrivateKey: ${DEEP_NODE_REALITY_PRIVATE_KEY:?set DEEP_NODE_REALITY_PRIVATE_KEY}
+      Vless__Reality__ShortId: ${DEEP_NODE_REALITY_SHORT_ID:?set DEEP_NODE_REALITY_SHORT_ID}
+      Vless__Reality__Fingerprint: ${DEEP_NODE_REALITY_FINGERPRINT:-chrome}
+      Vless__Reality__SpiderX: ${DEEP_NODE_REALITY_SPIDER_X:-/}
+
+      RegistryHeartbeat__Enabled: "true"
+      RegistryHeartbeat__Endpoint: ${DEEP_REGISTRY_URL:?set DEEP_REGISTRY_URL}/api/nodes/register
+      RegistryHeartbeat__Interval: ${DEEP_REGISTRY_HEARTBEAT_INTERVAL:-00:00:30}
+
+      RegistryRegistration__OperatorAddress: ${DEEP_OPERATOR_ADDRESS:?set DEEP_OPERATOR_ADDRESS}
+      RegistryRegistration__RewardsAddress: ${DEEP_REWARDS_ADDRESS:?set DEEP_REWARDS_ADDRESS}
+      RegistryRegistration__OperatorFeeBps: ${DEEP_OPERATOR_FEE_BPS:-0}
+      RegistryRegistration__StakeAtomic: ${DEEP_STAKE_ATOMIC:?set DEEP_STAKE_ATOMIC}
+      RegistryRegistration__Ed25519PublicKey: ${DEEP_NODE_ED25519_PUBLIC_KEY:?set DEEP_NODE_ED25519_PUBLIC_KEY}
+      RegistryRegistration__Ed25519Signature: ${DEEP_NODE_ED25519_SIGNATURE:-}
+      RegistryRegistration__BlsPrivateKeyPath: /run/secrets/node-bls-private-key
+      RegistryRegistration__EthereumRpcUrl: ${DEEP_ARBITRUM_RPC_URL:?set DEEP_ARBITRUM_RPC_URL}
+      RegistryRegistration__ServiceNodeRewardsAddress: ${DEEP_SERVICE_NODE_REWARDS_ADDRESS:?set DEEP_SERVICE_NODE_REWARDS_ADDRESS}
+      RegistryRegistration__SigningEndpoint: ${DEEP_NODE_SIGNING_ENDPOINT:?set DEEP_NODE_SIGNING_ENDPOINT}
+    ports:
+      - "${DEEP_NODE_VLESS_BIND:-443}:443"
+      - "${DEEP_NODE_API_BIND:-127.0.0.1:8080}:8080"
+    volumes:
+      - xnode-state:/var/lib/xnode
+      - xnode-config:/etc/xnode
+    secrets:
+      - source: node-ed25519-private-key
+        target: node-ed25519-private-key
+      - source: node-bls-private-key
+        target: node-bls-private-key
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health/ready >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  storage-service:
+    image: ${DEEP_STORAGE_SERVICE_IMAGE:?set DEEP_STORAGE_SERVICE_IMAGE}
+    restart: unless-stopped
+    environment:
+      PORT: "8080"
+      SERVICE_NAME: deep-storage-service
+      COMPAT_STATE_DIR: /var/lib/deep/storage-service
+      PUSH_COMPAT_NOTIFY_URL: ${DEEP_PUSH_NOTIFY_URL:-}
+    ports:
+      - "${DEEP_NODE_STORAGE_BIND:-127.0.0.1:22021}:8080"
+    volumes:
+      - node-storage-state:/var/lib/deep/storage-service
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+volumes:
+  xnode-state:
+  xnode-config:
+  node-storage-state:
+
+secrets:
+  node-ed25519-private-key:
+    file: ${DEEP_NODE_ED25519_PRIVATE_KEY_FILE:?set DEEP_NODE_ED25519_PRIVATE_KEY_FILE}
+  node-bls-private-key:
+    file: ${DEEP_NODE_BLS_PRIVATE_KEY_FILE:?set DEEP_NODE_BLS_PRIVATE_KEY_FILE}

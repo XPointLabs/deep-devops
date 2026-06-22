@@ -1,0 +1,65 @@
+﻿name: integration
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout devops
+        uses: actions/checkout@v4
+        with:
+          path: deep-devops
+
+      - name: Checkout sibling repos
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/deep-tests-e2e
+          token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
+          path: deep-tests-e2e
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/xnode
+          token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
+          path: xnode
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/deep-registry-api
+          token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
+          path: deep-registry-api
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/xpoint-staking-backend
+          token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
+          path: xpoint-staking-backend
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/xpoint-staking-contracts
+          token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
+          path: xpoint-staking-contracts
+
+      - name: Run e2e smoke
+        shell: pwsh
+        run: ./deep-devops/scripts/test-env.ps1 -Suite smoke
+
+      - name: Run backend-external no-mock smoke
+        shell: pwsh
+        run: ./deep-devops/scripts/test-env.ps1 -Suite smoke -BackendMode external -ManagedExternalProfile backend-external -RequireRouterNoMock
+
+      - name: Run multi-node no-mock rehearsal
+        shell: pwsh
+        run: ./deep-devops/scripts/multi-node-rehearsal.ps1
+
+      - name: Upload integration artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-artifacts
+          path: deep-devops/artifacts/**

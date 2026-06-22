@@ -1,0 +1,125 @@
+﻿{
+  "generatedAt": "2026-06-02T00:00:00.000Z",
+  "releaseCandidate": "deep-messenger-rc.1",
+  "runs": [
+    {
+      "name": "devops-integration",
+      "repository": "XPointLabs/deep-devops",
+      "workflow": "integration.yml",
+      "runId": 123456789,
+      "runAttempt": 1,
+      "headSha": "0123456789abcdef0123456789abcdef01234567",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/XPointLabs/deep-devops/actions/runs/123456789",
+      "artifacts": [
+        {
+          "name": "integration-artifacts",
+          "id": 987654321,
+          "url": "https://github.com/XPointLabs/deep-devops/actions/runs/123456789/artifacts/987654321"
+        }
+      ]
+    },
+    {
+      "name": "devops-nightly-full-e2e",
+      "repository": "XPointLabs/deep-devops",
+      "workflow": "nightly-full-e2e.yml",
+      "runId": 123456790,
+      "runAttempt": 1,
+      "headSha": "0123456789abcdef0123456789abcdef01234567",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/XPointLabs/deep-devops/actions/runs/123456790",
+      "artifacts": [
+        {
+          "name": "nightly-e2e-artifacts",
+          "id": 987654322,
+          "url": "https://github.com/XPointLabs/deep-devops/actions/runs/123456790/artifacts/987654322"
+        }
+      ]
+    },
+    {
+      "name": "devops-security-gate",
+      "repository": "XPointLabs/deep-devops",
+      "workflow": "unit.yml",
+      "runId": 123456791,
+      "runAttempt": 1,
+      "headSha": "0123456789abcdef0123456789abcdef01234567",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/XPointLabs/deep-devops/actions/runs/123456791",
+      "artifacts": [
+        {
+          "name": "security-gate-artifacts",
+          "id": 987654323,
+          "url": "https://github.com/XPointLabs/deep-devops/actions/runs/123456791/artifacts/987654323"
+        }
+      ]
+    },
+    {
+      "name": "devops-release-gate-contracts",
+      "repository": "XPointLabs/deep-devops",
+      "workflow": "unit.yml",
+      "runId": 123456792,
+      "runAttempt": 1,
+      "headSha": "0123456789abcdef0123456789abcdef01234567",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/XPointLabs/deep-devops/actions/runs/123456792",
+      "artifacts": [
+        {
+          "name": "release-gate-contract-artifacts",
+          "id": 987654324,
+          "url": "https://github.com/XPointLabs/deep-devops/actions/runs/123456792/artifacts/987654324"
+        }
+      ]
+    },
+    {
+      "name": "devops-release-secret-preflight",
+      "repository": "XPointLabs/deep-devops",
+      "workflow": "release-secret-preflight.yml",
+      "runId": 123456793,
+      "runAttempt": 1,
+      "headSha": "0123456789abcdef0123456789abcdef01234567",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/XPointLabs/deep-devops/actions/runs/123456793",
+      "artifacts": [
+        {
+          "name": "release-secret-preflight-artifacts",
+          "id": 987654325,
+          "url": "https://github.com/XPointLabs/deep-devops/actions/runs/123456793/artifacts/987654325"
+        }
+      ]
+    },
+    {
+      "name": "xnode-c3",
+      "repository": "XPointLabs/xnode",
+      "workflow": "ci.yml",
+      "runId": 223456789,
+      "runAttempt": 1,
+      "headSha": "abcdef0123456789abcdef0123456789abcdef01",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/XPointLabs/xnode/actions/runs/223456789",
+      "artifacts": [
+        {
+          "name": "c3-test-results",
+          "id": 887654321,
+          "url": "https://github.com/XPointLabs/xnode/actions/runs/223456789/artifacts/887654321"
+        }
+      ]
+    },
+    {
+      "name": "client-maui-platform-matrix",
+      "repository": "XPointLabs/deep-client-maui",
+      "workflow": "ci.yml",
+      "runId": 323456789,
+      "runAttempt": 1,
+      "headSha": "fedcba9876543210fedcba9876543210fedcba98",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/XPointLabs/deep-client-maui/actions/runs/323456789",
+      "artifacts": [
+        {
+          "name": "deep-client-maui-platform-matrix",
+          "id": 787654321,
+          "url": "https://github.com/XPointLabs/deep-client-maui/actions/runs/323456789/artifacts/787654321"
+        }
+      ]
+    }
+  ]
+}

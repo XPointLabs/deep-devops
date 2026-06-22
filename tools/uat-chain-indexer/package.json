@@ -1,0 +1,15 @@
+﻿{
+  "name": "deep-uat-chain-indexer",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node indexer.mjs",
+    "check": "node --check indexer.mjs"
+  },
+  "dependencies": {
+    "viem": "2.21.54"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

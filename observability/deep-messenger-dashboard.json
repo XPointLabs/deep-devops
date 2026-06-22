@@ -1,0 +1,65 @@
+﻿{
+  "uid": "deep-messenger-release-health",
+  "title": "Deep Messenger Release Health",
+  "schemaVersion": 39,
+  "version": 1,
+  "tags": ["deep", "messenger", "release"],
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Service Error Counters",
+      "type": "timeseries",
+      "severity": "critical",
+      "targets": [
+        { "expr": "sum(rate(deep_storage_errors_total[5m]))", "legendFormat": "storage" },
+        { "expr": "sum(rate(deep_file_errors_total[5m]))", "legendFormat": "file" },
+        { "expr": "sum(rate(deep_push_errors_total[5m]))", "legendFormat": "push" }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Messenger Operation P95 Latency",
+      "type": "timeseries",
+      "severity": "warning",
+      "targets": [
+        { "expr": "histogram_quantile(0.95, sum(rate(deep_storage_store_duration_seconds_bucket[5m])) by (le))", "legendFormat": "storage store" },
+        { "expr": "histogram_quantile(0.95, sum(rate(deep_file_upload_duration_seconds_bucket[5m])) by (le))", "legendFormat": "file upload" },
+        { "expr": "histogram_quantile(0.95, sum(rate(deep_avatar_duration_seconds_bucket[5m])) by (le))", "legendFormat": "avatar" }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Push Provider Delivery Health",
+      "type": "timeseries",
+      "severity": "warning",
+      "targets": [
+        { "expr": "sum(rate(deep_push_provider_delivered_total[5m]))", "legendFormat": "delivered" },
+        { "expr": "sum(rate(deep_push_provider_failed_total[5m]))", "legendFormat": "failed" },
+        { "expr": "sum(rate(deep_push_provider_not_configured_total[5m]))", "legendFormat": "not configured" }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Router Runtime Transport",
+      "type": "stat",
+      "severity": "critical",
+      "targets": [
+        { "expr": "deep_router_transport_mocked", "legendFormat": "mocked" },
+        { "expr": "deep_router_xray_degraded", "legendFormat": "xray degraded" }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Release Rollback MTTR",
+      "type": "stat",
+      "severity": "critical",
+      "targets": [
+        { "expr": "deep_release_rollback_mttr_seconds", "legendFormat": "MTTR seconds" }
+      ]
+    }
+  ]
+}

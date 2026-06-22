@@ -1,0 +1,51 @@
+﻿{
+  "status": "passed",
+  "generatedAt": "2026-06-02T00:00:00.000Z",
+  "releaseCandidate": "deep-messenger-rc.1",
+  "environment": "staging",
+  "deployment": {
+    "id": "deploy-staging-rc1",
+    "url": "https://ci.example.invalid/artifacts/deep-staging-deploy"
+  },
+  "dashboards": {
+    "deployed": true,
+    "uid": "deep-messenger-release",
+    "url": "https://grafana.example.invalid/d/deep-messenger-release",
+    "panels": [
+      "Deep Messenger Release Health",
+      "Router C3 SLO",
+      "Storage/File/Push Error Budget"
+    ],
+    "evidence": {
+      "url": "https://ci.example.invalid/artifacts/dashboard-deployment"
+    }
+  },
+  "alerts": {
+    "routesTested": true,
+    "testedRoutes": [
+      "critical-release-pager",
+      "warning-release-watch"
+    ],
+    "evidence": {
+      "url": "https://ci.example.invalid/artifacts/alert-route-test"
+    }
+  },
+  "postDeployVerification": {
+    "status": "passed",
+    "runtimeHealth": {
+      "status": "ok"
+    },
+    "releaseGate": {
+      "url": "https://ci.example.invalid/artifacts/release-evidence-summary"
+    },
+    "evidence": {
+      "url": "https://ci.example.invalid/artifacts/post-deploy-smoke"
+    }
+  },
+  "recovery": {
+    "backupLocation": "s3://example-invalid/deep/staging/rc1",
+    "rollbackDrill": {
+      "url": "https://ci.example.invalid/artifacts/rollback-drill"
+    }
+  }
+}

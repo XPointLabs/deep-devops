@@ -1,0 +1,53 @@
+﻿{
+  "version": 1,
+  "service": "deep-messenger",
+  "sloWindow": "release-rehearsal",
+  "budgets": {
+    "errorCounters": 0,
+    "rollbackMttrSeconds": 3600,
+    "timingP95Ms": {
+      "pushSubscribe": 250,
+      "storageStore": 500,
+      "storageRetry": 500,
+      "storageRetrieve": 250,
+      "fileUpload": 250,
+      "fileInfo": 250,
+      "fileDownload": 250,
+      "fileExtend": 250,
+      "avatar": 250,
+      "pushUnsubscribe": 250
+    },
+    "router": {
+      "soakSuccessRate": 0.99,
+      "chaosSuccessRate": 0.55,
+      "loadSuccessRate": 0.99,
+      "pathSelectP95Ms": 15
+    }
+  },
+  "alertRules": [
+    {
+      "name": "DeepXNodeTransportMocked",
+      "severity": "critical",
+      "condition": "router transportMode is mocked on a production rehearsal",
+      "runbook": "docs/MESSENGER_NODE_PRODUCTION_RUNBOOK.md#rollback"
+    },
+    {
+      "name": "DeepBackendErrorCounterNonZero",
+      "severity": "critical",
+      "condition": "storage/file/push errors counter is greater than zero",
+      "runbook": "docs/MESSENGER_NODE_PRODUCTION_RUNBOOK.md#rollback"
+    },
+    {
+      "name": "DeepProviderDeliveryFailures",
+      "severity": "warning",
+      "condition": "push provider failure inventory is greater than zero",
+      "runbook": "docs/MESSENGER_NODE_PRODUCTION_RUNBOOK.md#release-rehearsal"
+    },
+    {
+      "name": "DeepRollbackMttrBudgetExceeded",
+      "severity": "critical",
+      "condition": "rollback drill MTTR exceeds the release SLO budget",
+      "runbook": "docs/MESSENGER_NODE_PRODUCTION_RUNBOOK.md#rollback"
+    }
+  ]
+}

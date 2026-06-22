@@ -1,0 +1,27 @@
+﻿{
+  "version": 1,
+  "owner": "sre-ops",
+  "defaultReceiver": "deep-release-watch",
+  "routes": [
+    {
+      "name": "critical-release-pager",
+      "severity": "critical",
+      "receiver": "deep-primary-oncall",
+      "repeatInterval": "30m",
+      "alerts": [
+        "DeepXNodeTransportMocked",
+        "DeepBackendErrorCounterNonZero",
+        "DeepRollbackMttrBudgetExceeded"
+      ]
+    },
+    {
+      "name": "warning-release-watch",
+      "severity": "warning",
+      "receiver": "deep-release-watch",
+      "repeatInterval": "2h",
+      "alerts": [
+        "DeepProviderDeliveryFailures"
+      ]
+    }
+  ]
+}

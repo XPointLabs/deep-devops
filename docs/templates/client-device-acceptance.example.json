@@ -1,0 +1,96 @@
+﻿{
+  "status": "passed",
+  "generatedAt": "2026-06-02T00:00:00.000Z",
+  "releaseCandidate": "deep-messenger-rc.1",
+  "deepSessionStack": {
+    "name": "staging-messenger-cluster",
+    "url": "https://ci.example.invalid/artifacts/deep-staging-stack"
+  },
+  "platforms": [
+    {
+      "platform": "android",
+      "status": "passed",
+      "evidenceType": "device-lab",
+      "deviceLabRunId": "android-run-id",
+      "url": "https://ci.example.invalid/artifacts/android-device-run"
+    },
+    {
+      "platform": "ios",
+      "status": "passed",
+      "evidenceType": "device-lab",
+      "deviceLabRunId": "ios-run-id",
+      "url": "https://ci.example.invalid/artifacts/ios-device-run"
+    },
+    {
+      "platform": "windows",
+      "status": "passed",
+      "evidenceType": "device-lab",
+      "deviceLabRunId": "windows-run-id",
+      "url": "https://ci.example.invalid/artifacts/windows-device-run"
+    }
+  ],
+  "scenarios": [
+    {
+      "name": "onboarding-recovery",
+      "status": "passed",
+      "evidenceType": "device-lab",
+      "platforms": ["android", "ios", "windows"],
+      "url": "https://ci.example.invalid/artifacts/onboarding-recovery"
+    },
+    {
+      "name": "one-to-one-messaging",
+      "status": "passed",
+      "evidenceType": "device-lab",
+      "platforms": ["android", "ios", "windows"],
+      "url": "https://ci.example.invalid/artifacts/one-to-one-messaging"
+    },
+    {
+      "name": "offline-retrieval",
+      "status": "passed",
+      "evidenceType": "device-lab",
+      "platforms": ["android", "ios", "windows"],
+      "url": "https://ci.example.invalid/artifacts/offline-retrieval"
+    },
+    {
+      "name": "groups-lifecycle",
+      "status": "passed",
+      "evidenceType": "device-lab",
+      "platforms": ["android", "ios", "windows"],
+      "url": "https://ci.example.invalid/artifacts/groups-lifecycle"
+    },
+    {
+      "name": "attachments",
+      "status": "passed",
+      "evidenceType": "device-lab",
+      "platforms": ["android", "ios", "windows"],
+      "url": "https://ci.example.invalid/artifacts/attachments"
+    },
+    {
+      "name": "avatars-profile-image",
+      "status": "passed",
+      "evidenceType": "device-lab",
+      "platforms": ["android", "ios", "windows"],
+      "url": "https://ci.example.invalid/artifacts/avatars-profile-image"
+    },
+    {
+      "name": "push-lifecycle",
+      "status": "passed",
+      "evidenceType": "device-lab",
+      "platforms": ["android", "ios", "windows"],
+      "url": "https://ci.example.invalid/artifacts/push-lifecycle"
+    },
+    {
+      "name": "release-no-stub-no-mock-guards",
+      "status": "passed",
+      "evidenceType": "device-lab",
+      "platforms": ["android", "ios", "windows"],
+      "url": "https://ci.example.invalid/artifacts/release-no-stub-no-mock-guards"
+    }
+  ],
+  "releaseGuards": {
+    "noStubTransport": true,
+    "noSessionEndpoints": true,
+    "deepSessionFileUrlRequired": true,
+    "deepSessionPushUrlRequired": true
+  }
+}

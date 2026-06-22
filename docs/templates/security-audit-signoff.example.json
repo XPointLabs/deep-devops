@@ -1,0 +1,27 @@
+﻿{
+  "status": "approved",
+  "generatedAt": "2026-06-02T00:00:00.000Z",
+  "releaseCandidate": "deep-messenger-rc.1",
+  "approver": {
+    "name": "Security DRI",
+    "id": "security-dri"
+  },
+  "externalAudit": {
+    "status": "closed",
+    "url": "https://audit.example.invalid/reports/deep-messenger-rc1"
+  },
+  "openFindings": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 3
+  },
+  "securityGate": {
+    "status": "passed",
+    "url": "https://ci.example.invalid/artifacts/security-gate-summary"
+  },
+  "sbom": {
+    "attested": true,
+    "url": "https://ci.example.invalid/artifacts/sbom-attestation"
+  }
+}

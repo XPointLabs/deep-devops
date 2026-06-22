@@ -1,0 +1,226 @@
+﻿name: production-readiness
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_candidate:
+        description: Named release candidate, for example deep-messenger-rc.1
+        required: true
+        type: string
+      release_lane:
+        description: GitHub Environment used for release-scoped secrets and approvals
+        required: false
+        default: staging
+        type: string
+      supporting_evidence_run_id:
+        description: Optional deep-devops workflow run id with a retained evidence bundle for push canary, rollback/observability, and/or P6 manifests
+        required: false
+        type: string
+      supporting_evidence_artifact_name:
+        description: Optional artifact name from supporting_evidence_run_id to hydrate before strict preflight
+        required: false
+        type: string
+
+jobs:
+  production-readiness:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.release_lane }}
+    steps:
+      - name: Checkout devops
+        uses: actions/checkout@v4
+        with:
+          path: deep-devops
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/xnode
+          token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
+          path: xnode
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/deep-registry-api
+          token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
+          path: deep-registry-api
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/deep-client-shared
+          token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
+          path: deep-client-shared
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/deep-client-maui
+          token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
+          path: deep-client-maui
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Check production readiness scripts
+        run: |
+          node --check deep-devops/scripts/production-readiness-status.mjs
+          node --check deep-devops/scripts/production-readiness-gate.mjs
+          node --check deep-devops/scripts/release-evidence-gate.mjs
+          node --check deep-devops/scripts/session-infra-guard.mjs
+          node --check deep-devops/scripts/release-artifact-bundle.mjs
+          node --check deep-devops/scripts/release-ci-lanes.mjs
+          node --check deep-devops/scripts/collect-attached-ci-source.mjs
+          node --check deep-devops/scripts/bundle-supporting-release-evidence.mjs
+          node --check deep-devops/scripts/hydrate-release-artifact-bundle.mjs
+          node --check deep-devops/scripts/attached-ci-manifest.mjs
+          node --check deep-devops/scripts/registry-recovery-drill.mjs
+
+      - name: Validate supporting evidence artifact inputs
+        id: supporting_inputs
+        shell: pwsh
+        run: |
+          $supportingRunId = '${{ inputs.supporting_evidence_run_id }}'.Trim()
+          $supportingArtifactName = '${{ inputs.supporting_evidence_artifact_name }}'.Trim()
+
+          if ([string]::IsNullOrWhiteSpace($supportingRunId) -and [string]::IsNullOrWhiteSpace($supportingArtifactName)) {
+            Write-Host 'No supporting evidence artifact requested; strict preflight will rely on attached CI artifacts and any artifacts generated in this run.'
+            return
+          }
+
+          $missing = @()
+          if ([string]::IsNullOrWhiteSpace($supportingRunId)) {
+            $missing += 'supporting_evidence_run_id'
+          }
+          if ([string]::IsNullOrWhiteSpace($supportingArtifactName)) {
+            $missing += 'supporting_evidence_artifact_name'
+          }
+
+          if ($missing.Count -gt 0) {
+            throw "Supporting evidence artifact inputs must be provided together. Missing: $($missing -join ', ')"
+          }
+
+      - name: Collect attached CI prerequisite runs
+        id: attached_ci
+        run: >
+          node deep-devops/scripts/collect-attached-ci-source.mjs
+          --owner "${{ github.repository_owner }}"
+          --branch "${{ github.ref_name }}"
+          --release-candidate "${{ inputs.release_candidate }}"
+          --require-success
+        env:
+          DEEP_GITHUB_TOKEN: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
+          DEEP_RELEASE_CANDIDATE: ${{ inputs.release_candidate }}
+
+      - name: Download integration release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: integration-artifacts
+          path: deep-devops/artifacts/hydrated/devops-integration
+          github-token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
+          repository: ${{ github.repository_owner }}/deep-devops
+          token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
+          run-id: ${{ steps.attached_ci.outputs.devops_integration_run_id }}
+
+      - name: Download nightly full e2e artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: nightly-e2e-artifacts
+          path: deep-devops/artifacts/hydrated/devops-nightly-full-e2e
+          github-token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
+          repository: ${{ github.repository_owner }}/deep-devops
+          token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
+          run-id: ${{ steps.attached_ci.outputs.devops_nightly_full_e2e_run_id }}
+
+      - name: Download security gate artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: security-gate-artifacts
+          path: deep-devops/artifacts/hydrated/devops-security-gate
+          github-token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
+          repository: ${{ github.repository_owner }}/deep-devops
+          token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
+          run-id: ${{ steps.attached_ci.outputs.devops_security_gate_run_id }}
+
+      - name: Download xnode C3 artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: c3-test-results
+          path: deep-devops/artifacts/hydrated/xnode-c3
+          github-token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
+          repository: ${{ github.repository_owner }}/xnode
+          token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
+          run-id: ${{ steps.attached_ci.outputs.node_router_c3_run_id }}
+
+      - name: Download supporting release evidence bundle
+        if: ${{ inputs.supporting_evidence_run_id != '' && inputs.supporting_evidence_artifact_name != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.supporting_evidence_artifact_name }}
+          path: deep-devops/artifacts/hydrated/supporting-evidence
+          github-token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
+          repository: ${{ github.repository_owner }}/deep-devops
+          token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
+          run-id: ${{ inputs.supporting_evidence_run_id }}
+
+      - name: Hydrate release artifact bundle
+        run: >
+          node deep-devops/scripts/hydrate-release-artifact-bundle.mjs
+          --input-dir deep-devops/artifacts/hydrated
+          --allow-missing
+
+      - name: Validate supporting evidence hydration
+        if: ${{ inputs.supporting_evidence_run_id != '' && inputs.supporting_evidence_artifact_name != '' }}
+        shell: pwsh
+        run: |
+          $summaryPath = Join-Path $PWD 'deep-devops/artifacts/release/release-artifact-hydration-summary.json'
+          if (-not (Test-Path -LiteralPath $summaryPath)) {
+            throw "Hydration summary was not written: $summaryPath"
+          }
+
+          $summary = Get-Content -LiteralPath $summaryPath -Raw | ConvertFrom-Json
+          $supportingArtifacts = @(
+            $summary.hydratedArtifacts | Where-Object {
+              $_.hydrated -eq $true -and [string]$_.sourcePath -like '*supporting-evidence*'
+            }
+          )
+
+          if ($supportingArtifacts.Count -eq 0) {
+            throw "Supporting evidence artifact '${{ inputs.supporting_evidence_artifact_name }}' did not hydrate any recognized release artifact. Check the artifact layout before rerunning production-readiness."
+          }
+
+      - name: Generate attached CI manifest
+        run: >
+          node deep-devops/scripts/attached-ci-manifest.mjs
+          --release-candidate "${{ inputs.release_candidate }}"
+        env:
+          DEEP_RELEASE_CANDIDATE: ${{ inputs.release_candidate }}
+
+      - name: Guard against upstream Session infrastructure dependencies
+        run: node deep-devops/scripts/session-infra-guard.mjs
+        env:
+          DEEP_RELEASE_CANDIDATE: ${{ inputs.release_candidate }}
+
+      - name: Preflight release artifact bundle
+        continue-on-error: true
+        run: >
+          node deep-devops/scripts/release-artifact-bundle.mjs
+          --release-candidate "${{ inputs.release_candidate }}"
+        env:
+          DEEP_RELEASE_CANDIDATE: ${{ inputs.release_candidate }}
+          XNODE_C3_ARTIFACT: ${{ github.workspace }}/deep-devops/artifacts/router-c3-latest.json
+
+      - name: Run strict production readiness status
+        run: >
+          node deep-devops/scripts/production-readiness-status.mjs
+          --run-gates
+          --strict-release
+          --release-candidate "${{ inputs.release_candidate }}"
+        env:
+          DEEP_RELEASE_CANDIDATE: ${{ inputs.release_candidate }}
+          XNODE_C3_ARTIFACT: ${{ github.workspace }}/deep-devops/artifacts/router-c3-latest.json
+
+      - name: Upload production readiness artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-readiness-artifacts
+          path: deep-devops/artifacts/release/**

@@ -1,0 +1,64 @@
+﻿{
+  "decision": "go",
+  "generatedAt": "2026-06-02T00:00:00.000Z",
+  "releaseCandidate": "deep-messenger-rc.1",
+  "meetingMinutes": {
+    "url": "https://docs.example.invalid/deep-ga-decision-rc1"
+  },
+  "releaseBlockers": [
+    {
+      "id": "P6-001",
+      "status": "closed",
+      "summary": "Strict release evidence gate is green with attached CI and staging canary."
+    },
+    {
+      "id": "P6-002",
+      "status": "accepted",
+      "summary": "Post-GA desktop convenience polish is outside launch-critical messenger scope."
+    }
+  ],
+  "approvals": [
+    {
+      "role": "engineering",
+      "status": "approved",
+      "approver": "Engineering DRI",
+      "approvedAt": "2026-06-02T00:00:00.000Z"
+    },
+    {
+      "role": "security",
+      "status": "approved",
+      "approver": "Security DRI",
+      "approvedAt": "2026-06-02T00:00:00.000Z"
+    },
+    {
+      "role": "ops",
+      "status": "approved",
+      "approver": "Ops DRI",
+      "approvedAt": "2026-06-02T00:00:00.000Z"
+    }
+  ],
+  "stabilizationPlan": {
+    "day30": {
+      "owner": "Release DRI",
+      "objective": "Weekly launch-critical regression review and SLO burn-rate audit."
+    },
+    "day60": {
+      "owner": "SRE DRI",
+      "objective": "Capacity and incident-readiness review for the messenger node fleet."
+    },
+    "day90": {
+      "owner": "Product DRI",
+      "objective": "Post-GA backlog triage and next-scope decision."
+    }
+  },
+  "postGaBacklog": [
+    {
+      "id": "POST-GA-VPN-001",
+      "scope": "VPN remains deferred outside the production-ready messenger launch."
+    },
+    {
+      "id": "POST-GA-DESKTOP-001",
+      "scope": "Desktop convenience polish after launch-critical parity is stable."
+    }
+  ]
+}

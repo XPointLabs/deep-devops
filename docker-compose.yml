@@ -1,0 +1,426 @@
+﻿name: deep-integration
+
+services:
+  xnode:
+    build:
+      context: ${DEEP_ROOT:-..}/xnode
+      dockerfile: ${XNODE_DOCKERFILE:-../deep-devops/docker/dotnet-service.Dockerfile}
+      args:
+        SDK_IMAGE: mcr.microsoft.com/dotnet/sdk:10.0
+        RUNTIME_IMAGE: mcr.microsoft.com/dotnet/aspnet:10.0
+        PROJECT: src/XNode/XNode.csproj
+        APP_DLL: XNode.dll
+        XRAY_VERSION: ${XNODE_XRAY_VERSION:-v26.3.27}
+        XRAY_DOWNLOAD_URL: ${XNODE_XRAY_DOWNLOAD_URL:-}
+        XRAY_SHA256: ${XNODE_XRAY_SHA256:-}
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${XNODE_ASPNETCORE_ENVIRONMENT:-Development}
+      ASPNETCORE_URLS: http://0.0.0.0:8080
+      Node__ApiListenUrl: http://0.0.0.0:8080
+      Node__DataDirectory: /var/lib/xnode
+      Node__RouterId: "fe8f458267a9c92015b143d395807a0b99be7303b89af0cee60f37cbaf7941e3"
+      Node__Ed25519PrivateKey: "81722c06866f88623f818a6156a8013f6c5ee8e74c94f2100ea68694534b9a96"
+      Node__Network: devnet
+      Node__PublicHost: xnode
+      Node__PublicPort: 443
+      Node__PublicRpcEndpoint: http://xnode:8080
+      Runtime__BootstrapFromStorage: "false"
+      Runtime__RequireSignedRelayContacts: "true"
+      Vless__MockProcess: ${XNODE_VLESS_MOCK_PROCESS:-true}
+      Vless__XrayExecutablePath: ${XNODE_XRAY_EXECUTABLE_PATH:-mock}
+      Vless__GeneratedConfigPath: /tmp/deep/xray.generated.json
+      Vless__WorkingDirectory: /tmp/deep/xray
+      Vless__PublicHost: xnode
+      Vless__PublicPort: 443
+      Vless__TransportMode: ${XNODE_TRANSPORT_MODE:-Reality}
+      Vless__Reality__ServerName: www.microsoft.com
+      Vless__Reality__PublicKey: devnet-reality-public-key
+      Vless__Reality__PrivateKey: devnet-reality-private-key
+      Vless__Reality__ShortId: 0123456789abcdef
+      RegistryHeartbeat__Enabled: "false"
+    ports:
+      - "18081:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health/ready >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+
+  xnode-1:
+    profiles: ["multi-node"]
+    build:
+      context: ${DEEP_ROOT:-..}/xnode
+      dockerfile: ${XNODE_DOCKERFILE:-../deep-devops/docker/dotnet-service.Dockerfile}
+      args:
+        SDK_IMAGE: mcr.microsoft.com/dotnet/sdk:10.0
+        RUNTIME_IMAGE: mcr.microsoft.com/dotnet/aspnet:10.0
+        PROJECT: src/XNode/XNode.csproj
+        APP_DLL: XNode.dll
+        XRAY_VERSION: ${XNODE_XRAY_VERSION:-v26.3.27}
+        XRAY_DOWNLOAD_URL: ${XNODE_XRAY_DOWNLOAD_URL:-}
+        XRAY_SHA256: ${XNODE_XRAY_SHA256:-}
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${XNODE_ASPNETCORE_ENVIRONMENT:-Development}
+      ASPNETCORE_URLS: http://0.0.0.0:8080
+      Node__ApiListenUrl: http://0.0.0.0:8080
+      Node__DataDirectory: /var/lib/xnode-node-1
+      Node__RouterId: "c1f667cb6bba5fbf80c3bc39a32e13e3fea26add89db5b73d752e477d11f208d"
+      Node__Ed25519PrivateKey: "cdf3c15ba213a3132c5088cc0b4a16df226216d0234ed407f717b00e6a249987"
+      Node__Network: devnet
+      Node__PublicHost: xnode-1
+      Node__PublicPort: 443
+      Node__PublicRpcEndpoint: http://xnode-1:8080
+      Runtime__BootstrapFromStorage: "false"
+      Runtime__RequireSignedRelayContacts: "true"
+      Vless__MockProcess: ${XNODE_VLESS_MOCK_PROCESS:-true}
+      Vless__XrayExecutablePath: ${XNODE_XRAY_EXECUTABLE_PATH:-mock}
+      Vless__GeneratedConfigPath: /tmp/deep/xray.generated.json
+      Vless__WorkingDirectory: /tmp/deep/xray
+      Vless__PublicHost: xnode-1
+      Vless__PublicPort: 443
+      Vless__TransportMode: ${XNODE_TRANSPORT_MODE:-Reality}
+      Vless__Reality__ServerName: www.microsoft.com
+      Vless__Reality__PublicKey: devnet-reality-public-key
+      Vless__Reality__PrivateKey: devnet-reality-private-key
+      Vless__Reality__ShortId: 0123456789abc101
+      RegistryHeartbeat__Enabled: "false"
+    ports:
+      - "19281:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health/ready >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+
+  xnode-2:
+    profiles: ["multi-node"]
+    build:
+      context: ${DEEP_ROOT:-..}/xnode
+      dockerfile: ${XNODE_DOCKERFILE:-../deep-devops/docker/dotnet-service.Dockerfile}
+      args:
+        SDK_IMAGE: mcr.microsoft.com/dotnet/sdk:10.0
+        RUNTIME_IMAGE: mcr.microsoft.com/dotnet/aspnet:10.0
+        PROJECT: src/XNode/XNode.csproj
+        APP_DLL: XNode.dll
+        XRAY_VERSION: ${XNODE_XRAY_VERSION:-v26.3.27}
+        XRAY_DOWNLOAD_URL: ${XNODE_XRAY_DOWNLOAD_URL:-}
+        XRAY_SHA256: ${XNODE_XRAY_SHA256:-}
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${XNODE_ASPNETCORE_ENVIRONMENT:-Development}
+      ASPNETCORE_URLS: http://0.0.0.0:8080
+      Node__ApiListenUrl: http://0.0.0.0:8080
+      Node__DataDirectory: /var/lib/xnode-node-2
+      Node__RouterId: "950462de6f917f4f28725daf96178bba68afbc766739566aec18e3ef407ca406"
+      Node__Ed25519PrivateKey: "430b7d8f95f6547f10492da07a578ec86a2e693cd129c89382294dceb6ffab08"
+      Node__Network: devnet
+      Node__PublicHost: xnode-2
+      Node__PublicPort: 443
+      Node__PublicRpcEndpoint: http://xnode-2:8080
+      Runtime__BootstrapFromStorage: "false"
+      Runtime__RequireSignedRelayContacts: "true"
+      Vless__MockProcess: ${XNODE_VLESS_MOCK_PROCESS:-true}
+      Vless__XrayExecutablePath: ${XNODE_XRAY_EXECUTABLE_PATH:-mock}
+      Vless__GeneratedConfigPath: /tmp/deep/xray.generated.json
+      Vless__WorkingDirectory: /tmp/deep/xray
+      Vless__PublicHost: xnode-2
+      Vless__PublicPort: 443
+      Vless__TransportMode: ${XNODE_TRANSPORT_MODE:-Reality}
+      Vless__Reality__ServerName: www.microsoft.com
+      Vless__Reality__PublicKey: devnet-reality-public-key
+      Vless__Reality__PrivateKey: devnet-reality-private-key
+      Vless__Reality__ShortId: 0123456789abc102
+      RegistryHeartbeat__Enabled: "false"
+    ports:
+      - "19282:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health/ready >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+
+  xnode-3:
+    profiles: ["multi-node"]
+    build:
+      context: ${DEEP_ROOT:-..}/xnode
+      dockerfile: ${XNODE_DOCKERFILE:-../deep-devops/docker/dotnet-service.Dockerfile}
+      args:
+        SDK_IMAGE: mcr.microsoft.com/dotnet/sdk:10.0
+        RUNTIME_IMAGE: mcr.microsoft.com/dotnet/aspnet:10.0
+        PROJECT: src/XNode/XNode.csproj
+        APP_DLL: XNode.dll
+        XRAY_VERSION: ${XNODE_XRAY_VERSION:-v26.3.27}
+        XRAY_DOWNLOAD_URL: ${XNODE_XRAY_DOWNLOAD_URL:-}
+        XRAY_SHA256: ${XNODE_XRAY_SHA256:-}
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${XNODE_ASPNETCORE_ENVIRONMENT:-Development}
+      ASPNETCORE_URLS: http://0.0.0.0:8080
+      Node__ApiListenUrl: http://0.0.0.0:8080
+      Node__DataDirectory: /var/lib/xnode-node-3
+      Node__RouterId: "7bd5eca39a7fc8f86c7d6b28dc28e1cc439b7d516780a3b06b5104c834cb9d30"
+      Node__Ed25519PrivateKey: "6184adf827cab2e39bc920c59f96cf09c2b05ebcb8e5b4f1b83d80e68cbb9fd9"
+      Node__Network: devnet
+      Node__PublicHost: xnode-3
+      Node__PublicPort: 443
+      Node__PublicRpcEndpoint: http://xnode-3:8080
+      Runtime__BootstrapFromStorage: "false"
+      Runtime__RequireSignedRelayContacts: "true"
+      Vless__MockProcess: ${XNODE_VLESS_MOCK_PROCESS:-true}
+      Vless__XrayExecutablePath: ${XNODE_XRAY_EXECUTABLE_PATH:-mock}
+      Vless__GeneratedConfigPath: /tmp/deep/xray.generated.json
+      Vless__WorkingDirectory: /tmp/deep/xray
+      Vless__PublicHost: xnode-3
+      Vless__PublicPort: 443
+      Vless__TransportMode: ${XNODE_TRANSPORT_MODE:-Reality}
+      Vless__Reality__ServerName: www.microsoft.com
+      Vless__Reality__PublicKey: devnet-reality-public-key
+      Vless__Reality__PrivateKey: devnet-reality-private-key
+      Vless__Reality__ShortId: 0123456789abc103
+      RegistryHeartbeat__Enabled: "false"
+    ports:
+      - "19283:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health/ready >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+
+  registry:
+    build:
+      context: ${DEEP_ROOT:-..}/deep-registry-api
+      dockerfile: ${DEEP_DEVOPS_DIR:-../deep-devops}/docker/dotnet-service.Dockerfile
+      args:
+        SDK_IMAGE: mcr.microsoft.com/dotnet/sdk:10.0
+        RUNTIME_IMAGE: mcr.microsoft.com/dotnet/aspnet:10.0
+        PROJECT: src/Deep.Registry.Api/Deep.Registry.Api.csproj
+        APP_DLL: Deep.Registry.Api.dll
+    environment:
+      ASPNETCORE_URLS: http://0.0.0.0:8080
+      Registry__StakingRequirementAtomic: "25000000000000"
+    ports:
+      - "18080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health/live >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+
+  staking-backend:
+    build:
+      context: ${DEEP_ROOT:-..}/xpoint-staking-backend
+      dockerfile: ${DEEP_DEVOPS_DIR:-../deep-devops}/docker/dotnet-service.Dockerfile
+      args:
+        SDK_IMAGE: mcr.microsoft.com/dotnet/sdk:10.0
+        RUNTIME_IMAGE: mcr.microsoft.com/dotnet/aspnet:10.0
+        PROJECT: src/XPoint.Staking.Backend/XPoint.Staking.Backend.csproj
+        APP_DLL: XPoint.Staking.Backend.dll
+    environment:
+      ASPNETCORE_URLS: http://0.0.0.0:8080
+      Contracts__ChainId: "31337"
+      Contracts__TokenAddress: "0x0000000000000000000000000000000000001000"
+      Contracts__ServiceNodeRewardsAddress: "0x0000000000000000000000000000000000001001"
+      Contracts__ServiceNodeContributionFactoryAddress: "0x0000000000000000000000000000000000001002"
+      Contracts__RewardRatePoolAddress: "0x0000000000000000000000000000000000001003"
+      Contracts__StakingRequirementAtomic: "25000000000000"
+      Contracts__ExitRequestTimeSeconds: ${DEEP_EXIT_REQUEST_TIME_SECONDS:-86400}
+      Contracts__ChainBlockTimeMilliseconds: ${DEEP_CHAIN_BLOCK_TIME_MS:-250}
+    ports:
+      - "18082:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health/live >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+
+  contracts-devnet:
+    build:
+      context: ${DEEP_ROOT:-..}/xpoint-staking-contracts
+      dockerfile: ${DEEP_DEVOPS_DIR:-../deep-devops}/docker/hardhat-devnet.Dockerfile
+    command: ["pnpm", "hardhat", "node", "--hostname", "0.0.0.0"]
+    ports:
+      - "18545:8545"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"fetch('http://127.0.0.1:8545',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'eth_chainId',params:[]})}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 20s
+
+  storage:
+    image: node:24-bookworm-slim
+    working_dir: /service
+    volumes:
+      - ${DEEP_DEVOPS_DIR:-.}/tools/compat-services:/service:ro
+    environment:
+      SERVICE_MODE: storage
+      PORT: "8080"
+      COMPAT_STATE_DIR: /tmp/deep/compat-state
+      PUSH_COMPAT_NOTIFY_URL: http://push:8080
+    command: ["node", "compat-service.mjs"]
+    ports:
+      - "18100:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  storage-service:
+    profiles: ["storage-external", "backend-external"]
+    build:
+      context: ${DEEP_DEVOPS_DIR:-.}
+      dockerfile: docker/storage-service.Dockerfile
+    environment:
+      PORT: "8080"
+      SERVICE_NAME: deep-storage-service
+      COMPAT_STATE_DIR: /var/lib/deep/storage-service
+      PUSH_COMPAT_NOTIFY_URL: ${DEEP_STORAGE_PUSH_NOTIFY_URL:-http://push:8080}
+    volumes:
+      - storage-service-state:/var/lib/deep/storage-service
+    ports:
+      - "19100:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  file-service:
+    profiles: ["backend-external"]
+    build:
+      context: ${DEEP_DEVOPS_DIR:-.}
+      dockerfile: docker/file-service.Dockerfile
+    environment:
+      PORT: "8080"
+      SERVICE_NAME: deep-file-service
+      COMPAT_STATE_DIR: /var/lib/deep/file-service
+    volumes:
+      - file-service-state:/var/lib/deep/file-service
+    ports:
+      - "19101:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  push-service:
+    profiles: ["backend-external"]
+    build:
+      context: ${DEEP_DEVOPS_DIR:-.}
+      dockerfile: docker/push-service.Dockerfile
+    environment:
+      PORT: "8080"
+      SERVICE_NAME: deep-push-service
+      COMPAT_STATE_DIR: /var/lib/deep/push-service
+      PUSH_PROVIDER_BASE_URL: ${PUSH_PROVIDER_BASE_URL:-}
+      PUSH_PROVIDER_APNS_URL: ${PUSH_PROVIDER_APNS_URL:-}
+      PUSH_PROVIDER_FIREBASE_URL: ${PUSH_PROVIDER_FIREBASE_URL:-}
+      PUSH_PROVIDER_HUAWEI_URL: ${PUSH_PROVIDER_HUAWEI_URL:-}
+      PUSH_PROVIDER_AUTH_HEADER: ${PUSH_PROVIDER_AUTH_HEADER:-}
+      PUSH_PROVIDER_APNS_AUTH_HEADER: ${PUSH_PROVIDER_APNS_AUTH_HEADER:-}
+      PUSH_PROVIDER_FIREBASE_AUTH_HEADER: ${PUSH_PROVIDER_FIREBASE_AUTH_HEADER:-}
+      PUSH_PROVIDER_HUAWEI_AUTH_HEADER: ${PUSH_PROVIDER_HUAWEI_AUTH_HEADER:-}
+      PUSH_PROVIDER_BEARER_TOKEN: ${PUSH_PROVIDER_BEARER_TOKEN:-}
+      PUSH_PROVIDER_APNS_BEARER_TOKEN: ${PUSH_PROVIDER_APNS_BEARER_TOKEN:-}
+      PUSH_PROVIDER_FIREBASE_BEARER_TOKEN: ${PUSH_PROVIDER_FIREBASE_BEARER_TOKEN:-}
+      PUSH_PROVIDER_HUAWEI_BEARER_TOKEN: ${PUSH_PROVIDER_HUAWEI_BEARER_TOKEN:-}
+      PUSH_PROVIDER_TIMEOUT_MS: ${PUSH_PROVIDER_TIMEOUT_MS:-2500}
+    volumes:
+      - push-service-state:/var/lib/deep/push-service
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "19102:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  file:
+    image: node:24-bookworm-slim
+    working_dir: /service
+    volumes:
+      - ${DEEP_DEVOPS_DIR:-.}/tools/compat-services:/service:ro
+    environment:
+      SERVICE_MODE: file
+      PORT: "8080"
+      COMPAT_STATE_DIR: /tmp/deep/compat-state
+    command: ["node", "compat-service.mjs"]
+    ports:
+      - "18101:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  push:
+    image: node:24-bookworm-slim
+    working_dir: /service
+    volumes:
+      - ${DEEP_DEVOPS_DIR:-.}/tools/compat-services:/service:ro
+    environment:
+      SERVICE_MODE: push
+      PORT: "8080"
+      COMPAT_STATE_DIR: /tmp/deep/compat-state
+    command: ["node", "compat-service.mjs"]
+    ports:
+      - "18102:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  test-client:
+    image: node:24-bookworm-slim
+    profiles: ["e2e"]
+    working_dir: /tests
+    volumes:
+      - ${DEEP_TESTS_DIR:-../deep-tests-e2e}:/tests:ro
+      - ${DEEP_DEVOPS_DIR:-.}/artifacts:/artifacts
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      XNODE_URL: http://xnode:8080
+      DEEP_REGISTRY_URL: http://registry:8080
+      DEEP_STORAGE_URL: ${DEEP_STORAGE_URL:-http://storage:8080}
+      DEEP_FILE_URL: ${DEEP_FILE_URL:-http://file:8080}
+      DEEP_PUSH_URL: ${DEEP_PUSH_URL:-http://push:8080}
+      DEEP_STAKING_URL: http://staking-backend:8080
+      DEEP_DEVNET_RPC_URL: http://contracts-devnet:8545
+      DEEP_ARTIFACT_DIR: /artifacts/test-results
+      DEEP_BACKEND_MODE: ${DEEP_BACKEND_MODE:-compat}
+      E2E_SUITE: ${E2E_SUITE:-smoke}
+    command: ["sh", "-lc", "npm run ci:${E2E_SUITE:-smoke}"]
+    depends_on:
+      xnode:
+        condition: service_healthy
+      registry:
+        condition: service_healthy
+      staking-backend:
+        condition: service_healthy
+      contracts-devnet:
+        condition: service_healthy
+      storage:
+        condition: service_healthy
+      file:
+        condition: service_healthy
+      push:
+        condition: service_healthy
+
+volumes:
+  storage-service-state:
+  file-service-state:
+  push-service-state:

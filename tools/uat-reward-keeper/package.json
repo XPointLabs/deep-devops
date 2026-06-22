@@ -1,0 +1,12 @@
+﻿{
+  "name": "deep-uat-reward-keeper",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node keeper.mjs"
+  },
+  "dependencies": {
+    "viem": "^2.21.54"
+  }
+}

@@ -1,0 +1,145 @@
+﻿name: p6-release-evidence
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_candidate:
+        description: Named release candidate, for example deep-messenger-rc.1
+        required: true
+        type: string
+      source_run_id:
+        description: deep-devops workflow run id with the raw P6 evidence source artifact
+        required: true
+        type: string
+      source_artifact_name:
+        description: Artifact name from source_run_id containing the four raw P6 manifests
+        required: true
+        type: string
+      artifact_name:
+        description: Optional retained artifact name; defaults to p6-release-evidence-<rc>
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  p6-release-evidence:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout devops
+        uses: actions/checkout@v4
+        with:
+          path: deep-devops
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Check P6 evidence scripts
+        run: |
+          node --check deep-devops/scripts/hydrate-release-artifact-bundle.mjs
+          node --check deep-devops/scripts/client-device-acceptance-gate.mjs
+          node --check deep-devops/scripts/ops-deployment-evidence-gate.mjs
+          node --check deep-devops/scripts/security-audit-signoff-gate.mjs
+          node --check deep-devops/scripts/ga-decision-gate.mjs
+
+      - name: Download raw P6 evidence source
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.source_artifact_name }}
+          path: deep-devops/artifacts/hydrated/p6-release-evidence-source
+          github-token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
+          repository: ${{ github.repository_owner }}/deep-devops
+          token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
+          run-id: ${{ inputs.source_run_id }}
+
+      - name: Hydrate raw P6 manifests
+        run: >
+          node deep-devops/scripts/hydrate-release-artifact-bundle.mjs
+          --input-dir deep-devops/artifacts/hydrated/p6-release-evidence-source
+          --only client-device-acceptance,ops-deployment-evidence,security-audit-signoff,ga-decision
+
+      - name: Validate raw P6 manifest set
+        shell: pwsh
+        run: |
+          $releaseCandidate = '${{ inputs.release_candidate }}'.Trim()
+          $releaseDir = Join-Path $PWD 'deep-devops/artifacts/release'
+          $required = @(
+            'client-device-acceptance.json',
+            'ops-deployment-evidence.json',
+            'security-audit-signoff.json',
+            'ga-decision.json'
+          )
+
+          $missing = @()
+          foreach ($fileName in $required) {
+            $filePath = Join-Path $releaseDir $fileName
+            if (-not (Test-Path -LiteralPath $filePath)) {
+              $missing += $fileName
+              continue
+            }
+
+            $manifest = Get-Content -LiteralPath $filePath -Raw | ConvertFrom-Json
+            if ([string]::IsNullOrWhiteSpace([string]$manifest.releaseCandidate)) {
+              throw "$fileName is missing releaseCandidate"
+            }
+            if ([string]$manifest.releaseCandidate -ne $releaseCandidate) {
+              throw "$fileName releaseCandidate '$($manifest.releaseCandidate)' does not match '$releaseCandidate'"
+            }
+          }
+
+          if ($missing.Count -gt 0) {
+            throw "Raw P6 evidence source is missing required manifest(s): $($missing -join ', ')"
+          }
+
+      - name: Run client device acceptance gate
+        run: node deep-devops/scripts/client-device-acceptance-gate.mjs
+        env:
+          DEEP_RELEASE_CANDIDATE: ${{ inputs.release_candidate }}
+
+      - name: Run ops deployment evidence gate
+        run: node deep-devops/scripts/ops-deployment-evidence-gate.mjs
+        env:
+          DEEP_RELEASE_CANDIDATE: ${{ inputs.release_candidate }}
+
+      - name: Run security audit sign-off gate
+        run: node deep-devops/scripts/security-audit-signoff-gate.mjs
+        env:
+          DEEP_RELEASE_CANDIDATE: ${{ inputs.release_candidate }}
+
+      - name: Run GA decision gate
+        run: node deep-devops/scripts/ga-decision-gate.mjs
+        env:
+          DEEP_RELEASE_CANDIDATE: ${{ inputs.release_candidate }}
+
+      - name: Resolve retained artifact name
+        id: artifact_name
+        shell: pwsh
+        run: |
+          $requested = '${{ inputs.artifact_name }}'.Trim()
+          if ([string]::IsNullOrWhiteSpace($requested)) {
+            $requested = 'p6-release-evidence-${{ inputs.release_candidate }}'
+          }
+          "value=$requested" >> $env:GITHUB_OUTPUT
+
+      - name: Upload P6 release evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.artifact_name.outputs.value }}
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            deep-devops/artifacts/release/release-artifact-hydration-summary.json
+            deep-devops/artifacts/release/client-device-acceptance.json
+            deep-devops/artifacts/release/client-device-acceptance-summary.json
+            deep-devops/artifacts/release/ops-deployment-evidence.json
+            deep-devops/artifacts/release/ops-deployment-evidence-summary.json
+            deep-devops/artifacts/release/security-audit-signoff.json
+            deep-devops/artifacts/release/security-audit-signoff-summary.json
+            deep-devops/artifacts/release/ga-decision.json
+            deep-devops/artifacts/release/ga-decision-summary.json

@@ -1,0 +1,350 @@
+﻿name: deep-uat
+
+services:
+  staking-backend:
+    build:
+      context: ${DEEP_ROOT:-..}/xpoint-staking-backend
+      dockerfile: ${DEEP_DEVOPS_DIR:-../deep-devops}/docker/dotnet-service.Dockerfile
+      args:
+        SDK_IMAGE: mcr.microsoft.com/dotnet/sdk:10.0
+        RUNTIME_IMAGE: mcr.microsoft.com/dotnet/aspnet:10.0
+        PROJECT: src/XPoint.Staking.Backend/XPoint.Staking.Backend.csproj
+        APP_DLL: XPoint.Staking.Backend.dll
+    environment:
+      ASPNETCORE_URLS: http://0.0.0.0:8080
+      Contracts__ChainId: "421614"
+      Contracts__NetworkName: uat-arbitrum-sepolia
+      Contracts__EthereumRpcUrl: ${ARB_SEPOLIA_RPC_URL:?set ARB_SEPOLIA_RPC_URL in .env.uat}
+      Contracts__TokenAddress: ${XPNT_TOKEN_ADDRESS:?set XPNT_TOKEN_ADDRESS in .env.uat}
+      Contracts__ServiceNodeRewardsAddress: ${SERVICE_NODE_REWARDS_ADDRESS:?set SERVICE_NODE_REWARDS_ADDRESS in .env.uat}
+      Contracts__ServiceNodeContributionFactoryAddress: ${SERVICE_NODE_CONTRIBUTION_FACTORY_ADDRESS:?set SERVICE_NODE_CONTRIBUTION_FACTORY_ADDRESS in .env.uat}
+      Contracts__RewardRatePoolAddress: ${REWARD_RATE_POOL_ADDRESS:?set REWARD_RATE_POOL_ADDRESS in .env.uat}
+      Contracts__StakingRequirementAtomic: ${STAKING_REQUIREMENT_ATOMIC:-120000000000}
+      Contracts__RewardAccrualIntervalSeconds: ${UAT_REWARD_ACCRUAL_INTERVAL_SECONDS:-30}
+      Contracts__RewardPulseSeconds: ${UAT_REWARD_PULSE_SECONDS:-120}
+      Contracts__ExitRequestTimeSeconds: ${UAT_EXIT_REQUEST_TIME_SECONDS:-86400}
+      Contracts__ChainBlockTimeMilliseconds: ${UAT_CHAIN_BLOCK_TIME_MS:-250}
+      Contracts__QuorumSignatureTimeoutSeconds: "10"
+      Contracts__StatePath: /var/lib/deep/staking-backend/staking-state.json
+      Registry__BaseUrl: http://registry:8080
+      Registry__HeartbeatGraceSeconds: ${SERVICE_NODE_HEARTBEAT_GRACE_SECONDS:-120}
+      Registry__DecommissionGraceSeconds: ${SERVICE_NODE_DECOMMISSION_GRACE_SECONDS:-300}
+      Registry__LiquidationGraceSeconds: ${SERVICE_NODE_LIQUIDATION_GRACE_SECONDS:-600}
+      Price__EthereumRpcUrl: ${PRICE_ARBITRUM_RPC_URL:-https://arb1.arbitrum.io/rpc}
+      Price__UniswapPoolAddress: ${XPNT_UNISWAP_V3_POOL_ADDRESS:-0x5d42A2b90867B813B753f5B49877Ea7c6bB2B603}
+      Price__BaseTokenAddress: ${XPNT_ARBITRUM_ONE_TOKEN_ADDRESS:-0x63b2cdb8b0d8774f1fdca91d24803698582a079f}
+      Price__QuoteTokenAddress: ${USDC_ARBITRUM_ONE_TOKEN_ADDRESS:-0xaf88d065e77c8cc2239327c5edb3a432268e5831}
+    volumes:
+      - staking-backend-state:/var/lib/deep/staking-backend
+    ports:
+      - "28082:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health/live >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+
+  staking-indexer:
+    build:
+      context: ${DEEP_DEVOPS_DIR:-.}
+      dockerfile: docker/uat-chain-indexer.Dockerfile
+    environment:
+      ARB_SEPOLIA_RPC_URL: ${ARB_SEPOLIA_RPC_URL:?set ARB_SEPOLIA_RPC_URL in .env.uat}
+      STAKING_BACKEND_URL: http://staking-backend:8080
+      CHAIN_ID: "421614"
+      START_BLOCK: ${UAT_CONTRACT_START_BLOCK:?set UAT_CONTRACT_START_BLOCK in .env.uat}
+      SERVICE_NODE_REWARDS_ADDRESS: ${SERVICE_NODE_REWARDS_ADDRESS:?set SERVICE_NODE_REWARDS_ADDRESS in .env.uat}
+      SERVICE_NODE_CONTRIBUTION_FACTORY_ADDRESS: ${SERVICE_NODE_CONTRIBUTION_FACTORY_ADDRESS:?set SERVICE_NODE_CONTRIBUTION_FACTORY_ADDRESS in .env.uat}
+      ABI_DIR: /abis
+      STATE_FILE: /var/lib/deep/uat-chain-indexer/state.json
+      POLL_MS: ${UAT_INDEXER_POLL_MS:-12000}
+      CATCHUP_DELAY_MS: ${UAT_INDEXER_CATCHUP_DELAY_MS:-0}
+      RPC_TIMEOUT_MS: ${UAT_INDEXER_RPC_TIMEOUT_MS:-30000}
+      CONFIRMATIONS: ${UAT_INDEXER_CONFIRMATIONS:-2}
+      BATCH_BLOCKS: ${UAT_INDEXER_BATCH_BLOCKS:-10}
+      MAX_LOG_BLOCK_RANGE: ${UAT_INDEXER_MAX_LOG_BLOCK_RANGE:-10}
+      ALCHEMY_FAST_BACKFILL: ${UAT_INDEXER_ALCHEMY_FAST_BACKFILL:-true}
+      ALCHEMY_FAST_BACKFILL_CATEGORIES: ${UAT_INDEXER_ALCHEMY_FAST_BACKFILL_CATEGORIES:-external}
+      ALCHEMY_FAST_BACKFILL_MIN_LAG_BLOCKS: ${UAT_INDEXER_ALCHEMY_FAST_BACKFILL_MIN_LAG_BLOCKS:-1000}
+      ALCHEMY_FAST_BACKFILL_INTERVAL_MS: ${UAT_INDEXER_ALCHEMY_FAST_BACKFILL_INTERVAL_MS:-60000}
+    volumes:
+      - ${DEEP_ROOT:-..}/xpoint-staking-contracts/abi:/abis:ro
+      - staking-indexer-state:/var/lib/deep/uat-chain-indexer
+    depends_on:
+      staking-backend:
+        condition: service_healthy
+
+  staking-reward-keeper:
+    build:
+      context: ${DEEP_DEVOPS_DIR:-.}
+      dockerfile: docker/uat-reward-keeper.Dockerfile
+    environment:
+      ARB_SEPOLIA_RPC_URL: ${ARB_SEPOLIA_RPC_URL:?set ARB_SEPOLIA_RPC_URL in .env.uat}
+      XPNT_TOKEN_ADDRESS: ${XPNT_TOKEN_ADDRESS:?set XPNT_TOKEN_ADDRESS in .env.uat}
+      SERVICE_NODE_REWARDS_ADDRESS: ${SERVICE_NODE_REWARDS_ADDRESS:?set SERVICE_NODE_REWARDS_ADDRESS in .env.uat}
+      REWARD_RATE_POOL_ADDRESS: ${REWARD_RATE_POOL_ADDRESS:?set REWARD_RATE_POOL_ADDRESS in .env.uat}
+      UAT_DEPLOYER_MNEMONIC: ${UAT_DEPLOYER_MNEMONIC:?set UAT_DEPLOYER_MNEMONIC in .env.uat}
+      CHECKPOINT_INTERVAL_MS: ${UAT_REWARD_CHECKPOINT_INTERVAL_MS:-300000}
+      MIN_RELEASE_ATOMIC: ${UAT_REWARD_CHECKPOINT_MIN_RELEASE_ATOMIC:-1000000000}
+      ABI_DIR: /abis
+    volumes:
+      - ${DEEP_ROOT:-..}/xpoint-staking-contracts/abi:/abis:ro
+    depends_on:
+      staking-backend:
+        condition: service_healthy
+
+  registry:
+    build:
+      context: ${DEEP_ROOT:-..}/deep-registry-api
+      dockerfile: ${DEEP_DEVOPS_DIR:-../deep-devops}/docker/dotnet-service.Dockerfile
+      args:
+        SDK_IMAGE: mcr.microsoft.com/dotnet/sdk:10.0
+        RUNTIME_IMAGE: mcr.microsoft.com/dotnet/aspnet:10.0
+        PROJECT: src/Deep.Registry.Api/Deep.Registry.Api.csproj
+        APP_DLL: Deep.Registry.Api.dll
+    environment:
+      ASPNETCORE_URLS: http://0.0.0.0:8080
+      Registry__StakingRequirementAtomic: ${STAKING_REQUIREMENT_ATOMIC:-120000000000}
+      Registry__StatePath: /var/lib/deep/registry/registry-state.json
+      Registry__StakingBackendBaseUrl: http://staking-backend:8080
+    volumes:
+      - registry-state:/var/lib/deep/registry
+    ports:
+      - "28080:8080"
+    depends_on:
+      staking-backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health/live >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+
+  staking-portal:
+    build:
+      context: ${DEEP_STAKING_PORTAL_DIR:-../xpoint-staking-portal}
+      dockerfile: ../deep-devops/docker/xpoint-staking-portal.Dockerfile
+      args:
+        NEXT_PUBLIC_BACKEND_API_URL: http://staking-backend:8080
+        NEXT_PUBLIC_NETWORK_API_URL: http://staking-backend:8080
+        NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID: ${NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID:?set NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID in .env.uat}
+        NEXT_PUBLIC_RPC_URL_ARB: ${ARB_SEPOLIA_RPC_URL:?set ARB_SEPOLIA_RPC_URL in .env.uat}
+        NEXT_PUBLIC_PRICE_TOKEN: xpnt
+        NEXT_PUBLIC_TESTNET: "true"
+        NEXT_PUBLIC_ENV_FLAG: ${NEXT_PUBLIC_ENV_FLAG:-prd}
+        NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-http://${DEEP_LAN_IP:-192.168.1.44}:28083}
+        SESSION_WEBSITES_COMMIT_HASH: ${STAKING_PORTAL_COMMIT_HASH:-unknown}
+        NEXT_PUBLIC_TOKEN_ADDRESS_ARB_SEPOLIA: ${XPNT_TOKEN_ADDRESS:?set XPNT_TOKEN_ADDRESS in .env.uat}
+        NEXT_PUBLIC_SERVICE_NODE_REWARDS_ADDRESS_ARB_SEPOLIA: ${SERVICE_NODE_REWARDS_ADDRESS:?set SERVICE_NODE_REWARDS_ADDRESS in .env.uat}
+        NEXT_PUBLIC_REWARD_RATE_POOL_ADDRESS_ARB_SEPOLIA: ${REWARD_RATE_POOL_ADDRESS:?set REWARD_RATE_POOL_ADDRESS in .env.uat}
+        NEXT_PUBLIC_SERVICE_NODE_CONTRIBUTION_FACTORY_ADDRESS_ARB_SEPOLIA: ${SERVICE_NODE_CONTRIBUTION_FACTORY_ADDRESS:?set SERVICE_NODE_CONTRIBUTION_FACTORY_ADDRESS in .env.uat}
+        NEXT_PUBLIC_STAKING_REQUIREMENT_ATOMIC: ${STAKING_REQUIREMENT_ATOMIC:-120000000000}
+    environment:
+      NEXT_PUBLIC_BACKEND_API_URL: http://staking-backend:8080
+      NEXT_PUBLIC_NETWORK_API_URL: http://staking-backend:8080
+      NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID: ${NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID:?set NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID in .env.uat}
+      NEXT_PUBLIC_RPC_URL_ARB: ${ARB_SEPOLIA_RPC_URL:?set ARB_SEPOLIA_RPC_URL in .env.uat}
+      NEXT_PUBLIC_PRICE_TOKEN: xpnt
+      NEXT_PUBLIC_TESTNET: "true"
+      NEXT_PUBLIC_ENV_FLAG: ${NEXT_PUBLIC_ENV_FLAG:-prd}
+      NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-http://${DEEP_LAN_IP:-192.168.1.44}:28083}
+      NEXT_PUBLIC_ENABLE_FAUCET: "false"
+      NEXT_PUBLIC_ENABLE_LEADERBOARD: "false"
+    ports:
+      - "28083:3000"
+    depends_on:
+      staking-backend:
+        condition: service_healthy
+
+  xnode-1:
+    build: &router-build
+      context: ${DEEP_ROOT:-..}/xnode
+      dockerfile: ${DEEP_DEVOPS_DIR:-../deep-devops}/docker/xnode-xray.Dockerfile
+      args:
+        SDK_IMAGE: mcr.microsoft.com/dotnet/sdk:10.0
+        RUNTIME_IMAGE: mcr.microsoft.com/dotnet/aspnet:10.0
+        PROJECT: src/XNode/XNode.csproj
+        APP_DLL: XNode.dll
+        XRAY_VERSION: ${XNODE_XRAY_VERSION:-v26.3.27}
+    environment: &router-common-env
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://0.0.0.0:8080
+      Node__ApiListenUrl: http://0.0.0.0:8080
+      Node__DataDirectory: /var/lib/xnode-node-1
+      Node__RouterId: ${UAT_NODE_1_ED25519_PUBLIC_KEY:?set UAT_NODE_1_ED25519_PUBLIC_KEY in .env.uat}
+      Node__Ed25519PrivateKey: ${UAT_NODE_1_ED25519_PRIVATE_KEY:?set UAT_NODE_1_ED25519_PRIVATE_KEY in .env.uat}
+      Node__Network: mainnet
+      Node__PublicHost: ${DEEP_LAN_IP:-192.168.1.44}
+      Node__PublicPort: "20443"
+      Node__PublicRpcEndpoint: http://xnode-1:8080
+      Runtime__BootstrapFromStorage: "true"
+      Runtime__HeartbeatInterval: "00:00:10"
+      Runtime__RequireSignedRelayContacts: "true"
+      RegistryBootstrap__BaseUrl: http://registry:8080
+      StorageRpc__BaseUrl: http://storage:8080
+      Vless__MockProcess: "false"
+      Vless__XrayExecutablePath: /usr/local/bin/xray
+      Vless__GeneratedConfigPath: /tmp/deep/xray.generated.json
+      Vless__WorkingDirectory: /tmp/deep/xray
+      Vless__InboundListenHost: 0.0.0.0
+      Vless__InboundListenPort: "443"
+      Vless__PublicHost: ${DEEP_LAN_IP:-192.168.1.44}
+      Vless__PublicPort: "20443"
+      Vless__TransportMode: Tcp
+      RegistryHeartbeat__Enabled: "true"
+      RegistryHeartbeat__Endpoint: http://registry:8080/api/nodes/register
+      RegistryHeartbeat__Interval: "00:00:10"
+      RegistryRegistration__OperatorAddress: ${UAT_OPERATOR_ADDRESS:-0xb0cE3b1229c00d1B85c7083E31Dae531f3B352C0}
+      RegistryRegistration__RewardsAddress: ${UAT_REWARDS_ADDRESS:-0xb0cE3b1229c00d1B85c7083E31Dae531f3B352C0}
+      RegistryRegistration__OperatorFeeBps: "0"
+      RegistryRegistration__StakeAtomic: ${STAKING_REQUIREMENT_ATOMIC:-120000000000}
+      RegistryRegistration__Ed25519PublicKey: ${UAT_NODE_1_ED25519_PUBLIC_KEY:?set UAT_NODE_1_ED25519_PUBLIC_KEY in .env.uat}
+      RegistryRegistration__BlsPrivateKey: ${UAT_NODE_1_BLS_PRIVATE_KEY:?set UAT_NODE_1_BLS_PRIVATE_KEY in .env.uat}
+      RegistryRegistration__EthereumRpcUrl: ${ARB_SEPOLIA_RPC_URL:?set ARB_SEPOLIA_RPC_URL in .env.uat}
+      RegistryRegistration__ServiceNodeRewardsAddress: ${SERVICE_NODE_REWARDS_ADDRESS:?set SERVICE_NODE_REWARDS_ADDRESS in .env.uat}
+      RegistryRegistration__SigningEndpoint: http://xnode-1:8080/api/staking/quorum/sign
+    ports:
+      - "29281:8080"
+      - "20443:443"
+    depends_on:
+      registry:
+        condition: service_healthy
+      storage:
+        condition: service_healthy
+    healthcheck: &router-healthcheck
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health/ready >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 20s
+
+  xnode-2:
+    build: *router-build
+    environment:
+      <<: *router-common-env
+      Node__DataDirectory: /var/lib/xnode-node-2
+      Node__RouterId: ${UAT_NODE_2_ED25519_PUBLIC_KEY:?set UAT_NODE_2_ED25519_PUBLIC_KEY in .env.uat}
+      Node__Ed25519PrivateKey: ${UAT_NODE_2_ED25519_PRIVATE_KEY:?set UAT_NODE_2_ED25519_PRIVATE_KEY in .env.uat}
+      Node__PublicPort: "20444"
+      Node__PublicRpcEndpoint: http://xnode-2:8080
+      Vless__PublicPort: "20444"
+      RegistryRegistration__Ed25519PublicKey: ${UAT_NODE_2_ED25519_PUBLIC_KEY:?set UAT_NODE_2_ED25519_PUBLIC_KEY in .env.uat}
+      RegistryRegistration__BlsPrivateKey: ${UAT_NODE_2_BLS_PRIVATE_KEY:?set UAT_NODE_2_BLS_PRIVATE_KEY in .env.uat}
+      RegistryRegistration__SigningEndpoint: http://xnode-2:8080/api/staking/quorum/sign
+    ports:
+      - "29282:8080"
+      - "20444:443"
+    depends_on:
+      registry:
+        condition: service_healthy
+      storage:
+        condition: service_healthy
+    healthcheck: *router-healthcheck
+
+  xnode-3:
+    build: *router-build
+    environment:
+      <<: *router-common-env
+      Node__DataDirectory: /var/lib/xnode-node-3
+      Node__RouterId: ${UAT_NODE_3_ED25519_PUBLIC_KEY:?set UAT_NODE_3_ED25519_PUBLIC_KEY in .env.uat}
+      Node__Ed25519PrivateKey: ${UAT_NODE_3_ED25519_PRIVATE_KEY:?set UAT_NODE_3_ED25519_PRIVATE_KEY in .env.uat}
+      Node__PublicPort: "20445"
+      Node__PublicRpcEndpoint: http://xnode-3:8080
+      Vless__PublicPort: "20445"
+      RegistryRegistration__Ed25519PublicKey: ${UAT_NODE_3_ED25519_PUBLIC_KEY:?set UAT_NODE_3_ED25519_PUBLIC_KEY in .env.uat}
+      RegistryRegistration__BlsPrivateKey: ${UAT_NODE_3_BLS_PRIVATE_KEY:?set UAT_NODE_3_BLS_PRIVATE_KEY in .env.uat}
+      RegistryRegistration__SigningEndpoint: http://xnode-3:8080/api/staking/quorum/sign
+    ports:
+      - "29283:8080"
+      - "20445:443"
+    depends_on:
+      registry:
+        condition: service_healthy
+      storage:
+        condition: service_healthy
+    healthcheck: *router-healthcheck
+
+  storage:
+    image: node:24-bookworm-slim
+    working_dir: /service
+    volumes:
+      - ${DEEP_DEVOPS_DIR:-.}/tools/compat-services:/service:ro
+      - compat-state:/var/lib/deep/compat
+    environment:
+      SERVICE_MODE: storage
+      PORT: "8080"
+      COMPAT_STATE_DIR: /var/lib/deep/compat
+      PUSH_COMPAT_NOTIFY_URL: http://push:8080
+    command: ["node", "compat-service.mjs"]
+    ports:
+      - "28100:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  file:
+    image: node:24-bookworm-slim
+    working_dir: /service
+    volumes:
+      - ${DEEP_DEVOPS_DIR:-.}/tools/compat-services:/service:ro
+      - compat-state:/var/lib/deep/compat
+    environment:
+      SERVICE_MODE: file
+      PORT: "8080"
+      COMPAT_STATE_DIR: /var/lib/deep/compat
+    command: ["node", "compat-service.mjs"]
+    ports:
+      - "28101:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  push:
+    image: node:24-bookworm-slim
+    working_dir: /service
+    volumes:
+      - ${DEEP_DEVOPS_DIR:-.}/tools/compat-services:/service:ro
+      - compat-state:/var/lib/deep/compat
+    environment:
+      SERVICE_MODE: push
+      PORT: "8080"
+      COMPAT_STATE_DIR: /var/lib/deep/compat
+    command: ["node", "compat-service.mjs"]
+    ports:
+      - "28102:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  calls:
+    image: node:24-bookworm-slim
+    working_dir: /service
+    volumes:
+      - ${DEEP_DEVOPS_DIR:-.}/tools/compat-services:/service:ro
+      - compat-state:/var/lib/deep/compat
+    environment:
+      SERVICE_MODE: calls
+      PORT: "8080"
+      COMPAT_STATE_DIR: /var/lib/deep/compat
+    command: ["node", "compat-service.mjs"]
+    ports:
+      - "28103:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  staking-backend-state:
+  staking-indexer-state:
+  registry-state:
+  compat-state:
