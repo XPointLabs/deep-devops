@@ -118,16 +118,32 @@ After the stake transaction is submitted on the staking portal, the router heart
 
 ## Contracts Readiness
 
-Production contracts are expected to be deployed on Arbitrum One:
+Production staking contracts are deployed on Arbitrum One and recorded in
+`xpoint-staking-contracts/docs/ARBITRUM_STAKING_PRODUCTION_DEPLOYMENT.md`.
+Configure production services with:
 
-- `XPNT` token.
-- `RewardRatePool`.
-- `ServiceNodeRewards`.
-- `ServiceNodeContributionFactory`.
+```text
+Contracts__TokenAddress=0x63B2cdb8B0d8774F1Fdca91D24803698582a079F
+Contracts__ServiceNodeRewardsAddress=0xc52284b7aBAebbEF7BdE0E1ca8251B44AeA12F5f
+Contracts__ServiceNodeContributionFactoryAddress=0x289d88A8C06881634Fb619Ec528361C7b88521f1
+Contracts__RewardRatePoolAddress=0xEd894fb5f0BA3b141A562190D4c9941FEd348356
+Contracts__StakingRequirementAtomic=25000000000000
+Registry__StakingRequirementAtomic=25000000000000
+DEEP_SERVICE_NODE_REWARDS_ADDRESS=0xc52284b7aBAebbEF7BdE0E1ca8251B44AeA12F5f
+DEEP_STAKE_ATOMIC=25000000000000
+```
+
+Deployment facts:
+
+- XPNT token: `0x63B2cdb8B0d8774F1Fdca91D24803698582a079F`.
+- RewardRatePool proxy: `0xEd894fb5f0BA3b141A562190D4c9941FEd348356`, funded with `40,000,000 XPNT`.
+- ServiceNodeRewards proxy: `0xc52284b7aBAebbEF7BdE0E1ca8251B44AeA12F5f`.
+- ServiceNodeContributionFactory proxy: `0x289d88A8C06881634Fb619Ec528361C7b88521f1`.
+- Staking requirement: `25,000 XPNT`.
 
 The active rewards path uses `BLS12-381` (`contracts/libraries/BLS12381.sol`) and the EIP-2537 precompiles available on Arbitrum One. Legacy `BN256*` libraries are not imported by production contracts.
 
-Before production deployment:
+Before future production upgrades or redeploy rehearsals:
 
 ```powershell
 cd C:\Work\Deep\xpoint-staking-contracts
@@ -135,7 +151,9 @@ pnpm build
 pnpm test
 ```
 
-Then deploy with the production deployment scripts and write final addresses into the production secret store and release runbook. Do not put production private keys or mnemonics in git.
+Then use the production deployment scripts and write final addresses into the
+production secret store and this release runbook. Do not put production private
+keys or mnemonics in git.
 
 ## Still Centralized
 

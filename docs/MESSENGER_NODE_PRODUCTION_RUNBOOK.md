@@ -60,6 +60,23 @@ Push provider canary:
 
 Secrets must come from the deployment secret store or CI secret context. Do not commit provider credentials, Xray private keys, or TLS material.
 
+## Production Staking Contracts
+
+The Arbitrum One staking deployment is complete and committed in
+`xpoint-staking-contracts/docs/ARBITRUM_STAKING_PRODUCTION_DEPLOYMENT.md`.
+Use the same values in registry, staking backend, staking portal, and node
+host env:
+
+| Setting | Value |
+| --- | --- |
+| Chain ID | `42161` |
+| XPNT token | `0x63B2cdb8B0d8774F1Fdca91D24803698582a079F` |
+| ServiceNodeRewards proxy | `0xc52284b7aBAebbEF7BdE0E1ca8251B44AeA12F5f` |
+| ServiceNodeContributionFactory proxy | `0x289d88A8C06881634Fb619Ec528361C7b88521f1` |
+| RewardRatePool proxy | `0xEd894fb5f0BA3b141A562190D4c9941FEd348356` |
+| Staking requirement | `25000000000000` atomic (`25,000 XPNT`) |
+| Reward pool deposit | `40,000,000 XPNT` |
+
 ## Release Rehearsal
 
 1. Run the no-mock external smoke gate:
