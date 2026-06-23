@@ -32,7 +32,7 @@ services:
       Vless__GeneratedConfigPath: /etc/xnode/xray.generated.json
       Vless__WorkingDirectory: /var/lib/xnode/xray
       Vless__InboundListenHost: 0.0.0.0
-      Vless__InboundListenPort: "443"
+      Vless__InboundListenPort: ${DEEP_NODE_VLESS_CONTAINER_PORT:-443}
       Vless__PublicHost: ${DEEP_NODE_PUBLIC_HOST:?set DEEP_NODE_PUBLIC_HOST}
       Vless__PublicPort: ${DEEP_NODE_PUBLIC_PORT:-443}
       Vless__ApiIngressHost: 127.0.0.1
@@ -64,7 +64,7 @@ services:
       RegistryRegistration__ServiceNodeRewardsAddress: ${DEEP_SERVICE_NODE_REWARDS_ADDRESS:?set DEEP_SERVICE_NODE_REWARDS_ADDRESS}
       RegistryRegistration__SigningEndpoint: ${DEEP_NODE_SIGNING_ENDPOINT:?set DEEP_NODE_SIGNING_ENDPOINT}
     ports:
-      - "${DEEP_NODE_VLESS_BIND:-443}:443"
+      - "${DEEP_NODE_VLESS_BIND:-443}:${DEEP_NODE_VLESS_CONTAINER_PORT:-443}"
       - "${DEEP_NODE_API_BIND:-127.0.0.1:8080}:8080"
     volumes:
       - xnode-state:/var/lib/xnode

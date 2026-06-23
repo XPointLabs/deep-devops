@@ -32,7 +32,9 @@ Use `XNODE_XRAY_SHA256`/`XRAY_SHA256` for release builds when the Xray archive c
 ## Prepare Node Host
 
 1. Install Docker Engine with the Compose plugin.
-2. Open inbound TCP `443` to the node host.
+2. Open the chosen public VLESS Reality TCP port to the node host. Port `443`
+   is the recommended default, but the node can publish and serve any reachable
+   TCP port.
 3. Keep the node API/signing port private. The example binds it to `127.0.0.1:8080`; expose it through a private VPN, private reverse proxy, or another controlled internal path used by the registry/staking backend.
 4. Copy `docker-compose.node.prod.yml` and create `.env.node.prod` from `.env.node.prod.example`.
 5. Generate node identity files. This follows the upstream Session/Oxen model:
@@ -67,6 +69,9 @@ Put the generated private/public key pair into `DEEP_NODE_REALITY_PRIVATE_KEY` a
 - `XNODE_IMAGE`: pushed image tag.
 - `DEEP_STORAGE_SERVICE_IMAGE`: pushed per-node storage service image tag.
 - `DEEP_NODE_PUBLIC_HOST`: public DNS name or public IP clients can reach.
+- `DEEP_NODE_PUBLIC_PORT`: public VLESS Reality port clients use. Keep it equal
+  to `DEEP_NODE_VLESS_BIND` unless a reverse proxy, NAT rule, or cloud load
+  balancer translates the port.
 - `DEEP_NODE_RPC_ENDPOINT`: http(s) endpoint other router nodes can reach for `/api/session/rpc`; use a private mesh/VPN or controlled reverse proxy, not an unauthenticated public admin port.
 - `DEEP_NODE_SIGNING_ENDPOINT`: HTTPS URL that staking backend can call for `/api/staking/quorum/sign`.
 - `DEEP_NODE_STORAGE_BIND`: host bind address for the per-node storage sidecar; keep it private or expose it through the approved node/onion ingress path.

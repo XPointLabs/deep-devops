@@ -25,7 +25,8 @@ before baking production bootstrap hosts into clients.
    and the Docker Compose plugin.
 2. Build and push the node images from `docs/PRODUCTION_NODE_RUNBOOK.md`.
 3. Create DNS `A`/`AAAA` records for all three seed hosts.
-4. Open public TCP `443` to each seed host for VLESS Reality transport.
+4. Open the chosen public VLESS Reality TCP port to each seed host. The
+   recommended default is `443`, but any reachable TCP port is supported.
 5. Keep the node API/signing endpoint private to the control plane. Use
    WireGuard, Tailscale, a private load balancer, or an allowlisted reverse
    proxy. Do not expose the raw node API as an unauthenticated public admin
@@ -197,7 +198,17 @@ DEEP_NODE_PUBLIC_HOST=seed2.xpoint.network
 DEEP_NODE_PUBLIC_HOST=seed3.xpoint.network
 ```
 
-The public client bootstrap endpoint is always `DEEP_NODE_PUBLIC_HOST:443`.
+The public client bootstrap endpoint is
+`DEEP_NODE_PUBLIC_HOST:DEEP_NODE_PUBLIC_PORT`. Keep `DEEP_NODE_PUBLIC_PORT` and
+`DEEP_NODE_VLESS_BIND` equal unless a reverse proxy, NAT rule, or cloud load
+balancer maps a different external port to the local Docker bind.
+
+For a non-443 node:
+
+```text
+DEEP_NODE_PUBLIC_PORT=8443
+DEEP_NODE_VLESS_BIND=8443
+```
 
 The control-plane RPC/signing endpoints must point to the private route that the
 registry and staking backend can reach. Prefer private network addresses or
@@ -213,13 +224,16 @@ that forwards only from allowlisted control-plane IPs to `127.0.0.1:8080`.
 
 ## Firewall
 
-Open only the public transport port:
+Open only the chosen public transport port:
 
 ```bash
 sudo ufw allow 443/tcp
 sudo ufw enable
 sudo ufw status verbose
 ```
+
+Replace `443` with the node's `DEEP_NODE_PUBLIC_PORT` when the node uses a
+non-default port.
 
 Keep `8080` and `22021` bound to localhost or to a private management
 interface. Do not open them to the public internet.
@@ -258,6 +272,8 @@ Check the public VLESS Reality port is listening:
 ```bash
 sudo ss -lntp | grep ':443'
 ```
+
+Replace `443` with the node's public port when using a non-default port.
 
 ## Verify From The Control Plane
 
@@ -307,6 +323,10 @@ seed1.expoint.network:443
 seed2.xpoint.network:443
 seed3.xpoint.network:443
 ```
+
+If a seed uses a non-default public port, include that port in the bootstrap
+entry and verify the registry relay contact advertises the same
+`publicHost/publicPort`.
 
 Client releases must also point discovery/bootstrap APIs at the production
 registry and staking backend. The client should use registry-published relay
