@@ -5,7 +5,9 @@ This is the manual production path for one Deep service-node host. Run the same 
 ## Build And Push Images
 
 The normal production path is the `publish-production-images` GitHub Actions
-workflow in `XPointLabs/deep-devops`.
+workflow in `XPointLabs/deep-devops`. It is intentionally manual-only and does
+not run the full DevOps validation suite inside the publish job; run release
+gates separately before approving a production tag.
 
 Run it from the GitHub UI with:
 
