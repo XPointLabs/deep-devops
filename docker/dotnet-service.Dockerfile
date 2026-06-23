@@ -12,8 +12,19 @@ FROM ${RUNTIME_IMAGE} AS runtime
 ARG APP_DLL
 ENV APP_DLL=${APP_DLL}
 WORKDIR /app
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl ca-certificates \
+RUN set -eux; \
+    for attempt in 1 2 3 4 5; do \
+      rm -rf /var/lib/apt/lists/*; \
+      apt-get update \
+        -o Acquire::Retries=5 \
+        -o Acquire::http::Timeout=60 \
+        -o Acquire::https::Timeout=60 && break; \
+      if [ "$attempt" = "5" ]; then exit 1; fi; \
+      sleep $((attempt * 10)); \
+    done \
+    && apt-get install -y --no-install-recommends \
+      -o Acquire::Retries=5 \
+      curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /app .
 EXPOSE 8080

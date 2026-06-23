@@ -86,7 +86,7 @@ Sepolia ETH for gas.
 Run from `C:\Work\Deep\xpoint-staking-contracts`.
 
 ```powershell
-$env:ARB_SEPOLIA_RPC_URL = "<the Arbitrum Sepolia RPC URL provided for UAT>"
+$env:ARB_SEPOLIA_RPC_URL = "https://sepolia-rollup.arbitrum.io/rpc"
 $env:ARB_SEPOLIA_MNEMONIC = "betray track rubber vault ring good naive claim income bus venue carpet"
 
 docker compose run --rm `
@@ -116,7 +116,8 @@ notepad .env.uat
 
 Set:
 
-- `ARB_SEPOLIA_RPC_URL` to the UAT Arbitrum Sepolia RPC URL.
+- `ARB_SEPOLIA_RPC_URL` to `https://sepolia-rollup.arbitrum.io/rpc`, unless
+  QA intentionally tests against another Arbitrum Sepolia RPC provider.
 - Keep the prefilled contract addresses and `UAT_CONTRACT_START_BLOCK` unless UAT contracts were redeployed.
 - Keep `UAT_OPERATOR_ADDRESS` and `UAT_REWARDS_ADDRESS` on the UAT deployer wallet while QA uses deployer-owned nodes.
 - Keep `UAT_DEPLOYER_MNEMONIC` set to the generated UAT mnemonic so `staking-reward-keeper` can checkpoint reward funds.
@@ -124,7 +125,13 @@ Set:
 - Router nodes publish their own `RegistryRegistration__SigningEndpoint` values in the registry heartbeat. The staking backend discovers signer endpoints from `/api/nodes`, matches them to active on-chain BLS public keys from `ServiceNodeRewards`, and aggregates only signatures returned by registered active nodes.
 - The router signing endpoint supports the contract-level quorum messages used by `ServiceNodeRewards`: reward balance updates, normal exits, and liquidations. The staking backend derives service-node obligations from on-chain state plus registry heartbeat/transport health. `/obligations` shows the full status set, `/exit_liquidation_list` exposes only currently eligible exits/liquidations, and direct `/exit/{bls}` or `/liquidation/{bls}` requests are rejected until the indexed state is eligible.
 - Keep `SERVICE_NODE_HEARTBEAT_GRACE_SECONDS`, `SERVICE_NODE_DECOMMISSION_GRACE_SECONDS`, and `SERVICE_NODE_LIQUIDATION_GRACE_SECONDS` at their defaults for QA unless you intentionally need faster local failure drills.
-- Keep `UAT_INDEXER_MAX_LOG_BLOCK_RANGE=10` for the current Alchemy Free Arbitrum Sepolia RPC; that endpoint rejects wider `eth_getLogs` ranges. If QA moves to a paid RPC tier, `UAT_INDEXER_BATCH_BLOCKS` and `UAT_INDEXER_MAX_LOG_BLOCK_RANGE` can be raised together.
+- Keep `UAT_INDEXER_ALCHEMY_FAST_BACKFILL=false` with the public Arbitrum
+  Sepolia RPC; `alchemy_getAssetTransfers` is an Alchemy-specific namespace.
+- Keep `UAT_INDEXER_BATCH_BLOCKS=1000000` and
+  `UAT_INDEXER_MAX_LOG_BLOCK_RANGE=1000000` with the public Arbitrum Sepolia
+  RPC. The indexer queries only the watched contract addresses, so this keeps a
+  redeployed UAT environment from spending hours replaying a sparse history.
+  If QA moves to a stricter RPC tier, lower both values together.
 - `NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID` to the WalletConnect project id used by QA.
 - `DEEP_STAKING_PORTAL_DIR` to `..\xpoint-staking-portal`.
 - `STAKING_PORTAL_COMMIT_HASH` to `git -C ..\xpoint-staking-portal rev-parse HEAD`.

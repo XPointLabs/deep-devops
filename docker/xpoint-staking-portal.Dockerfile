@@ -3,8 +3,19 @@
 FROM node:22-bookworm-slim
 
 WORKDIR /src
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates python3 make g++ \
+RUN set -eux; \
+    for attempt in 1 2 3 4 5; do \
+      rm -rf /var/lib/apt/lists/*; \
+      apt-get update \
+        -o Acquire::Retries=5 \
+        -o Acquire::http::Timeout=60 \
+        -o Acquire::https::Timeout=60 && break; \
+      if [ "$attempt" = "5" ]; then exit 1; fi; \
+      sleep $((attempt * 10)); \
+    done \
+    && apt-get install -y --no-install-recommends \
+      -o Acquire::Retries=5 \
+      ca-certificates python3 make g++ \
     && rm -rf /var/lib/apt/lists/*
 
 COPY . .
