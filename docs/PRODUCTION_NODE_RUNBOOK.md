@@ -2,9 +2,34 @@
 
 This is the manual production path for one Deep service-node host. Run the same compose file on every node host with a unique Ed25519 identity file, BLS identity file, public Ed25519 key, VLESS UUID, Reality key pair, and local storage volume.
 
-## Build And Push Image
+## Build And Push Images
 
-From `C:\Work\Deep\deep-devops`:
+The normal production path is the `publish-production-images` GitHub Actions
+workflow in `XPointLabs/deep-devops`.
+
+Run it from the GitHub UI with:
+
+- `xnode_ref`: the `XPointLabs/xnode` branch, tag, or SHA to build.
+- `image_tag`: optional common release tag. When empty, the workflow uses
+  `prod-<xnode-sha>-<devops-sha>`.
+- `push_latest`: keep enabled for the currently approved production image set.
+- `xray_version`: Xray-core release bundled into the `xnode` image.
+
+The workflow validates `xnode` and the storage service, then publishes:
+
+```text
+ghcr.io/xpointlabs/xnode:<tag>
+ghcr.io/xpointlabs/xnode:xnode-<xnode-sha>
+ghcr.io/xpointlabs/xnode:latest
+ghcr.io/xpointlabs/deep-storage-service:<tag>
+ghcr.io/xpointlabs/deep-storage-service:devops-<devops-sha>
+ghcr.io/xpointlabs/deep-storage-service:latest
+```
+
+Make the resulting GitHub Container Registry packages public, or log in on
+node hosts with a token that has `read:packages` before running the installer.
+
+Manual fallback from `C:\Work\Deep\deep-devops`:
 
 ```powershell
 $org = "ghcr.io/xpointlabs"

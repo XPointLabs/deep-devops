@@ -1,0 +1,202 @@
+name: publish-production-images
+
+on:
+  workflow_dispatch:
+    inputs:
+      xnode_ref:
+        description: xnode branch, tag, or SHA to build
+        required: false
+        default: main
+        type: string
+      image_tag:
+        description: Optional common image tag. Defaults to prod-<xnode-sha>-<devops-sha>.
+        required: false
+        default: ""
+        type: string
+      push_latest:
+        description: Also publish the latest tag
+        required: false
+        default: true
+        type: boolean
+      xray_version:
+        description: Xray-core release version bundled into the xnode image
+        required: false
+        default: v26.3.27
+        type: string
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/publish-production-images.yml
+      - docker/xnode-xray.Dockerfile
+      - docker/storage-service.Dockerfile
+      - tools/compat-services/**
+      - tools/storage-service/**
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: publish-production-images-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE_PREFIX: ghcr.io/xpointlabs
+  DEFAULT_XNODE_REF: main
+  DEFAULT_XRAY_VERSION: v26.3.27
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout deep-devops
+        uses: actions/checkout@v4
+        with:
+          path: deep-devops
+
+      - name: Checkout xnode
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/xnode
+          ref: ${{ inputs.xnode_ref || env.DEFAULT_XNODE_REF }}
+          token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
+          path: xnode
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Validate xnode
+        run: dotnet test xnode/XNode.slnx --configuration Release --logger "trx;LogFileName=xnode.trx"
+
+      - name: Validate storage service
+        run: node --test deep-devops/tools/storage-service/storage-service-runtime.test.mjs
+
+  publish:
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - name: Checkout deep-devops
+        uses: actions/checkout@v4
+        with:
+          path: deep-devops
+
+      - name: Checkout xnode
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/xnode
+          ref: ${{ inputs.xnode_ref || env.DEFAULT_XNODE_REF }}
+          token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
+          path: xnode
+
+      - name: Resolve image tags
+        id: versions
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          xnode_sha="$(git -C xnode rev-parse HEAD)"
+          xnode_short="$(git -C xnode rev-parse --short=12 HEAD)"
+          devops_sha="$(git -C deep-devops rev-parse HEAD)"
+          devops_short="$(git -C deep-devops rev-parse --short=12 HEAD)"
+
+          image_tag="${IMAGE_TAG_INPUT}"
+          if [ -z "$image_tag" ]; then
+            image_tag="prod-${xnode_short}-${devops_short}"
+          fi
+
+          push_latest="${PUSH_LATEST_INPUT}"
+
+          {
+            echo "xnode_sha=$xnode_sha"
+            echo "xnode_short=$xnode_short"
+            echo "devops_sha=$devops_sha"
+            echo "devops_short=$devops_short"
+            echo "image_tag=$image_tag"
+            echo "xnode_tags<<EOF"
+            echo "${IMAGE_PREFIX}/xnode:${image_tag}"
+            echo "${IMAGE_PREFIX}/xnode:xnode-${xnode_short}"
+            if [ "$push_latest" = "true" ]; then
+              echo "${IMAGE_PREFIX}/xnode:latest"
+            fi
+            echo "EOF"
+            echo "storage_tags<<EOF"
+            echo "${IMAGE_PREFIX}/deep-storage-service:${image_tag}"
+            echo "${IMAGE_PREFIX}/deep-storage-service:devops-${devops_short}"
+            if [ "$push_latest" = "true" ]; then
+              echo "${IMAGE_PREFIX}/deep-storage-service:latest"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+        env:
+          IMAGE_TAG_INPUT: ${{ inputs.image_tag || '' }}
+          PUSH_LATEST_INPUT: ${{ github.event_name == 'push' && 'true' || inputs.push_latest }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build and push xnode
+        uses: docker/build-push-action@v6
+        with:
+          context: xnode
+          file: deep-devops/docker/xnode-xray.Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            PROJECT=src/XNode/XNode.csproj
+            APP_DLL=XNode.dll
+            XRAY_VERSION=${{ inputs.xray_version || env.DEFAULT_XRAY_VERSION }}
+          tags: ${{ steps.versions.outputs.xnode_tags }}
+          labels: |
+            org.opencontainers.image.title=XPoint XNode
+            org.opencontainers.image.description=XPoint production service node with Xray Reality transport
+            org.opencontainers.image.source=https://github.com/XPointLabs/xnode
+            org.opencontainers.image.revision=${{ steps.versions.outputs.xnode_sha }}
+          cache-from: type=gha,scope=xnode-production
+          cache-to: type=gha,scope=xnode-production,mode=max
+
+      - name: Build and push storage service
+        uses: docker/build-push-action@v6
+        with:
+          context: deep-devops
+          file: deep-devops/docker/storage-service.Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.versions.outputs.storage_tags }}
+          labels: |
+            org.opencontainers.image.title=XPoint Storage Service
+            org.opencontainers.image.description=XPoint per-node storage service
+            org.opencontainers.image.source=https://github.com/XPointLabs/deep-devops
+            org.opencontainers.image.revision=${{ steps.versions.outputs.devops_sha }}
+          cache-from: type=gha,scope=deep-storage-service-production
+          cache-to: type=gha,scope=deep-storage-service-production,mode=max
+
+      - name: Summary
+        run: |
+          {
+            echo "## Published production images"
+            echo
+            echo "Common tag: \`${{ steps.versions.outputs.image_tag }}\`"
+            echo
+            echo "### xnode"
+            echo '${{ steps.versions.outputs.xnode_tags }}' | sed 's/^/- `/' | sed 's/$/`/'
+            echo
+            echo "### deep-storage-service"
+            echo '${{ steps.versions.outputs.storage_tags }}' | sed 's/^/- `/' | sed 's/$/`/'
+          } >> "$GITHUB_STEP_SUMMARY"
