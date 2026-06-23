@@ -1,0 +1,98 @@
+name: xpoint-client-services-prod
+
+services:
+  storage-service:
+    build:
+      context: .
+      dockerfile: docker/storage-service.Dockerfile
+    restart: unless-stopped
+    environment:
+      PORT: "8080"
+      SERVICE_NAME: deep-storage-service
+      COMPAT_STATE_DIR: /var/lib/deep/storage-service
+      PUSH_COMPAT_NOTIFY_URL: http://push-service:8080/_compat/push-notify
+    volumes:
+      - storage-service-state:/var/lib/deep/storage-service
+    ports:
+      - "127.0.0.1:19100:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  file-service:
+    build:
+      context: .
+      dockerfile: docker/file-service.Dockerfile
+    restart: unless-stopped
+    environment:
+      PORT: "8080"
+      SERVICE_NAME: deep-file-service
+      COMPAT_STATE_DIR: /var/lib/deep/file-service
+    volumes:
+      - file-service-state:/var/lib/deep/file-service
+    ports:
+      - "127.0.0.1:19101:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  push-service:
+    build:
+      context: .
+      dockerfile: docker/push-service.Dockerfile
+    restart: unless-stopped
+    environment:
+      PORT: "8080"
+      SERVICE_NAME: deep-push-service
+      COMPAT_STATE_DIR: /var/lib/deep/push-service
+      PUSH_PROVIDER_BASE_URL: ""
+      PUSH_PROVIDER_APNS_URL: ""
+      PUSH_PROVIDER_FIREBASE_URL: ""
+      PUSH_PROVIDER_HUAWEI_URL: ""
+      PUSH_PROVIDER_AUTH_HEADER: ""
+      PUSH_PROVIDER_APNS_AUTH_HEADER: ""
+      PUSH_PROVIDER_FIREBASE_AUTH_HEADER: ""
+      PUSH_PROVIDER_HUAWEI_AUTH_HEADER: ""
+      PUSH_PROVIDER_BEARER_TOKEN: ""
+      PUSH_PROVIDER_APNS_BEARER_TOKEN: ""
+      PUSH_PROVIDER_FIREBASE_BEARER_TOKEN: ""
+      PUSH_PROVIDER_HUAWEI_BEARER_TOKEN: ""
+      PUSH_PROVIDER_TIMEOUT_MS: "2500"
+    volumes:
+      - push-service-state:/var/lib/deep/push-service
+    ports:
+      - "127.0.0.1:19102:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  calls-service:
+    build:
+      context: .
+      dockerfile: docker/calls-service.Dockerfile
+    restart: unless-stopped
+    environment:
+      PORT: "8080"
+      SERVICE_NAME: deep-calls-service
+      CALLS_STATE_DIR: /var/lib/deep/calls-service
+    volumes:
+      - calls-service-state:/var/lib/deep/calls-service
+    ports:
+      - "127.0.0.1:19103:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  storage-service-state:
+  file-service-state:
+  push-service-state:
+  calls-service-state:
