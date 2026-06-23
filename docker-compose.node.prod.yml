@@ -54,7 +54,7 @@ services:
       RegistryRegistration__OperatorAddress: ${DEEP_OPERATOR_ADDRESS:?set DEEP_OPERATOR_ADDRESS}
       RegistryRegistration__RewardsAddress: ${DEEP_REWARDS_ADDRESS:?set DEEP_REWARDS_ADDRESS}
       RegistryRegistration__OperatorFeeBps: ${DEEP_OPERATOR_FEE_BPS:-0}
-      RegistryRegistration__StakeAtomic: ${DEEP_STAKE_ATOMIC:?set DEEP_STAKE_ATOMIC}
+      RegistryRegistration__StakeAtomic: "25000000000000"
       RegistryRegistration__ChainId: ${DEEP_ARBITRUM_CHAIN_ID:-42161}
       RegistryRegistration__Ed25519PublicKey: ${DEEP_NODE_ED25519_PUBLIC_KEY:?set DEEP_NODE_ED25519_PUBLIC_KEY}
       RegistryRegistration__Ed25519Signature: ${DEEP_NODE_ED25519_SIGNATURE:-}

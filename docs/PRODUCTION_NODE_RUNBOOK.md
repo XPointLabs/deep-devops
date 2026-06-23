@@ -74,7 +74,6 @@ Put the generated private/public key pair into `DEEP_NODE_REALITY_PRIVATE_KEY` a
 - `DEEP_REGISTRY_URL`: production registry API base URL.
 - `DEEP_STORAGE_RPC_URL`: node-local or private storage RPC base URL used only by the exit router hop.
 - `DEEP_OPERATOR_ADDRESS` and `DEEP_REWARDS_ADDRESS`: staked operator/reward wallet.
-- `DEEP_STAKE_ATOMIC`: production staking requirement in XPNT atomic units.
 - `DEEP_ARBITRUM_RPC_URL`: backend-only Arbitrum One RPC. Use Alchemy or
   another private provider here if desired; do not expose this value through
   frontend `NEXT_PUBLIC_*` configuration.
@@ -136,7 +135,6 @@ Registry__StakingRequirementAtomic=25000000000000
 DEEP_ARBITRUM_RPC_URL=https://arb-mainnet.g.alchemy.com/v2/<alchemy-key>
 DEEP_ARBITRUM_FALLBACK_RPC_URLS=https://arb1.arbitrum.io/rpc
 DEEP_SERVICE_NODE_REWARDS_ADDRESS=0xc52284b7aBAebbEF7BdE0E1ca8251B44AeA12F5f
-DEEP_STAKE_ATOMIC=25000000000000
 ```
 
 Deployment facts:
