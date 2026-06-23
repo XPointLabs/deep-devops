@@ -15,6 +15,7 @@ services:
       Contracts__ChainId: "421614"
       Contracts__NetworkName: uat-arbitrum-sepolia
       Contracts__EthereumRpcUrl: ${ARB_SEPOLIA_RPC_URL:?set ARB_SEPOLIA_RPC_URL in .env.uat}
+      Contracts__EthereumFallbackRpcUrls: ${ARB_SEPOLIA_FALLBACK_RPC_URLS:-https://sepolia-rollup.arbitrum.io/rpc}
       Contracts__TokenAddress: ${XPNT_TOKEN_ADDRESS:?set XPNT_TOKEN_ADDRESS in .env.uat}
       Contracts__ServiceNodeRewardsAddress: ${SERVICE_NODE_REWARDS_ADDRESS:?set SERVICE_NODE_REWARDS_ADDRESS in .env.uat}
       Contracts__ServiceNodeContributionFactoryAddress: ${SERVICE_NODE_CONTRIBUTION_FACTORY_ADDRESS:?set SERVICE_NODE_CONTRIBUTION_FACTORY_ADDRESS in .env.uat}
@@ -31,6 +32,7 @@ services:
       Registry__DecommissionGraceSeconds: ${SERVICE_NODE_DECOMMISSION_GRACE_SECONDS:-300}
       Registry__LiquidationGraceSeconds: ${SERVICE_NODE_LIQUIDATION_GRACE_SECONDS:-600}
       Price__EthereumRpcUrl: ${PRICE_ARBITRUM_RPC_URL:-https://arb1.arbitrum.io/rpc}
+      Price__EthereumFallbackRpcUrls: ${PRICE_ARBITRUM_FALLBACK_RPC_URLS:-https://arb1.arbitrum.io/rpc}
       Price__UniswapPoolAddress: ${XPNT_UNISWAP_V3_POOL_ADDRESS:-0x5d42A2b90867B813B753f5B49877Ea7c6bB2B603}
       Price__BaseTokenAddress: ${XPNT_ARBITRUM_ONE_TOKEN_ADDRESS:-0x63b2cdb8b0d8774f1fdca91d24803698582a079f}
       Price__QuoteTokenAddress: ${USDC_ARBITRUM_ONE_TOKEN_ADDRESS:-0xaf88d065e77c8cc2239327c5edb3a432268e5831}
@@ -51,6 +53,7 @@ services:
       dockerfile: docker/uat-chain-indexer.Dockerfile
     environment:
       ARB_SEPOLIA_RPC_URL: ${ARB_SEPOLIA_RPC_URL:?set ARB_SEPOLIA_RPC_URL in .env.uat}
+      ARB_SEPOLIA_FALLBACK_RPC_URLS: ${ARB_SEPOLIA_FALLBACK_RPC_URLS:-https://sepolia-rollup.arbitrum.io/rpc}
       STAKING_BACKEND_URL: http://staking-backend:8080
       CHAIN_ID: "421614"
       START_BLOCK: ${UAT_CONTRACT_START_BLOCK:?set UAT_CONTRACT_START_BLOCK in .env.uat}
@@ -81,6 +84,7 @@ services:
       dockerfile: docker/uat-reward-keeper.Dockerfile
     environment:
       ARB_SEPOLIA_RPC_URL: ${ARB_SEPOLIA_RPC_URL:?set ARB_SEPOLIA_RPC_URL in .env.uat}
+      ARB_SEPOLIA_FALLBACK_RPC_URLS: ${ARB_SEPOLIA_FALLBACK_RPC_URLS:-https://sepolia-rollup.arbitrum.io/rpc}
       XPNT_TOKEN_ADDRESS: ${XPNT_TOKEN_ADDRESS:?set XPNT_TOKEN_ADDRESS in .env.uat}
       SERVICE_NODE_REWARDS_ADDRESS: ${SERVICE_NODE_REWARDS_ADDRESS:?set SERVICE_NODE_REWARDS_ADDRESS in .env.uat}
       REWARD_RATE_POOL_ADDRESS: ${REWARD_RATE_POOL_ADDRESS:?set REWARD_RATE_POOL_ADDRESS in .env.uat}
@@ -130,7 +134,7 @@ services:
         NEXT_PUBLIC_BACKEND_API_URL: http://staking-backend:8080
         NEXT_PUBLIC_NETWORK_API_URL: http://staking-backend:8080
         NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID: ${NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID:?set NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID in .env.uat}
-        NEXT_PUBLIC_RPC_URL_ARB: ${ARB_SEPOLIA_RPC_URL:?set ARB_SEPOLIA_RPC_URL in .env.uat}
+        NEXT_PUBLIC_RPC_URL_ARB: ${UAT_BROWSER_ARBITRUM_RPC_URL:-/api/network/rpc/arbitrum}
         NEXT_PUBLIC_PRICE_TOKEN: xpnt
         NEXT_PUBLIC_TESTNET: "true"
         NEXT_PUBLIC_ENV_FLAG: ${NEXT_PUBLIC_ENV_FLAG:-prd}
@@ -145,7 +149,7 @@ services:
       NEXT_PUBLIC_BACKEND_API_URL: http://staking-backend:8080
       NEXT_PUBLIC_NETWORK_API_URL: http://staking-backend:8080
       NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID: ${NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID:?set NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID in .env.uat}
-      NEXT_PUBLIC_RPC_URL_ARB: ${ARB_SEPOLIA_RPC_URL:?set ARB_SEPOLIA_RPC_URL in .env.uat}
+      NEXT_PUBLIC_RPC_URL_ARB: ${UAT_BROWSER_ARBITRUM_RPC_URL:-/api/network/rpc/arbitrum}
       NEXT_PUBLIC_PRICE_TOKEN: xpnt
       NEXT_PUBLIC_TESTNET: "true"
       NEXT_PUBLIC_ENV_FLAG: ${NEXT_PUBLIC_ENV_FLAG:-prd}
@@ -204,6 +208,7 @@ services:
       RegistryRegistration__Ed25519PublicKey: ${UAT_NODE_1_ED25519_PUBLIC_KEY:?set UAT_NODE_1_ED25519_PUBLIC_KEY in .env.uat}
       RegistryRegistration__BlsPrivateKey: ${UAT_NODE_1_BLS_PRIVATE_KEY:?set UAT_NODE_1_BLS_PRIVATE_KEY in .env.uat}
       RegistryRegistration__EthereumRpcUrl: ${ARB_SEPOLIA_RPC_URL:?set ARB_SEPOLIA_RPC_URL in .env.uat}
+      RegistryRegistration__EthereumFallbackRpcUrls: ${ARB_SEPOLIA_FALLBACK_RPC_URLS:-https://sepolia-rollup.arbitrum.io/rpc}
       RegistryRegistration__ServiceNodeRewardsAddress: ${SERVICE_NODE_REWARDS_ADDRESS:?set SERVICE_NODE_REWARDS_ADDRESS in .env.uat}
       RegistryRegistration__SigningEndpoint: http://xnode-1:8080/api/staking/quorum/sign
     ports:

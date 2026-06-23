@@ -60,6 +60,7 @@ services:
       RegistryRegistration__Ed25519Signature: ${DEEP_NODE_ED25519_SIGNATURE:-}
       RegistryRegistration__BlsPrivateKeyPath: /run/secrets/node-bls-private-key
       RegistryRegistration__EthereumRpcUrl: ${DEEP_ARBITRUM_RPC_URL:-https://arb1.arbitrum.io/rpc}
+      RegistryRegistration__EthereumFallbackRpcUrls: ${DEEP_ARBITRUM_FALLBACK_RPC_URLS:-https://arb1.arbitrum.io/rpc}
       RegistryRegistration__ServiceNodeRewardsAddress: ${DEEP_SERVICE_NODE_REWARDS_ADDRESS:?set DEEP_SERVICE_NODE_REWARDS_ADDRESS}
       RegistryRegistration__SigningEndpoint: ${DEEP_NODE_SIGNING_ENDPOINT:?set DEEP_NODE_SIGNING_ENDPOINT}
     ports:

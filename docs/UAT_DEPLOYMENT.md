@@ -86,11 +86,13 @@ Sepolia ETH for gas.
 Run from `C:\Work\Deep\xpoint-staking-contracts`.
 
 ```powershell
-$env:ARB_SEPOLIA_RPC_URL = "https://sepolia-rollup.arbitrum.io/rpc"
+$env:ARB_SEPOLIA_RPC_URL = "https://arb-sepolia.g.alchemy.com/v2/<alchemy-key>"
+$env:ARB_SEPOLIA_FALLBACK_RPC_URLS = "https://sepolia-rollup.arbitrum.io/rpc"
 $env:ARB_SEPOLIA_MNEMONIC = "betray track rubber vault ring good naive claim income bus venue carpet"
 
 docker compose run --rm `
   -e ARB_SEPOLIA_RPC_URL="$env:ARB_SEPOLIA_RPC_URL" `
+  -e ARB_SEPOLIA_FALLBACK_RPC_URLS="$env:ARB_SEPOLIA_FALLBACK_RPC_URLS" `
   -e ARB_SEPOLIA_MNEMONIC="$env:ARB_SEPOLIA_MNEMONIC" `
   contracts-devnet pnpm deploy-uat-arbitrum-sepolia
 ```
@@ -116,8 +118,13 @@ notepad .env.uat
 
 Set:
 
-- `ARB_SEPOLIA_RPC_URL` to `https://sepolia-rollup.arbitrum.io/rpc`, unless
-  QA intentionally tests against another Arbitrum Sepolia RPC provider.
+- `ARB_SEPOLIA_RPC_URL` to the private/backend-only Arbitrum Sepolia RPC, for
+  example `https://arb-sepolia.g.alchemy.com/v2/<alchemy-key>`.
+- `ARB_SEPOLIA_FALLBACK_RPC_URLS` to `https://sepolia-rollup.arbitrum.io/rpc`.
+- `UAT_BROWSER_ARBITRUM_RPC_URL` to `/api/network/rpc/arbitrum`. Do not point
+  `NEXT_PUBLIC_RPC_URL_ARB` or any `NEXT_PUBLIC_*` variable at `alchemy.com`;
+  the browser must call the staking backend RPC proxy so provider tokens remain
+  server-side.
 - Keep the prefilled contract addresses and `UAT_CONTRACT_START_BLOCK` unless UAT contracts were redeployed.
 - Keep `UAT_OPERATOR_ADDRESS` and `UAT_REWARDS_ADDRESS` on the UAT deployer wallet while QA uses deployer-owned nodes.
 - Keep `UAT_DEPLOYER_MNEMONIC` set to the generated UAT mnemonic so `staking-reward-keeper` can checkpoint reward funds.
@@ -125,8 +132,10 @@ Set:
 - Router nodes publish their own `RegistryRegistration__SigningEndpoint` values in the registry heartbeat. The staking backend discovers signer endpoints from `/api/nodes`, matches them to active on-chain BLS public keys from `ServiceNodeRewards`, and aggregates only signatures returned by registered active nodes.
 - The router signing endpoint supports the contract-level quorum messages used by `ServiceNodeRewards`: reward balance updates, normal exits, and liquidations. The staking backend derives service-node obligations from on-chain state plus registry heartbeat/transport health. `/obligations` shows the full status set, `/exit_liquidation_list` exposes only currently eligible exits/liquidations, and direct `/exit/{bls}` or `/liquidation/{bls}` requests are rejected until the indexed state is eligible.
 - Keep `SERVICE_NODE_HEARTBEAT_GRACE_SECONDS`, `SERVICE_NODE_DECOMMISSION_GRACE_SECONDS`, and `SERVICE_NODE_LIQUIDATION_GRACE_SECONDS` at their defaults for QA unless you intentionally need faster local failure drills.
-- Keep `UAT_INDEXER_ALCHEMY_FAST_BACKFILL=false` with the public Arbitrum
-  Sepolia RPC; `alchemy_getAssetTransfers` is an Alchemy-specific namespace.
+- Keep `UAT_INDEXER_ALCHEMY_FAST_BACKFILL=false` unless the backend/indexer is
+  intentionally allowed to use Alchemy-specific namespace calls. Normal JSON-RPC
+  calls use `ARB_SEPOLIA_RPC_URL` first and `ARB_SEPOLIA_FALLBACK_RPC_URLS` if
+  the primary endpoint is transiently unavailable.
 - Keep `UAT_INDEXER_BATCH_BLOCKS=1000000` and
   `UAT_INDEXER_MAX_LOG_BLOCK_RANGE=1000000` with the public Arbitrum Sepolia
   RPC. The indexer queries only the watched contract addresses, so this keeps a

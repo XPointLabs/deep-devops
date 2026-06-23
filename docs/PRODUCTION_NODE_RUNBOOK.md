@@ -75,8 +75,11 @@ Put the generated private/public key pair into `DEEP_NODE_REALITY_PRIVATE_KEY` a
 - `DEEP_STORAGE_RPC_URL`: node-local or private storage RPC base URL used only by the exit router hop.
 - `DEEP_OPERATOR_ADDRESS` and `DEEP_REWARDS_ADDRESS`: staked operator/reward wallet.
 - `DEEP_STAKE_ATOMIC`: production staking requirement in XPNT atomic units.
-- `DEEP_ARBITRUM_RPC_URL`: Arbitrum One RPC. Defaults to
-  `https://arb1.arbitrum.io/rpc` in the production compose file.
+- `DEEP_ARBITRUM_RPC_URL`: backend-only Arbitrum One RPC. Use Alchemy or
+  another private provider here if desired; do not expose this value through
+  frontend `NEXT_PUBLIC_*` configuration.
+- `DEEP_ARBITRUM_FALLBACK_RPC_URLS`: fallback Arbitrum One RPC list. The default
+  production fallback is `https://arb1.arbitrum.io/rpc`.
 - `DEEP_SERVICE_NODE_REWARDS_ADDRESS`: production `ServiceNodeRewards` contract.
 - `DEEP_NODE_ED25519_PUBLIC_KEY`: public node/router id derived from `key_ed25519`.
 - `DEEP_NODE_ED25519_PRIVATE_KEY_FILE` and `DEEP_NODE_BLS_PRIVATE_KEY_FILE`: local files mounted as Docker secrets; do not put private key material directly in `.env`.
@@ -130,7 +133,8 @@ Contracts__ServiceNodeContributionFactoryAddress=0x289d88A8C06881634Fb619Ec52836
 Contracts__RewardRatePoolAddress=0xEd894fb5f0BA3b141A562190D4c9941FEd348356
 Contracts__StakingRequirementAtomic=25000000000000
 Registry__StakingRequirementAtomic=25000000000000
-DEEP_ARBITRUM_RPC_URL=https://arb1.arbitrum.io/rpc
+DEEP_ARBITRUM_RPC_URL=https://arb-mainnet.g.alchemy.com/v2/<alchemy-key>
+DEEP_ARBITRUM_FALLBACK_RPC_URLS=https://arb1.arbitrum.io/rpc
 DEEP_SERVICE_NODE_REWARDS_ADDRESS=0xc52284b7aBAebbEF7BdE0E1ca8251B44AeA12F5f
 DEEP_STAKE_ATOMIC=25000000000000
 ```

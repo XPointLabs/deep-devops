@@ -1,9 +1,13 @@
 ﻿import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { createPublicClient, decodeEventLog, http } from 'viem';
+import { createPublicClient, decodeEventLog, fallback, http } from 'viem';
 import { arbitrumSepolia } from 'viem/chains';
 
 const rpcUrl = requireEnv('ARB_SEPOLIA_RPC_URL');
+const rpcUrls = unique([
+  rpcUrl,
+  ...splitRpcUrls(process.env.ARB_SEPOLIA_FALLBACK_RPC_URLS),
+]);
 const backendUrl = trimTrailingSlash(requireEnv('STAKING_BACKEND_URL'));
 const rewardsAddress = normalizeAddress(requireEnv('SERVICE_NODE_REWARDS_ADDRESS'));
 const factoryAddress = normalizeAddress(requireEnv('SERVICE_NODE_CONTRIBUTION_FACTORY_ADDRESS'));
@@ -38,7 +42,7 @@ const contributionEvents = extractEvents(contributionAbi);
 
 const client = createPublicClient({
   chain: arbitrumSepolia,
-  transport: http(rpcUrl, { timeout: rpcTimeoutMs, retryCount: 2 }),
+  transport: createRpcTransport(rpcUrls, { timeout: rpcTimeoutMs, retryCount: 2 }),
 });
 
 const state = await loadState();
@@ -51,6 +55,7 @@ console.log(JSON.stringify({
   nextBlock: state.nextBlock.toString(),
   batchBlocks: batchBlocks.toString(),
   maxLogBlockRange: maxLogBlockRange.toString(),
+  rpcEndpointCount: rpcUrls.length,
   alchemyFastBackfill,
   alchemyFastBackfillCategories,
   knownContributionContracts: Object.keys(state.contributionContracts).length,
@@ -498,6 +503,29 @@ function parseBoolean(value, fallback) {
   }
 
   return ['1', 'true', 'yes', 'on'].includes(String(value).trim().toLowerCase());
+}
+
+function splitRpcUrls(value) {
+  return String(value ?? '')
+    .split(/[,\s;]+/)
+    .map(item => item.trim())
+    .filter(Boolean);
+}
+
+function unique(values) {
+  const result = [];
+  for (const value of values) {
+    if (!result.some(item => item.toLowerCase() === value.toLowerCase())) {
+      result.push(value);
+    }
+  }
+
+  return result;
+}
+
+function createRpcTransport(urls, options) {
+  const transports = urls.map(url => http(url, options));
+  return transports.length === 1 ? transports[0] : fallback(transports, { rank: false });
 }
 
 function delay(ms) {

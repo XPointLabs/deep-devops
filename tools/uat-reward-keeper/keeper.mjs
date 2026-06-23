@@ -4,12 +4,17 @@ import {
   createPublicClient,
   createWalletClient,
   formatUnits,
+  fallback,
   http,
 } from 'viem';
 import { arbitrumSepolia } from 'viem/chains';
 import { mnemonicToAccount, privateKeyToAccount } from 'viem/accounts';
 
 const rpcUrl = requireEnv('ARB_SEPOLIA_RPC_URL');
+const rpcUrls = unique([
+  rpcUrl,
+  ...splitRpcUrls(process.env.ARB_SEPOLIA_FALLBACK_RPC_URLS),
+]);
 const rewardRatePoolAddress = normalizeAddress(requireEnv('REWARD_RATE_POOL_ADDRESS'));
 const tokenAddress = normalizeAddress(requireEnv('XPNT_TOKEN_ADDRESS'));
 const serviceNodeRewardsAddress = normalizeAddress(requireEnv('SERVICE_NODE_REWARDS_ADDRESS'));
@@ -20,7 +25,7 @@ const minReleaseAtomic = BigInt(process.env.MIN_RELEASE_ATOMIC ?? '1000000000');
 const account = loadAccount();
 const tokenAbi = await loadAbi('XPNTL2.json');
 const rewardRatePoolAbi = await loadAbi('RewardRatePool.json');
-const transport = http(rpcUrl, { timeout: 30_000 });
+const transport = createRpcTransport(rpcUrls, { timeout: 30_000 });
 const publicClient = createPublicClient({ chain: arbitrumSepolia, transport });
 const walletClient = createWalletClient({ account, chain: arbitrumSepolia, transport });
 
@@ -32,6 +37,7 @@ console.log(JSON.stringify({
   account: account.address,
   intervalMs,
   minReleaseAtomic: minReleaseAtomic.toString(),
+  rpcEndpointCount: rpcUrls.length,
 }));
 
 while (true) {
@@ -157,4 +163,27 @@ function requireEnv(name) {
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function splitRpcUrls(value) {
+  return String(value ?? '')
+    .split(/[,\s;]+/)
+    .map(item => item.trim())
+    .filter(Boolean);
+}
+
+function unique(values) {
+  const result = [];
+  for (const value of values) {
+    if (!result.some(item => item.toLowerCase() === value.toLowerCase())) {
+      result.push(value);
+    }
+  }
+
+  return result;
+}
+
+function createRpcTransport(urls, options) {
+  const transports = urls.map(url => http(url, options));
+  return transports.length === 1 ? transports[0] : fallback(transports, { rank: false });
 }
