@@ -114,22 +114,22 @@ const zero = '0x0000000000000000000000000000000000000000' as Address;
 
 export const addresses: Record<ContractName, Record<ChainId, Address>> = {
   Token: {
-    [arbitrumChainId]: '0x10Ea9E5303670331Bdddfa66A4cEA47dae4fcF3b',
-    [ethChainId]: '0x10Ea9E5303670331Bdddfa66A4cEA47dae4fcF3b',
+    [arbitrumChainId]: '0x63B2cdb8B0d8774F1Fdca91D24803698582a079F',
+    [ethChainId]: zero,
     [arbitrumSepoliaChainId]: '${tokenAddress}' as Address,
   },
   ServiceNodeRewards: {
-    [arbitrumChainId]: '0xC2B9fC251aC068763EbDfdecc792E3352E351c00',
+    [arbitrumChainId]: '0xc52284b7aBAebbEF7BdE0E1ca8251B44AeA12F5f',
     [ethChainId]: zero,
     [arbitrumSepoliaChainId]: '${serviceNodeRewardsAddress}' as Address,
   },
   RewardRatePool: {
-    [arbitrumChainId]: '0x11f040E89dFAbBA9070FFE6145E914AC68DbFea0',
+    [arbitrumChainId]: '0xEd894fb5f0BA3b141A562190D4c9941FEd348356',
     [ethChainId]: zero,
     [arbitrumSepoliaChainId]: '${rewardRatePoolAddress}' as Address,
   },
   ServiceNodeContributionFactory: {
-    [arbitrumChainId]: '0x8129bE2D5eF7ACd39483C19F28DE86b7EF19DBCA',
+    [arbitrumChainId]: '0x289d88A8C06881634Fb619Ec528361C7b88521f1',
     [ethChainId]: zero,
     [arbitrumSepoliaChainId]: '${serviceNodeContributionFactoryAddress}' as Address,
   },
