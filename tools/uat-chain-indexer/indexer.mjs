@@ -1,17 +1,18 @@
 ﻿import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createPublicClient, decodeEventLog, fallback, http } from 'viem';
-import { arbitrumSepolia } from 'viem/chains';
+import { arbitrum, arbitrumSepolia } from 'viem/chains';
 
-const rpcUrl = requireEnv('ARB_SEPOLIA_RPC_URL');
+const chainId = Number(process.env.CHAIN_ID ?? arbitrumSepolia.id);
+const chain = selectChain(chainId);
+const rpcUrl = requireFirstEnv('ARBITRUM_RPC_URL', 'ARB_SEPOLIA_RPC_URL');
 const rpcUrls = unique([
   rpcUrl,
-  ...splitRpcUrls(process.env.ARB_SEPOLIA_FALLBACK_RPC_URLS),
+  ...splitRpcUrls(process.env.ARBITRUM_FALLBACK_RPC_URLS ?? process.env.ARB_SEPOLIA_FALLBACK_RPC_URLS),
 ]);
 const backendUrl = trimTrailingSlash(requireEnv('STAKING_BACKEND_URL'));
 const rewardsAddress = normalizeAddress(requireEnv('SERVICE_NODE_REWARDS_ADDRESS'));
 const factoryAddress = normalizeAddress(requireEnv('SERVICE_NODE_CONTRIBUTION_FACTORY_ADDRESS'));
-const chainId = Number(process.env.CHAIN_ID ?? arbitrumSepolia.id);
 const startBlock = BigInt(process.env.START_BLOCK ?? '0');
 const pollMs = Number(process.env.POLL_MS ?? '12000');
 const catchupDelayMs = Number(process.env.CATCHUP_DELAY_MS ?? '250');
@@ -41,13 +42,14 @@ const factoryEvents = extractEvents(factoryAbi);
 const contributionEvents = extractEvents(contributionAbi);
 
 const client = createPublicClient({
-  chain: arbitrumSepolia,
+  chain,
   transport: createRpcTransport(rpcUrls, { timeout: rpcTimeoutMs, retryCount: 2 }),
 });
 
 const state = await loadState();
 console.log(JSON.stringify({
-  service: 'deep-uat-chain-indexer',
+  service: process.env.SERVICE_NAME ?? (chainId === arbitrum.id ? 'deep-chain-indexer' : 'deep-uat-chain-indexer'),
+  chain: chain.name,
   chainId,
   rewardsAddress,
   factoryAddress,
@@ -487,6 +489,29 @@ function requireEnv(name) {
   }
 
   return value;
+}
+
+function requireFirstEnv(...names) {
+  for (const name of names) {
+    const value = process.env[name];
+    if (value) {
+      return value;
+    }
+  }
+
+  throw new Error(`${names.join(' or ')} is required`);
+}
+
+function selectChain(id) {
+  if (id === arbitrum.id) {
+    return arbitrum;
+  }
+
+  if (id === arbitrumSepolia.id) {
+    return arbitrumSepolia;
+  }
+
+  throw new Error(`Unsupported chain id ${id}. Expected ${arbitrum.id} or ${arbitrumSepolia.id}.`);
 }
 
 function minBigInt(left, right) {

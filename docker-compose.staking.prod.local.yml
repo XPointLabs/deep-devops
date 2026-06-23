@@ -1,0 +1,145 @@
+name: deep-staking-prod-local
+
+services:
+  staking-backend:
+    build:
+      context: ${DEEP_ROOT:-..}/xpoint-staking-backend
+      dockerfile: ${DEEP_DEVOPS_DIR:-../deep-devops}/docker/dotnet-service.Dockerfile
+      args:
+        SDK_IMAGE: mcr.microsoft.com/dotnet/sdk:10.0
+        RUNTIME_IMAGE: mcr.microsoft.com/dotnet/aspnet:10.0
+        PROJECT: src/XPoint.Staking.Backend/XPoint.Staking.Backend.csproj
+        APP_DLL: XPoint.Staking.Backend.dll
+    environment:
+      ASPNETCORE_URLS: http://0.0.0.0:8080
+      Contracts__ChainId: "42161"
+      Contracts__NetworkName: arbitrum-one
+      Contracts__EthereumRpcUrl: ${PROD_ARBITRUM_RPC_URL:?set PROD_ARBITRUM_RPC_URL in .env.staking.prod.local}
+      Contracts__EthereumFallbackRpcUrls: ${PROD_ARBITRUM_FALLBACK_RPC_URLS:-https://arb1.arbitrum.io/rpc}
+      Contracts__TokenAddress: ${XPNT_TOKEN_ADDRESS:-0x63B2cdb8B0d8774F1Fdca91D24803698582a079F}
+      Contracts__ServiceNodeRewardsAddress: ${SERVICE_NODE_REWARDS_ADDRESS:-0xc52284b7aBAebbEF7BdE0E1ca8251B44AeA12F5f}
+      Contracts__ServiceNodeContributionFactoryAddress: ${SERVICE_NODE_CONTRIBUTION_FACTORY_ADDRESS:-0x289d88A8C06881634Fb619Ec528361C7b88521f1}
+      Contracts__RewardRatePoolAddress: ${REWARD_RATE_POOL_ADDRESS:-0xEd894fb5f0BA3b141A562190D4c9941FEd348356}
+      Contracts__StakingRequirementAtomic: ${STAKING_REQUIREMENT_ATOMIC:-25000000000000}
+      Contracts__RewardAccrualIntervalSeconds: ${PROD_REWARD_ACCRUAL_INTERVAL_SECONDS:-30}
+      Contracts__RewardPulseSeconds: ${PROD_REWARD_PULSE_SECONDS:-120}
+      Contracts__ExitRequestTimeSeconds: ${PROD_EXIT_REQUEST_TIME_SECONDS:-1209600}
+      Contracts__ChainBlockTimeMilliseconds: ${PROD_CHAIN_BLOCK_TIME_MS:-250}
+      Contracts__QuorumSignatureTimeoutSeconds: ${PROD_QUORUM_SIGNATURE_TIMEOUT_SECONDS:-10}
+      Contracts__StatePath: /var/lib/deep/staking-backend/staking-state.json
+      Registry__BaseUrl: http://registry:8080
+      Registry__HeartbeatGraceSeconds: ${PROD_SERVICE_NODE_HEARTBEAT_GRACE_SECONDS:-120}
+      Registry__DecommissionGraceSeconds: ${PROD_SERVICE_NODE_DECOMMISSION_GRACE_SECONDS:-300}
+      Registry__LiquidationGraceSeconds: ${PROD_SERVICE_NODE_LIQUIDATION_GRACE_SECONDS:-600}
+      Price__EthereumRpcUrl: ${PRICE_ARBITRUM_RPC_URL:-https://arb1.arbitrum.io/rpc}
+      Price__EthereumFallbackRpcUrls: ${PRICE_ARBITRUM_FALLBACK_RPC_URLS:-https://arb1.arbitrum.io/rpc}
+      Price__UniswapPoolAddress: ${XPNT_UNISWAP_V3_POOL_ADDRESS:-0x5d42A2b90867B813B753f5B49877Ea7c6bB2B603}
+      Price__BaseTokenAddress: ${XPNT_ARBITRUM_ONE_TOKEN_ADDRESS:-0x63b2cdb8b0d8774f1fdca91d24803698582a079f}
+      Price__QuoteTokenAddress: ${USDC_ARBITRUM_ONE_TOKEN_ADDRESS:-0xaf88d065e77c8cc2239327c5edb3a432268e5831}
+    volumes:
+      - prod-staking-backend-state:/var/lib/deep/staking-backend
+    ports:
+      - "${PROD_STAKING_BACKEND_BIND:-28182}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health/live >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+
+  staking-indexer:
+    build:
+      context: ${DEEP_DEVOPS_DIR:-.}
+      dockerfile: docker/uat-chain-indexer.Dockerfile
+    environment:
+      SERVICE_NAME: deep-prod-chain-indexer
+      ARBITRUM_RPC_URL: ${PROD_ARBITRUM_RPC_URL:?set PROD_ARBITRUM_RPC_URL in .env.staking.prod.local}
+      ARBITRUM_FALLBACK_RPC_URLS: ${PROD_ARBITRUM_FALLBACK_RPC_URLS:-https://arb1.arbitrum.io/rpc}
+      STAKING_BACKEND_URL: http://staking-backend:8080
+      CHAIN_ID: "42161"
+      START_BLOCK: ${PROD_CONTRACT_START_BLOCK:-476121260}
+      SERVICE_NODE_REWARDS_ADDRESS: ${SERVICE_NODE_REWARDS_ADDRESS:-0xc52284b7aBAebbEF7BdE0E1ca8251B44AeA12F5f}
+      SERVICE_NODE_CONTRIBUTION_FACTORY_ADDRESS: ${SERVICE_NODE_CONTRIBUTION_FACTORY_ADDRESS:-0x289d88A8C06881634Fb619Ec528361C7b88521f1}
+      ABI_DIR: /abis
+      STATE_FILE: /var/lib/deep/chain-indexer/state.json
+      POLL_MS: ${PROD_INDEXER_POLL_MS:-12000}
+      CATCHUP_DELAY_MS: ${PROD_INDEXER_CATCHUP_DELAY_MS:-250}
+      RPC_TIMEOUT_MS: ${PROD_INDEXER_RPC_TIMEOUT_MS:-30000}
+      CONFIRMATIONS: ${PROD_INDEXER_CONFIRMATIONS:-20}
+      BATCH_BLOCKS: ${PROD_INDEXER_BATCH_BLOCKS:-5000}
+      MAX_LOG_BLOCK_RANGE: ${PROD_INDEXER_MAX_LOG_BLOCK_RANGE:-5000}
+      ALCHEMY_FAST_BACKFILL: ${PROD_INDEXER_ALCHEMY_FAST_BACKFILL:-false}
+      ALCHEMY_FAST_BACKFILL_CATEGORIES: ${PROD_INDEXER_ALCHEMY_FAST_BACKFILL_CATEGORIES:-external}
+      ALCHEMY_FAST_BACKFILL_MIN_LAG_BLOCKS: ${PROD_INDEXER_ALCHEMY_FAST_BACKFILL_MIN_LAG_BLOCKS:-1000}
+      ALCHEMY_FAST_BACKFILL_INTERVAL_MS: ${PROD_INDEXER_ALCHEMY_FAST_BACKFILL_INTERVAL_MS:-60000}
+    volumes:
+      - ${DEEP_ROOT:-..}/xpoint-staking-contracts/abi:/abis:ro
+      - prod-staking-indexer-state:/var/lib/deep/chain-indexer
+    depends_on:
+      staking-backend:
+        condition: service_healthy
+
+  registry:
+    build:
+      context: ${DEEP_ROOT:-..}/deep-registry-api
+      dockerfile: ${DEEP_DEVOPS_DIR:-../deep-devops}/docker/dotnet-service.Dockerfile
+      args:
+        SDK_IMAGE: mcr.microsoft.com/dotnet/sdk:10.0
+        RUNTIME_IMAGE: mcr.microsoft.com/dotnet/aspnet:10.0
+        PROJECT: src/Deep.Registry.Api/Deep.Registry.Api.csproj
+        APP_DLL: Deep.Registry.Api.dll
+    environment:
+      ASPNETCORE_URLS: http://0.0.0.0:8080
+      Registry__StakingRequirementAtomic: ${STAKING_REQUIREMENT_ATOMIC:-25000000000000}
+      Registry__StatePath: /var/lib/deep/registry/registry-state.json
+      Registry__StakingBackendBaseUrl: http://staking-backend:8080
+    volumes:
+      - prod-registry-state:/var/lib/deep/registry
+    ports:
+      - "${PROD_REGISTRY_BIND:-28180}:8080"
+    depends_on:
+      staking-backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health/live >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+
+  staking-portal:
+    build:
+      context: ${DEEP_STAKING_PORTAL_DIR:-../xpoint-staking-portal}
+      dockerfile: ../deep-devops/docker/xpoint-staking-portal.Dockerfile
+      args:
+        NEXT_PUBLIC_BACKEND_API_URL: http://staking-backend:8080
+        NEXT_PUBLIC_NETWORK_API_URL: http://staking-backend:8080
+        NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID: ${NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID:?set NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID in .env.staking.prod.local}
+        NEXT_PUBLIC_RPC_URL_ARB: ${PROD_BROWSER_ARBITRUM_RPC_URL:-/api/network/rpc/arbitrum}
+        NEXT_PUBLIC_PRICE_TOKEN: xpnt
+        NEXT_PUBLIC_TESTNET: "false"
+        NEXT_PUBLIC_ENV_FLAG: ${NEXT_PUBLIC_ENV_FLAG:-prd}
+        NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-http://127.0.0.1:28183}
+        SESSION_WEBSITES_COMMIT_HASH: ${STAKING_PORTAL_COMMIT_HASH:-unknown}
+        NEXT_PUBLIC_STAKING_REQUIREMENT_ATOMIC: ${STAKING_REQUIREMENT_ATOMIC:-25000000000000}
+    environment:
+      NEXT_PUBLIC_BACKEND_API_URL: http://staking-backend:8080
+      NEXT_PUBLIC_NETWORK_API_URL: http://staking-backend:8080
+      NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID: ${NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID:?set NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID in .env.staking.prod.local}
+      NEXT_PUBLIC_RPC_URL_ARB: ${PROD_BROWSER_ARBITRUM_RPC_URL:-/api/network/rpc/arbitrum}
+      NEXT_PUBLIC_PRICE_TOKEN: xpnt
+      NEXT_PUBLIC_TESTNET: "false"
+      NEXT_PUBLIC_ENV_FLAG: ${NEXT_PUBLIC_ENV_FLAG:-prd}
+      NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-http://127.0.0.1:28183}
+      NEXT_PUBLIC_ENABLE_FAUCET: "false"
+      NEXT_PUBLIC_ENABLE_LEADERBOARD: "false"
+    ports:
+      - "${PROD_STAKING_PORTAL_BIND:-28183}:3000"
+    depends_on:
+      staking-backend:
+        condition: service_healthy
+
+volumes:
+  prod-staking-backend-state:
+  prod-staking-indexer-state:
+  prod-registry-state:

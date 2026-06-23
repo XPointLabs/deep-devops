@@ -2,3 +2,4 @@ artifacts/*
 !artifacts/.gitkeep
 .env
 .env.uat
+.env.*.local

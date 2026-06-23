@@ -62,6 +62,12 @@ const addressFromEnv = (name, fallback) => {
   return fallback;
 };
 
+const zeroAddress = '0x0000000000000000000000000000000000000000';
+const isTestnetBuild = process.env.NEXT_PUBLIC_TESTNET === 'true';
+const testnetAddressFromEnv = (name, fallback) => isTestnetBuild
+  ? addressFromEnv(name, fallback)
+  : zeroAddress;
+
 const buildInfoPath = 'packages/util-js/build.ts';
 let buildInfo = fs.readFileSync(buildInfoPath, 'utf8');
 buildInfo = buildInfo.replace(
@@ -70,19 +76,19 @@ buildInfo = buildInfo.replace(
 );
 fs.writeFileSync(buildInfoPath, buildInfo);
 
-const tokenAddress = addressFromEnv(
+const tokenAddress = testnetAddressFromEnv(
   'NEXT_PUBLIC_TOKEN_ADDRESS_ARB_SEPOLIA',
   '0x992E6EA54d74e79cd2CEC8D9fBD101a9a105ace5'
 );
-const serviceNodeRewardsAddress = addressFromEnv(
+const serviceNodeRewardsAddress = testnetAddressFromEnv(
   'NEXT_PUBLIC_SERVICE_NODE_REWARDS_ADDRESS_ARB_SEPOLIA',
   '0x08A5a47E67fCd18e14AdFB535e8d8644476D4197'
 );
-const rewardRatePoolAddress = addressFromEnv(
+const rewardRatePoolAddress = testnetAddressFromEnv(
   'NEXT_PUBLIC_REWARD_RATE_POOL_ADDRESS_ARB_SEPOLIA',
   '0xe055c7200aE13984fe66c2e8AaC608bC80E19D57'
 );
-const serviceNodeContributionFactoryAddress = addressFromEnv(
+const serviceNodeContributionFactoryAddress = testnetAddressFromEnv(
   'NEXT_PUBLIC_SERVICE_NODE_CONTRIBUTION_FACTORY_ADDRESS_ARB_SEPOLIA',
   '0x34e50278dbeDdB0F8EC7641D2304CFf4F116066b'
 );
