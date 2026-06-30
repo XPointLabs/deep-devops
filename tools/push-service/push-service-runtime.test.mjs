@@ -6,8 +6,9 @@ import test from 'node:test';
 import { spawn } from 'node:child_process';
 import http from 'node:http';
 import { createTestStorageSigningIdentity } from '../compat-services/storage-signatures.mjs';
+import { fileURLToPath } from 'node:url';
 
-const scriptPath = path.resolve('c:/Work/Deep/deep-devops/tools/push-service/push-service.mjs');
+const scriptPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'push-service.mjs');
 const validEncKey = 'abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd';
 const pushSigningIdentity = createTestStorageSigningIdentity();
 

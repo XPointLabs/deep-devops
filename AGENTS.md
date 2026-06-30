@@ -85,6 +85,7 @@ node --test .\tools\compat-services\compat-service.test.mjs
 node --test .\tools\storage-service\storage-service-runtime.test.mjs
 node --test .\tools\file-service\file-service-runtime.test.mjs
 node --test .\tools\push-service\push-service-runtime.test.mjs
+node --test .\tools\calls-service\calls-service-runtime.test.mjs
 ```
 
 ## Acceptance Gates

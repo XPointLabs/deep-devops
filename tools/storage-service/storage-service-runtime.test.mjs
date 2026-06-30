@@ -6,8 +6,9 @@ import path from 'node:path';
 import test from 'node:test';
 import { spawn } from 'node:child_process';
 import { createTestStorageSigningIdentity } from '../compat-services/storage-signatures.mjs';
+import { fileURLToPath } from 'node:url';
 
-const scriptPath = path.resolve('c:/Work/Deep/deep-devops/tools/storage-service/storage-service.mjs');
+const scriptPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'storage-service.mjs');
 const validPushSignature = 'f8efdd12000700000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000';
 const compatRelayId = '1111111111111111111111111111111111111111111111111111111111111111';
 const storageSigningIdentity = createTestStorageSigningIdentity();

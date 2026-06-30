@@ -10,6 +10,7 @@ It applies to:
 
 - storage service compatibility,
 - file/avatar service compatibility,
+- call signaling service compatibility,
 - push notification compatibility and provider cutover,
 - router no-mock production rehearsals,
 - registry/staking integration,
@@ -33,7 +34,7 @@ If a source checkout is missing, document the missing source and use checked-in 
 Deep infrastructure has two categories:
 
 - New Deep services: router, registry, staking backend, release gates, readiness scripts, multi-node rehearsal.
-- Session-compatible replacement services: storage, file/avatar, and push runtimes that implement externally visible Session contracts without requiring the full upstream Oxen/native deployment stack.
+- Session-compatible replacement services: storage, file/avatar, calls, and push runtimes that implement externally visible Session/Deep client contracts without requiring the full upstream Oxen/native deployment stack.
 
 Compatibility services must be treated as production-profile contract implementations when they pass fixtures, restart persistence, load smoke, and provider canary gates.
 
@@ -69,6 +70,14 @@ File/avatar:
 - oversized/malformed rejection,
 - restart persistence,
 - metadata endpoint behavior.
+
+Calls:
+
+- signal enqueue/dequeue via `/api/calls/signal` and `/api/calls/inbox/{recipient}`,
+- recipient inbox drain semantics,
+- malformed/missing party rejection,
+- restart persistence for pending signals,
+- runtime stats and health evidence.
 
 Push:
 

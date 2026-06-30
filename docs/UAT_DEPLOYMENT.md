@@ -4,7 +4,7 @@ Last updated: 2026-06-18.
 
 This runbook brings up the first QA UAT stack on the LAN host `192.168.1.44`.
 It uses Arbitrum Sepolia for XPNT staking contracts and Docker on this machine
-for the backend, staking portal, compatibility services, and three router nodes.
+for the backend, staking portal, product storage/file/calls services, push compatibility service, and three router nodes.
 
 ## Current Deployment Status
 
@@ -368,4 +368,7 @@ State is kept in Docker volumes:
 - `deep-uat_staking-backend-state`
 - `deep-uat_staking-indexer-state`
 - `deep-uat_registry-state`
-- `deep-uat_compat-state`
+- `deep-uat_storage-state`
+- `deep-uat_file-state`
+- `deep-uat_calls-state`
+- `deep-uat_compat-state` for push compatibility state

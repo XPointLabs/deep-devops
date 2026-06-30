@@ -256,16 +256,16 @@ services:
       start_period: 20s
 
   storage:
-    image: node:24-bookworm-slim
-    working_dir: /service
-    volumes:
-      - ${DEEP_DEVOPS_DIR:-.}/tools/compat-services:/service:ro
+    build:
+      context: ${DEEP_DEVOPS_DIR:-.}
+      dockerfile: docker/storage-service.Dockerfile
     environment:
-      SERVICE_MODE: storage
       PORT: "8080"
-      COMPAT_STATE_DIR: /tmp/deep/compat-state
+      SERVICE_NAME: deep-storage
+      COMPAT_STATE_DIR: /var/lib/deep/storage
       PUSH_COMPAT_NOTIFY_URL: http://push:8080
-    command: ["node", "compat-service.mjs"]
+    volumes:
+      - storage-state:/var/lib/deep/storage
     ports:
       - "18100:8080"
     healthcheck:
@@ -313,6 +313,25 @@ services:
       timeout: 3s
       retries: 30
 
+  calls-service:
+    profiles: ["backend-external"]
+    build:
+      context: ${DEEP_DEVOPS_DIR:-.}
+      dockerfile: docker/calls-service.Dockerfile
+    environment:
+      PORT: "8080"
+      SERVICE_NAME: deep-calls-service
+      CALLS_STATE_DIR: /var/lib/deep/calls-service
+    volumes:
+      - calls-service-state:/var/lib/deep/calls-service
+    ports:
+      - "19103:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
   push-service:
     profiles: ["backend-external"]
     build:
@@ -348,15 +367,15 @@ services:
       retries: 30
 
   file:
-    image: node:24-bookworm-slim
-    working_dir: /service
-    volumes:
-      - ${DEEP_DEVOPS_DIR:-.}/tools/compat-services:/service:ro
+    build:
+      context: ${DEEP_DEVOPS_DIR:-.}
+      dockerfile: docker/file-service.Dockerfile
     environment:
-      SERVICE_MODE: file
       PORT: "8080"
-      COMPAT_STATE_DIR: /tmp/deep/compat-state
-    command: ["node", "compat-service.mjs"]
+      SERVICE_NAME: deep-file
+      COMPAT_STATE_DIR: /var/lib/deep/file
+    volumes:
+      - file-state:/var/lib/deep/file
     ports:
       - "18101:8080"
     healthcheck:
@@ -383,6 +402,24 @@ services:
       timeout: 3s
       retries: 30
 
+  calls:
+    build:
+      context: ${DEEP_DEVOPS_DIR:-.}
+      dockerfile: docker/calls-service.Dockerfile
+    environment:
+      PORT: "8080"
+      SERVICE_NAME: deep-calls
+      CALLS_STATE_DIR: /var/lib/deep/calls
+    volumes:
+      - calls-state:/var/lib/deep/calls
+    ports:
+      - "18103:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
   test-client:
     image: node:24-bookworm-slim
     profiles: ["e2e"]
@@ -398,6 +435,7 @@ services:
       DEEP_STORAGE_URL: ${DEEP_STORAGE_URL:-http://storage:8080}
       DEEP_FILE_URL: ${DEEP_FILE_URL:-http://file:8080}
       DEEP_PUSH_URL: ${DEEP_PUSH_URL:-http://push:8080}
+      DEEP_CALL_SIGNALING_BASE_URL: ${DEEP_CALL_SIGNALING_BASE_URL:-}
       DEEP_STAKING_URL: http://staking-backend:8080
       DEEP_DEVNET_RPC_URL: http://contracts-devnet:8545
       DEEP_ARTIFACT_DIR: /artifacts/test-results
@@ -419,8 +457,14 @@ services:
         condition: service_healthy
       push:
         condition: service_healthy
+      calls:
+        condition: service_healthy
 
 volumes:
+  storage-state:
+  file-state:
+  calls-state:
   storage-service-state:
   file-service-state:
+  calls-service-state:
   push-service-state:

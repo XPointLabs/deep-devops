@@ -4,8 +4,9 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 import test from 'node:test';
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
-const scriptPath = path.resolve('c:/Work/Deep/deep-devops/tools/file-service/file-service.mjs');
+const scriptPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'file-service.mjs');
 
 async function waitForReady(baseUrl, timeoutMs = 5000) {
   const started = Date.now();

@@ -273,17 +273,16 @@ services:
     healthcheck: *router-healthcheck
 
   storage:
-    image: node:24-bookworm-slim
-    working_dir: /service
-    volumes:
-      - ${DEEP_DEVOPS_DIR:-.}/tools/compat-services:/service:ro
-      - compat-state:/var/lib/deep/compat
+    build:
+      context: ${DEEP_DEVOPS_DIR:-.}
+      dockerfile: docker/storage-service.Dockerfile
     environment:
-      SERVICE_MODE: storage
       PORT: "8080"
-      COMPAT_STATE_DIR: /var/lib/deep/compat
+      SERVICE_NAME: deep-storage
+      COMPAT_STATE_DIR: /var/lib/deep/storage
       PUSH_COMPAT_NOTIFY_URL: http://push:8080
-    command: ["node", "compat-service.mjs"]
+    volumes:
+      - storage-state:/var/lib/deep/storage
     ports:
       - "28100:8080"
     healthcheck:
@@ -293,16 +292,15 @@ services:
       retries: 30
 
   file:
-    image: node:24-bookworm-slim
-    working_dir: /service
-    volumes:
-      - ${DEEP_DEVOPS_DIR:-.}/tools/compat-services:/service:ro
-      - compat-state:/var/lib/deep/compat
+    build:
+      context: ${DEEP_DEVOPS_DIR:-.}
+      dockerfile: docker/file-service.Dockerfile
     environment:
-      SERVICE_MODE: file
       PORT: "8080"
-      COMPAT_STATE_DIR: /var/lib/deep/compat
-    command: ["node", "compat-service.mjs"]
+      SERVICE_NAME: deep-file
+      COMPAT_STATE_DIR: /var/lib/deep/file
+    volumes:
+      - file-state:/var/lib/deep/file
     ports:
       - "28101:8080"
     healthcheck:
@@ -331,16 +329,15 @@ services:
       retries: 30
 
   calls:
-    image: node:24-bookworm-slim
-    working_dir: /service
-    volumes:
-      - ${DEEP_DEVOPS_DIR:-.}/tools/compat-services:/service:ro
-      - compat-state:/var/lib/deep/compat
+    build:
+      context: ${DEEP_DEVOPS_DIR:-.}
+      dockerfile: docker/calls-service.Dockerfile
     environment:
-      SERVICE_MODE: calls
       PORT: "8080"
-      COMPAT_STATE_DIR: /var/lib/deep/compat
-    command: ["node", "compat-service.mjs"]
+      SERVICE_NAME: deep-calls
+      CALLS_STATE_DIR: /var/lib/deep/calls
+    volumes:
+      - calls-state:/var/lib/deep/calls
     ports:
       - "28103:8080"
     healthcheck:
@@ -353,4 +350,7 @@ volumes:
   staking-backend-state:
   staking-indexer-state:
   registry-state:
+  storage-state:
+  file-state:
+  calls-state:
   compat-state:

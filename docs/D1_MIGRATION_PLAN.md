@@ -1,17 +1,18 @@
 ﻿# D1 Migration Plan: mock -> compatibility services
 
 ## Goal
-Replace dev-only mock storage/file/push services with production-profile equivalent compatibility services while preserving Session-facing API contracts.
+Replace dev-only mock storage/file/calls/push services with production-profile equivalent product or compatibility services while preserving Session-facing API contracts.
 
 ## Scope
 - Storage service (`/storage/store`, `/storage/retrieve`)
 - File service (`/file`, `/file/{id}`, `/file/{id}/info`, `/avatar/{sessionId}`)
+- Calls service (`/api/calls/signal`, `/api/calls/inbox/{recipient}`)
 - Push service (`/subscribe`, `/subscriptions/{pubkey}`)
 
 ## Migration Steps
 1. Baseline contract behavior from existing hardened implementation.
-2. Promote implementation into dedicated compatibility runtime (`tools/compat-services`).
-3. Switch devops compose wiring to compatibility runtime for storage/file/push.
+2. Promote implementation into dedicated service runtimes under `tools/*-service`.
+3. Switch devops compose wiring to product runtimes for storage/file/calls while preserving push compatibility runtime.
 4. Preserve API contract compatibility and behavior semantics:
    - retry/idempotency keys
    - TTL + pruning
@@ -67,12 +68,13 @@ Replace dev-only mock storage/file/push services with production-profile equival
 - Runtime snapshot gating in external mode now also supports separate host-reachable `DEEP_STORAGE_STATS_URL`, `DEEP_FILE_STATS_URL`, and `DEEP_PUSH_STATS_URL` values when the container-visible service URLs differ from the host diagnostics path.
 - A first dedicated storage service slice now exists as `tools/storage-service/storage-service.mjs` + `docker/storage-service.Dockerfile` + compose profile `storage-external`; it reuses the validated storage runtime behind a separate service identity and named Docker volume for clean validation runs.
 - `test-env.ps1` external mode now correctly starts only router/registry/staking/contracts services; storage/file/push must come from explicitly supplied external endpoints.
-- Dedicated `file-service` and `push-service` slices now also exist as `tools/file-service/file-service.mjs`, `tools/push-service/push-service.mjs`, `docker/file-service.Dockerfile`, and `docker/push-service.Dockerfile`; compose profile `backend-external` now validates a fully dedicated storage/file/push triad behind the external cutover path.
+- Dedicated `file-service`, `calls-service`, and `push-service` slices now also exist as `tools/file-service/file-service.mjs`, `tools/calls-service/calls-service.mjs`, `tools/push-service/push-service.mjs`, `docker/file-service.Dockerfile`, `docker/calls-service.Dockerfile`, and `docker/push-service.Dockerfile`; compose profile `backend-external` now validates dedicated storage/file/calls/push services behind the external cutover path.
 - `storage-service` now also has a standalone runtime module in `tools/storage-service/storage-service-runtime.mjs`, so dedicated storage traffic no longer imports `compat-service.mjs` directly while preserving `storage.json` + `storage-subaccounts.json` persistence, sequence/batch helpers, and the outbound notify hop to `push-service`.
 - Dedicated `storage-service` now also has focused standalone runtime tests for persisted message + revoked-subaccount reload across restart.
 - `file-service` now also has a standalone runtime module in `tools/file-service/file-service-runtime.mjs`, so dedicated file traffic no longer imports `compat-service.mjs` directly while preserving the same file-state persistence and HTTP contract.
 - Dedicated `file-service` now also has focused standalone runtime tests for health/stats, persisted `file.json` reload across restart, legacy `/files` reload, `/file/{id}/extend`, and env-backed `/session_version` + `/token_info` metadata.
 - `push-service` now also has a standalone runtime module in `tools/push-service/push-service-runtime.mjs`, so dedicated push traffic no longer imports `compat-service.mjs` directly while preserving the same `push.json` persistence shape, diagnostics, and internal notify contract used by `storage-service`.
+- `calls-service` now also has a standalone runtime module in `tools/calls-service/calls-service-runtime.mjs`, so UAT/default call signaling no longer imports `compat-service.mjs` directly while preserving the `/api/calls/signal` and `/api/calls/inbox/{recipient}` contract.
 - Dedicated `push-service` now also has focused standalone runtime tests for persisted subscription reload across restart and post-restart notify handling.
 - Storage contract coverage now includes private-namespace store auth-presence guards, signed store timestamp-tolerance validation, store `sig_timestamp` validation, real signature verification for verifiable identities across store/retrieve/get_expiries/expire_all/expire/delete/delete_all/delete_before, storage subaccount read/write/delete/`any_prefix` authorization, subaccount revoke/unrevoke/list lifecycle, capped revocation retention, and write-only `/expire` behavior, retrieve auth/noauth exceptions, retrieve request-shape validation, signed retrieve timestamp-tolerance validation, `get_expiries` timestamp-tolerance validation, store namespace-range validation, ordered/best-effort batching, expiry lookup, bulk/targeted scalar+array expiry mutation, selective delete, delete-before, delete-all purge, and stale/future timestamp rejection aligned to upstream `session-storage-server/network-tests/test_batch.py`, `test_deletes.py`, `test_expire.py`, `test_msg_ns.py`, `test_store_retrieve.py`, and `test_subaccount_auth.py`.
 - File contract coverage now includes exact salted BLAKE2b file IDs, upstream 3-week expiry defaults, optional `X-FS-TTL` overrides, expiry pruning, empty/oversized upload rejection, upload `expires` metadata, duplicate-upload stability, deprecated `/files` backward-compat behavior, `404`/extend/missing-file semantics, and env-backed `/session_version` + `/token_info` coverage aligned to the compatibility baseline for `session-file-server` lifecycle behavior.
@@ -93,11 +95,11 @@ Replace dev-only mock storage/file/push services with production-profile equival
 - Smoke validation now also exercises live storage->push delivery for an active subscription, and full validation remains green with the new delivery hop enabled.
 - Smoke validation now also passes in `-BackendMode external` against externally addressed storage/file/push endpoints, while default compat-backed smoke/full validation remains green after the migration-harness change.
 - Smoke and full validation now also pass against the dedicated `storage-service` slice in external mode while file/push continue to use external compat endpoints.
-- Smoke/full validation now also pass against the fully dedicated `storage/file/push` service wrappers in `backend-external`, including the storage->push notify hop redirected to `push-service`.
+- Smoke/full validation now also pass against the dedicated `storage/file/calls/push` service wrappers in `backend-external`, including the storage->push notify hop redirected to `push-service`.
 - Smoke/full validation remains green after the `file-service` runtime extraction, so the dedicated backend triad no longer depends on the shared compat runtime for the file slice.
 - Smoke/full validation remains green after the `push-service` runtime extraction, so the dedicated backend triad no longer depends on the shared compat runtime for the push slice either.
 - Smoke/full validation remains green after the `storage-service` runtime extraction, so the dedicated backend triad no longer depends on the shared compat runtime for the storage slice either.
-- Managed `test-env.ps1 -Suite full -BackendMode external -ManagedExternalProfile backend-external` now also performs a host-side `docker compose restart` rehearsal for `storage-service`/`file-service`/`push-service` and emits `artifacts/test-results/backend-restart-smoke.json` to prove named-volume persistence plus post-restart storage->push delivery.
+- Managed `test-env.ps1 -Suite full -BackendMode external -ManagedExternalProfile backend-external` now also performs a host-side `docker compose restart` rehearsal for `storage-service`/`file-service`/`push-service`/`calls-service` and emits `artifacts/test-results/backend-restart-smoke.json` to prove named-volume persistence plus post-restart storage->push delivery and pending call-signal reload.
 
 ## Additional Implemented State (2026-06-01)
 - File compatibility and dedicated runtimes now expose an explicit avatar lifecycle on `/avatar/{sessionId}` and `/avatar/{sessionId}/info`, backed by the same bounded file storage but with separate `avatar.json` pointer metadata.
@@ -123,7 +125,7 @@ Replace dev-only mock storage/file/push services with production-profile equival
 - At least one dedicated non-default backend slice (`storage-service`) is reproducibly validated behind that cutover path.
 - The entire storage/file/push path is now reproducibly validated behind dedicated standalone runtimes, not just wrappers.
 - Dedicated backend load evidence now comes from `deep-tests-e2e/test/e2e/deep.load.test.mjs` and `artifacts/test-results/backend-load-smoke.json`, gated by `test-env.ps1 -Suite full -BackendMode external`.
-- The same external cutover path is now reproducible in CI/local orchestration through `test-env.ps1 -ManagedExternalProfile backend-external`, which bootstraps the dedicated triad and tears it down with profile-aware cleanup.
+- The same external cutover path is now reproducible in CI/local orchestration through `test-env.ps1 -ManagedExternalProfile backend-external`, which bootstraps the dedicated backend services and tears them down with profile-aware cleanup.
 - The managed external full path now also proves compose-level restart recovery, including avatar pointer persistence and persisted push delivery reload, through `artifacts/test-results/backend-restart-smoke.json`, not just steady-state e2e/load behavior.
 - Attachment and avatar backend lifecycle evidence is now present in full/load/restart artifacts; MAUI client remote avatar publication now has shared/client transport wiring, while attached device acceptance evidence remains tracked in P3 rather than this backend migration exit.
 - Remaining backend work is now production hardening rather than further runtime extraction, missing provider-facing push dispatch mechanics, missing avatar/backend load evidence, or missing compose restart proof; the provider canary hook exists, but credentialed APNs/FCM/Huawei staging credentials and operator sign-off evidence remain outside this migration slice.

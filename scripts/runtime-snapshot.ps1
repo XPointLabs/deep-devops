@@ -110,9 +110,10 @@ else {
     $env:DEEP_BACKEND_MODE
 }
 
-$storageStatsName = if ($backendMode -eq "external") { "storage-external-stats" } else { "storage-compat-stats" }
-$fileStatsName = if ($backendMode -eq "external") { "file-external-stats" } else { "file-compat-stats" }
+$storageStatsName = if ($backendMode -eq "external") { "storage-external-stats" } else { "storage-product-stats" }
+$fileStatsName = if ($backendMode -eq "external") { "file-external-stats" } else { "file-product-stats" }
 $pushStatsName = if ($backendMode -eq "external") { "push-external-stats" } else { "push-compat-stats" }
+$callsStatsName = if ($backendMode -eq "external") { "calls-external-stats" } else { "calls-product-stats" }
 
 $storageStatsUrl = if ($backendMode -eq "external") {
     Get-ExternalStatsUrl -ExplicitStatsUrl $env:DEEP_STORAGE_STATS_URL -ServiceUrl $env:DEEP_STORAGE_URL -FallbackUrl "http://127.0.0.1:18100/stats"
@@ -135,6 +136,13 @@ else {
     "http://127.0.0.1:18102/stats"
 }
 
+$callsStatsUrl = if ($backendMode -eq "external") {
+    Get-ExternalStatsUrl -ExplicitStatsUrl $env:DEEP_CALL_STATS_URL -ServiceUrl $env:DEEP_CALL_SIGNALING_BASE_URL -FallbackUrl $null
+}
+else {
+    "http://127.0.0.1:18103/stats"
+}
+
 $snapshots = @(
     (Get-Snapshot -Name "router-health-ready" -Url "http://127.0.0.1:18081/health/ready"),
     (Get-Snapshot -Name "registry-health-live" -Url "http://127.0.0.1:18080/health/live"),
@@ -151,6 +159,10 @@ $snapshots = @(
         params = @()
     })
 )
+
+if (-not [string]::IsNullOrWhiteSpace($callsStatsUrl)) {
+    $snapshots += (Get-Snapshot -Name $callsStatsName -Url $callsStatsUrl)
+}
 
 $payload = [ordered]@{
     capturedAtUtc = [DateTimeOffset]::UtcNow.ToString("o")

@@ -181,13 +181,14 @@ function createPushUnsubscribePayload(identity, subscription) {
 }
 
 async function getServiceStats(urls) {
-  const [storage, file, push] = await Promise.all([
+  const [storage, file, push, calls] = await Promise.all([
     getJson(urls.storage, '/stats'),
     getJson(urls.file, '/stats'),
-    getJson(urls.push, '/stats')
+    getJson(urls.push, '/stats'),
+    getJson(urls.calls, '/stats')
   ]);
 
-  return { storage, file, push };
+  return { storage, file, push, calls };
 }
 
 function restartManagedExternalServices() {
@@ -197,7 +198,7 @@ function restartManagedExternalServices() {
   const profile = process.env.DEEP_EXTERNAL_PROFILE ?? 'backend-external';
   const restart = spawnSync(
     'docker',
-    ['compose', '-f', composeFile, '--profile', profile, 'restart', 'storage-service', 'file-service', 'push-service'],
+    ['compose', '-f', composeFile, '--profile', profile, 'restart', 'storage-service', 'file-service', 'push-service', 'calls-service'],
     {
       stdio: 'inherit',
       env: process.env
@@ -219,13 +220,15 @@ async function main() {
   const urls = {
     storage: resolveHostServiceBaseUrl('DEEP_STORAGE_URL', 'DEEP_STORAGE_STATS_URL', 'http://127.0.0.1:19100'),
     file: resolveHostServiceBaseUrl('DEEP_FILE_URL', 'DEEP_FILE_STATS_URL', 'http://127.0.0.1:19101'),
-    push: resolveHostServiceBaseUrl('DEEP_PUSH_URL', 'DEEP_PUSH_STATS_URL', 'http://127.0.0.1:19102')
+    push: resolveHostServiceBaseUrl('DEEP_PUSH_URL', 'DEEP_PUSH_STATS_URL', 'http://127.0.0.1:19102'),
+    calls: resolveHostServiceBaseUrl('DEEP_CALL_SIGNALING_BASE_URL', 'DEEP_CALL_STATS_URL', 'http://127.0.0.1:19103')
   };
 
   await Promise.all([
     waitForReady('storage-service', urls.storage),
     waitForReady('file-service', urls.file),
-    waitForReady('push-service', urls.push)
+    waitForReady('push-service', urls.push),
+    waitForReady('calls-service', urls.calls)
   ]);
 
   const storageIdentity = createTestStorageSigningIdentity();
@@ -239,6 +242,16 @@ async function main() {
   });
   const filePayload = Buffer.from(`backend-external-restart-file-${Date.now()}`, 'utf8');
   const avatarPayload = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x01]);
+  const callRecipient = `05${'d'.repeat(64)}`;
+  const callSignal = {
+    callId: `restart-call-${Date.now()}`,
+    conversationId: callRecipient,
+    sender: { value: storageIdentity.directPubkey },
+    recipient: { value: callRecipient },
+    type: 0,
+    payload: '{"sdp":"offer"}',
+    createdAt: new Date().toISOString()
+  };
 
   const pushSubscribe = await postJson(urls.push, '/subscribe', pushSubscription);
   assert.equal(pushSubscribe.success, true);
@@ -280,14 +293,20 @@ async function main() {
   assert.equal(avatarInfoBeforeRestart.contentType, 'image/png');
   assert.deepEqual(avatarBytesBeforeRestart, avatarPayload);
 
+  const callSignalBeforeRestart = await postJson(urls.calls, '/api/calls/signal', callSignal);
+  assert.equal(callSignalBeforeRestart.accepted, true);
+  assert.equal(callSignalBeforeRestart.callId, callSignal.callId);
+
   const statsBeforeRestart = await getServiceStats(urls);
+  assert.equal(statsBeforeRestart.calls.inventory.callSignals, 1);
 
   restartManagedExternalServices();
 
   await Promise.all([
     waitForReady('storage-service', urls.storage),
     waitForReady('file-service', urls.file),
-    waitForReady('push-service', urls.push)
+    waitForReady('push-service', urls.push),
+    waitForReady('calls-service', urls.calls)
   ]);
 
   const statsAfterRestart = await getServiceStats(urls);
@@ -315,6 +334,11 @@ async function main() {
     statsAfterRestart.push.inventory.pushDeliveries,
     statsBeforeRestart.push.inventory.pushDeliveries,
     'push delivery inventory changed across compose restart'
+  );
+  assert.equal(
+    statsAfterRestart.calls.inventory.callSignals,
+    statsBeforeRestart.calls.inventory.callSignals,
+    'call signal inventory changed across compose restart'
   );
 
   const retrievedAfterRestart = await postJson(
@@ -353,6 +377,10 @@ async function main() {
   assert.equal(subscriptionsAfterRestart.deliveries.length, 1);
   assert.equal(subscriptionsAfterRestart.deliveries[0].hash, storedBeforeRestart.hash);
   assert.equal(subscriptionsAfterRestart.deliveries[0].token, pushToken);
+
+  const callInboxAfterRestart = await getJson(urls.calls, `/api/calls/inbox/${encodeURIComponent(callRecipient)}`);
+  assert.equal(callInboxAfterRestart.length, 1);
+  assert.equal(callInboxAfterRestart[0].callId, callSignal.callId);
 
   const extendedAfterRestart = await postJson(urls.file, `/file/${uploadedBeforeRestart.id}/extend`, {});
   assert.equal(extendedAfterRestart.size, fileInfoAfterRestart.size);
@@ -415,6 +443,11 @@ async function main() {
     statsAfterRehearsal.push.inventory.pushDeliveries >= statsAfterRestart.push.inventory.pushDeliveries + 1,
     'push delivery inventory did not reflect post-restart notify activity'
   );
+  assert.equal(
+    statsAfterRehearsal.calls.inventory.callSignals,
+    0,
+    'call signal inventory did not drain after post-restart inbox retrieval'
+  );
 
   writeArtifact('backend-restart-smoke.json', {
     status: 'ok',
@@ -428,12 +461,14 @@ async function main() {
     fileInfoBeforeRestart,
     avatarBeforeRestart,
     avatarInfoBeforeRestart,
+    callSignalBeforeRestart,
     statsBeforeRestart,
     statsAfterRestart,
     retrievedAfterRestart,
     fileInfoAfterRestart,
     avatarInfoAfterRestart,
     subscriptionsAfterRestart,
+    callInboxAfterRestart,
     extendedAfterRestart,
     storedAfterRestart,
     retrievedFinal,
