@@ -99,8 +99,15 @@ Put the generated private/public key pair into `DEEP_NODE_REALITY_PRIVATE_KEY` a
 - `DEEP_NODE_PUBLIC_PORT`: public VLESS Reality port clients use. Keep it equal
   to `DEEP_NODE_VLESS_BIND` unless a reverse proxy, NAT rule, or cloud load
   balancer translates the port.
-- `DEEP_NODE_RPC_ENDPOINT`: http(s) endpoint other router nodes can reach for `/api/session/rpc`; use a private mesh/VPN or controlled reverse proxy, not an unauthenticated public admin port.
-- `DEEP_NODE_SIGNING_ENDPOINT`: HTTPS URL that staking backend can call for `/api/staking/quorum/sign`.
+- `DEEP_NODE_PUBLIC_IP`: public origin IPv4 address advertised to other nodes.
+- `DEEP_NODE_PEER_RPC_PORT` and `DEEP_NODE_PEER_RPC_ENDPOINT`: public peer-only
+  listener and exact `/api/peer/onion` endpoint. Requests are encrypted by the
+  onion protocol and authenticated with the sending node's Ed25519 identity,
+  timestamp, and one-time nonce. The endpoint does not expose the admin API.
+- `DEEP_NODE_SIGNING_ENDPOINT`: private control-plane URL for
+  `/api/staking/quorum/sign`; it can remain loopback when the node itself pulls
+  and signs obligations, or use authenticated private networking when the
+  staking backend calls it remotely.
 - `DEEP_NODE_STORAGE_BIND`: host bind address for the per-node storage sidecar; keep it private or expose it through the approved node/onion ingress path.
 - `DEEP_PUSH_NOTIFY_URL`: optional centralized push notify endpoint used by storage to trigger push delivery.
 - `DEEP_REGISTRY_URL`: production registry API base URL.
@@ -197,12 +204,12 @@ keys or mnemonics in git.
 
 ## Still Centralized
 
-- Registry API/control plane: bootstrap cache, transport metadata cache, heartbeat mirror, and diagnostics are still centralized services, but they are not the authority for active service-node membership or reward quorum membership.
+- Registry API/control plane: bootstrap cache, transport metadata cache, heartbeat mirror, and diagnostics are still centralized services, but they are not the authority for active service-node membership or reward quorum membership. The public node view is sanitized; the complete transport catalog is returned only to a healthy registered node after Ed25519 request authentication.
 - Staking backend, chain indexer, reward checkpoint keeper, and the UI price endpoint are centralized application services around decentralized Arbitrum contracts. The chain/indexer determines active membership; service-node obligations gate reward/exit/liquidation signatures. XPNT price is sourced from the on-chain XPNT/USDC Uniswap V3 pool on Arbitrum One rather than a third-party price API.
-- Staking portal/web frontend and public DNS/bootstrap URLs are centralized.
+- Staking portal/web frontend and the initial seed DNS names are centralized.
 - Storage runs as a per-node sidecar with node-local state, matching the upstream Session service-node storage model more closely than a single central storage service.
 - File/avatar and push services remain operated infrastructure. Push can never be fully decentralized while Android/iOS delivery goes through FCM/APNs/Huawei provider gateways.
 - Container registry, observability, alerting, CI release evidence, and incident/rollback automation are centralized operations systems.
 - Contract ownership/governance remains centralized until ownership is transferred to the final multisig/governance process.
 
-The decentralized pieces in the current architecture are the Arbitrum contracts, signed relay contacts, and BLS quorum signatures produced by active, obligation-eligible service nodes. The next decentralization frontier is replacing the centralized bootstrap/cache endpoints with node-network gossip for client discovery while keeping FCM/APNs/Huawei push delivery centralized by platform necessity.
+The decentralized pieces in the current architecture are the Arbitrum contracts, signed relay contacts, authenticated onion relay transport, and BLS quorum signatures produced by active, obligation-eligible service nodes. Clients enter through a built-in Reality seed, request a fresh signed route from that node, and verify every relay contact. The next decentralization frontier is replacing the authenticated registry cache with node-network gossip while keeping FCM/APNs/Huawei push delivery centralized by platform necessity.

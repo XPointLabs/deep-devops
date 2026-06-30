@@ -7,17 +7,20 @@ services:
     stop_grace_period: 30s
     environment:
       ASPNETCORE_ENVIRONMENT: Production
-      ASPNETCORE_URLS: http://0.0.0.0:8080
+      ASPNETCORE_URLS: http://0.0.0.0:8080;http://0.0.0.0:8081
 
       Node__ApiListenUrl: http://0.0.0.0:8080
+      Node__PeerRpcListenUrl: http://0.0.0.0:8081
       Node__DataDirectory: /var/lib/xnode
       Node__RouterId: ${DEEP_NODE_ED25519_PUBLIC_KEY:?set DEEP_NODE_ED25519_PUBLIC_KEY}
       Node__Ed25519PrivateKeyPath: /run/secrets/node-ed25519-private-key
       Node__IsRelay: "true"
       Node__Network: ${DEEP_NETWORK:-mainnet}
       Node__PublicHost: ${DEEP_NODE_PUBLIC_HOST:?set DEEP_NODE_PUBLIC_HOST}
+      Node__PublicIp: ${DEEP_NODE_PUBLIC_IP:?set DEEP_NODE_PUBLIC_IP}
       Node__PublicPort: ${DEEP_NODE_PUBLIC_PORT:-443}
-      Node__PublicRpcEndpoint: ${DEEP_NODE_RPC_ENDPOINT:?set DEEP_NODE_RPC_ENDPOINT}
+      Node__PublicPeerRpcPort: ${DEEP_NODE_PEER_RPC_PORT:-22020}
+      Node__PublicPeerRpcEndpoint: ${DEEP_NODE_PEER_RPC_ENDPOINT:?set DEEP_NODE_PEER_RPC_ENDPOINT}
 
       Runtime__BootstrapFromStorage: ${DEEP_NODE_BOOTSTRAP_FROM_STORAGE:-true}
       Runtime__HeartbeatInterval: ${DEEP_NODE_RUNTIME_HEARTBEAT_INTERVAL:-00:00:30}
@@ -65,6 +68,7 @@ services:
       RegistryRegistration__SigningEndpoint: ${DEEP_NODE_SIGNING_ENDPOINT:?set DEEP_NODE_SIGNING_ENDPOINT}
     ports:
       - "${DEEP_NODE_VLESS_BIND:-443}:${DEEP_NODE_VLESS_CONTAINER_PORT:-443}"
+      - "${DEEP_NODE_PEER_RPC_BIND:-22020}:8081"
       - "${DEEP_NODE_API_BIND:-127.0.0.1:8080}:8080"
     volumes:
       - xnode-state:/var/lib/xnode

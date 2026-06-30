@@ -11,13 +11,9 @@ Requested seed hostnames:
 
 | Node | Public host |
 | --- | --- |
-| seed-1 | `seed1.expoint.network` |
+| seed-1 | `seed1.xpoint.network` |
 | seed-2 | `seed2.xpoint.network` |
 | seed-3 | `seed3.xpoint.network` |
-
-Confirm `seed1.expoint.network` before the client release. It is recorded here
-exactly as requested; if this is a DNS typo, change it to `seed1.xpoint.network`
-before baking production bootstrap hosts into clients.
 
 ## Prerequisites
 
@@ -27,6 +23,7 @@ before baking production bootstrap hosts into clients.
 3. Create DNS `A`/`AAAA` records for all three seed hosts.
 4. Open the chosen public VLESS Reality TCP port to each seed host. The
    recommended default is `443`, but any reachable TCP port is supported.
+   Also open the signed node-to-node peer port, `22020` by default.
 5. Keep the node API/signing endpoint private to the control plane. Use
    WireGuard, Tailscale, a private load balancer, or an allowlisted reverse
    proxy. Do not expose the raw node API as an unauthenticated public admin
@@ -157,6 +154,10 @@ DEEP_NETWORK=mainnet
 
 DEEP_NODE_PUBLIC_PORT=443
 DEEP_NODE_VLESS_BIND=443
+DEEP_NODE_PUBLIC_IP=<public origin IPv4 address>
+DEEP_NODE_PEER_RPC_PORT=22020
+DEEP_NODE_PEER_RPC_BIND=22020
+DEEP_NODE_PEER_RPC_ENDPOINT=http://<public origin IPv4 address>:22020/api/peer/onion
 DEEP_NODE_API_BIND=127.0.0.1:8080
 DEEP_NODE_STORAGE_BIND=127.0.0.1:22021
 
@@ -189,7 +190,7 @@ Set the public host per server:
 
 ```text
 # seed-1
-DEEP_NODE_PUBLIC_HOST=seed1.expoint.network
+DEEP_NODE_PUBLIC_HOST=seed1.xpoint.network
 
 # seed-2
 DEEP_NODE_PUBLIC_HOST=seed2.xpoint.network
@@ -210,12 +211,12 @@ DEEP_NODE_PUBLIC_PORT=8443
 DEEP_NODE_VLESS_BIND=8443
 ```
 
-The control-plane RPC/signing endpoints must point to the private route that the
-registry and staking backend can reach. Prefer private network addresses or
-private DNS names:
+The peer RPC endpoint is generated from the node's origin IP and peer port. It
+accepts only `/api/peer/onion`; every request is onion-encrypted and signed by a
+registered node. The admin and BLS signing API remains bound to loopback unless
+an authenticated private control-plane route is configured:
 
 ```text
-DEEP_NODE_RPC_ENDPOINT=http://<private-management-host-or-ip>:8080/api/session/rpc
 DEEP_NODE_SIGNING_ENDPOINT=http://<private-management-host-or-ip>:8080/api/staking/quorum/sign
 ```
 
@@ -224,15 +225,17 @@ that forwards only from allowlisted control-plane IPs to `127.0.0.1:8080`.
 
 ## Firewall
 
-Open only the chosen public transport port:
+Open the chosen Reality transport port and the signed peer transport port:
 
 ```bash
 sudo ufw allow 443/tcp
+sudo ufw allow 22020/tcp
 sudo ufw enable
 sudo ufw status verbose
 ```
 
-Replace `443` with the node's `DEEP_NODE_PUBLIC_PORT` when the node uses a
+Replace `443` with the node's `DEEP_NODE_PUBLIC_PORT` and `22020` with its
+`DEEP_NODE_PEER_RPC_PORT` when the node uses a
 non-default port.
 
 Keep `8080` and `22021` bound to localhost or to a private management
@@ -281,7 +284,6 @@ Run from a machine that can reach the private management endpoints:
 
 ```bash
 curl -fsS https://registry.xpoint.network/api/nodes
-curl -fsS https://registry.xpoint.network/api/relay-contacts
 curl -fsS https://staking.xpoint.network/obligations
 ```
 
@@ -293,6 +295,10 @@ Every seed must appear in the registry with:
 - non-mocked VLESS transport;
 - populated BLS public key and signing endpoint;
 - recent heartbeat timestamp.
+
+`/api/relay-contacts` intentionally returns `401` to anonymous callers. XPoint
+nodes fetch the complete catalog with a signed Ed25519 request; clients obtain
+fresh routes through a Reality-connected seed and verify every contact locally.
 
 ## Stake And Start Production Registration
 
@@ -319,7 +325,7 @@ After all three nodes are active on-chain and healthy in the registry,
 production clients can include these bootstrap hosts:
 
 ```text
-seed1.expoint.network:443
+seed1.xpoint.network:443
 seed2.xpoint.network:443
 seed3.xpoint.network:443
 ```
@@ -328,9 +334,9 @@ If a seed uses a non-default public port, include that port in the bootstrap
 entry and verify the registry relay contact advertises the same
 `publicHost/publicPort`.
 
-Client releases must also point discovery/bootstrap APIs at the production
-registry and staking backend. The client should use registry-published relay
-contacts for live routing, not a static list of registry rows.
+Client releases contain only the initial Reality seed profiles. After entering
+the network, the client asks a seed for a fresh route and verifies the signed
+relay contacts. Clients do not download the complete catalog from the registry.
 
 ## Operations
 

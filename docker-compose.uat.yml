@@ -174,15 +174,18 @@ services:
         XRAY_VERSION: ${XNODE_XRAY_VERSION:-v26.3.27}
     environment: &router-common-env
       ASPNETCORE_ENVIRONMENT: Production
-      ASPNETCORE_URLS: http://0.0.0.0:8080
+      ASPNETCORE_URLS: http://0.0.0.0:8080;http://0.0.0.0:8081
       Node__ApiListenUrl: http://0.0.0.0:8080
+      Node__PeerRpcListenUrl: http://0.0.0.0:8081
       Node__DataDirectory: /var/lib/xnode-node-1
       Node__RouterId: ${UAT_NODE_1_ED25519_PUBLIC_KEY:?set UAT_NODE_1_ED25519_PUBLIC_KEY in .env.uat}
       Node__Ed25519PrivateKey: ${UAT_NODE_1_ED25519_PRIVATE_KEY:?set UAT_NODE_1_ED25519_PRIVATE_KEY in .env.uat}
       Node__Network: mainnet
       Node__PublicHost: ${DEEP_LAN_IP:-192.168.1.44}
+      Node__PublicIp: ${DEEP_LAN_IP:-192.168.1.44}
       Node__PublicPort: "20443"
-      Node__PublicRpcEndpoint: http://xnode-1:8080
+      Node__PublicPeerRpcPort: "22020"
+      Node__PublicPeerRpcEndpoint: http://${DEEP_LAN_IP:-192.168.1.44}:22020/api/peer/onion
       Runtime__BootstrapFromStorage: "true"
       Runtime__HeartbeatInterval: "00:00:10"
       Runtime__RequireSignedRelayContacts: "true"
@@ -213,6 +216,7 @@ services:
       RegistryRegistration__SigningEndpoint: http://xnode-1:8080/api/staking/quorum/sign
     ports:
       - "29281:8080"
+      - "22020:8081"
       - "20443:443"
     depends_on:
       registry:
@@ -234,13 +238,15 @@ services:
       Node__RouterId: ${UAT_NODE_2_ED25519_PUBLIC_KEY:?set UAT_NODE_2_ED25519_PUBLIC_KEY in .env.uat}
       Node__Ed25519PrivateKey: ${UAT_NODE_2_ED25519_PRIVATE_KEY:?set UAT_NODE_2_ED25519_PRIVATE_KEY in .env.uat}
       Node__PublicPort: "20444"
-      Node__PublicRpcEndpoint: http://xnode-2:8080
+      Node__PublicPeerRpcPort: "22022"
+      Node__PublicPeerRpcEndpoint: http://${DEEP_LAN_IP:-192.168.1.44}:22022/api/peer/onion
       Vless__PublicPort: "20444"
       RegistryRegistration__Ed25519PublicKey: ${UAT_NODE_2_ED25519_PUBLIC_KEY:?set UAT_NODE_2_ED25519_PUBLIC_KEY in .env.uat}
       RegistryRegistration__BlsPrivateKey: ${UAT_NODE_2_BLS_PRIVATE_KEY:?set UAT_NODE_2_BLS_PRIVATE_KEY in .env.uat}
       RegistryRegistration__SigningEndpoint: http://xnode-2:8080/api/staking/quorum/sign
     ports:
       - "29282:8080"
+      - "22022:8081"
       - "20444:443"
     depends_on:
       registry:
@@ -257,13 +263,15 @@ services:
       Node__RouterId: ${UAT_NODE_3_ED25519_PUBLIC_KEY:?set UAT_NODE_3_ED25519_PUBLIC_KEY in .env.uat}
       Node__Ed25519PrivateKey: ${UAT_NODE_3_ED25519_PRIVATE_KEY:?set UAT_NODE_3_ED25519_PRIVATE_KEY in .env.uat}
       Node__PublicPort: "20445"
-      Node__PublicRpcEndpoint: http://xnode-3:8080
+      Node__PublicPeerRpcPort: "22023"
+      Node__PublicPeerRpcEndpoint: http://${DEEP_LAN_IP:-192.168.1.44}:22023/api/peer/onion
       Vless__PublicPort: "20445"
       RegistryRegistration__Ed25519PublicKey: ${UAT_NODE_3_ED25519_PUBLIC_KEY:?set UAT_NODE_3_ED25519_PUBLIC_KEY in .env.uat}
       RegistryRegistration__BlsPrivateKey: ${UAT_NODE_3_BLS_PRIVATE_KEY:?set UAT_NODE_3_BLS_PRIVATE_KEY in .env.uat}
       RegistryRegistration__SigningEndpoint: http://xnode-3:8080/api/staking/quorum/sign
     ports:
       - "29283:8080"
+      - "22023:8081"
       - "20445:443"
     depends_on:
       registry:
