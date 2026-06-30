@@ -46,5 +46,5 @@ RUN set -eux; \
     && rm -rf /tmp/xray-download \
     && xray version
 COPY --from=build /app .
-EXPOSE 8080 443
+EXPOSE 8080 8081 443
 ENTRYPOINT ["sh", "-c", "dotnet \"$APP_DLL\""]
