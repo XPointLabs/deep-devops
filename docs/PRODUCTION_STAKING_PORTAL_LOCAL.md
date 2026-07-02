@@ -56,6 +56,11 @@ docker compose --env-file .\.env.staking.prod.local -f .\docker-compose.staking.
 docker compose --env-file .\.env.staking.prod.local -f .\docker-compose.staking.prod.local.yml logs --tail 100 staking-indexer
 ```
 
+The staking backend reads quorum signer metadata from
+`http://registry:8080/api/internal/nodes` on the private Compose network. Add
+`nginx/registry-internal-deny.conf` to the public registry virtual host; the
+`/api/internal/` namespace must return `404` from the Internet.
+
 Expected `/info` contract values:
 
 ```text
