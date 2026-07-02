@@ -31,6 +31,8 @@ curl -fsS http://127.0.0.1:19102/health/ready
 
 Expose only `/subscribe`, `/unsubscribe`, and the health endpoints through Nginx. `/_compat/push-notify` accepts authenticated requests, but external storage nodes need to reach it; authentication is mandatory even when Nginx permits the route.
 
+An Nginx virtual host is provided at `nginx/push.xpoint.network.conf`. Install it in `/etc/nginx/sites-available`, enable its symlink in `sites-enabled`, and include `push.xpoint.network` when obtaining or expanding the Certbot certificate.
+
 The co-located storage service uses `push-internal-token`. Operator storage nodes sign each notification with their existing Ed25519 node key. The push server resolves that key through `https://registry.xpoint.network/api/nodes` and only accepts active nodes with timestamps within five minutes.
 
 ## Diagnostics
