@@ -95,10 +95,9 @@ services:
       Registry__StakingBackendBaseUrl: http://staking-backend:8080
       Calls__TurnSharedSecretFile: /run/secrets/turn-shared-secret
       Calls__CredentialLifetimeSeconds: "3600"
-      Calls__IceUrls__0: stun:registry.xpoint.network:3478
-      Calls__IceUrls__1: turn:registry.xpoint.network:3478?transport=udp
-      Calls__IceUrls__2: turn:registry.xpoint.network:3478?transport=tcp
-      Calls__IceUrls__3: turns:registry.xpoint.network:5349?transport=tcp
+      Calls__IceUrls__0: stun:${DEEP_TURN_PUBLIC_HOST:-111.235.151.150}:3478
+      Calls__IceUrls__1: turn:${DEEP_TURN_PUBLIC_HOST:-111.235.151.150}:3478?transport=udp
+      Calls__IceUrls__2: turn:${DEEP_TURN_PUBLIC_HOST:-111.235.151.150}:3478?transport=tcp
     volumes:
       - prod-registry-state:/var/lib/deep/registry
     secrets:

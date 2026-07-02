@@ -43,6 +43,8 @@ docker compose -f docker-compose.client-services.prod.yml \
 
 Nginx must route `/api/calls` on `registry.xpoint.network` to the registry API (`http://127.0.0.1:28180`), not to port `19103`.
 
+`registry.xpoint.network` is currently proxied by Cloudflare, which does not forward standard TURN ports. The production default therefore publishes the origin IP through `DEEP_TURN_PUBLIC_HOST`. To enable censorship-resistant TURN over TLS, create a DNS-only `turn.xpoint.network` record to the same origin, issue a certificate for it, set `DEEP_TURN_PUBLIC_HOST=turn.xpoint.network`, and add `turns:turn.xpoint.network:5349?transport=tcp` to `Calls__IceUrls`. ICE configuration is fetched at runtime, so this change does not require a new client build.
+
 ## Verify
 
 An unsigned credential request must be rejected:
