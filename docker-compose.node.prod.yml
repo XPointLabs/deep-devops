@@ -93,10 +93,15 @@ services:
       SERVICE_NAME: deep-storage-service
       COMPAT_STATE_DIR: /var/lib/deep/storage-service
       PUSH_COMPAT_NOTIFY_URL: ${DEEP_PUSH_NOTIFY_URL:-}
+      PUSH_COMPAT_NOTIFY_NODE_ID: ${DEEP_NODE_ED25519_PUBLIC_KEY:?set DEEP_NODE_ED25519_PUBLIC_KEY}
+      PUSH_COMPAT_NOTIFY_ED25519_PRIVATE_KEY_FILE: /run/secrets/node-ed25519-private-key
     ports:
       - "${DEEP_NODE_STORAGE_BIND:-127.0.0.1:22021}:8080"
     volumes:
       - node-storage-state:/var/lib/deep/storage-service
+    secrets:
+      - source: node-ed25519-private-key
+        target: node-ed25519-private-key
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval: 10s

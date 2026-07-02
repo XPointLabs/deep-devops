@@ -11,10 +11,13 @@ services:
       SERVICE_NAME: deep-storage-service
       COMPAT_STATE_DIR: /var/lib/deep/storage-service
       PUSH_COMPAT_NOTIFY_URL: http://push-service:8080/_compat/push-notify
+      PUSH_COMPAT_NOTIFY_BEARER_TOKEN_FILE: /run/secrets/push-internal-token
     volumes:
       - storage-service-state:/var/lib/deep/storage-service
     ports:
       - "127.0.0.1:19100:8080"
+    secrets:
+      - push-internal-token
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval: 3s
@@ -41,33 +44,45 @@ services:
       retries: 30
 
   push-service:
-    build:
-      context: .
-      dockerfile: docker/push-service.Dockerfile
+    image: ${DEEP_PUSH_SERVER_IMAGE:-xpoint/deep-push-notification-server:prod}
     restart: unless-stopped
+    depends_on:
+      push-db:
+        condition: service_healthy
     environment:
-      PORT: "8080"
-      SERVICE_NAME: deep-push-service
-      COMPAT_STATE_DIR: /var/lib/deep/push-service
-      PUSH_PROVIDER_BASE_URL: ""
-      PUSH_PROVIDER_APNS_URL: ""
-      PUSH_PROVIDER_FIREBASE_URL: ""
-      PUSH_PROVIDER_HUAWEI_URL: ""
-      PUSH_PROVIDER_AUTH_HEADER: ""
-      PUSH_PROVIDER_APNS_AUTH_HEADER: ""
-      PUSH_PROVIDER_FIREBASE_AUTH_HEADER: ""
-      PUSH_PROVIDER_HUAWEI_AUTH_HEADER: ""
-      PUSH_PROVIDER_BEARER_TOKEN: ""
-      PUSH_PROVIDER_APNS_BEARER_TOKEN: ""
-      PUSH_PROVIDER_FIREBASE_BEARER_TOKEN: ""
-      PUSH_PROVIDER_HUAWEI_BEARER_TOKEN: ""
-      PUSH_PROVIDER_TIMEOUT_MS: "2500"
-    volumes:
-      - push-service-state:/var/lib/deep/push-service
+      ASPNETCORE_ENVIRONMENT: Production
+      Database__Host: push-db
+      Database__Name: deep_push
+      Database__Username: deep_push
+      Database__PasswordFile: /run/secrets/push-db-password
+      Push__FirebaseCredentialsPath: /run/secrets/firebase-service-account.json
+      Push__InternalTokenFile: /run/secrets/push-internal-token
+      Push__RegistryUrl: https://registry.xpoint.network
+    secrets:
+      - push-db-password
+      - push-internal-token
+      - firebase-service-account
     ports:
       - "127.0.0.1:19102:8080"
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health/ready >/dev/null"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  push-db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: deep_push
+      POSTGRES_USER: deep_push
+      POSTGRES_PASSWORD_FILE: /run/secrets/push-db-password
+    volumes:
+      - push-db-data:/var/lib/postgresql/data
+    secrets:
+      - push-db-password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U deep_push -d deep_push"]
       interval: 3s
       timeout: 3s
       retries: 30
@@ -94,5 +109,13 @@ services:
 volumes:
   storage-service-state:
   file-service-state:
-  push-service-state:
+  push-db-data:
   calls-service-state:
+
+secrets:
+  push-db-password:
+    file: ${DEEP_PUSH_DB_PASSWORD_FILE:-./secrets/push-db-password}
+  push-internal-token:
+    file: ${DEEP_PUSH_INTERNAL_TOKEN_FILE:-./secrets/push-internal-token}
+  firebase-service-account:
+    file: ${DEEP_FIREBASE_SERVICE_ACCOUNT_FILE:-./secrets/firebase-service-account.json}

@@ -1,6 +1,7 @@
 ﻿import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import http from 'node:http';
+import { createHash, generateKeyPairSync, verify } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -100,6 +101,8 @@ async function startPushNotifyReceiver(options = {}) {
     requests.push({
       method: req.method,
       pathname: url.pathname,
+      headers: req.headers,
+      raw,
       body: raw.length === 0 ? null : JSON.parse(raw.toString('utf8'))
     });
 
@@ -818,6 +821,53 @@ test('storage runtime reloads persisted messages and subaccount revocations acro
     assert.equal(statsBody.inventory.revokedSubaccounts, 0);
   } finally {
     await service.stop();
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test('storage runtime authenticates push notifications with its node identity', async () => {
+  const stateDir = await mkdtemp(path.join(tmpdir(), 'storage-service-push-signing-'));
+  const keyFile = path.join(stateDir, 'key_ed25519');
+  const { publicKey, privateKey } = generateKeyPairSync('ed25519');
+  const publicKeyBytes = Buffer.from(publicKey.export({ type: 'spki', format: 'der' })).subarray(-32);
+  const seed = Buffer.from(privateKey.export({ type: 'pkcs8', format: 'der' })).subarray(-32);
+  const nodeId = publicKeyBytes.toString('hex');
+  await writeFile(keyFile, `0x${seed.toString('hex')}\n`);
+  const receiver = await startPushNotifyReceiver();
+  const service = await startStorageService({
+    port: randomPort(),
+    stateDir,
+    extraEnv: {
+      PUSH_COMPAT_NOTIFY_URL: receiver.baseUrl,
+      PUSH_COMPAT_NOTIFY_NODE_ID: nodeId,
+      PUSH_COMPAT_NOTIFY_ED25519_PRIVATE_KEY_FILE: keyFile
+    }
+  });
+
+  try {
+    const payload = createSignedStorageStorePayload(storageSigningIdentity, {
+      namespace: 42,
+      timestamp: Date.now(),
+      data: Buffer.from('signed-push-hop').toString('base64')
+    });
+    const response = await fetch(`${service.baseUrl}/storage/store`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    assert.equal(response.status, 200);
+    await waitFor(() => receiver.requests.length === 1, 5000, 'signed push notification was not emitted');
+
+    const request = receiver.requests[0];
+    const timestamp = request.headers['x-xpoint-notify-timestamp'];
+    const signature = Buffer.from(request.headers['x-xpoint-notify-signature'], 'base64');
+    const bodyHash = createHash('sha256').update(request.raw).digest('hex');
+    const canonical = `XPOINT_PUSH_NOTIFY_V1\n${nodeId}\n${timestamp}\n${bodyHash}`;
+    assert.equal(request.headers['x-xpoint-node-id'], nodeId);
+    assert.equal(verify(null, Buffer.from(canonical), publicKey, signature), true);
+  } finally {
+    await service.stop();
+    await receiver.stop();
     await rm(stateDir, { recursive: true, force: true });
   }
 });

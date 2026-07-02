@@ -1,5 +1,6 @@
 ﻿import { createHash } from 'node:crypto';
 import http from 'node:http';
+import { createPrivateKey, sign } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -16,6 +17,10 @@ const fileStatePath = path.join(stateDir, 'file.json');
 const pushStatePath = path.join(stateDir, 'push.json');
 const compatPushNotifyPath = '/_compat/push-notify';
 const pushCompatNotifyUrl = String(process.env.PUSH_COMPAT_NOTIFY_URL ?? '');
+const pushNotifyNodeId = String(process.env.PUSH_COMPAT_NOTIFY_NODE_ID ?? '').trim().toLowerCase();
+const pushNotifyPrivateKeyFile = String(process.env.PUSH_COMPAT_NOTIFY_ED25519_PRIVATE_KEY_FILE ?? '').trim();
+const pushNotifyBearerTokenFile = String(process.env.PUSH_COMPAT_NOTIFY_BEARER_TOKEN_FILE ?? '').trim();
+const pushNotifySigner = await loadPushNotifySigner();
 
 const messages = await loadJson(storageStatePath, []);
 const loadedStorageSubaccountRevocations = await loadJson(storageSubaccountsStatePath, []);
@@ -168,10 +173,11 @@ async function emitPushNotification(notification) {
   }
 
   try {
+    const requestBody = JSON.stringify(notification);
     const response = await fetch(new URL(compatPushNotifyPath, pushCompatNotifyUrl), {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(notification)
+      headers: pushNotifyHeaders(requestBody),
+      body: requestBody
     });
     if (!response.ok) {
       return { queued: 0 };
@@ -181,6 +187,52 @@ async function emitPushNotification(notification) {
   } catch {
     return { queued: 0 };
   }
+}
+
+async function loadPushNotifySigner() {
+  if (pushNotifyBearerTokenFile) {
+    const bearerToken = (await readFile(pushNotifyBearerTokenFile, 'utf8')).trim();
+    if (!bearerToken) {
+      throw new Error('PUSH_COMPAT_NOTIFY_BEARER_TOKEN_FILE is empty');
+    }
+    return { bearerToken };
+  }
+
+  if (!pushNotifyPrivateKeyFile && !pushNotifyNodeId) {
+    return null;
+  }
+  if (!/^[0-9a-f]{64}$/.test(pushNotifyNodeId) || !pushNotifyPrivateKeyFile) {
+    throw new Error('Signed push notifications require a 64-hex node id and an Ed25519 private key file');
+  }
+
+  const value = (await readFile(pushNotifyPrivateKeyFile, 'utf8')).trim().replace(/^0x/i, '');
+  if (!/^[0-9a-f]{64}(?:[0-9a-f]{64})?$/i.test(value)) {
+    throw new Error('Push notification Ed25519 key must contain a 32-byte seed or 64-byte secret key');
+  }
+  const seed = Buffer.from(value.slice(0, 64), 'hex');
+  const pkcs8SeedPrefix = Buffer.from('302e020100300506032b657004220420', 'hex');
+  return {
+    privateKey: createPrivateKey({ key: Buffer.concat([pkcs8SeedPrefix, seed]), format: 'der', type: 'pkcs8' })
+  };
+}
+
+function pushNotifyHeaders(requestBody) {
+  const headers = { 'content-type': 'application/json' };
+  if (pushNotifySigner?.bearerToken) {
+    headers.authorization = `Bearer ${pushNotifySigner.bearerToken}`;
+    return headers;
+  }
+  if (!pushNotifySigner?.privateKey) {
+    return headers;
+  }
+
+  const timestamp = Math.floor(Date.now() / 1000);
+  const bodyHash = createHash('sha256').update(requestBody).digest('hex');
+  const canonical = `XPOINT_PUSH_NOTIFY_V1\n${pushNotifyNodeId}\n${timestamp}\n${bodyHash}`;
+  headers['x-xpoint-node-id'] = pushNotifyNodeId;
+  headers['x-xpoint-notify-timestamp'] = String(timestamp);
+  headers['x-xpoint-notify-signature'] = sign(null, Buffer.from(canonical), pushNotifySigner.privateKey).toString('base64');
+  return headers;
 }
 
 function pathOf(req) {
