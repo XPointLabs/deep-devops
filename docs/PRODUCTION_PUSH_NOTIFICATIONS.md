@@ -11,8 +11,10 @@ sudo install -d -m 700 /opt/xpoint-prod/deep-devops/secrets
 openssl rand -base64 48 | sudo tee /opt/xpoint-prod/deep-devops/secrets/push-db-password >/dev/null
 openssl rand -base64 48 | sudo tee /opt/xpoint-prod/deep-devops/secrets/push-internal-token >/dev/null
 sudo install -m 600 firebase-service-account.json /opt/xpoint-prod/deep-devops/secrets/firebase-service-account.json
-sudo chmod 600 /opt/xpoint-prod/deep-devops/secrets/*
+sudo chmod 444 /opt/xpoint-prod/deep-devops/secrets/*
 ```
+
+The directory remains root-only (`0700`). Files are read-only because non-root containers receive Compose file secrets as bind mounts and must be able to read them; they are not traversable by other host users through the protected directory.
 
 The Firebase service account must belong to the same Firebase project as the Android `google-services.json` for package `network.xpoint.deep`.
 

@@ -61,7 +61,8 @@ services:
     secrets:
       - push-db-password
       - push-internal-token
-      - firebase-service-account
+      - source: firebase-service-account
+        target: firebase-service-account.json
     ports:
       - "127.0.0.1:19102:8080"
     healthcheck:
