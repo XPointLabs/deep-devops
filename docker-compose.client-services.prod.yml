@@ -95,6 +95,7 @@ services:
     user: "0:0"
     environment:
       DETECT_EXTERNAL_IP: "yes"
+      DETECT_RELAY_IP: "yes"
     entrypoint: ["/bin/sh", "-ec"]
     command:
       - exec turnserver -c /etc/coturn/turnserver.conf --static-auth-secret="$$(cat /run/secrets/turn-shared-secret)"
