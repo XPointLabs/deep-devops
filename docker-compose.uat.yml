@@ -186,6 +186,7 @@ services:
       Node__PublicPort: "20443"
       Node__PublicPeerRpcPort: "22020"
       Node__PublicPeerRpcEndpoint: http://${DEEP_LAN_IP:-192.168.1.44}:22020/api/peer/onion
+      Node__QuorumCoordinatorNetworks: "172.16.0.0/12,${DEEP_LAN_IP:-192.168.1.44}/32"
       Runtime__BootstrapFromStorage: "true"
       Runtime__HeartbeatInterval: "00:00:10"
       Runtime__RequireSignedRelayContacts: "true"
@@ -213,7 +214,6 @@ services:
       RegistryRegistration__EthereumRpcUrl: ${ARB_SEPOLIA_RPC_URL:?set ARB_SEPOLIA_RPC_URL in .env.uat}
       RegistryRegistration__EthereumFallbackRpcUrls: ${ARB_SEPOLIA_FALLBACK_RPC_URLS:-https://sepolia-rollup.arbitrum.io/rpc}
       RegistryRegistration__ServiceNodeRewardsAddress: ${SERVICE_NODE_REWARDS_ADDRESS:?set SERVICE_NODE_REWARDS_ADDRESS in .env.uat}
-      RegistryRegistration__SigningEndpoint: http://xnode-1:8080/api/staking/quorum/sign
     ports:
       - "29281:8080"
       - "22020:8081"
@@ -243,7 +243,6 @@ services:
       Vless__PublicPort: "20444"
       RegistryRegistration__Ed25519PublicKey: ${UAT_NODE_2_ED25519_PUBLIC_KEY:?set UAT_NODE_2_ED25519_PUBLIC_KEY in .env.uat}
       RegistryRegistration__BlsPrivateKey: ${UAT_NODE_2_BLS_PRIVATE_KEY:?set UAT_NODE_2_BLS_PRIVATE_KEY in .env.uat}
-      RegistryRegistration__SigningEndpoint: http://xnode-2:8080/api/staking/quorum/sign
     ports:
       - "29282:8080"
       - "22022:8081"
@@ -268,7 +267,6 @@ services:
       Vless__PublicPort: "20445"
       RegistryRegistration__Ed25519PublicKey: ${UAT_NODE_3_ED25519_PUBLIC_KEY:?set UAT_NODE_3_ED25519_PUBLIC_KEY in .env.uat}
       RegistryRegistration__BlsPrivateKey: ${UAT_NODE_3_BLS_PRIVATE_KEY:?set UAT_NODE_3_BLS_PRIVATE_KEY in .env.uat}
-      RegistryRegistration__SigningEndpoint: http://xnode-3:8080/api/staking/quorum/sign
     ports:
       - "29283:8080"
       - "22023:8081"

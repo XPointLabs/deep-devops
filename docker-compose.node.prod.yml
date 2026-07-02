@@ -21,6 +21,7 @@ services:
       Node__PublicPort: ${DEEP_NODE_PUBLIC_PORT:-443}
       Node__PublicPeerRpcPort: ${DEEP_NODE_PEER_RPC_PORT:-22020}
       Node__PublicPeerRpcEndpoint: ${DEEP_NODE_PEER_RPC_ENDPOINT:?set DEEP_NODE_PEER_RPC_ENDPOINT}
+      Node__QuorumCoordinatorNetworks: "111.235.151.150/32"
 
       Runtime__BootstrapFromStorage: ${DEEP_NODE_BOOTSTRAP_FROM_STORAGE:-true}
       Runtime__HeartbeatInterval: ${DEEP_NODE_RUNTIME_HEARTBEAT_INTERVAL:-00:00:30}
@@ -65,7 +66,6 @@ services:
       RegistryRegistration__EthereumRpcUrl: ${DEEP_ARBITRUM_RPC_URL:-https://arb1.arbitrum.io/rpc}
       RegistryRegistration__EthereumFallbackRpcUrls: ${DEEP_ARBITRUM_FALLBACK_RPC_URLS:-https://arb1.arbitrum.io/rpc}
       RegistryRegistration__ServiceNodeRewardsAddress: ${DEEP_SERVICE_NODE_REWARDS_ADDRESS:?set DEEP_SERVICE_NODE_REWARDS_ADDRESS}
-      RegistryRegistration__SigningEndpoint: ${DEEP_NODE_SIGNING_ENDPOINT:?set DEEP_NODE_SIGNING_ENDPOINT}
     ports:
       - "${DEEP_NODE_VLESS_BIND:-443}:${DEEP_NODE_VLESS_CONTAINER_PORT:-443}"
       - "${DEEP_NODE_PEER_RPC_BIND:-22020}:8081"

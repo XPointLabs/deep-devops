@@ -104,10 +104,9 @@ Put the generated private/public key pair into `DEEP_NODE_REALITY_PRIVATE_KEY` a
   listener and exact `/api/peer/onion` endpoint. Requests are encrypted by the
   onion protocol and authenticated with the sending node's Ed25519 identity,
   timestamp, and one-time nonce. The endpoint does not expose the admin API.
-- `DEEP_NODE_SIGNING_ENDPOINT`: private control-plane URL for
-  `/api/staking/quorum/sign`; it can remain loopback when the node itself pulls
-  and signs obligations, or use authenticated private networking when the
-  staking backend calls it remotely.
+- The BLS signing URL is derived from the signed peer RPC contact and is not an
+  operator setting. Production images accept that route only from the staking
+  control-plane network.
 - `DEEP_NODE_STORAGE_BIND`: host bind address for the per-node storage sidecar; keep it private or expose it through the approved node/onion ingress path.
 - `DEEP_PUSH_NOTIFY_URL`: optional centralized push notify endpoint used by storage to trigger push delivery.
 - `DEEP_REGISTRY_URL`: production registry API base URL.

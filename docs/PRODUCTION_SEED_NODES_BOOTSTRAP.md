@@ -211,17 +211,11 @@ DEEP_NODE_PUBLIC_PORT=8443
 DEEP_NODE_VLESS_BIND=8443
 ```
 
-The peer RPC endpoint is generated from the node's origin IP and peer port. It
-accepts only `/api/peer/onion`; every request is onion-encrypted and signed by a
-registered node. The admin and BLS signing API remains bound to loopback unless
-an authenticated private control-plane route is configured:
-
-```text
-DEEP_NODE_SIGNING_ENDPOINT=http://<private-management-host-or-ip>:8080/api/staking/quorum/sign
-```
-
-If the control plane requires HTTPS, terminate TLS on a private reverse proxy
-that forwards only from allowlisted control-plane IPs to `127.0.0.1:8080`.
+The peer RPC endpoint is generated from the node's origin IP and peer port.
+Onion requests are encrypted and signed by a registered node. The BLS signer
+URL is derived automatically from this signed contact; `/api/staking/quorum/sign`
+is accepted only from the production staking control-plane network. There is no
+operator-configurable signer URL.
 
 ## Firewall
 
