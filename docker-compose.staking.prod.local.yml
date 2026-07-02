@@ -95,6 +95,8 @@ services:
       Registry__StakingBackendBaseUrl: http://staking-backend:8080
       Calls__TurnSharedSecretFile: /run/secrets/turn-shared-secret
       Calls__CredentialLifetimeSeconds: "3600"
+      Calls__PushNotifyUrl: http://push-service:8080/_compat/push-notify
+      Calls__PushNotifyBearerTokenFile: /run/secrets/push-internal-token
       Calls__IceUrls__0: stun:${DEEP_TURN_PUBLIC_HOST:-111.235.151.150}:3478
       Calls__IceUrls__1: turn:${DEEP_TURN_PUBLIC_HOST:-111.235.151.150}:3478?transport=udp
       Calls__IceUrls__2: turn:${DEEP_TURN_PUBLIC_HOST:-111.235.151.150}:3478?transport=tcp
@@ -102,6 +104,10 @@ services:
       - prod-registry-state:/var/lib/deep/registry
     secrets:
       - turn-shared-secret
+      - push-internal-token
+    networks:
+      - default
+      - client-services
     ports:
       - "${PROD_REGISTRY_BIND:-28180}:8080"
     depends_on:
@@ -154,3 +160,10 @@ volumes:
 secrets:
   turn-shared-secret:
     file: ${DEEP_TURN_SHARED_SECRET_FILE:-./secrets/turn-shared-secret}
+  push-internal-token:
+    file: ${DEEP_PUSH_INTERNAL_TOKEN_FILE:-./secrets/push-internal-token}
+
+networks:
+  client-services:
+    external: true
+    name: xpoint-client-services-prod_default
