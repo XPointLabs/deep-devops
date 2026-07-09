@@ -43,32 +43,36 @@ Requested seed hostnames:
 
 ## Install Host Packages
 
-Copy the production host installer from `deep-devops` to each seed host and run
-it. The installer is idempotent: it installs Docker Engine and the Compose
-plugin plus bootstrap host tools (`nodejs`, `npm`, `openssl`) when needed,
-configures Docker `json-file` log rotation, enables Docker, and can prune
-stopped containers, unused images, and build cache without removing volumes.
+Use the public node installer from
+`https://github.com/XPointLabs/xpoint-node-installer`. It is the canonical
+operator-facing path for independent node owners: it installs Docker Engine and
+the Compose plugin plus bootstrap host tools when needed, configures Docker
+`json-file` log rotation, writes the production node compose/env files, and can
+prune stopped containers, unused images, and build cache without removing
+volumes.
 
 Example from the operator workstation:
 
 ```bash
-scp scripts/install-production-docker-host.sh root@<seed-host>:/tmp/
-ssh root@<seed-host> 'bash /tmp/install-production-docker-host.sh --prune'
+ssh root@<seed-host> 'curl -fsSL https://raw.githubusercontent.com/XPointLabs/xpoint-node-installer/main/install-xpoint-node.sh -o /tmp/install-xpoint-node.sh'
+ssh root@<seed-host> 'chmod +x /tmp/install-xpoint-node.sh && /tmp/install-xpoint-node.sh --no-start --prune-docker'
 ```
 
-Equivalent command when the script is already on the seed host:
+Equivalent command when the public installer repository is already on the seed
+host:
 
 ```bash
-bash ./install-production-docker-host.sh --prune
+cd /opt/xpoint-node-installer
+sudo ./install-xpoint-node.sh --no-start --prune-docker
 ```
 
 By default, Docker host logs are capped at `50m` x `5` files. Override with
-`--log-max-size`, `--log-max-file`, or the matching env vars
+`--docker-log-max-size`, `--docker-log-max-file`, or the matching env vars
 `DEEP_DOCKER_LOG_MAX_SIZE` and `DEEP_DOCKER_LOG_MAX_FILE`.
 
-On existing production hosts, `--prune` can remove unused rollback images and
-build cache. It never removes Docker volumes, but preserve any rollback tags you
-need before pruning.
+On existing production hosts, `--prune-docker` can remove unused rollback images
+and build cache. It never removes Docker volumes, but preserve any rollback tags
+you need before pruning.
 
 If the deployment user should run Docker without `sudo`:
 
@@ -95,13 +99,12 @@ Copy these files from `deep-devops` to `/opt/xpoint-node`:
 docker-compose.node.prod.yml
 .env.node.prod.example
 scripts/new-xnode-identity.mjs
-install-production-docker-host.sh
 ```
 
 Example from the operator workstation:
 
 ```bash
-rsync -av docker-compose.node.prod.yml .env.node.prod.example scripts/new-xnode-identity.mjs scripts/install-production-docker-host.sh \
+rsync -av docker-compose.node.prod.yml .env.node.prod.example scripts/new-xnode-identity.mjs \
   deploy@<seed-host>:/opt/xpoint-node/
 ```
 

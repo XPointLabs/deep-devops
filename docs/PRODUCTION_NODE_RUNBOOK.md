@@ -58,30 +58,32 @@ Use `XNODE_XRAY_SHA256`/`XRAY_SHA256` for release builds when the Xray archive c
 
 ## Prepare Node Host
 
-1. Run the production Docker host installer from `deep-devops`:
+1. Run the public XPoint node installer:
 
 ```bash
-bash ./scripts/install-production-docker-host.sh --prune
+curl -fsSL https://raw.githubusercontent.com/XPointLabs/xpoint-node-installer/main/install-xpoint-node.sh \
+  -o /tmp/install-xpoint-node.sh
+chmod +x /tmp/install-xpoint-node.sh
+sudo /tmp/install-xpoint-node.sh --no-start --prune-docker
 ```
 
-The installer is idempotent. It installs Docker Engine and the Compose plugin
-plus bootstrap host tools (`nodejs`, `npm`, `openssl`) when needed, configures
-Docker `json-file` log rotation (`50m` x `5` files by default), enables Docker,
-and prunes stopped containers, unused images, and build cache when `--prune` is
-passed. Docker volumes are never pruned. On existing production hosts,
-`--prune` can remove unused rollback images and build cache, so preserve any
-rollback tags you need before using it.
+The public installer is idempotent. It installs Docker Engine and the Compose
+plugin plus bootstrap host tools when needed, configures Docker `json-file` log
+rotation (`50m` x `5` files by default), writes the production node compose/env
+files, and can prune stopped containers, unused images, and build cache when
+`--prune-docker` is passed. Docker volumes are never pruned. On existing
+production hosts, `--prune-docker` can remove unused rollback images and build
+cache, so preserve any rollback tags you need before using it.
 
-Use `--skip-docker-install` on hosts where Docker is managed by another
-provisioning system.
+Use the public installer README for the complete operator flow and CLI options.
 
 2. Open the chosen public VLESS Reality TCP port to the node host. Port `443`
    is the recommended default, but the node can publish and serve any reachable
    TCP port.
 3. Keep the node API/signing port private. The example binds it to `127.0.0.1:8080`; expose it through a private VPN, private reverse proxy, or another controlled internal path used by the registry/staking backend.
-4. Copy `docker-compose.node.prod.yml`,
-   `scripts/install-production-docker-host.sh`, and create `.env.node.prod`
-   from `.env.node.prod.example`.
+4. If you are not using the public installer end to end, copy
+   `docker-compose.node.prod.yml` and create `.env.node.prod` from
+   `.env.node.prod.example`.
 5. Generate node identity files. This follows the upstream Session/Oxen model:
    service-node keys are local node files (`key_ed25519` and `key_bls`) loaded
    from the node data/config folder, not private seeds passed as environment
