@@ -66,6 +66,11 @@ services:
       RegistryRegistration__EthereumRpcUrl: ${DEEP_ARBITRUM_RPC_URL:-https://arb1.arbitrum.io/rpc}
       RegistryRegistration__EthereumFallbackRpcUrls: ${DEEP_ARBITRUM_FALLBACK_RPC_URLS:-https://arb1.arbitrum.io/rpc}
       RegistryRegistration__ServiceNodeRewardsAddress: ${DEEP_SERVICE_NODE_REWARDS_ADDRESS:?set DEEP_SERVICE_NODE_REWARDS_ADDRESS}
+      RegistryRegistration__EnforceQuorumSigningPolicy: ${DEEP_ENFORCE_QUORUM_SIGNING_POLICY:-true}
+      RegistryRegistration__QuorumPolicyBackendBaseUrl: ${DEEP_STAKING_BACKEND_URL:?set DEEP_STAKING_BACKEND_URL}
+      RegistryRegistration__QuorumPolicyBackendTimeoutSeconds: ${DEEP_QUORUM_POLICY_BACKEND_TIMEOUT_SECONDS:-5}
+      RegistryRegistration__MaxRewardSignatureIncreaseAtomic: ${DEEP_MAX_REWARD_SIGNATURE_INCREASE_ATOMIC:-100000000000000}
+      RegistryRegistration__MaxQuorumSignatureTimestampSkewSeconds: ${DEEP_MAX_QUORUM_SIGNATURE_TIMESTAMP_SKEW_SECONDS:-300}
     ports:
       - "${DEEP_NODE_VLESS_BIND:-443}:${DEEP_NODE_VLESS_CONTAINER_PORT:-443}"
       - "${DEEP_NODE_PEER_RPC_BIND:-22020}:8081"

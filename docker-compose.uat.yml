@@ -26,6 +26,7 @@ services:
       Contracts__ExitRequestTimeSeconds: ${UAT_EXIT_REQUEST_TIME_SECONDS:-86400}
       Contracts__ChainBlockTimeMilliseconds: ${UAT_CHAIN_BLOCK_TIME_MS:-250}
       Contracts__QuorumSignatureTimeoutSeconds: "10"
+      Contracts__QuorumNonSignerThresholdMax: "4000"
       Contracts__StatePath: /var/lib/deep/staking-backend/staking-state.json
       Registry__BaseUrl: http://registry:8080
       Registry__HeartbeatGraceSeconds: ${SERVICE_NODE_HEARTBEAT_GRACE_SECONDS:-120}
@@ -214,6 +215,11 @@ services:
       RegistryRegistration__EthereumRpcUrl: ${ARB_SEPOLIA_RPC_URL:?set ARB_SEPOLIA_RPC_URL in .env.uat}
       RegistryRegistration__EthereumFallbackRpcUrls: ${ARB_SEPOLIA_FALLBACK_RPC_URLS:-https://sepolia-rollup.arbitrum.io/rpc}
       RegistryRegistration__ServiceNodeRewardsAddress: ${SERVICE_NODE_REWARDS_ADDRESS:?set SERVICE_NODE_REWARDS_ADDRESS in .env.uat}
+      RegistryRegistration__EnforceQuorumSigningPolicy: "true"
+      RegistryRegistration__QuorumPolicyBackendBaseUrl: http://staking-backend:8080
+      RegistryRegistration__QuorumPolicyBackendTimeoutSeconds: "5"
+      RegistryRegistration__MaxRewardSignatureIncreaseAtomic: "100000000000000"
+      RegistryRegistration__MaxQuorumSignatureTimestampSkewSeconds: "300"
     ports:
       - "29281:8080"
       - "22020:8081"

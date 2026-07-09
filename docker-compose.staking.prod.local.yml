@@ -26,6 +26,7 @@ services:
       Contracts__ExitRequestTimeSeconds: ${PROD_EXIT_REQUEST_TIME_SECONDS:-1209600}
       Contracts__ChainBlockTimeMilliseconds: ${PROD_CHAIN_BLOCK_TIME_MS:-250}
       Contracts__QuorumSignatureTimeoutSeconds: ${PROD_QUORUM_SIGNATURE_TIMEOUT_SECONDS:-10}
+      Contracts__QuorumNonSignerThresholdMax: ${PROD_QUORUM_NON_SIGNER_THRESHOLD_MAX:-4000}
       Contracts__StatePath: /var/lib/deep/staking-backend/staking-state.json
       Registry__BaseUrl: http://registry:8080
       Registry__HeartbeatGraceSeconds: ${PROD_SERVICE_NODE_HEARTBEAT_GRACE_SECONDS:-120}
