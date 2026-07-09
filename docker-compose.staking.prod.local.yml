@@ -1,5 +1,11 @@
 name: deep-staking-prod-local
 
+x-prod-logging: &prod-logging
+  driver: json-file
+  options:
+    max-size: ${DEEP_DOCKER_LOG_MAX_SIZE:-50m}
+    max-file: ${DEEP_DOCKER_LOG_MAX_FILE:-5}
+
 services:
   staking-backend:
     build:
@@ -10,6 +16,7 @@ services:
         RUNTIME_IMAGE: mcr.microsoft.com/dotnet/aspnet:10.0
         PROJECT: src/XPoint.Staking.Backend/XPoint.Staking.Backend.csproj
         APP_DLL: XPoint.Staking.Backend.dll
+    logging: *prod-logging
     environment:
       ASPNETCORE_URLS: http://0.0.0.0:8080
       Contracts__ChainId: "42161"
@@ -52,6 +59,7 @@ services:
     build:
       context: ${DEEP_DEVOPS_DIR:-.}
       dockerfile: docker/uat-chain-indexer.Dockerfile
+    logging: *prod-logging
     environment:
       SERVICE_NAME: deep-prod-chain-indexer
       ARBITRUM_RPC_URL: ${PROD_ARBITRUM_RPC_URL:?set PROD_ARBITRUM_RPC_URL in .env.staking.prod.local}
@@ -89,6 +97,7 @@ services:
         RUNTIME_IMAGE: mcr.microsoft.com/dotnet/aspnet:10.0
         PROJECT: src/Deep.Registry.Api/Deep.Registry.Api.csproj
         APP_DLL: Deep.Registry.Api.dll
+    logging: *prod-logging
     environment:
       ASPNETCORE_URLS: http://0.0.0.0:8080
       Registry__StakingRequirementAtomic: ${STAKING_REQUIREMENT_ATOMIC:-25000000000000}
@@ -147,6 +156,7 @@ services:
       NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-http://127.0.0.1:28183}
       NEXT_PUBLIC_ENABLE_FAUCET: "false"
       NEXT_PUBLIC_ENABLE_LEADERBOARD: "false"
+    logging: *prod-logging
     ports:
       - "${PROD_STAKING_PORTAL_BIND:-28183}:3000"
     depends_on:
