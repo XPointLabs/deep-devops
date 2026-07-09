@@ -1,11 +1,18 @@
 name: xpoint-client-services-prod
 
+x-prod-logging: &prod-logging
+  driver: json-file
+  options:
+    max-size: ${DEEP_DOCKER_LOG_MAX_SIZE:-50m}
+    max-file: ${DEEP_DOCKER_LOG_MAX_FILE:-5}
+
 services:
   storage-service:
     build:
       context: .
       dockerfile: docker/storage-service.Dockerfile
     restart: unless-stopped
+    logging: *prod-logging
     environment:
       PORT: "8080"
       SERVICE_NAME: deep-storage-service
@@ -29,6 +36,7 @@ services:
       context: .
       dockerfile: docker/file-service.Dockerfile
     restart: unless-stopped
+    logging: *prod-logging
     environment:
       PORT: "8080"
       SERVICE_NAME: deep-file-service
@@ -46,6 +54,7 @@ services:
   push-service:
     image: ${DEEP_PUSH_SERVER_IMAGE:-xpoint/deep-push-notification-server:prod}
     restart: unless-stopped
+    logging: *prod-logging
     depends_on:
       push-db:
         condition: service_healthy
@@ -74,6 +83,7 @@ services:
   push-db:
     image: postgres:17-alpine
     restart: unless-stopped
+    logging: *prod-logging
     environment:
       POSTGRES_DB: deep_push
       POSTGRES_USER: deep_push
@@ -91,6 +101,7 @@ services:
   turn-service:
     image: coturn/coturn:4.12.0-alpine
     restart: unless-stopped
+    logging: *prod-logging
     network_mode: host
     user: "0:0"
     entrypoint: ["/bin/sh", "-ec"]

@@ -58,12 +58,30 @@ Use `XNODE_XRAY_SHA256`/`XRAY_SHA256` for release builds when the Xray archive c
 
 ## Prepare Node Host
 
-1. Install Docker Engine with the Compose plugin.
+1. Run the production Docker host installer from `deep-devops`:
+
+```bash
+bash ./scripts/install-production-docker-host.sh --prune
+```
+
+The installer is idempotent. It installs Docker Engine and the Compose plugin
+plus bootstrap host tools (`nodejs`, `npm`, `openssl`) when needed, configures
+Docker `json-file` log rotation (`50m` x `5` files by default), enables Docker,
+and prunes stopped containers, unused images, and build cache when `--prune` is
+passed. Docker volumes are never pruned. On existing production hosts,
+`--prune` can remove unused rollback images and build cache, so preserve any
+rollback tags you need before using it.
+
+Use `--skip-docker-install` on hosts where Docker is managed by another
+provisioning system.
+
 2. Open the chosen public VLESS Reality TCP port to the node host. Port `443`
    is the recommended default, but the node can publish and serve any reachable
    TCP port.
 3. Keep the node API/signing port private. The example binds it to `127.0.0.1:8080`; expose it through a private VPN, private reverse proxy, or another controlled internal path used by the registry/staking backend.
-4. Copy `docker-compose.node.prod.yml` and create `.env.node.prod` from `.env.node.prod.example`.
+4. Copy `docker-compose.node.prod.yml`,
+   `scripts/install-production-docker-host.sh`, and create `.env.node.prod`
+   from `.env.node.prod.example`.
 5. Generate node identity files. This follows the upstream Session/Oxen model:
    service-node keys are local node files (`key_ed25519` and `key_bls`) loaded
    from the node data/config folder, not private seeds passed as environment
@@ -110,6 +128,9 @@ Put the generated private/public key pair into `DEEP_NODE_REALITY_PRIVATE_KEY` a
 - `DEEP_NODE_STORAGE_BIND`: host bind address for the per-node storage sidecar; keep it private or expose it through the approved node/onion ingress path.
 - `DEEP_PUSH_NOTIFY_URL`: optional centralized push notify endpoint used by storage to trigger push delivery.
 - `DEEP_REGISTRY_URL`: production registry API base URL.
+- `DEEP_STAKING_BACKEND_URL`: production staking backend API base URL used by
+  xnodes to verify quorum-signing policy quotes before signing reward,
+  exit, or liquidation messages.
 - `DEEP_STORAGE_RPC_URL`: node-local or private storage RPC base URL used only by the exit router hop.
 - `DEEP_OPERATOR_ADDRESS` and `DEEP_REWARDS_ADDRESS`: staked operator/reward wallet.
 - `DEEP_ARBITRUM_RPC_URL`: backend-only Arbitrum One RPC. Use Alchemy or
@@ -121,6 +142,8 @@ Put the generated private/public key pair into `DEEP_NODE_REALITY_PRIVATE_KEY` a
 - `DEEP_NODE_ED25519_PUBLIC_KEY`: public node/router id derived from `key_ed25519`.
 - `DEEP_NODE_ED25519_PRIVATE_KEY_FILE` and `DEEP_NODE_BLS_PRIVATE_KEY_FILE`: local files mounted as Docker secrets; do not put private key material directly in `.env`.
 - `DEEP_NODE_VLESS_CLIENT_ID` and Reality fields: unique per node.
+- `DEEP_DOCKER_LOG_MAX_SIZE` and `DEEP_DOCKER_LOG_MAX_FILE`: optional compose
+  overrides for Docker `json-file` log rotation; defaults are `50m` and `5`.
 
 ## Start And Verify
 

@@ -43,26 +43,32 @@ Requested seed hostnames:
 
 ## Install Host Packages
 
-Run on each seed host:
+Copy the production host installer from `deep-devops` to each seed host and run
+it. The installer is idempotent: it installs Docker Engine and the Compose
+plugin plus bootstrap host tools (`nodejs`, `npm`, `openssl`) when needed,
+configures Docker `json-file` log rotation, enables Docker, and can prune
+stopped containers, unused images, and build cache without removing volumes.
+
+Example from the operator workstation:
 
 ```bash
-sudo apt-get update
-sudo apt-get install -y ca-certificates curl gnupg openssl nodejs npm
-
-sudo install -m 0755 -d /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
-  | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-sudo chmod a+r /etc/apt/keyrings/docker.gpg
-
-. /etc/os-release
-echo \
-  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu ${VERSION_CODENAME} stable" \
-  | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
-
-sudo apt-get update
-sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-sudo systemctl enable --now docker
+scp scripts/install-production-docker-host.sh root@<seed-host>:/tmp/
+ssh root@<seed-host> 'bash /tmp/install-production-docker-host.sh --prune'
 ```
+
+Equivalent command when the script is already on the seed host:
+
+```bash
+bash ./install-production-docker-host.sh --prune
+```
+
+By default, Docker host logs are capped at `50m` x `5` files. Override with
+`--log-max-size`, `--log-max-file`, or the matching env vars
+`DEEP_DOCKER_LOG_MAX_SIZE` and `DEEP_DOCKER_LOG_MAX_FILE`.
+
+On existing production hosts, `--prune` can remove unused rollback images and
+build cache. It never removes Docker volumes, but preserve any rollback tags you
+need before pruning.
 
 If the deployment user should run Docker without `sudo`:
 
@@ -89,12 +95,13 @@ Copy these files from `deep-devops` to `/opt/xpoint-node`:
 docker-compose.node.prod.yml
 .env.node.prod.example
 scripts/new-xnode-identity.mjs
+install-production-docker-host.sh
 ```
 
 Example from the operator workstation:
 
 ```bash
-rsync -av docker-compose.node.prod.yml .env.node.prod.example scripts/new-xnode-identity.mjs \
+rsync -av docker-compose.node.prod.yml .env.node.prod.example scripts/new-xnode-identity.mjs scripts/install-production-docker-host.sh \
   deploy@<seed-host>:/opt/xpoint-node/
 ```
 
@@ -162,9 +169,16 @@ DEEP_NODE_API_BIND=127.0.0.1:8080
 DEEP_NODE_STORAGE_BIND=127.0.0.1:22021
 
 DEEP_REGISTRY_URL=https://registry.xpoint.network
+DEEP_STAKING_BACKEND_URL=https://staking-api.xpoint.network
 DEEP_STORAGE_RPC_URL=http://storage-service:8080
 DEEP_PUSH_NOTIFY_URL=https://push.xpoint.network/_compat/push-notify
 DEEP_REGISTRY_HEARTBEAT_INTERVAL=00:00:30
+DEEP_ENFORCE_QUORUM_SIGNING_POLICY=true
+DEEP_QUORUM_POLICY_BACKEND_TIMEOUT_SECONDS=5
+DEEP_MAX_REWARD_SIGNATURE_INCREASE_ATOMIC=100000000000000
+DEEP_MAX_QUORUM_SIGNATURE_TIMESTAMP_SKEW_SECONDS=300
+DEEP_DOCKER_LOG_MAX_SIZE=50m
+DEEP_DOCKER_LOG_MAX_FILE=5
 
 DEEP_OPERATOR_ADDRESS=<staking operator wallet>
 DEEP_REWARDS_ADDRESS=<staking rewards wallet>
