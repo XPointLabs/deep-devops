@@ -365,6 +365,17 @@ export function ed25519PublicKeyToX25519(publicKeyBytes) {
   return bigIntToLittleEndianBytes(u, 32);
 }
 
+export function verifySessionSignature({ pubkey, pubkeyEd25519, signature, message }) {
+  const resolvedKey = resolveStorageVerificationKey(pubkey, pubkeyEd25519);
+  const signatureBytes = decodeHexOrBase64Bytes(signature, 64);
+  const messageBytes = Buffer.isBuffer(message) ? message : Buffer.from(message ?? '');
+  if (!resolvedKey.checked || !resolvedKey.publicKeyBytes || !signatureBytes) {
+    return false;
+  }
+
+  return verifyEd25519Signature(resolvedKey.publicKeyBytes, messageBytes, signatureBytes);
+}
+
 export function verifyStorageSignature({
   operation,
   pubkey,
@@ -501,6 +512,9 @@ export function verifyStorageSignature({
 
 function createStorageSigner(privateKey) {
   return {
+    signMessage(message) {
+      return cryptoSign(null, Buffer.from(message), privateKey).toString('base64');
+    },
     signStore(namespace, signatureTimestamp) {
       return cryptoSign(null, createStorageStoreSignatureMessage(namespace, signatureTimestamp), privateKey).toString('base64');
     },

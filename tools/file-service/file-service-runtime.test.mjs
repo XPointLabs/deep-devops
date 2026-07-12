@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os';
 import test from 'node:test';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { createHash, randomBytes } from 'node:crypto';
+import { createTestStorageSigningIdentity } from '../compat-services/storage-signatures.mjs';
 
 const scriptPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'file-service.mjs');
 
@@ -67,6 +69,34 @@ async function startFileService({ port, stateDir, extraEnv = {} }) {
 
 function randomPort() {
   return 22000 + Math.floor(Math.random() * 1000);
+}
+
+function avatarAuthorizationHeaders(identity, requestPath, content, overrides = {}) {
+  const timestamp = overrides.timestamp ?? Date.now();
+  const nonce = overrides.nonce ?? randomBytes(16).toString('hex');
+  const contentSha256 = overrides.contentSha256
+    ?? createHash('sha256').update(content).digest('hex');
+  const sessionId = overrides.sessionId ?? identity.sessionPubkey;
+  const pubkeyEd25519 = overrides.pubkeyEd25519 ?? identity.pubkeyEd25519;
+  const signingPayload = Buffer.from([
+    'deep-avatar-upload-v1',
+    'PUT',
+    requestPath,
+    sessionId,
+    pubkeyEd25519,
+    String(timestamp),
+    nonce,
+    contentSha256
+  ].join('\n'), 'utf8');
+
+  return {
+    'x-deep-session-id': sessionId,
+    'x-deep-ed25519': pubkeyEd25519,
+    'x-deep-timestamp': String(timestamp),
+    'x-deep-nonce': nonce,
+    'x-deep-content-sha256': contentSha256,
+    'x-deep-signature': identity.signMessage(signingPayload)
+  };
 }
 
 test('health and stats endpoints honor SERVICE_NAME override', async () => {
@@ -693,13 +723,16 @@ test('file runtime persists avatar upload, update, fetch, and info lifecycle acr
   });
 
   try {
-    const sessionId = '05avatar-owner';
+    const identity = createTestStorageSigningIdentity();
+    const sessionId = identity.sessionPubkey;
+    const avatarPath = `/avatar/${encodeURIComponent(sessionId)}`;
     const firstAvatar = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x01]);
-    const firstResponse = await fetch(`${service.baseUrl}/avatar/${encodeURIComponent(sessionId)}`, {
+    const firstResponse = await fetch(`${service.baseUrl}${avatarPath}`, {
       method: 'PUT',
       headers: {
         'content-type': 'image/png',
-        'x-fs-ttl': '3600'
+        'x-fs-ttl': '3600',
+        ...avatarAuthorizationHeaders(identity, avatarPath, firstAvatar)
       },
       body: firstAvatar
     });
@@ -733,11 +766,12 @@ test('file runtime persists avatar upload, update, fetch, and info lifecycle acr
     assert.deepEqual(await reloadedResponse.json(), first);
 
     const secondAvatar = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x02]);
-    const secondResponse = await fetch(`${service.baseUrl}/avatar/${encodeURIComponent(sessionId)}`, {
+    const secondResponse = await fetch(`${service.baseUrl}${avatarPath}`, {
       method: 'PUT',
       headers: {
         'content-type': 'image/jpeg',
-        'x-fs-ttl': '3600'
+        'x-fs-ttl': '3600',
+        ...avatarAuthorizationHeaders(identity, avatarPath, secondAvatar)
       },
       body: secondAvatar
     });
@@ -778,34 +812,54 @@ test('file runtime rejects invalid avatar uploads without mutating state', async
   });
 
   try {
-    const unsupportedResponse = await fetch(`${service.baseUrl}/avatar/05avatar-owner`, {
+    const identity = createTestStorageSigningIdentity();
+    const attacker = createTestStorageSigningIdentity();
+    const avatarPath = `/avatar/${identity.sessionPubkey}`;
+    const unsupportedContent = Buffer.from('not-an-image', 'utf8');
+    const unsupportedResponse = await fetch(`${service.baseUrl}${avatarPath}`, {
       method: 'PUT',
       headers: {
-        'content-type': 'text/plain'
+        'content-type': 'text/plain',
+        ...avatarAuthorizationHeaders(identity, avatarPath, unsupportedContent)
       },
-      body: Buffer.from('not-an-image', 'utf8')
+      body: unsupportedContent
     });
     assert.equal(unsupportedResponse.status, 415);
     assert.equal((await unsupportedResponse.json()).status_code, 415);
 
-    const emptyResponse = await fetch(`${service.baseUrl}/avatar/05avatar-owner`, {
+    const emptyContent = Buffer.alloc(0);
+    const emptyResponse = await fetch(`${service.baseUrl}${avatarPath}`, {
       method: 'PUT',
       headers: {
-        'content-type': 'image/png'
+        'content-type': 'image/png',
+        ...avatarAuthorizationHeaders(identity, avatarPath, emptyContent)
       },
-      body: Buffer.alloc(0)
+      body: emptyContent
     });
     assert.equal(emptyResponse.status, 413);
     assert.equal((await emptyResponse.json()).status_code, 413);
 
-    const missingResponse = await fetch(`${service.baseUrl}/avatar/05avatar-owner`);
+    const hijackContent = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+    const hijackResponse = await fetch(`${service.baseUrl}${avatarPath}`, {
+      method: 'PUT',
+      headers: {
+        'content-type': 'image/png',
+        ...avatarAuthorizationHeaders(attacker, avatarPath, hijackContent, {
+          sessionId: identity.sessionPubkey
+        })
+      },
+      body: hijackContent
+    });
+    assert.equal(hijackResponse.status, 401);
+
+    const missingResponse = await fetch(`${service.baseUrl}${avatarPath}`);
     assert.equal(missingResponse.status, 404);
     assert.equal((await missingResponse.json()).status_code, 404);
 
     const statsResponse = await fetch(`${service.baseUrl}/stats`);
     assert.equal(statsResponse.status, 200);
     const statsBody = await statsResponse.json();
-    assert.equal(statsBody.stats.avatarUpload, 2);
+    assert.equal(statsBody.stats.avatarUpload, 3);
     assert.equal(statsBody.stats.errors, 0);
     assert.equal(statsBody.inventory.files, 0);
     assert.equal(statsBody.inventory.avatars, 0);

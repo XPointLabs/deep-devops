@@ -10,7 +10,6 @@ import { createTestStorageSigningIdentity } from '../compat-services/storage-sig
 import { fileURLToPath } from 'node:url';
 
 const scriptPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'storage-service.mjs');
-const validPushSignature = 'f8efdd12000700000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000';
 const compatRelayId = '1111111111111111111111111111111111111111111111111111111111111111';
 const storageSigningIdentity = createTestStorageSigningIdentity();
 
@@ -126,8 +125,11 @@ async function startPushNotifyReceiver(options = {}) {
   };
 }
 
+let nextPort = 22000 + Math.floor(Math.random() * 1000);
+
 function randomPort() {
-  return 21000 + Math.floor(Math.random() * 1000);
+  nextPort += 1;
+  return nextPort;
 }
 
 function withStorageSubaccount(payload, subaccount) {
@@ -136,31 +138,6 @@ function withStorageSubaccount(payload, subaccount) {
     subaccount: subaccount.subaccount,
     subaccount_sig: subaccount.subaccountSig
   };
-}
-
-function createStorageStorePayload(overrides = {}) {
-  const payload = { ...overrides };
-  const namespace = Number(payload.namespace ?? 0);
-  if (namespace % 10 !== 0 && payload.signature === undefined) {
-    payload.signature = validPushSignature;
-  }
-  return payload;
-}
-
-function isNoAuthRetrieveNamespace(namespace) {
-  return namespace === -10 || (namespace < 0 && (-namespace % 20) === 1);
-}
-
-function createStorageRetrievePayload(overrides = {}) {
-  const payload = { ...overrides };
-  const namespace = payload.namespace === undefined ? undefined : Number(payload.namespace);
-  if ((namespace === undefined || !isNoAuthRetrieveNamespace(namespace)) && payload.signature === undefined) {
-    payload.signature = validPushSignature;
-  }
-  if (payload.signature !== undefined && payload.timestamp === undefined) {
-    payload.timestamp = Date.now();
-  }
-  return payload;
 }
 
 function createSignedStorageStorePayload(identity, overrides = {}) {
@@ -216,6 +193,61 @@ function createSignedStorageDeleteAllPayload(identity, overrides = {}) {
     pubkey: identity.directPubkey,
     timestamp,
     signature: identity.signDeleteAll(namespace, timestamp),
+    ...payload
+  };
+}
+
+function createSignedStorageExpireAllPayload(identity, overrides = {}) {
+  const payload = { ...overrides };
+  const namespace = payload.namespace ?? 0;
+  const expiry = Number(payload.expiry ?? Date.now() + 60_000);
+
+  return {
+    pubkey: identity.directPubkey,
+    namespace,
+    expiry,
+    signature: identity.signExpireAll(namespace, expiry),
+    ...payload
+  };
+}
+
+function createSignedStorageExpirePayload(identity, overrides = {}) {
+  const payload = { ...overrides };
+  const messages = Array.isArray(payload.messages) ? payload.messages.map(value => String(value)) : [];
+  const expiry = payload.expiry ?? Date.now() + 60_000;
+  const mode = payload.shorten === true ? 'shorten' : payload.extend === true ? 'extend' : '';
+
+  return {
+    pubkey: identity.directPubkey,
+    messages,
+    expiry,
+    signature: identity.signExpire(mode, expiry, messages),
+    ...payload
+  };
+}
+
+function createSignedStorageDeletePayload(identity, overrides = {}) {
+  const payload = { ...overrides };
+  const messages = Array.isArray(payload.messages) ? payload.messages.map(value => String(value)) : [];
+
+  return {
+    pubkey: identity.directPubkey,
+    messages,
+    signature: identity.signDelete(messages),
+    ...payload
+  };
+}
+
+function createSignedStorageDeleteBeforePayload(identity, overrides = {}) {
+  const payload = { ...overrides };
+  const namespace = payload.namespace ?? 0;
+  const before = Number(payload.before ?? Date.now());
+
+  return {
+    pubkey: identity.directPubkey,
+    namespace,
+    before,
+    signature: identity.signDeleteBefore(namespace, before),
     ...payload
   };
 }
@@ -304,6 +336,251 @@ test('health and stats endpoints honor SERVICE_NAME override', async () => {
     assert.equal(statsBody.inventory.files, 0);
     assert.equal(statsBody.inventory.subscriptions, 0);
     assert.equal(statsBody.inventory.pushDeliveries, 0);
+  } finally {
+    await service.stop();
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test('storage runtime fails closed for every protected operation', async () => {
+  const stateDir = await mkdtemp(path.join(tmpdir(), 'storage-service-runtime-'));
+  const service = await startStorageService({ port: randomPort(), stateDir });
+  const timestamp = Date.now();
+  const uncheckableSessionPubkey = `05${'0'.repeat(64)}`;
+  const subaccount = storageSigningIdentity.createSubaccount();
+  const protectedRequests = [
+    ['/storage/store', {
+      pubkey: uncheckableSessionPubkey,
+      namespace: 42,
+      timestamp,
+      ttl: 60_000,
+      data: Buffer.from('uncheckable-store', 'utf8').toString('base64'),
+      signature: 'deep-client-storage-retrieve'
+    }],
+    ['/storage/retrieve', { pubkey: uncheckableSessionPubkey, namespace: 0, timestamp, signature: 'deep-client-storage-retrieve' }],
+    ['/storage/get_expiries', { pubkey: uncheckableSessionPubkey, timestamp, messages: ['message'], signature: 'deep-client-storage-retrieve' }],
+    ['/storage/revoke_subaccount', { pubkey: uncheckableSessionPubkey, timestamp, revoke: subaccount.subaccount, signature: 'deep-client-storage-retrieve' }],
+    ['/storage/unrevoke_subaccount', { pubkey: uncheckableSessionPubkey, timestamp, unrevoke: subaccount.subaccount, signature: 'deep-client-storage-retrieve' }],
+    ['/storage/revoked_subaccounts', { pubkey: uncheckableSessionPubkey, timestamp, signature: 'deep-client-storage-retrieve' }],
+    ['/storage/expire_all', { pubkey: uncheckableSessionPubkey, namespace: 0, expiry: timestamp + 60_000, signature: 'deep-client-storage-retrieve' }],
+    ['/storage/expire', { pubkey: uncheckableSessionPubkey, messages: ['message'], expiry: timestamp + 60_000, signature: 'deep-client-storage-retrieve' }],
+    ['/storage/delete', { pubkey: uncheckableSessionPubkey, messages: ['message'], signature: 'deep-client-storage-retrieve' }],
+    ['/storage/delete_all', { pubkey: uncheckableSessionPubkey, namespace: 0, timestamp, signature: 'deep-client-storage-retrieve' }],
+    ['/storage/delete_before', { pubkey: uncheckableSessionPubkey, namespace: 0, before: timestamp, signature: 'deep-client-storage-retrieve' }]
+  ];
+
+  try {
+    for (const [pathname, payload] of protectedRequests) {
+      const response = await fetch(`${service.baseUrl}${pathname}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      assert.equal(response.status, 401, pathname);
+    }
+
+    const publicInboxResponse = await fetch(`${service.baseUrl}/storage/store`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        pubkey: uncheckableSessionPubkey,
+        namespace: 0,
+        timestamp,
+        ttl: 60_000,
+        data: Buffer.from('public-inbox-remains-open', 'utf8').toString('base64')
+      })
+    });
+    assert.equal(publicInboxResponse.status, 200);
+  } finally {
+    await service.stop();
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test('storage runtime requires bound 05 companions and exact signed request values', async () => {
+  const stateDir = await mkdtemp(path.join(tmpdir(), 'storage-service-runtime-'));
+  const service = await startStorageService({ port: randomPort(), stateDir });
+  const sessionIdentity = createTestStorageSigningIdentity();
+  const otherIdentity = createTestStorageSigningIdentity();
+  const timestamp = Date.now();
+
+  try {
+    const sessionStore = createSignedStorageStorePayload(sessionIdentity, {
+      pubkey: sessionIdentity.sessionPubkey,
+      pubkey_ed25519: sessionIdentity.pubkeyEd25519,
+      namespace: 42,
+      timestamp
+    });
+    const sessionStoreResponse = await fetch(`${service.baseUrl}/storage/store`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(sessionStore)
+    });
+    assert.equal(sessionStoreResponse.status, 200);
+
+    const missingCompanionResponse = await fetch(`${service.baseUrl}/storage/retrieve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(createSignedStorageRetrievePayload(sessionIdentity, {
+        pubkey: sessionIdentity.sessionPubkey,
+        namespace: 42,
+        timestamp
+      }))
+    });
+    assert.equal(missingCompanionResponse.status, 401);
+
+    const wrongCompanionResponse = await fetch(`${service.baseUrl}/storage/retrieve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(createSignedStorageRetrievePayload(sessionIdentity, {
+        pubkey: sessionIdentity.sessionPubkey,
+        pubkey_ed25519: otherIdentity.pubkeyEd25519,
+        namespace: 42,
+        timestamp
+      }))
+    });
+    assert.equal(wrongCompanionResponse.status, 401);
+
+    const malformedSignatureResponse = await fetch(`${service.baseUrl}/storage/retrieve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        pubkey: sessionIdentity.directPubkey,
+        namespace: 42,
+        timestamp,
+        signature: 'not base64!'
+      })
+    });
+    assert.equal(malformedSignatureResponse.status, 401);
+
+    const missingRetrieveTimestampResponse = await fetch(`${service.baseUrl}/storage/retrieve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        pubkey: sessionIdentity.directPubkey,
+        namespace: 42,
+        signature: sessionIdentity.signRetrieve(42, timestamp)
+      })
+    });
+    assert.equal(missingRetrieveTimestampResponse.status, 400);
+
+    const { timestamp: ignoredTimestamp, ...missingStoreTimestamp } = createSignedStorageStorePayload(sessionIdentity, {
+      namespace: 42,
+      timestamp
+    });
+    const missingStoreTimestampResponse = await fetch(`${service.baseUrl}/storage/store`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(missingStoreTimestamp)
+    });
+    assert.equal(missingStoreTimestampResponse.status, 400);
+
+    const wrongKeyResponse = await fetch(`${service.baseUrl}/storage/retrieve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(createSignedStorageRetrievePayload(sessionIdentity, {
+        pubkey: otherIdentity.directPubkey,
+        namespace: 42,
+        timestamp
+      }))
+    });
+    assert.equal(wrongKeyResponse.status, 401);
+
+    const wrongNamespaceResponse = await fetch(`${service.baseUrl}/storage/store`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        ...createSignedStorageStorePayload(sessionIdentity, { namespace: 43, timestamp }),
+        namespace: 42
+      })
+    });
+    assert.equal(wrongNamespaceResponse.status, 401);
+
+    const wrongTimestampResponse = await fetch(`${service.baseUrl}/storage/retrieve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        ...createSignedStorageRetrievePayload(sessionIdentity, { namespace: 42, timestamp }),
+        timestamp: timestamp + 1
+      })
+    });
+    assert.equal(wrongTimestampResponse.status, 401);
+
+    const signedSessionRetrieveResponse = await fetch(`${service.baseUrl}/storage/retrieve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(createSignedStorageRetrievePayload(sessionIdentity, {
+        pubkey: sessionIdentity.sessionPubkey,
+        pubkey_ed25519: sessionIdentity.pubkeyEd25519,
+        namespace: 42,
+        timestamp
+      }))
+    });
+    assert.equal(signedSessionRetrieveResponse.status, 200);
+    assert.equal((await signedSessionRetrieveResponse.json()).messages.length, 1);
+  } finally {
+    await service.stop();
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test('storage runtime accepts canonical real signatures for expiry and delete operations', async () => {
+  const stateDir = await mkdtemp(path.join(tmpdir(), 'storage-service-runtime-'));
+  const service = await startStorageService({ port: randomPort(), stateDir });
+  const timestamp = Date.now();
+
+  try {
+    const stored = [];
+    for (const suffix of ['one', 'two', 'three']) {
+      stored.push(await storeSignedStorageMessage(service, storageSigningIdentity, {
+        namespace: 42,
+        timestamp,
+        ttl: 120_000,
+        data: Buffer.from(`canonical-${suffix}`, 'utf8').toString('base64')
+      }));
+    }
+
+    const expireAllResponse = await fetch(`${service.baseUrl}/storage/expire_all`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(createSignedStorageExpireAllPayload(storageSigningIdentity, {
+        namespace: 42,
+        expiry: timestamp + 60_000
+      }))
+    });
+    assert.equal(expireAllResponse.status, 200);
+
+    const expireResponse = await fetch(`${service.baseUrl}/storage/expire`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(createSignedStorageExpirePayload(storageSigningIdentity, {
+        messages: [stored[0].hash],
+        expiry: timestamp + 90_000,
+        extend: true
+      }))
+    });
+    assert.equal(expireResponse.status, 200);
+
+    const deleteResponse = await fetch(`${service.baseUrl}/storage/delete`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(createSignedStorageDeletePayload(storageSigningIdentity, {
+        messages: [stored[1].hash]
+      }))
+    });
+    assert.equal(deleteResponse.status, 200);
+
+    const deleteBeforeResponse = await fetch(`${service.baseUrl}/storage/delete_before`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(createSignedStorageDeleteBeforePayload(storageSigningIdentity, {
+        namespace: 42,
+        before: Date.now()
+      }))
+    });
+    assert.equal(deleteBeforeResponse.status, 200);
+    const deleteBeforeBody = await deleteBeforeResponse.json();
+    assert.deepEqual(deleteBeforeBody.swarm[compatRelayId].deleted.sort(), [stored[0].hash, stored[2].hash].sort());
   } finally {
     await service.stop();
     await rm(stateDir, { recursive: true, force: true });
@@ -471,8 +748,7 @@ test('storage runtime preserves signed store when push notify hop fails downstre
 
 test('storage runtime prunes expired messages from retrieve and persisted state', async () => {
   const stateDir = await mkdtemp(path.join(tmpdir(), 'storage-service-runtime-'));
-  const storageStatePath = path.join(stateDir, 'storage.json');
-  const service = await startStorageService({ port: randomPort(), stateDir });
+  let service = await startStorageService({ port: randomPort(), stateDir });
 
   try {
     const stored = await storeSignedStorageMessage(service, storageSigningIdentity, {
@@ -523,8 +799,18 @@ test('storage runtime prunes expired messages from retrieve and persisted state'
     const statsBody = await statsResponse.json();
     assert.equal(statsBody.inventory.storageMessages, 0);
 
-    const persistedState = JSON.parse(await readFile(storageStatePath, 'utf8'));
-    assert.deepEqual(persistedState, []);
+    await service.stop();
+    service = await startStorageService({ port: randomPort(), stateDir });
+    const restartedRetrieve = await fetch(`${service.baseUrl}/storage/retrieve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(createSignedStorageRetrievePayload(storageSigningIdentity, {
+        namespace: 42,
+        timestamp: Date.now()
+      }))
+    });
+    assert.equal(restartedRetrieve.status, 200);
+    assert.deepEqual((await restartedRetrieve.json()).messages, []);
   } finally {
     await service.stop();
     await rm(stateDir, { recursive: true, force: true });
@@ -659,7 +945,7 @@ test('storage sequence stops on the first error while batch continues', async ()
   const service = await startStorageService({ port: randomPort(), stateDir });
 
   try {
-    const pubkey = '05sequence-error';
+    const pubkey = storageSigningIdentity.directPubkey;
     const storeResponse = await fetch(`${service.baseUrl}/storage/store`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -672,6 +958,7 @@ test('storage sequence stops on the first error while batch continues', async ()
     });
     const stored = await storeResponse.json();
     assert.equal(storeResponse.status, 200);
+    const retrieveTimestamp = Date.now();
 
     const requests = [
       {
@@ -689,8 +976,9 @@ test('storage sequence stops on the first error while batch continues', async ()
         method: 'retrieve',
         params: {
           pubkey,
-          timestamp: Date.now(),
-          signature: validPushSignature
+          namespace: 0,
+          timestamp: retrieveTimestamp,
+          signature: storageSigningIdentity.signRetrieve(0, retrieveTimestamp)
         }
       }
     ];
@@ -868,6 +1156,151 @@ test('storage runtime authenticates push notifications with its node identity', 
   } finally {
     await service.stop();
     await receiver.stop();
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test('storage runtime enforces request, message, account, and retrieve-page quotas', async () => {
+  const stateDir = await mkdtemp(path.join(tmpdir(), 'storage-service-runtime-'));
+  const service = await startStorageService({
+    port: randomPort(),
+    stateDir,
+    extraEnv: {
+      STORAGE_MAX_REQUEST_BYTES: '512',
+      STORAGE_MAX_MESSAGE_BYTES: '32',
+      STORAGE_MAX_MESSAGES_PER_ACCOUNT: '2',
+      STORAGE_RETRIEVE_PAGE_SIZE: '1'
+    }
+  });
+
+  try {
+    const requestTooLarge = await fetch(`${service.baseUrl}/storage/retrieve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ padding: 'x'.repeat(1024) })
+    });
+    assert.equal(requestTooLarge.status, 413);
+
+    const oversizedData = await fetch(`${service.baseUrl}/storage/store`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(createSignedStorageStorePayload(storageSigningIdentity, {
+        namespace: 42,
+        timestamp: Date.now(),
+        data: Buffer.alloc(33, 7).toString('base64')
+      }))
+    });
+    assert.equal(oversizedData.status, 413);
+
+    const stored = [];
+    for (const suffix of ['one', 'two']) {
+      stored.push(await storeSignedStorageMessage(service, storageSigningIdentity, {
+        namespace: 42,
+        timestamp: Date.now(),
+        data: Buffer.from(suffix).toString('base64')
+      }));
+    }
+
+    const accountQuota = await fetch(`${service.baseUrl}/storage/store`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(createSignedStorageStorePayload(storageSigningIdentity, {
+        namespace: 42,
+        timestamp: Date.now(),
+        data: Buffer.from('three').toString('base64')
+      }))
+    });
+    assert.equal(accountQuota.status, 413);
+
+    const firstPage = await fetch(`${service.baseUrl}/storage/retrieve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(createSignedStorageRetrievePayload(storageSigningIdentity, {
+        namespace: 42,
+        timestamp: Date.now()
+      }))
+    });
+    const firstPageBody = await firstPage.json();
+    assert.equal(firstPage.status, 200);
+    assert.equal(firstPageBody.messages.length, 1);
+    assert.equal(firstPageBody.more, true);
+
+    const secondPage = await fetch(`${service.baseUrl}/storage/retrieve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(createSignedStorageRetrievePayload(storageSigningIdentity, {
+        namespace: 42,
+        last_hash: firstPageBody.messages[0].hash,
+        timestamp: Date.now()
+      }))
+    });
+    const secondPageBody = await secondPage.json();
+    assert.equal(secondPage.status, 200);
+    assert.equal(secondPageBody.messages.length, 1);
+    assert.equal(secondPageBody.messages[0].hash, stored[1].hash);
+  } finally {
+    await service.stop();
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test('storage runtime rate limits public storage requests with no queue', async () => {
+  const stateDir = await mkdtemp(path.join(tmpdir(), 'storage-service-runtime-'));
+  const service = await startStorageService({
+    port: randomPort(),
+    stateDir,
+    extraEnv: { STORAGE_RATE_LIMIT_PER_MINUTE: '1' }
+  });
+
+  try {
+    const first = await fetch(`${service.baseUrl}/storage/unknown`, { method: 'POST' });
+    const second = await fetch(`${service.baseUrl}/storage/unknown`, { method: 'POST' });
+
+    assert.equal(first.status, 404);
+    assert.equal(second.status, 429);
+  } finally {
+    await service.stop();
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test('storage runtime journals concurrent mutations and reloads without lost messages', async () => {
+  const stateDir = await mkdtemp(path.join(tmpdir(), 'storage-service-runtime-'));
+  const storageJournalPath = path.join(stateDir, 'storage.journal.ndjson');
+  let service = await startStorageService({
+    port: randomPort(),
+    stateDir,
+    extraEnv: { STORAGE_SNAPSHOT_EVERY_MUTATIONS: '1000' }
+  });
+
+  try {
+    const stored = await Promise.all(
+      Array.from({ length: 12 }, (_, index) => storeSignedStorageMessage(service, storageSigningIdentity, {
+        namespace: 42,
+        timestamp: Date.now(),
+        data: Buffer.from(`concurrent-${index}`).toString('base64')
+      }))
+    );
+    assert.equal(new Set(stored.map(message => message.hash)).size, 12);
+
+    const journal = await readFile(storageJournalPath, 'utf8');
+    assert.equal(journal.trim().split('\n').length, 12);
+
+    await service.stop();
+    service = await startStorageService({ port: randomPort(), stateDir });
+    const retrieve = await fetch(`${service.baseUrl}/storage/retrieve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(createSignedStorageRetrievePayload(storageSigningIdentity, {
+        namespace: 42,
+        timestamp: Date.now(),
+        limit: 100
+      }))
+    });
+    assert.equal(retrieve.status, 200);
+    assert.equal((await retrieve.json()).messages.length, 12);
+  } finally {
+    await service.stop();
     await rm(stateDir, { recursive: true, force: true });
   }
 });

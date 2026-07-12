@@ -54,6 +54,7 @@ Storage:
 
 - per-node service-node storage deployment profile,
 - signed store/retrieve/delete/expiry lifecycle,
+- fail-closed signature verification for every authenticated operation, including bound `05...`/`pubkey_ed25519` identities,
 - namespace access rules,
 - subaccount authorization and revocation,
 - sequence/batch semantics,

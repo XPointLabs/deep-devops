@@ -3,9 +3,9 @@ using System.Text.Json;
 using Deep.Client.Shared.Services;
 
 var routerUrls = GetRouterUrls(args);
-var targetKey = GetOption(args, "--target")
-    ?? Environment.GetEnvironmentVariable("DEEP_ONION_SMOKE_TARGET")
-    ?? "05uat-onion-smoke";
+using var identity = new SessionIdentityProvider($"uat onion smoke {Guid.NewGuid():N}");
+var targetKey = identity.SessionId.Value;
+var pubkeyEd25519 = Convert.ToHexString(identity.GetEd25519PublicKey()).ToLowerInvariant();
 
 using var httpClient = new HttpClient
 {
@@ -17,22 +17,28 @@ var router = new XNodeRpcClient(
 
 var payloadText = "uat-onion-smoke:" + Guid.NewGuid().ToString("N");
 var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+var storeSignature = Convert.ToBase64String(identity.SignDetached(Encoding.UTF8.GetBytes($"store{timestamp}")));
 await router.PostStorageAsync("storage_store", new
 {
     pubkey = targetKey,
+    pubkey_ed25519 = pubkeyEd25519,
     @namespace = 0,
     timestamp,
     ttl = 60_000,
     data = Convert.ToBase64String(Encoding.UTF8.GetBytes(payloadText)),
-    idempotency_key = Guid.NewGuid().ToString("N")
+    idempotency_key = Guid.NewGuid().ToString("N"),
+    signature = storeSignature
 }, targetKey);
 
+var retrieveTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+var retrieveSignature = Convert.ToBase64String(identity.SignDetached(Encoding.UTF8.GetBytes($"retrieve{retrieveTimestamp}")));
 var retrieved = await router.PostStorageAsync("storage_retrieve", new
 {
     pubkey = targetKey,
+    pubkey_ed25519 = pubkeyEd25519,
     @namespace = 0,
-    timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-    signature = "deep-uat-onion-smoke",
+    timestamp = retrieveTimestamp,
+    signature = retrieveSignature,
     last_hash = (string?)null
 }, targetKey);
 
@@ -70,13 +76,27 @@ Console.WriteLine(JsonSerializer.Serialize(new
     WriteIndented = true
 }));
 
-static IReadOnlyList<string> GetRouterUrls(string[] args)
+static IReadOnlyList<PinnedRouterEndpoint> GetRouterUrls(string[] args)
 {
     var fromArgs = GetOption(args, "--routers");
     var raw = fromArgs
         ?? Environment.GetEnvironmentVariable("XNODE_URLS")
-        ?? "http://127.0.0.1:29281,http://127.0.0.1:29282,http://127.0.0.1:29283";
-    return raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        ?? "fe8f458267a9c92015b143d395807a0b99be7303b89af0cee60f37cbaf7941e3|http://127.0.0.1:29281,"
+           + "c1f667cb6bba5fbf80c3bc39a32e13e3fea26add89db5b73d752e477d11f208d|http://127.0.0.1:29282,"
+           + "950462de6f917f4f28725daf96178bba68afbc766739566aec18e3ef407ca406|http://127.0.0.1:29283";
+    return raw
+        .Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        .Select(value =>
+        {
+            var separator = value.IndexOf('|');
+            if (separator <= 0 || separator == value.Length - 1)
+            {
+                throw new InvalidOperationException("XNODE_URLS entries must use '<router-id>|<absolute-url>'.");
+            }
+
+            return new PinnedRouterEndpoint(value[(separator + 1)..], value[..separator]);
+        })
+        .ToArray();
 }
 
 static string? GetOption(string[] args, string name)

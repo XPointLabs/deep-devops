@@ -3,3 +3,5 @@ artifacts/*
 .env
 .env.uat
 .env.*.local
+**/bin/
+**/obj/

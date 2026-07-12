@@ -3,7 +3,7 @@ import http from 'node:http';
 import { createPrivateKey, sign } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { decodeHexOrBase64Bytes, storageSubaccountAccess, verifyStorageSignature } from '../compat-services/storage-signatures.mjs';
 
 const mode = 'storage';
@@ -12,6 +12,7 @@ const serviceName = String(process.env.SERVICE_NAME ?? 'deep-storage-service');
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const stateDir = process.env.COMPAT_STATE_DIR ?? process.env.MOCK_STATE_DIR ?? path.resolve(scriptDir, '..', '..', 'artifacts', 'compat-state');
 const storageStatePath = path.join(stateDir, 'storage.json');
+const storageJournalPath = path.join(stateDir, 'storage.journal.ndjson');
 const storageSubaccountsStatePath = path.join(stateDir, 'storage-subaccounts.json');
 const fileStatePath = path.join(stateDir, 'file.json');
 const pushStatePath = path.join(stateDir, 'push.json');
@@ -22,7 +23,30 @@ const pushNotifyPrivateKeyFile = String(process.env.PUSH_COMPAT_NOTIFY_ED25519_P
 const pushNotifyBearerTokenFile = String(process.env.PUSH_COMPAT_NOTIFY_BEARER_TOKEN_FILE ?? '').trim();
 const pushNotifySigner = await loadPushNotifySigner();
 
-const messages = await loadJson(storageStatePath, []);
+const maxStorageRequestBytes = parsePositiveInteger(process.env.STORAGE_MAX_REQUEST_BYTES, 256 * 1024, 4 * 1024 * 1024);
+const maxStorageMessageBytes = parsePositiveInteger(process.env.STORAGE_MAX_MESSAGE_BYTES, 64 * 1024, maxStorageRequestBytes);
+const maxStorageMessagesPerAccount = parsePositiveInteger(process.env.STORAGE_MAX_MESSAGES_PER_ACCOUNT, 10_000, 1_000_000);
+const maxStorageBytesPerAccount = parsePositiveInteger(process.env.STORAGE_MAX_BYTES_PER_ACCOUNT, 256 * 1024 * 1024, 4 * 1024 * 1024 * 1024);
+const maxStorageMessages = parsePositiveInteger(process.env.STORAGE_MAX_MESSAGES, 100_000, 2_000_000);
+const maxStorageBytes = parsePositiveInteger(process.env.STORAGE_MAX_BYTES, 2 * 1024 * 1024 * 1024, 16 * 1024 * 1024 * 1024);
+const storageRetrievePageSize = parsePositiveInteger(process.env.STORAGE_RETRIEVE_PAGE_SIZE, 100, 1_000);
+const maxStorageRetrievePageBytes = parsePositiveInteger(process.env.STORAGE_MAX_RETRIEVE_PAGE_BYTES, 1024 * 1024, 8 * 1024 * 1024);
+const maxStorageMutationHashes = parsePositiveInteger(process.env.STORAGE_MAX_MUTATION_HASHES, 1_000, 10_000);
+const maxStoragePipelineRequests = parsePositiveInteger(process.env.STORAGE_MAX_PIPELINE_REQUESTS, 20, 100);
+const storageRateLimitPerMinute = parsePositiveInteger(process.env.STORAGE_RATE_LIMIT_PER_MINUTE, 600, 100_000);
+const maxStorageRateLimitClients = parsePositiveInteger(process.env.STORAGE_RATE_LIMIT_MAX_CLIENTS, 10_000, 100_000);
+const storageSnapshotEveryMutations = parsePositiveInteger(process.env.STORAGE_SNAPSHOT_EVERY_MUTATIONS, 100, 10_000);
+
+const storageMessageIds = new WeakMap();
+const persistedStorageMessages = new Map();
+const storageRateLimitClients = new Map();
+let storageMessageSequence = 0;
+let storagePersistQueue = Promise.resolve();
+let storageMutationCount = 0;
+
+const messages = await loadStorageSnapshot();
+await replayStorageJournal(messages);
+refreshPersistedStorageMessages();
 const loadedStorageSubaccountRevocations = await loadJson(storageSubaccountsStatePath, []);
 const storageSubaccountRevocations = new Map(
   (Array.isArray(loadedStorageSubaccountRevocations) ? loadedStorageSubaccountRevocations : [])
@@ -147,8 +171,198 @@ async function saveJson(filePath, value) {
   await writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
 }
 
-async function saveStorageState() {
-  await saveJson(storageStatePath, messages);
+async function loadStorageSnapshot() {
+  const persisted = await loadJson(storageStatePath, []);
+  if (Array.isArray(persisted)) {
+    return persisted.map((message, index) => {
+      setStorageMessageId(message, `legacy-${index + 1}`);
+      return message;
+    });
+  }
+
+  if (!persisted || persisted.version !== 1 || !Array.isArray(persisted.messages)) {
+    throw new Error('storage snapshot has an unsupported format');
+  }
+
+  return persisted.messages
+    .filter(entry => entry && typeof entry === 'object' && typeof entry.id === 'string' && entry.message && typeof entry.message === 'object')
+    .map(entry => {
+      setStorageMessageId(entry.message, entry.id);
+      return entry.message;
+    });
+}
+
+async function replayStorageJournal(target) {
+  let raw;
+  try {
+    raw = await readFile(storageJournalPath, 'utf8');
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+      return;
+    }
+    throw error;
+  }
+
+  const lines = raw.split('\n');
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (!line.trim()) {
+      continue;
+    }
+
+    let event;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      if (index === lines.length - 1 && !raw.endsWith('\n')) {
+        // A process can be interrupted during append. Earlier complete events are
+        // durable and this incomplete trailing event was never acknowledged.
+        return;
+      }
+      throw new Error('storage journal contains invalid JSON');
+    }
+
+    applyStorageJournalEvent(target, event);
+  }
+}
+
+function applyStorageJournalEvent(target, event) {
+  if (!event || typeof event !== 'object' || typeof event.type !== 'string') {
+    throw new Error('storage journal contains an invalid event');
+  }
+
+  if (event.type === 'append') {
+    if (typeof event.id !== 'string' || !event.message || typeof event.message !== 'object') {
+      throw new Error('storage journal append event is invalid');
+    }
+    if (!target.some(message => getStorageMessageId(message) === event.id)) {
+      setStorageMessageId(event.message, event.id);
+      target.push(event.message);
+    }
+    return;
+  }
+
+  if (event.type === 'replace') {
+    if (typeof event.id !== 'string' || !event.message || typeof event.message !== 'object') {
+      throw new Error('storage journal replace event is invalid');
+    }
+    const index = target.findIndex(message => getStorageMessageId(message) === event.id);
+    if (index >= 0) {
+      setStorageMessageId(event.message, event.id);
+      target[index] = event.message;
+    }
+    return;
+  }
+
+  if (event.type === 'remove') {
+    if (!Array.isArray(event.ids) || !event.ids.every(id => typeof id === 'string')) {
+      throw new Error('storage journal remove event is invalid');
+    }
+    const ids = new Set(event.ids);
+    for (let index = target.length - 1; index >= 0; index -= 1) {
+      if (ids.has(getStorageMessageId(target[index]))) {
+        target.splice(index, 1);
+      }
+    }
+    return;
+  }
+
+  throw new Error('storage journal event type is unsupported');
+}
+
+function getStorageMessageId(message) {
+  return storageMessageIds.get(message);
+}
+
+function setStorageMessageId(message, id = undefined) {
+  const nextId = id ?? `message-${++storageMessageSequence}`;
+  storageMessageIds.set(message, nextId);
+  const sequence = /^message-(\d+)$/.exec(nextId);
+  if (sequence) {
+    storageMessageSequence = Math.max(storageMessageSequence, Number(sequence[1]));
+  }
+  return nextId;
+}
+
+function ensureStorageMessageId(message) {
+  return getStorageMessageId(message) ?? setStorageMessageId(message);
+}
+
+function captureStorageMessages() {
+  return new Map(messages.map(message => [
+    ensureStorageMessageId(message),
+    JSON.stringify(message)
+  ]));
+}
+
+function refreshPersistedStorageMessages(snapshot = captureStorageMessages()) {
+  persistedStorageMessages.clear();
+  for (const [id, serialized] of snapshot) {
+    persistedStorageMessages.set(id, serialized);
+  }
+}
+
+function collectStorageJournalEvents() {
+  const current = captureStorageMessages();
+  const events = [];
+
+  for (const [id, serialized] of current) {
+    const previous = persistedStorageMessages.get(id);
+    if (previous === undefined) {
+      const message = messages.find(candidate => getStorageMessageId(candidate) === id);
+      events.push({ type: 'append', id, message });
+    } else if (previous !== serialized) {
+      const message = messages.find(candidate => getStorageMessageId(candidate) === id);
+      events.push({ type: 'replace', id, message });
+    }
+  }
+
+  const removed = [...persistedStorageMessages.keys()].filter(id => !current.has(id));
+  if (removed.length > 0) {
+    events.push({ type: 'remove', ids: removed });
+  }
+
+  return { events, current };
+}
+
+async function writeStorageSnapshot() {
+  await ensureStateDir();
+  const tempPath = `${storageStatePath}.${process.pid}.${Date.now()}.${storageMessageSequence}.tmp`;
+  const snapshot = {
+    version: 1,
+    messages: messages.map(message => ({
+      id: ensureStorageMessageId(message),
+      message
+    }))
+  };
+
+  await writeFile(tempPath, `${JSON.stringify(snapshot)}\n`, 'utf8');
+  await rename(tempPath, storageStatePath);
+}
+
+function saveStorageState() {
+  const write = storagePersistQueue.then(async () => {
+    const { events, current } = collectStorageJournalEvents();
+    if (events.length === 0) {
+      return;
+    }
+
+    await ensureStateDir();
+    await appendFile(storageJournalPath, `${events.map(event => JSON.stringify(event)).join('\n')}\n`, 'utf8');
+    refreshPersistedStorageMessages(current);
+    storageMutationCount += events.length;
+
+    if (storageMutationCount >= storageSnapshotEveryMutations) {
+      await writeStorageSnapshot();
+      // Journal events are idempotent against the snapshot; truncation after the
+      // replacement preserves recoverability across a process crash.
+      await writeFile(storageJournalPath, '', 'utf8');
+      storageMutationCount = 0;
+    }
+  });
+
+  storagePersistQueue = write.catch(() => undefined);
+  return write;
 }
 
 async function saveStorageSubaccountState() {
@@ -187,6 +401,11 @@ async function emitPushNotification(notification) {
   } catch {
     return { queued: 0 };
   }
+}
+
+function isPositiveSafeInteger(value) {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0;
 }
 
 async function loadPushNotifySigner() {
@@ -239,17 +458,157 @@ function pathOf(req) {
   return new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
 }
 
-async function body(req) {
+class RequestTooLargeError extends Error {}
+
+class MalformedJsonError extends Error {}
+
+async function body(req, maxBytes = maxStorageRequestBytes) {
+  const contentLength = Number(req.headers?.['content-length']);
+  if (Number.isSafeInteger(contentLength) && contentLength > maxBytes) {
+    throw new RequestTooLargeError('request body exceeds the configured limit');
+  }
+
   const chunks = [];
+  let total = 0;
   for await (const chunk of req) {
-    chunks.push(Buffer.from(chunk));
+    const buffer = Buffer.from(chunk);
+    total += buffer.length;
+    if (total > maxBytes) {
+      if (typeof req.resume === 'function') {
+        req.resume();
+      }
+      throw new RequestTooLargeError('request body exceeds the configured limit');
+    }
+    chunks.push(buffer);
   }
   return Buffer.concat(chunks);
 }
 
 async function bodyJson(req) {
   const raw = await body(req);
-  return raw.length === 0 ? {} : JSON.parse(raw.toString('utf8'));
+  if (raw.length === 0) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(raw.toString('utf8'));
+  } catch {
+    throw new MalformedJsonError('request body is not valid JSON');
+  }
+}
+
+function decodeStorageData(data) {
+  if (typeof data !== 'string' || data.length === 0) {
+    return null;
+  }
+
+  const maxBase64Length = Math.ceil(maxStorageMessageBytes / 3) * 4 + 4;
+  if (data.length > maxBase64Length || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(data)) {
+    return null;
+  }
+
+  const decoded = Buffer.from(data, 'base64');
+  return decoded.length <= maxStorageMessageBytes ? decoded : null;
+}
+
+function storageMessageBytes(message) {
+  return Buffer.byteLength(String(message.data ?? ''), 'base64');
+}
+
+function storageUsage(pubkey = undefined) {
+  let count = 0;
+  let bytes = 0;
+  for (const message of messages) {
+    if (pubkey !== undefined && message.pubkey !== pubkey) {
+      continue;
+    }
+    count += 1;
+    bytes += storageMessageBytes(message);
+  }
+  return { count, bytes };
+}
+
+function isStorageQuotaAvailable(pubkey, dataBytes) {
+  const account = storageUsage(pubkey);
+  const global = storageUsage();
+  return account.count < maxStorageMessagesPerAccount
+    && account.bytes + dataBytes <= maxStorageBytesPerAccount
+    && global.count < maxStorageMessages
+    && global.bytes + dataBytes <= maxStorageBytes;
+}
+
+function normalizeBoundedHashes(value) {
+  if (!Array.isArray(value) || value.length === 0 || value.length > maxStorageMutationHashes) {
+    return null;
+  }
+  return value.map(item => String(item)).filter(Boolean);
+}
+
+function readRetrievePage(request) {
+  const requested = request.limit ?? request.max_results ?? request.maxResults;
+  return parsePositiveInteger(requested, storageRetrievePageSize, storageRetrievePageSize);
+}
+
+function selectRetrievePage(pubkey, namespace, lastHash, limit) {
+  const selected = [];
+  let selectedBytes = 0;
+  const hasLastHash = lastHash && messages.some(message =>
+    message.pubkey === pubkey &&
+    (namespace === undefined || message.namespace === namespace) &&
+    message.hash === lastHash
+  );
+  let started = !hasLastHash;
+  let more = false;
+
+  for (const message of messages) {
+    if (message.pubkey !== pubkey || (namespace !== undefined && message.namespace !== namespace)) {
+      continue;
+    }
+    if (!started) {
+      if (message.hash === lastHash) {
+        started = true;
+      }
+      continue;
+    }
+
+    const messageBytes = Buffer.byteLength(JSON.stringify(message));
+    if (selected.length >= limit || selectedBytes + messageBytes > maxStorageRetrievePageBytes) {
+      more = true;
+      break;
+    }
+
+    selected.push(message);
+    selectedBytes += messageBytes;
+  }
+
+  return { messages: selected, more };
+}
+
+function storageClientKey(req) {
+  return req.socket?.remoteAddress ?? 'unknown';
+}
+
+function isStorageRateLimitAllowed(req) {
+  const now = nowMs();
+  const key = storageClientKey(req);
+  let entry = storageRateLimitClients.get(key);
+  if (!entry || now - entry.windowStartedAt >= 60_000) {
+    if (!entry && storageRateLimitClients.size >= maxStorageRateLimitClients) {
+      const oldest = storageRateLimitClients.keys().next().value;
+      if (oldest !== undefined) {
+        storageRateLimitClients.delete(oldest);
+      }
+    }
+    entry = { windowStartedAt: now, count: 0 };
+    storageRateLimitClients.set(key, entry);
+  }
+
+  if (entry.count >= storageRateLimitPerMinute) {
+    return false;
+  }
+
+  entry.count += 1;
+  return true;
 }
 
 function incrementStat(key, value = 1) {
@@ -521,6 +880,16 @@ async function runStoragePipelineRequest(method, params) {
     };
   }
 
+  if (Buffer.byteLength(JSON.stringify(params ?? {})) > maxStorageRequestBytes) {
+    return {
+      status: 413,
+      body: {
+        error: 'quota-exceeded',
+        message: 'storage pipeline item exceeds the configured request limit'
+      }
+    };
+  }
+
   const syntheticReq = createSyntheticJsonRequest(pathname, params);
   const syntheticRes = createCapturedResponse();
   await handleStorage(syntheticReq, syntheticRes, pathOf(syntheticReq));
@@ -603,15 +972,32 @@ async function handleStorage(req, res, url) {
     const namespace = Number(request.namespace ?? 0);
     const signature = String(request.signature ?? '');
     const timestamp = parsePositiveInteger(request.timestamp, nowMs());
-    const signatureTimestamp = parsePositiveInteger(request.sig_timestamp ?? request.sigTimestamp, timestamp);
+    const signatureTimestampInput = request.sig_timestamp ?? request.sigTimestamp ?? request.timestamp;
+    const signatureTimestamp = parsePositiveInteger(signatureTimestampInput, timestamp);
     const ttl = parsePositiveInteger(request.ttl, defaultStorageTtlMs, maxStorageTtlMs);
     const data = String(request.data ?? '');
     const idempotencyKey = request.idempotency_key ?? request.idempotencyKey;
     const normalizedIdempotencyKey = idempotencyKey ? String(idempotencyKey) : null;
-    const decoded = Buffer.from(data, 'base64');
 
     if (!pubkey || Number.isNaN(namespace) || !data) {
       json(res, 400, { error: 'invalid-request', message: 'pubkey, namespace, and data are required' });
+      return true;
+    }
+
+    if (data.length > Math.ceil(maxStorageMessageBytes / 3) * 4 + 4) {
+      json(res, 413, { error: 'quota-exceeded', message: 'storage message exceeds the configured size limit' });
+      return true;
+    }
+
+    const decoded = decodeStorageData(data);
+    if (!decoded) {
+      const validBase64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(data);
+      json(res, validBase64 ? 413 : 400, {
+        error: validBase64 ? 'quota-exceeded' : 'invalid-request',
+        message: validBase64
+          ? 'storage message exceeds the configured size limit'
+          : 'data must be valid base64 within the configured size limit'
+      });
       return true;
     }
 
@@ -627,6 +1013,14 @@ async function handleStorage(req, res, url) {
       json(res, 401, {
         error: 'unauthorized',
         message: `store: signature required to store to namespace ${namespace}`
+      });
+      return true;
+    }
+
+    if (!isPublicInboxNamespace(namespace) && !isPositiveSafeInteger(signatureTimestampInput)) {
+      json(res, 400, {
+        error: 'invalid-request',
+        message: 'store signature timestamp is required'
       });
       return true;
     }
@@ -654,7 +1048,7 @@ async function handleStorage(req, res, url) {
         namespace,
         timestamp: signatureTimestamp
       });
-      if (verification.checked && !verification.verified) {
+      if (verification.checked !== true || verification.verified !== true) {
         json(res, 401, {
           error: 'unauthorized',
           message: 'store signature verification failed'
@@ -692,6 +1086,11 @@ async function handleStorage(req, res, url) {
         });
         return true;
       }
+    }
+
+    if (!isStorageQuotaAvailable(pubkey, decoded.length)) {
+      json(res, 413, { error: 'quota-exceeded', message: 'storage account or global quota exceeded' });
+      return true;
     }
 
     const hash = sha256(Buffer.concat([Buffer.from(pubkey), decoded]), 'base64url');
@@ -742,6 +1141,14 @@ async function handleStorage(req, res, url) {
       return true;
     }
 
+    if (signature && !hasTimestamp) {
+      json(res, 400, {
+        error: 'invalid-request',
+        message: "invalid request: Required field 'timestamp' missing"
+      });
+      return true;
+    }
+
     if (!signature && (namespace === undefined || !isNoAuthRetrieveNamespace(namespace))) {
       json(res, 401, {
         error: 'unauthorized',
@@ -750,10 +1157,10 @@ async function handleStorage(req, res, url) {
       return true;
     }
 
-    if (signature && hasTimestamp) {
+    if (signature) {
       const timestamp = Number(request.timestamp);
       const current = nowMs();
-      if (!Number.isFinite(timestamp) ||
+      if (!isPositiveSafeInteger(timestamp) ||
         timestamp < current - storageSignatureToleranceMs ||
         timestamp > current + storageSignatureToleranceMs) {
         json(res, 406, {
@@ -774,7 +1181,7 @@ async function handleStorage(req, res, url) {
         namespace,
         timestamp
       });
-      if (verification.checked && !verification.verified) {
+      if (verification.checked !== true || verification.verified !== true) {
         json(res, 401, {
           error: 'unauthorized',
           message: 'retrieve signature verification failed'
@@ -792,15 +1199,8 @@ async function handleStorage(req, res, url) {
       }
     }
 
-    let selected = messages.filter(message => message.pubkey === pubkey);
-    if (namespace !== undefined) {
-      selected = selected.filter(message => message.namespace === namespace);
-    }
-    if (lastHash) {
-      const index = selected.findIndex(message => message.hash === lastHash);
-      selected = index >= 0 ? selected.slice(index + 1) : selected;
-    }
-    json(res, 200, { messages: selected });
+    const page = selectRetrievePage(pubkey, namespace, lastHash, readRetrievePage(request));
+    json(res, 200, page);
     return true;
   }
 
@@ -815,11 +1215,9 @@ async function handleStorage(req, res, url) {
     const pubkey = String(request.pubkey ?? '');
     const signature = String(request.signature ?? '');
     const timestamp = Number(request.timestamp);
-    const requestedMessages = Array.isArray(request.messages)
-      ? request.messages.map(value => String(value)).filter(Boolean)
-      : null;
+    const requestedMessages = normalizeBoundedHashes(request.messages);
 
-    if (!pubkey || !signature || !Number.isFinite(timestamp) || !requestedMessages || requestedMessages.length === 0) {
+    if (!pubkey || !signature || !isPositiveSafeInteger(timestamp) || !requestedMessages || requestedMessages.length === 0) {
       json(res, 400, {
         error: 'invalid-request',
         message: 'pubkey, messages, timestamp, and signature are required'
@@ -847,7 +1245,7 @@ async function handleStorage(req, res, url) {
       timestamp,
       messages: requestedMessages
     });
-    if (verification.checked && !verification.verified) {
+    if (verification.checked !== true || verification.verified !== true) {
       json(res, 401, {
         error: 'unauthorized',
         message: 'get_expiries signature verification failed'
@@ -883,10 +1281,10 @@ async function handleStorage(req, res, url) {
     const timestamp = Number(request.timestamp);
     const revoke = normalizeStorageSubaccountTokens(request.revoke, 'revoke', 50);
 
-    if (!pubkey || !signature || !Number.isFinite(timestamp) || !revoke.ok) {
+    if (!pubkey || !signature || !isPositiveSafeInteger(timestamp) || !revoke.ok) {
       json(res, 400, {
         error: 'invalid-request',
-        message: !revoke.ok && pubkey && signature && Number.isFinite(timestamp)
+        message: !revoke.ok && pubkey && signature && isPositiveSafeInteger(timestamp)
           ? revoke.message
           : 'pubkey, revoke, timestamp, and signature are required'
       });
@@ -910,7 +1308,7 @@ async function handleStorage(req, res, url) {
       timestamp,
       subaccounts: revoke.signatureTokens
     });
-    if (verification.checked && !verification.verified) {
+    if (verification.checked !== true || verification.verified !== true) {
       json(res, 401, {
         error: 'unauthorized',
         message: 'revoke_subaccount signature verification failed'
@@ -943,10 +1341,10 @@ async function handleStorage(req, res, url) {
     const timestamp = Number(request.timestamp);
     const unrevoke = normalizeStorageSubaccountTokens(request.unrevoke, 'unrevoke');
 
-    if (!pubkey || !signature || !Number.isFinite(timestamp) || !unrevoke.ok) {
+    if (!pubkey || !signature || !isPositiveSafeInteger(timestamp) || !unrevoke.ok) {
       json(res, 400, {
         error: 'invalid-request',
-        message: !unrevoke.ok && pubkey && signature && Number.isFinite(timestamp)
+        message: !unrevoke.ok && pubkey && signature && isPositiveSafeInteger(timestamp)
           ? unrevoke.message
           : 'pubkey, unrevoke, timestamp, and signature are required'
       });
@@ -970,7 +1368,7 @@ async function handleStorage(req, res, url) {
       timestamp,
       subaccounts: unrevoke.signatureTokens
     });
-    if (verification.checked && !verification.verified) {
+    if (verification.checked !== true || verification.verified !== true) {
       json(res, 401, {
         error: 'unauthorized',
         message: 'unrevoke_subaccount signature verification failed'
@@ -1002,7 +1400,7 @@ async function handleStorage(req, res, url) {
     const signature = String(request.signature ?? '');
     const timestamp = Number(request.timestamp);
 
-    if (!pubkey || !signature || !Number.isFinite(timestamp)) {
+    if (!pubkey || !signature || !isPositiveSafeInteger(timestamp)) {
       json(res, 400, {
         error: 'invalid-request',
         message: 'pubkey, timestamp, and signature are required'
@@ -1026,7 +1424,7 @@ async function handleStorage(req, res, url) {
       signature,
       timestamp
     });
-    if (verification.checked && !verification.verified) {
+    if (verification.checked !== true || verification.verified !== true) {
       json(res, 401, {
         error: 'unauthorized',
         message: 'revoked_subaccounts signature verification failed'
@@ -1044,11 +1442,13 @@ async function handleStorage(req, res, url) {
     incrementStat(url.pathname === '/storage/sequence' ? 'storageSequence' : 'storageBatch');
 
     const request = await bodyJson(req);
-    const requests = Array.isArray(request.requests) ? request.requests : null;
+    const requests = Array.isArray(request.requests) && request.requests.length <= maxStoragePipelineRequests
+      ? request.requests
+      : null;
     if (!requests) {
       json(res, 400, {
         error: 'invalid-request',
-        message: 'requests array is required'
+        message: `requests array is required and limited to ${maxStoragePipelineRequests} items`
       });
       return true;
     }
@@ -1103,7 +1503,7 @@ async function handleStorage(req, res, url) {
       namespace: request.namespace,
       expiry
     });
-    if (verification.checked && !verification.verified) {
+    if (verification.checked !== true || verification.verified !== true) {
       if (stateChanged) {
         await saveStorageState();
       }
@@ -1154,9 +1554,7 @@ async function handleStorage(req, res, url) {
     const request = await bodyJson(req);
     const pubkey = String(request.pubkey ?? '');
     const signature = String(request.signature ?? '');
-    const requestedMessages = Array.isArray(request.messages)
-      ? request.messages.map(value => String(value)).filter(Boolean)
-      : null;
+    const requestedMessages = normalizeBoundedHashes(request.messages);
     const expireTargets = requestedMessages ? resolveStorageExpireTargets(requestedMessages, request.expiry) : null;
     const shorten = request.shorten === true;
     const extend = request.extend === true;
@@ -1195,7 +1593,7 @@ async function handleStorage(req, res, url) {
       expiry: request.expiry,
       messages: requestedMessages
     });
-    if (verification.checked && !verification.verified) {
+    if (verification.checked !== true || verification.verified !== true) {
       if (stateChanged) {
         await saveStorageState();
       }
@@ -1296,9 +1694,7 @@ async function handleStorage(req, res, url) {
     const request = await bodyJson(req);
     const pubkey = String(request.pubkey ?? '');
     const signature = String(request.signature ?? '');
-    const requestedMessages = Array.isArray(request.messages)
-      ? request.messages.map(value => String(value)).filter(Boolean)
-      : null;
+    const requestedMessages = normalizeBoundedHashes(request.messages);
     const required = request.required === true;
 
     if (!pubkey || !signature || !requestedMessages || requestedMessages.length === 0) {
@@ -1322,7 +1718,7 @@ async function handleStorage(req, res, url) {
       requiredSubaccountAccess: storageSubaccountAccess.DELETE,
       messages: requestedMessages
     });
-    if (verification.checked && !verification.verified) {
+    if (verification.checked !== true || verification.verified !== true) {
       if (stateChanged) {
         await saveStorageState();
       }
@@ -1392,7 +1788,7 @@ async function handleStorage(req, res, url) {
     const timestamp = Number(request.timestamp);
     const namespace = normalizeDeleteAllNamespace(request.namespace);
 
-    if (!pubkey || !signature || !Number.isFinite(timestamp)) {
+    if (!pubkey || !signature || !isPositiveSafeInteger(timestamp)) {
       if (stateChanged) {
         await saveStorageState();
       }
@@ -1437,7 +1833,7 @@ async function handleStorage(req, res, url) {
       namespace,
       timestamp
     });
-    if (verification.checked && !verification.verified) {
+    if (verification.checked !== true || verification.verified !== true) {
       if (stateChanged) {
         await saveStorageState();
       }
@@ -1559,7 +1955,7 @@ async function handleStorage(req, res, url) {
       namespace,
       before
     });
-    if (verification.checked && !verification.verified) {
+    if (verification.checked !== true || verification.verified !== true) {
       if (stateChanged) {
         await saveStorageState();
       }
@@ -1656,6 +2052,14 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (url.pathname.startsWith('/storage/') && !isStorageRateLimitAllowed(req)) {
+      json(res, 429, {
+        error: 'rate-limited',
+        message: 'storage request rate limit exceeded'
+      });
+      return;
+    }
+
     if (await handleStorage(req, res, url)) {
       return;
     }
@@ -1663,6 +2067,22 @@ const server = http.createServer(async (req, res) => {
     notFound(res);
   } catch (error) {
     incrementStat('errors');
+    if (error instanceof RequestTooLargeError) {
+      json(res, 413, {
+        service: serviceName,
+        error: 'quota-exceeded',
+        message: error.message
+      });
+      return;
+    }
+    if (error instanceof MalformedJsonError) {
+      json(res, 400, {
+        service: serviceName,
+        error: 'invalid-request',
+        message: error.message
+      });
+      return;
+    }
     json(res, 500, {
       service: serviceName,
       message: error instanceof Error ? error.message : String(error)

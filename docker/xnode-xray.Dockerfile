@@ -1,12 +1,23 @@
 ARG SDK_IMAGE=mcr.microsoft.com/dotnet/sdk:10.0
 ARG RUNTIME_IMAGE=mcr.microsoft.com/dotnet/aspnet:10.0
 
-FROM ${SDK_IMAGE} AS build
+FROM --platform=$BUILDPLATFORM ${SDK_IMAGE} AS build
 ARG PROJECT
+ARG TARGETARCH
 WORKDIR /src
 COPY . .
-RUN dotnet restore "$PROJECT"
-RUN dotnet publish "$PROJECT" --configuration Release --output /app --no-restore
+RUN case "$TARGETARCH" in \
+      amd64) DOTNET_ARCH=x64 ;; \
+      arm64) DOTNET_ARCH=arm64 ;; \
+      *) echo "Unsupported target architecture: $TARGETARCH" >&2; exit 1 ;; \
+    esac \
+    && dotnet restore "$PROJECT" --arch "$DOTNET_ARCH"
+RUN case "$TARGETARCH" in \
+      amd64) DOTNET_ARCH=x64 ;; \
+      arm64) DOTNET_ARCH=arm64 ;; \
+      *) echo "Unsupported target architecture: $TARGETARCH" >&2; exit 1 ;; \
+    esac \
+    && dotnet publish "$PROJECT" --configuration Release --arch "$DOTNET_ARCH" --output /app --no-restore
 
 FROM ${RUNTIME_IMAGE} AS runtime
 ARG APP_DLL

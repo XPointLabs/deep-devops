@@ -2,7 +2,9 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { blake2b } from '../compat-services/blake2b.mjs';
+import { verifySessionSignature } from '../compat-services/storage-signatures.mjs';
 
 const port = Number(process.env.PORT ?? 8080);
 const serviceName = String(process.env.SERVICE_NAME ?? 'deep-file-service');
@@ -53,7 +55,10 @@ const stats = {
 const maxFileSizeBytes = 6_000_000;
 const maxFileSizeBase64Bytes = 8_000_000;
 const maxAvatarSizeBytes = 1_500_000;
+const maxRequestBodyBytes = 8_100_000;
+const avatarAuthorizationFreshnessMs = 5 * 60 * 1000;
 const supportedAvatarContentTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const avatarAuthorizationNonces = new Map();
 const defaultFileTtlSeconds = 21 * 24 * 60 * 60;
 let fileStateWrite = Promise.resolve();
 let avatarStateWrite = Promise.resolve();
@@ -275,10 +280,21 @@ function pathOf(req) {
   return new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
 }
 
-async function body(req) {
+async function body(req, maximumBytes = maxRequestBodyBytes) {
+  const declaredLength = Number(req.headers['content-length'] ?? 0);
+  if (Number.isFinite(declaredLength) && declaredLength > maximumBytes) {
+    throw new RequestBodyTooLargeError();
+  }
+
   const chunks = [];
+  let totalBytes = 0;
   for await (const chunk of req) {
-    chunks.push(Buffer.from(chunk));
+    const bytes = Buffer.from(chunk);
+    totalBytes += bytes.length;
+    if (totalBytes > maximumBytes) {
+      throw new RequestBodyTooLargeError();
+    }
+    chunks.push(bytes);
   }
   return Buffer.concat(chunks);
 }
@@ -286,6 +302,13 @@ async function body(req) {
 async function bodyJson(req) {
   const raw = await body(req);
   return raw.length === 0 ? {} : JSON.parse(raw.toString('utf8'));
+}
+
+class RequestBodyTooLargeError extends Error {
+  constructor() {
+    super('request-body-too-large');
+    this.name = 'RequestBodyTooLargeError';
+  }
 }
 
 function incrementStat(key, value = 1) {
@@ -318,6 +341,73 @@ function avatarOwnerFromPath(value) {
   } catch {
     return null;
   }
+}
+
+function headerValue(req, name) {
+  const raw = req.headers[name];
+  return Array.isArray(raw) ? raw[0] : raw;
+}
+
+function pruneAvatarAuthorizationNonces(now = Date.now()) {
+  for (const [key, expiresAt] of avatarAuthorizationNonces.entries()) {
+    if (expiresAt <= now) {
+      avatarAuthorizationNonces.delete(key);
+    }
+  }
+}
+
+function parseAvatarAuthorization(req, url, owner) {
+  const sessionId = String(headerValue(req, 'x-deep-session-id') ?? '');
+  const pubkeyEd25519 = String(headerValue(req, 'x-deep-ed25519') ?? '').toLowerCase();
+  const timestampText = String(headerValue(req, 'x-deep-timestamp') ?? '');
+  const nonce = String(headerValue(req, 'x-deep-nonce') ?? '').toLowerCase();
+  const contentSha256 = String(headerValue(req, 'x-deep-content-sha256') ?? '').toLowerCase();
+  const signature = String(headerValue(req, 'x-deep-signature') ?? '');
+  const timestamp = Number(timestampText);
+  const now = Date.now();
+
+  if (sessionId !== owner
+    || !/^05[0-9a-f]{64}$/.test(sessionId)
+    || !/^[0-9a-f]{64}$/.test(pubkeyEd25519)
+    || !Number.isSafeInteger(timestamp)
+    || Math.abs(now - timestamp) > avatarAuthorizationFreshnessMs
+    || !/^[0-9a-f]{32}$/.test(nonce)
+    || !/^[0-9a-f]{64}$/.test(contentSha256)
+    || signature.length === 0) {
+    return null;
+  }
+
+  const signingPayload = Buffer.from([
+    'deep-avatar-upload-v1',
+    'PUT',
+    url.pathname,
+    sessionId,
+    pubkeyEd25519,
+    timestampText,
+    nonce,
+    contentSha256
+  ].join('\n'), 'utf8');
+  if (!verifySessionSignature({
+    pubkey: sessionId,
+    pubkeyEd25519,
+    signature,
+    message: signingPayload
+  })) {
+    return null;
+  }
+
+  pruneAvatarAuthorizationNonces(now);
+  return {
+    contentSha256,
+    replayKey: `${sessionId}:${nonce}`,
+    replayExpiresAt: timestamp + avatarAuthorizationFreshnessMs
+  };
+}
+
+function digestMatches(content, expectedHex) {
+  const expected = Buffer.from(expectedHex, 'hex');
+  const actual = createHash('sha256').update(content).digest();
+  return expected.length === actual.length && timingSafeEqual(expected, actual);
 }
 
 function normalizeContentType(req) {
@@ -473,6 +563,12 @@ async function handleFile(req, res, url) {
       return true;
     }
 
+    const authorization = parseAvatarAuthorization(req, url, owner);
+    if (!authorization) {
+      json(res, 401, { status_code: 401, error: 'invalid-avatar-authorization' });
+      return true;
+    }
+
     if (pruneFileExpired()) {
       await saveFileState();
     }
@@ -492,11 +588,21 @@ async function handleFile(req, res, url) {
       return true;
     }
 
-    const content = await body(req);
+    const content = await body(req, maxAvatarSizeBytes);
     if (content.length === 0 || content.length > maxAvatarSizeBytes) {
       json(res, 413, { status_code: 413 });
       return true;
     }
+
+    if (!digestMatches(content, authorization.contentSha256)) {
+      json(res, 401, { status_code: 401, error: 'avatar-content-digest-mismatch' });
+      return true;
+    }
+    if (avatarAuthorizationNonces.has(authorization.replayKey)) {
+      json(res, 409, { status_code: 409, error: 'avatar-authorization-replayed' });
+      return true;
+    }
+    avatarAuthorizationNonces.set(authorization.replayKey, authorization.replayExpiresAt);
 
     const id = sessionFileId(content);
     const now = nowSeconds();
@@ -676,6 +782,11 @@ const server = http.createServer(async (req, res) => {
     notFound(res);
   } catch (error) {
     incrementStat('errors');
+    if (error instanceof RequestBodyTooLargeError) {
+      json(res, 413, { status_code: 413, error: error.message });
+      return;
+    }
+
     json(res, 500, {
       service: serviceName,
       message: error instanceof Error ? error.message : String(error)
