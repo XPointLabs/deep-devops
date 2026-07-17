@@ -24,6 +24,10 @@ const summaryPath = path.join(releaseDir, 'release-gate-contract-summary.json');
 const scriptNames = [
   'pinned-integration-manifest.mjs',
   'secret-scan.mjs',
+  'artifact-upload-manifest.mjs',
+  'artifact-upload-gate.mjs',
+  'workflow-upload-contracts.mjs',
+  'uat-rotation-preflight.mjs',
   'release-ci-lanes.mjs',
   'release-evidence-guards.mjs',
   'release-secret-preflight.mjs',
@@ -145,6 +149,27 @@ if (commandResults.every(result => result.passed)) {
   runNode(
     ['--test', 'scripts/secret-scan.test.mjs'],
     'secret-scan:tests'
+  );
+}
+
+if (commandResults.every(result => result.passed)) {
+  runNode(
+    ['--test', 'scripts/artifact-upload-gate.test.mjs'],
+    'artifact-upload-gate:tests'
+  );
+}
+
+if (commandResults.every(result => result.passed)) {
+  runNode(
+    ['--test', 'scripts/uat-rotation-preflight.test.mjs'],
+    'uat-rotation-preflight:tests'
+  );
+}
+
+if (commandResults.every(result => result.passed)) {
+  runNode(
+    ['scripts/workflow-upload-contracts.mjs'],
+    'artifact-upload:workflow-contracts'
   );
 }
 

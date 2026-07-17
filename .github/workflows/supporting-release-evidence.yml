@@ -130,18 +130,31 @@ jobs:
           PUSH_PROVIDER_HUAWEI_AUTH_HEADER: ${{ secrets.PUSH_PROVIDER_HUAWEI_AUTH_HEADER }}
           PUSH_PROVIDER_HUAWEI_BEARER_TOKEN: ${{ secrets.PUSH_PROVIDER_HUAWEI_BEARER_TOKEN }}
 
-      - name: Scan release secret preflight summary
+      - name: Prepare exact release secret preflight upload manifest
+        id: prepare_preflight_upload
+        if: always()
+        run: >
+          node deep-devops/scripts/artifact-upload-manifest.mjs
+          --file deep-devops/artifacts/release/release-secret-preflight-summary.json
+          --staging "${{ runner.temp }}/deep-upload/supporting-preflight"
+          --manifest "${{ runner.temp }}/deep-upload/supporting-preflight-manifest.json"
+
+      - name: Scan exact release secret preflight upload manifest
         id: preflight_secret_scan
         if: always()
-        run: node deep-devops/scripts/secret-scan.mjs --artifacts deep-devops/artifacts/release
+        run: >
+          node deep-devops/scripts/artifact-upload-gate.mjs
+          --manifest "${{ runner.temp }}/deep-upload/supporting-preflight-manifest.json"
+          --staging-root "${{ runner.temp }}/deep-upload/supporting-preflight"
+          --summary "${{ runner.temp }}/deep-upload/supporting-preflight-scan.json"
 
       - name: Upload release secret preflight summary
-        if: ${{ always() && steps.preflight_secret_scan.outcome == 'success' }}
+        if: ${{ always() && steps.prepare_preflight_upload.outcome == 'success' && steps.preflight_secret_scan.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: release-secret-preflight-${{ inputs.release_candidate }}
-          path: deep-devops/artifacts/release/release-secret-preflight-summary.json
-          if-no-files-found: ignore
+          path: ${{ runner.temp }}/deep-upload/supporting-preflight/**
+          if-no-files-found: error
 
       - name: Validate P6 evidence artifact inputs
         id: p6_inputs
@@ -311,17 +324,31 @@ jobs:
 
           node @bundleArgs
 
-      - name: Scan supporting release evidence bundle
+      - name: Prepare exact supporting evidence upload manifest
+        id: prepare_bundle_upload
+        if: ${{ always() && steps.provider_config.outcome == 'success' && steps.p6_inputs.outcome == 'success' }}
+        run: >
+          node deep-devops/scripts/artifact-upload-manifest.mjs
+          --root deep-devops/artifacts/supporting-release-evidence
+          --staging "${{ runner.temp }}/deep-upload/supporting-bundle"
+          --manifest "${{ runner.temp }}/deep-upload/supporting-bundle-manifest.json"
+
+      - name: Scan exact supporting evidence upload manifest
         id: bundle_secret_scan
         if: ${{ always() && steps.provider_config.outcome == 'success' && steps.p6_inputs.outcome == 'success' }}
-        run: node deep-devops/scripts/secret-scan.mjs --artifacts deep-devops/artifacts/supporting-release-evidence
+        run: >
+          node deep-devops/scripts/artifact-upload-gate.mjs
+          --manifest "${{ runner.temp }}/deep-upload/supporting-bundle-manifest.json"
+          --staging-root "${{ runner.temp }}/deep-upload/supporting-bundle"
+          --summary "${{ runner.temp }}/deep-upload/supporting-bundle-scan.json"
 
       - name: Upload supporting release evidence bundle
-        if: ${{ always() && steps.provider_config.outcome == 'success' && steps.p6_inputs.outcome == 'success' && steps.bundle_secret_scan.outcome == 'success' }}
+        if: ${{ always() && steps.provider_config.outcome == 'success' && steps.p6_inputs.outcome == 'success' && steps.prepare_bundle_upload.outcome == 'success' && steps.bundle_secret_scan.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.artifact_name || format('supporting-release-evidence-{0}', inputs.release_candidate) }}
-          path: deep-devops/artifacts/supporting-release-evidence/**
+          path: ${{ runner.temp }}/deep-upload/supporting-bundle/**
+          if-no-files-found: error
 
       - name: Fail if supporting evidence generation is incomplete
         if: always()
@@ -366,6 +393,9 @@ jobs:
             }
             if ('${{ steps.bundle.outcome }}' -ne 'success') {
               $failed += 'bundle'
+            }
+            if ('${{ steps.prepare_bundle_upload.outcome }}' -ne 'success') {
+              $failed += 'prepare_bundle_upload'
             }
             if ('${{ steps.bundle_secret_scan.outcome }}' -ne 'success') {
               $failed += 'bundle_secret_scan'

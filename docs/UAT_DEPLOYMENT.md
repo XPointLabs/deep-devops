@@ -167,6 +167,23 @@ Do not commit `.env.uat` or `.secrets/`. Run
 
 ## Start UAT
 
+The start remains technically blocked until the signed, public-only rotation
+receipt and protected secret-file metadata pass:
+
+```powershell
+node scripts/uat-rotation-preflight.mjs `
+  --receipt <rotation-receipt.json> `
+  --secret-dir .secrets/uat `
+  --trusted-signer-sha256 <Mr-X-public-signing-key-sha256>
+```
+
+The receipt contains only retired/replacement public identities and successful
+transaction receipt metadata. Never place an old mnemonic, private scalar,
+private key, or its hash in this receipt. The preflight cryptographically
+verifies the receipt, requires exit/revocation and replacement-registration
+transaction metadata, and rejects non-canonical, reparse-linked, broadly
+readable, or unexpected secret files without reading their contents.
+
 ```powershell
 docker compose -f docker-compose.uat.yml --env-file .env.uat up -d --build
 ```

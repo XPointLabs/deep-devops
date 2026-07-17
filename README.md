@@ -147,9 +147,12 @@ node --test .\deep-devops\tools\calls-service\calls-service-runtime.test.mjs
 node --test .\deep-devops\tools\push-service\push-service-runtime.test.mjs
 ```
 
-The artifact collector writes only a redacted Compose topology, a recursively
-redacted runtime snapshot, and a zero-finding secret-scan summary. It never
-writes resolved Compose configuration or unrestricted container logs. See
+The artifact collector writes only a redacted Compose topology, a
+schema-allowlisted runtime snapshot, and a zero-finding secret-scan summary.
+Release workflows copy an explicit machine-derived manifest into a clean
+staging directory, scan exactly those files, and upload only that directory.
+They never upload raw UI bitmaps, arbitrary logs, resolved Compose
+configuration, or unrestricted container logs. See
 `deep-devops/docs/SECRET_SAFE_EVIDENCE.md`.
 
 Local test and rehearsal scripts generate matching ephemeral node identities in

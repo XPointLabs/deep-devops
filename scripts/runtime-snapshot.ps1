@@ -103,51 +103,89 @@ function Get-Snapshot {
     return $result
 }
 
-function Protect-EvidenceValue {
+function Select-AllowlistedObject {
     param(
         [object] $Value,
-        [string] $PropertyName = ""
+        [string[]] $AllowedProperties
     )
-
-    if ($PropertyName -match '(?i)(mnemonic|seed.?phrase|private.?key|private.?seed|private.?scalar|password|passwd|secret|authorization|bearer|token|api.?key)') {
-        return "<redacted>"
-    }
 
     if ($null -eq $Value) {
         return $null
     }
 
-    if ($Value -is [string]) {
-        $safe = [string]$Value
-        $safe = $safe -replace '(?i)(https?://[^/\s:@]+):[^/\s@]{8,}@', '$1:<redacted>@'
-        $safe = $safe -replace '(?i)([?&](?:access_token|token|api_key|key|secret|signature)=)[^&#\s"]+', '$1<redacted>'
-        $safe = $safe -replace '(?i)\b(gh[pousr]_|github_pat_)[A-Za-z0-9_]{20,}\b', '<redacted>'
-        $safe = $safe -replace '(?i)-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----', '<redacted>'
-        return $safe
-    }
-
-    if ($Value -is [System.Collections.IDictionary]) {
-        $safeMap = [ordered]@{}
-        foreach ($key in $Value.Keys) {
-            $safeMap[[string]$key] = Protect-EvidenceValue -Value $Value[$key] -PropertyName ([string]$key)
+    $safeObject = [ordered]@{}
+    foreach ($name in $AllowedProperties) {
+        $property = $Value.PSObject.Properties[$name]
+        if ($null -eq $property) {
+            continue
         }
-        return $safeMap
-    }
 
-    if ($Value -is [System.Collections.IEnumerable] -and $Value -isnot [string]) {
-        return @($Value | ForEach-Object { Protect-EvidenceValue -Value $_ })
-    }
-
-    $properties = @($Value.PSObject.Properties | Where-Object { $_.MemberType -in @("NoteProperty", "Property") })
-    if ($properties.Count -gt 0 -and $Value -isnot [ValueType]) {
-        $safeObject = [ordered]@{}
-        foreach ($property in $properties) {
-            $safeObject[$property.Name] = Protect-EvidenceValue -Value $property.Value -PropertyName $property.Name
+        $propertyValue = $property.Value
+        if ($null -eq $propertyValue -or
+            $propertyValue -is [bool] -or
+            $propertyValue -is [byte] -or
+            $propertyValue -is [int16] -or
+            $propertyValue -is [int32] -or
+            $propertyValue -is [int64] -or
+            $propertyValue -is [uint16] -or
+            $propertyValue -is [uint32] -or
+            $propertyValue -is [uint64] -or
+            $propertyValue -is [double] -or
+            $propertyValue -is [decimal] -or
+            ($propertyValue -is [string] -and $propertyValue.Length -le 128 -and
+                $propertyValue -notmatch '(?i)(://|token|secret|key|signature|authorization|bearer)')) {
+            $safeObject[$name] = $propertyValue
         }
-        return $safeObject
     }
 
-    return $Value
+    return $safeObject
+}
+
+function Select-AllowlistedSnapshotBody {
+    param(
+        [string] $SnapshotName,
+        [object] $Body
+    )
+
+    $schema = switch -Regex ($SnapshotName) {
+        '^router-health-ready$' {
+            @('status', 'ready', 'healthy', 'version', 'transportMode', 'xrayReady')
+            break
+        }
+        '^registry-health-live$' {
+            @('status', 'ready', 'healthy', 'version')
+            break
+        }
+        '^registry-runtime$' {
+            @('status', 'nodeCount', 'activeNodeCount', 'healthyNodeCount', 'reconciliationIssueCount',
+                'heartbeatCount', 'registrationCount', 'snapshotLoaded', 'snapshotQuarantined')
+            break
+        }
+        '^staking-health-live$' {
+            @('status', 'ready', 'healthy', 'version')
+            break
+        }
+        '^staking-events-stats$' {
+            @('status', 'chainId', 'currentBlock', 'safeBlock', 'lastIndexedBlock', 'eventCount',
+                'activeNodeCount', 'replayCount', 'reconciliationIssueCount')
+            break
+        }
+        '^(storage|file|push|calls)-(external|product|compat)-stats$' {
+            @('status', 'uptimeSeconds', 'requests', 'errors', 'storageMessages', 'files', 'avatars',
+                'subscriptions', 'pendingSignals', 'pushDeliveries', 'pushProviderDelivered',
+                'pushProviderFailed', 'pushProviderNotConfigured')
+            break
+        }
+        '^contracts-devnet-chainid$' {
+            @('jsonrpc', 'id', 'result')
+            break
+        }
+        default {
+            throw "No runtime evidence schema is registered for snapshot '$SnapshotName'"
+        }
+    }
+
+    return Select-AllowlistedObject -Value $Body -AllowedProperties $schema
 }
 
 $backendMode = if ([string]::IsNullOrWhiteSpace($env:DEEP_BACKEND_MODE)) {
@@ -211,11 +249,31 @@ if (-not [string]::IsNullOrWhiteSpace($callsStatsUrl)) {
     $snapshots += (Get-Snapshot -Name $callsStatsName -Url $callsStatsUrl)
 }
 
-$payload = Protect-EvidenceValue -Value ([ordered]@{
+$safeSnapshots = @($snapshots | ForEach-Object {
+    $safeSnapshot = [ordered]@{
+        name = $_.name
+        method = $_.method
+        capturedAtUtc = $_.capturedAtUtc
+        ok = [bool]$_.ok
+    }
+    if ($null -ne $_.status) {
+        $safeSnapshot.status = [int]$_.status
+    }
+    if ($null -ne $_.body) {
+        $safeSnapshot.body = Select-AllowlistedSnapshotBody -SnapshotName $_.name -Body $_.body
+    }
+    if (-not $_.ok) {
+        $safeSnapshot.errorCategory = "request-failed"
+    }
+    [pscustomobject]$safeSnapshot
+})
+
+$payload = [ordered]@{
+    schemaVersion = "2.0.0"
     capturedAtUtc = [DateTimeOffset]::UtcNow.ToString("o")
     backendMode = $backendMode
-    snapshots = $snapshots
-})
+    snapshots = $safeSnapshots
+}
 
 $targetPath = Join-Path $ArtifactDir "runtime.snapshot.json"
 $payload | ConvertTo-Json -Depth 30 | Out-File -Encoding utf8 $targetPath

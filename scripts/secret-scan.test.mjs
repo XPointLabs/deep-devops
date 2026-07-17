@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { spawnSync } from 'node:child_process';
 import { scan } from './secret-scan.mjs';
+import { prepareUpload } from './artifact-upload-manifest.mjs';
 
 async function fixture() {
   const root = await mkdtemp(path.join(os.tmpdir(), 'deep-secret-scan-'));
@@ -84,3 +86,147 @@ test('fails closed for an oversized text artifact', async () => {
     await remove(root);
   }
 });
+
+test('confirmed bypass: rejects symlink or reparse content inside an upload root', async () => {
+  const root = await fixture();
+  const outside = await mkdtemp(path.join(os.tmpdir(), 'deep-secret-outside-'));
+  try {
+    const keyName = ['api', 'key'].join('_');
+    await writeFile(path.join(outside, 'hidden.txt'), `${keyName}: HiddenCanary123456789\n`);
+    await symlink(outside, path.join(root, 'artifacts', 'linked'), 'junction');
+    await assert.rejects(
+      scan({ root, includeTracked: false, artifactRoots: [path.join(root, 'artifacts')] }),
+      /symlink\/reparse/
+    );
+  } finally {
+    await remove(root);
+    await remove(outside);
+  }
+});
+
+test('confirmed bypass: blocks unknown binary rather than silently skipping it', async () => {
+  const root = await fixture();
+  try {
+    await writeFile(path.join(root, 'artifacts', 'opaque.bin'), Buffer.from([0, 1, 2, 3, 4]));
+    const result = await scan({ root, includeTracked: false, artifactRoots: [path.join(root, 'artifacts')] });
+    assert.ok(result.findings.some(item => item.ruleId === 'unknown-binary-file'));
+  } finally {
+    await remove(root);
+  }
+});
+
+test('confirmed bypass: scans credential assignments in JSON and punctuation variants without values in results', async () => {
+  const root = await fixture();
+  try {
+    const canary = 'Canary-1234567890-Value';
+    await writeFile(path.join(root, 'artifacts', 'evidence.json'), JSON.stringify({
+      'api-key': canary,
+      nested: { client_secret: canary }
+    }, null, 2));
+    await writeFile(path.join(root, 'artifacts', 'evidence.yml'), `auth.token => ${canary}\n`);
+    const result = await scan({ root, includeTracked: false, artifactRoots: [path.join(root, 'artifacts')] });
+    assert.equal(result.status, 'failed');
+    assert.ok(result.findings.filter(item => item.ruleId === 'sensitive-assignment').length >= 3);
+    assert.ok(!JSON.stringify(result).includes(canary));
+  } finally {
+    await remove(root);
+  }
+});
+
+test('confirmed bypass: scans relative archive entry names and redacts a sensitive filename', async () => {
+  const root = await fixture();
+  try {
+    const archive = storedZip('password=Canary123456789.txt', Buffer.from('safe\n'));
+    await writeFile(path.join(root, 'artifacts', 'names.zip'), archive);
+    const result = await scan({ root, includeTracked: false, artifactRoots: [path.join(root, 'artifacts')] });
+    assert.equal(result.status, 'failed');
+    assert.ok(result.findings.some(item => item.ruleId === 'sensitive-filename'));
+    assert.ok(result.findings.some(item => item.path === '<redacted-sensitive-filename>'));
+  } finally {
+    await remove(root);
+  }
+});
+
+test('recursively inspects ZIP text entries and rejects malformed archives', async () => {
+  const root = await fixture();
+  try {
+    const canary = 'ArchiveCanary123456789';
+    await writeFile(
+      path.join(root, 'artifacts', 'evidence.zip'),
+      storedZip('nested/config.env', Buffer.from(`PASSWORD=${canary}\n`))
+    );
+    let result = await scan({ root, includeTracked: false, artifactRoots: [path.join(root, 'artifacts')] });
+    assert.ok(result.findings.some(item => item.path.includes('nested/config.env')));
+    assert.ok(!JSON.stringify(result).includes(canary));
+    await writeFile(path.join(root, 'artifacts', 'evidence.zip'), Buffer.from('PK\x03\x04broken'));
+    await assert.rejects(
+      scan({ root, includeTracked: false, artifactRoots: [path.join(root, 'artifacts')] }),
+      /truncated ZIP/
+    );
+  } finally {
+    await remove(root);
+  }
+});
+
+test('manifest scan verifies the exact staged files and permits only exact approved large opaque binaries', async () => {
+  const root = await fixture();
+  try {
+    const source = path.join(root, 'source');
+    const staging = path.join(root, 'staged');
+    const manifestPath = path.join(root, 'upload-manifest.json');
+    await mkdir(source);
+    await writeFile(path.join(source, 'evidence.json'), '{"status":"ok"}\n');
+    const manifest = await prepareUpload({ roots: [source], staging, manifest: manifestPath });
+    assert.equal(manifest.fileCount, 1);
+    const result = await scan({ root, manifest: manifestPath, stagingRoot: staging });
+    assert.equal(result.status, 'ok');
+    await writeFile(path.join(staging, 'evidence.json'), '{"status":"changed"}\n');
+    await assert.rejects(scan({ root, manifest: manifestPath, stagingRoot: staging }), /changed after manifest/);
+
+    const binary = Buffer.alloc(9 * 1024 * 1024, 0);
+    await writeFile(path.join(source, 'signed.exe'), binary);
+    const digest = createSha256(binary);
+    const approvals = path.join(root, 'opaque-approvals.json');
+    await writeFile(approvals, `${JSON.stringify({
+      schemaVersion: '1.0.0',
+      files: [{
+        path: 'signed.exe',
+        size: binary.length,
+        sha256: digest,
+        extension: '.exe',
+        mediaType: 'application/octet-stream',
+        handling: 'hash-only',
+        approvedOpaqueSignedBinary: true
+      }]
+    })}\n`);
+    const approved = await prepareUpload({
+      roots: [source],
+      staging,
+      manifest: manifestPath,
+      opaqueApprovalManifest: approvals,
+      maxFileBytes: 16 * 1024 * 1024
+    });
+    assert.equal(approved.fileCount, 2);
+    const approvedResult = await scan({ root, manifest: manifestPath, stagingRoot: staging });
+    assert.equal(approvedResult.status, 'ok');
+  } finally {
+    await remove(root);
+  }
+});
+
+function storedZip(name, content) {
+  const nameBuffer = Buffer.from(name);
+  const header = Buffer.alloc(30);
+  header.writeUInt32LE(0x04034b50, 0);
+  header.writeUInt16LE(20, 4);
+  header.writeUInt16LE(0, 6);
+  header.writeUInt16LE(0, 8);
+  header.writeUInt32LE(content.length, 18);
+  header.writeUInt32LE(content.length, 22);
+  header.writeUInt16LE(nameBuffer.length, 26);
+  return Buffer.concat([header, nameBuffer, content]);
+}
+
+function createSha256(buffer) {
+  return createHash('sha256').update(buffer).digest('hex');
+}

@@ -126,25 +126,37 @@ jobs:
           }
           "value=$requested" >> $env:GITHUB_OUTPUT
 
-      - name: Scan P6 release evidence for secrets
+      - name: Prepare exact P6 release evidence manifest
+        id: prepare_upload
+        if: always()
+        run: >
+          node deep-devops/scripts/artifact-upload-manifest.mjs
+          --file deep-devops/artifacts/release/release-artifact-hydration-summary.json
+          --file deep-devops/artifacts/release/client-device-acceptance.json
+          --file deep-devops/artifacts/release/client-device-acceptance-summary.json
+          --file deep-devops/artifacts/release/ops-deployment-evidence.json
+          --file deep-devops/artifacts/release/ops-deployment-evidence-summary.json
+          --file deep-devops/artifacts/release/security-audit-signoff.json
+          --file deep-devops/artifacts/release/security-audit-signoff-summary.json
+          --file deep-devops/artifacts/release/ga-decision.json
+          --file deep-devops/artifacts/release/ga-decision-summary.json
+          --staging "${{ runner.temp }}/deep-upload/p6"
+          --manifest "${{ runner.temp }}/deep-upload/p6-manifest.json"
+
+      - name: Scan exact P6 release evidence manifest
         id: secret_scan
         if: always()
-        run: node deep-devops/scripts/secret-scan.mjs --artifacts deep-devops/artifacts/release
+        run: >
+          node deep-devops/scripts/artifact-upload-gate.mjs
+          --manifest "${{ runner.temp }}/deep-upload/p6-manifest.json"
+          --staging-root "${{ runner.temp }}/deep-upload/p6"
+          --summary "${{ runner.temp }}/deep-upload/p6-scan.json"
 
       - name: Upload P6 release evidence
-        if: ${{ always() && steps.secret_scan.outcome == 'success' }}
+        if: ${{ always() && steps.prepare_upload.outcome == 'success' && steps.secret_scan.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.artifact_name.outputs.value }}
           if-no-files-found: error
           retention-days: 30
-          path: |
-            deep-devops/artifacts/release/release-artifact-hydration-summary.json
-            deep-devops/artifacts/release/client-device-acceptance.json
-            deep-devops/artifacts/release/client-device-acceptance-summary.json
-            deep-devops/artifacts/release/ops-deployment-evidence.json
-            deep-devops/artifacts/release/ops-deployment-evidence-summary.json
-            deep-devops/artifacts/release/security-audit-signoff.json
-            deep-devops/artifacts/release/security-audit-signoff-summary.json
-            deep-devops/artifacts/release/ga-decision.json
-            deep-devops/artifacts/release/ga-decision-summary.json
+          path: ${{ runner.temp }}/deep-upload/p6/**

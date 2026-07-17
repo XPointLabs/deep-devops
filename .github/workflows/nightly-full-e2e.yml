@@ -53,14 +53,27 @@ jobs:
         shell: pwsh
         run: ./deep-devops/scripts/test-env.ps1 -Suite full -BackendMode external -ManagedExternalProfile backend-external -RequireRouterNoMock
 
-      - name: Scan nightly evidence for secrets
+      - name: Prepare exact nightly artifact manifest
+        id: prepare_upload
+        run: >
+          node deep-devops/scripts/artifact-upload-manifest.mjs
+          --root deep-devops/artifacts
+          --staging "${{ runner.temp }}/deep-upload/nightly"
+          --manifest "${{ runner.temp }}/deep-upload/nightly-manifest.json"
+
+      - name: Scan exact nightly artifact manifest
         id: secret_scan
         if: always()
-        run: node deep-devops/scripts/secret-scan.mjs --artifacts deep-devops/artifacts
+        run: >
+          node deep-devops/scripts/artifact-upload-gate.mjs
+          --manifest "${{ runner.temp }}/deep-upload/nightly-manifest.json"
+          --staging-root "${{ runner.temp }}/deep-upload/nightly"
+          --summary "${{ runner.temp }}/deep-upload/nightly-scan.json"
 
       - name: Upload redacted nightly evidence
-        if: ${{ always() && steps.secret_scan.outcome == 'success' }}
+        if: ${{ always() && steps.prepare_upload.outcome == 'success' && steps.secret_scan.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: nightly-e2e-artifacts
-          path: deep-devops/artifacts/**
+          path: ${{ runner.temp }}/deep-upload/nightly/**
+          if-no-files-found: error

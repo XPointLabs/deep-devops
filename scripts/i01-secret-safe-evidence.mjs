@@ -1,4 +1,5 @@
 import { mkdir, writeFile } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { scan as scanSecrets } from './secret-scan.mjs';
@@ -23,6 +24,32 @@ function relativeOutput(filePath) {
   return relative.split(path.sep).join('/');
 }
 
+function runMachineCheck(args, label) {
+  const result = spawnSync(process.execPath, args, {
+    cwd: repositoryRoot,
+    encoding: 'utf8',
+    windowsHide: true,
+    timeout: 120_000
+  });
+  if (result.error || result.status !== 0) {
+    throw new Error(`${label} failed closed`);
+  }
+  return `${result.stdout}\n${result.stderr}`;
+}
+
+function tapCounters(output) {
+  const value = name => Number.parseInt(output.match(new RegExp(`^# ${name} (\\d+)$`, 'm'))?.[1] ?? '', 10);
+  const counters = {
+    tests: value('tests'),
+    passed: value('pass'),
+    failed: value('fail')
+  };
+  if (Object.values(counters).some(item => !Number.isSafeInteger(item))) {
+    throw new Error('unable to derive adversarial test counters');
+  }
+  return counters;
+}
+
 export async function main(argv = process.argv.slice(2)) {
   const outputDir = path.resolve(argumentValue(
     argv,
@@ -39,10 +66,29 @@ export async function main(argv = process.argv.slice(2)) {
   if (initialScan.status !== 'ok') {
     throw new Error(`secret scan has ${initialScan.findingCount} finding(s)`);
   }
+  const adversarialCounters = tapCounters(runMachineCheck(
+    ['--test', '--test-reporter=tap', 'scripts/secret-scan.test.mjs'],
+    'secret scanner adversarial tests'
+  ));
+  const uploadGateCounters = tapCounters(runMachineCheck(
+    ['--test', '--test-reporter=tap', 'scripts/artifact-upload-gate.test.mjs'],
+    'artifact upload fail-closed tests'
+  ));
+  const workflowOutput = runMachineCheck(
+    ['scripts/workflow-upload-contracts.mjs'],
+    'workflow upload contracts'
+  );
+  const stagedUploadCount = Number.parseInt(
+    workflowOutput.match(/passed \((\d+) exact staged uploads\)/)?.[1] ?? '',
+    10
+  );
+  if (!Number.isSafeInteger(stagedUploadCount)) {
+    throw new Error('unable to derive staged upload workflow count');
+  }
 
   const evidence = {
     schemaVersion: '1.0.0',
-    workPackage: 'I01-SEC',
+    workPackage: 'I01A.1-SEC-HARDENING',
     status: 'blocked-pending-credential-rotation',
     codeStatus: 'ready-for-review',
     programRevisionSha256: PROGRAM_REVISION_SHA,
@@ -51,19 +97,22 @@ export async function main(argv = process.argv.slice(2)) {
       secretScan: {
         status: initialScan.status,
         scannedFiles: initialScan.scannedFiles,
+        scannedTextEntries: initialScan.scannedTextEntries,
+        archiveEntriesInspected: initialScan.archiveEntriesInspected,
         findingCount: initialScan.findingCount
       },
-      secretCanaryTests: 4,
-      releaseGateContractCommands: 35,
-      composeQuietValidations: 2,
-      productionReadinessExpectedMissingEvidenceBlockers: 10
+      adversarialTests: adversarialCounters,
+      uploadFailClosedTests: uploadGateCounters,
+      exactStagedArtifactUploads: stagedUploadCount
     },
     controls: [
       'tracked-secret-literals-removed',
       'uat-secret-env-files',
       'ephemeral-local-node-identities',
       'redacted-allowlisted-evidence',
-      'fail-closed-pre-upload-secret-scan'
+      'schema-allowlisted-runtime-evidence',
+      'fail-closed-exact-manifest-pre-upload-secret-scan',
+      'signed-public-fingerprint-uat-rotation-preflight'
     ],
     blockers: [
       'Mr. X must rotate the retired UAT deployer and all three Ed25519/BLS identities.',
@@ -77,7 +126,7 @@ export async function main(argv = process.argv.slice(2)) {
   };
   const handoff = {
     schemaVersion: '1.0.0',
-    workPackage: 'I01-SEC',
+    workPackage: 'I01A.1-SEC-HARDENING',
     status: 'blocked',
     codeStatus: 'ready-for-review',
     accountableHuman: 'Mr. X',
@@ -102,7 +151,7 @@ export async function main(argv = process.argv.slice(2)) {
   if (finalScan.status !== 'ok') {
     throw new Error(`generated I01 artifacts failed secret scan with ${finalScan.findingCount} finding(s)`);
   }
-  console.log('I01-SEC evidence and handoff generated; UAT remains blocked pending irreversible rotation.');
+  console.log('I01A.1 security-hardening evidence generated; UAT remains blocked pending irreversible rotation.');
   return { evidence, handoff };
 }
 

@@ -78,19 +78,31 @@ jobs:
           node --test ./tools/push-service/push-service-runtime.test.mjs
           node --test ./tools/calls-service/calls-service-runtime.test.mjs
 
-      - name: Scan failed-test workspace before artifact upload
+      - name: Prepare exact failed-test artifact manifest
+        id: prepare_unit_upload
+        if: failure()
+        run: >
+          node deep-devops/scripts/artifact-upload-manifest.mjs
+          --root deep-devops/artifacts
+          --staging "${{ runner.temp }}/deep-upload/unit"
+          --manifest "${{ runner.temp }}/deep-upload/unit-manifest.json"
+
+      - name: Scan exact failed-test artifact manifest
         id: unit_secret_scan
         if: failure()
-        run: node deep-devops/scripts/secret-scan.mjs --root . --no-tracked --path . --summary deep-devops/artifacts/security/unit-upload-secret-scan.json
+        run: >
+          node deep-devops/scripts/artifact-upload-gate.mjs
+          --manifest "${{ runner.temp }}/deep-upload/unit-manifest.json"
+          --staging-root "${{ runner.temp }}/deep-upload/unit"
+          --summary deep-devops/artifacts/security/unit-upload-secret-scan.json
 
       - name: Upload unit artifacts
-        if: ${{ failure() && steps.unit_secret_scan.outcome == 'success' }}
+        if: ${{ failure() && steps.prepare_unit_upload.outcome == 'success' && steps.unit_secret_scan.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: unit-artifacts
-          path: |
-            **/TestResults/**
-            **/artifacts/**
+          path: ${{ runner.temp }}/deep-upload/unit/**
+          if-no-files-found: error
 
   security-gate:
     runs-on: ubuntu-latest
@@ -168,17 +180,31 @@ jobs:
       - name: Run security gate
         run: node deep-devops/scripts/security-gate.mjs
 
-      - name: Scan security artifacts for secrets
+      - name: Prepare exact security artifact manifest
+        id: prepare_security_upload
+        if: always()
+        run: >
+          node deep-devops/scripts/artifact-upload-manifest.mjs
+          --root deep-devops/artifacts/security
+          --staging "${{ runner.temp }}/deep-upload/security"
+          --manifest "${{ runner.temp }}/deep-upload/security-manifest.json"
+
+      - name: Scan exact security artifact manifest
         id: security_secret_scan
         if: always()
-        run: node deep-devops/scripts/secret-scan.mjs --artifacts deep-devops/artifacts/security
+        run: >
+          node deep-devops/scripts/artifact-upload-gate.mjs
+          --manifest "${{ runner.temp }}/deep-upload/security-manifest.json"
+          --staging-root "${{ runner.temp }}/deep-upload/security"
+          --summary "${{ runner.temp }}/deep-upload/security-scan.json"
 
       - name: Upload security artifacts
-        if: ${{ always() && steps.security_secret_scan.outcome == 'success' }}
+        if: ${{ always() && steps.prepare_security_upload.outcome == 'success' && steps.security_secret_scan.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: security-gate-artifacts
-          path: deep-devops/artifacts/security/**
+          path: ${{ runner.temp }}/deep-upload/security/**
+          if-no-files-found: error
 
   release-gate-contracts:
     runs-on: ubuntu-latest
@@ -225,19 +251,28 @@ jobs:
         env:
           DEEP_RELEASE_CONTRACT_ARTIFACT_ROOT: ${{ runner.temp }}/deep-release-gate-contracts
 
-      - name: Scan release gate contract artifacts for secrets
+      - name: Prepare exact release gate contract artifact manifest
+        id: prepare_release_contract_upload
+        if: always()
+        run: >
+          node deep-devops/scripts/artifact-upload-manifest.mjs
+          --root "${{ runner.temp }}/deep-release-gate-contracts"
+          --staging "${{ runner.temp }}/deep-upload/release-contracts"
+          --manifest "${{ runner.temp }}/deep-upload/release-contracts-manifest.json"
+
+      - name: Scan exact release gate contract artifact manifest
         id: release_contract_secret_scan
         if: always()
         run: >
-          node deep-devops/scripts/secret-scan.mjs
-          --root "${{ runner.temp }}"
-          --no-tracked
-          --artifacts "${{ runner.temp }}/deep-release-gate-contracts"
+          node deep-devops/scripts/artifact-upload-gate.mjs
+          --manifest "${{ runner.temp }}/deep-upload/release-contracts-manifest.json"
+          --staging-root "${{ runner.temp }}/deep-upload/release-contracts"
           --summary "${{ runner.temp }}/deep-release-gate-contracts/security/pre-upload-secret-scan.json"
 
       - name: Upload release gate contract artifacts
-        if: ${{ always() && steps.release_contract_secret_scan.outcome == 'success' }}
+        if: ${{ always() && steps.prepare_release_contract_upload.outcome == 'success' && steps.release_contract_secret_scan.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: release-gate-contract-artifacts
-          path: ${{ runner.temp }}/deep-release-gate-contracts/**
+          path: ${{ runner.temp }}/deep-upload/release-contracts/**
+          if-no-files-found: error

@@ -57,14 +57,27 @@ jobs:
         shell: pwsh
         run: ./deep-devops/scripts/multi-node-rehearsal.ps1
 
-      - name: Scan integration artifacts for secrets
+      - name: Prepare exact integration artifact manifest
+        id: prepare_upload
+        run: >
+          node deep-devops/scripts/artifact-upload-manifest.mjs
+          --root deep-devops/artifacts
+          --staging "${{ runner.temp }}/deep-upload/integration"
+          --manifest "${{ runner.temp }}/deep-upload/integration-manifest.json"
+
+      - name: Scan exact integration artifact manifest
         id: secret_scan
         if: always()
-        run: node deep-devops/scripts/secret-scan.mjs --artifacts deep-devops/artifacts
+        run: >
+          node deep-devops/scripts/artifact-upload-gate.mjs
+          --manifest "${{ runner.temp }}/deep-upload/integration-manifest.json"
+          --staging-root "${{ runner.temp }}/deep-upload/integration"
+          --summary "${{ runner.temp }}/deep-upload/integration-scan.json"
 
       - name: Upload integration artifacts
-        if: ${{ always() && steps.secret_scan.outcome == 'success' }}
+        if: ${{ always() && steps.prepare_upload.outcome == 'success' && steps.secret_scan.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: integration-artifacts
-          path: deep-devops/artifacts/**
+          path: ${{ runner.temp }}/deep-upload/integration/**
+          if-no-files-found: error

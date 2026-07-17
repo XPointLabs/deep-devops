@@ -35,9 +35,13 @@ Mr. X must complete these steps in order:
 7. Register the new public identities, verify proof of possession and on-chain
    membership, then validate registry/router mapping without printing private
    values.
-8. Run `node scripts/secret-scan.mjs`. Reactivate UAT only after it reports zero
-   findings and Mr. X records the rotation transaction IDs and new public IDs
-   in a separate secret-free evidence manifest.
+8. Create a signed rotation receipt that binds the checked-in retired public
+   fingerprint manifest, replacement public identities, and successful
+   on-chain transaction receipt metadata. Run
+   `node scripts/uat-rotation-preflight.mjs --receipt <receipt.json> --secret-dir
+   .secrets/uat --trusted-signer-sha256 <Mr-X-public-signing-key-sha256>`.
+9. Run `node scripts/secret-scan.mjs`. Reactivate UAT only after both gates
+   report zero findings. Neither gate reads or records old secret values.
 
 This rotation is intentionally irreversible. Rollback means returning to a
 stopped UAT stack and removing the newly created local secret files; it never
@@ -67,7 +71,7 @@ mode. Backups must be encrypted and managed by the same secret owner.
 
 - `compose.topology.redacted.json`, containing service/name/state/health and
   public port numbers;
-- `runtime.snapshot.json`, with sensitive property names recursively redacted;
+- `runtime.snapshot.json`, projected through a per-endpoint schema allowlist;
 - `security/secret-scan-summary.json`, containing rule IDs and relative paths
   only.
 
@@ -76,15 +80,31 @@ container logs. `compose.resolved.yml`, `compose.log`, private key files, local
 environment files, crash dumps, databases, and shell transcripts are forbidden
 release artifacts.
 
-Before every upload, run:
+Every CI upload is prepared and scanned as an exact immutable set:
 
 ```powershell
-node .\scripts\secret-scan.mjs
+node .\scripts\artifact-upload-manifest.mjs `
+  --root .\artifacts\release `
+  --staging <clean-staging-directory> `
+  --manifest <upload-manifest.json>
+node .\scripts\artifact-upload-gate.mjs `
+  --manifest <upload-manifest.json> `
+  --staging-root <clean-staging-directory> `
+  --summary <fresh-scan-summary.json>
 ```
 
-The scanner covers tracked files and the artifact tree, reports no matched
-value, treats oversized text files as unscannable, and rejects forbidden raw
-artifact names. Any finding blocks bundling and upload.
+The manifest records relative path, media type, extension, size, and SHA256 for
+every subsequently uploaded file. The scanner revalidates those fields and
+fails if a file changed. Scanner crash, timeout, non-zero exit, missing
+manifest/result, or staging mismatch prevents upload.
+
+The scanner checks relative file and archive-entry names, treats unknown
+binary/non-text input as blocking, and recursively inspects ZIP, TAR, GZ, APK,
+AAB, and MSIX entries with traversal, expanded-size, entry-count, and depth
+limits. Raw UI bitmaps and arbitrary logs are never uploadable by default.
+Opaque signed executable binaries require a separate explicit approval
+manifest with exact extension, MIME type, size, SHA256, and
+`approvedOpaqueSignedBinary: true`; their contents are handled hash-only.
 
 ## No-secret rollback
 
