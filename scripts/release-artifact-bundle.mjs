@@ -1,6 +1,7 @@
 ﻿import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { scan as scanSecrets } from './secret-scan.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const devopsRoot = path.resolve(__dirname, '..');
@@ -165,6 +166,16 @@ async function readJson(filePath) {
 
 addCheck('release-candidate:present', hasText(expectedReleaseCandidate), {
   observed: expectedReleaseCandidate ?? null
+});
+
+const secretScan = await scanSecrets({
+  root: devopsRoot,
+  artifactRoots: [artifactRoot]
+});
+addCheck('secret-scan:no-findings', secretScan.status === 'ok', {
+  scannedFiles: secretScan.scannedFiles,
+  findingCount: secretScan.findingCount,
+  findings: secretScan.findings
 });
 
 const artifacts = [];

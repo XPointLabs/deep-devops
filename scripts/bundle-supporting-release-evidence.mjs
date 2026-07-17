@@ -1,6 +1,7 @@
 ﻿import { access, copyFile, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { scan as scanSecrets } from './secret-scan.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const devopsRoot = path.resolve(__dirname, '..');
@@ -89,6 +90,18 @@ async function fileExists(filePath) {
   }
 }
 
+const sourceSecretScan = await scanSecrets({
+  root: devopsRoot,
+  includeTracked: false,
+  artifactRoots: [],
+  paths: supportingArtifacts.map(artifact => artifact.source)
+});
+addCheck('bundle:source-secret-scan', sourceSecretScan.status === 'ok', {
+  scannedFiles: sourceSecretScan.scannedFiles,
+  findingCount: sourceSecretScan.findingCount,
+  findings: sourceSecretScan.findings
+});
+
 const copiedArtifacts = [];
 for (const artifact of supportingArtifacts) {
   const exists = await fileExists(artifact.source);
@@ -134,6 +147,17 @@ if (requireAll) {
     expected: supportingArtifacts.length
   });
 }
+
+const outputSecretScan = await scanSecrets({
+  root: devopsRoot,
+  includeTracked: false,
+  artifactRoots: [outputDir]
+});
+addCheck('bundle:output-secret-scan', outputSecretScan.status === 'ok', {
+  scannedFiles: outputSecretScan.scannedFiles,
+  findingCount: outputSecretScan.findingCount,
+  findings: outputSecretScan.findings
+});
 
 const failedChecks = checks.filter(check => !check.passed).map(check => check.name);
 const summary = {

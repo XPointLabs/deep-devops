@@ -23,6 +23,7 @@ const summaryPath = path.join(releaseDir, 'release-gate-contract-summary.json');
 
 const scriptNames = [
   'pinned-integration-manifest.mjs',
+  'secret-scan.mjs',
   'release-ci-lanes.mjs',
   'release-evidence-guards.mjs',
   'release-secret-preflight.mjs',
@@ -138,6 +139,23 @@ if (commandResults.every(result => result.passed)) {
     ['--test', 'scripts/pinned-integration-manifest.test.mjs'],
     'pinned-integration-manifest:tests'
   );
+}
+
+if (commandResults.every(result => result.passed)) {
+  runNode(
+    ['--test', 'scripts/secret-scan.test.mjs'],
+    'secret-scan:tests'
+  );
+}
+
+if (commandResults.every(result => result.passed)) {
+  runNode([
+    'scripts/secret-scan.mjs',
+    '--artifacts',
+    artifactRoot,
+    '--summary',
+    path.join(securityDir, 'secret-scan-summary.json')
+  ], 'secret-scan:tracked-and-artifacts');
 }
 
 if (commandResults.every(result => result.passed)) {

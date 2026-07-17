@@ -218,8 +218,13 @@ jobs:
           DEEP_RELEASE_CANDIDATE: ${{ inputs.release_candidate }}
           XNODE_C3_ARTIFACT: ${{ github.workspace }}/deep-devops/artifacts/router-c3-latest.json
 
-      - name: Upload production readiness artifacts
+      - name: Scan production readiness artifacts for secrets
+        id: secret_scan
         if: always()
+        run: node deep-devops/scripts/secret-scan.mjs --artifacts deep-devops/artifacts/release
+
+      - name: Upload production readiness artifacts
+        if: ${{ always() && steps.secret_scan.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: production-readiness-artifacts

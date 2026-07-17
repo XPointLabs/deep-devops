@@ -1,4 +1,4 @@
-﻿name: deep-uat
+name: deep-uat
 
 services:
   staking-backend:
@@ -83,13 +83,14 @@ services:
     build:
       context: ${DEEP_DEVOPS_DIR:-.}
       dockerfile: docker/uat-reward-keeper.Dockerfile
+    env_file:
+      - ${UAT_REWARD_KEEPER_SECRET_ENV_FILE:?set UAT_REWARD_KEEPER_SECRET_ENV_FILE in .env.uat}
     environment:
       ARB_SEPOLIA_RPC_URL: ${ARB_SEPOLIA_RPC_URL:?set ARB_SEPOLIA_RPC_URL in .env.uat}
       ARB_SEPOLIA_FALLBACK_RPC_URLS: ${ARB_SEPOLIA_FALLBACK_RPC_URLS:-https://sepolia-rollup.arbitrum.io/rpc}
       XPNT_TOKEN_ADDRESS: ${XPNT_TOKEN_ADDRESS:?set XPNT_TOKEN_ADDRESS in .env.uat}
       SERVICE_NODE_REWARDS_ADDRESS: ${SERVICE_NODE_REWARDS_ADDRESS:?set SERVICE_NODE_REWARDS_ADDRESS in .env.uat}
       REWARD_RATE_POOL_ADDRESS: ${REWARD_RATE_POOL_ADDRESS:?set REWARD_RATE_POOL_ADDRESS in .env.uat}
-      UAT_DEPLOYER_MNEMONIC: ${UAT_DEPLOYER_MNEMONIC:?set UAT_DEPLOYER_MNEMONIC in .env.uat}
       CHECKPOINT_INTERVAL_MS: ${UAT_REWARD_CHECKPOINT_INTERVAL_MS:-300000}
       MIN_RELEASE_ATOMIC: ${UAT_REWARD_CHECKPOINT_MIN_RELEASE_ATOMIC:-1000000000}
       ABI_DIR: /abis
@@ -173,6 +174,8 @@ services:
         PROJECT: src/XNode/XNode.csproj
         APP_DLL: XNode.dll
         XRAY_VERSION: ${XNODE_XRAY_VERSION:-v26.3.27}
+    env_file:
+      - ${UAT_NODE_1_SECRET_ENV_FILE:?set UAT_NODE_1_SECRET_ENV_FILE in .env.uat}
     environment: &router-common-env
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://0.0.0.0:8080;http://0.0.0.0:8081
@@ -180,7 +183,6 @@ services:
       Node__PeerRpcListenUrl: http://0.0.0.0:8081
       Node__DataDirectory: /var/lib/xnode-node-1
       Node__RouterId: ${UAT_NODE_1_ED25519_PUBLIC_KEY:?set UAT_NODE_1_ED25519_PUBLIC_KEY in .env.uat}
-      Node__Ed25519PrivateKey: ${UAT_NODE_1_ED25519_PRIVATE_KEY:?set UAT_NODE_1_ED25519_PRIVATE_KEY in .env.uat}
       Node__Network: mainnet
       Node__PublicHost: ${DEEP_LAN_IP:-192.168.1.44}
       Node__PublicIp: ${DEEP_LAN_IP:-192.168.1.44}
@@ -211,7 +213,6 @@ services:
       RegistryRegistration__StakeAtomic: ${STAKING_REQUIREMENT_ATOMIC:-120000000000}
       RegistryRegistration__ChainId: ${ARB_SEPOLIA_CHAIN_ID:-421614}
       RegistryRegistration__Ed25519PublicKey: ${UAT_NODE_1_ED25519_PUBLIC_KEY:?set UAT_NODE_1_ED25519_PUBLIC_KEY in .env.uat}
-      RegistryRegistration__BlsPrivateKey: ${UAT_NODE_1_BLS_PRIVATE_KEY:?set UAT_NODE_1_BLS_PRIVATE_KEY in .env.uat}
       RegistryRegistration__EthereumRpcUrl: ${ARB_SEPOLIA_RPC_URL:?set ARB_SEPOLIA_RPC_URL in .env.uat}
       RegistryRegistration__EthereumFallbackRpcUrls: ${ARB_SEPOLIA_FALLBACK_RPC_URLS:-https://sepolia-rollup.arbitrum.io/rpc}
       RegistryRegistration__ServiceNodeRewardsAddress: ${SERVICE_NODE_REWARDS_ADDRESS:?set SERVICE_NODE_REWARDS_ADDRESS in .env.uat}
@@ -238,17 +239,17 @@ services:
 
   xnode-2:
     build: *router-build
+    env_file:
+      - ${UAT_NODE_2_SECRET_ENV_FILE:?set UAT_NODE_2_SECRET_ENV_FILE in .env.uat}
     environment:
       <<: *router-common-env
       Node__DataDirectory: /var/lib/xnode-node-2
       Node__RouterId: ${UAT_NODE_2_ED25519_PUBLIC_KEY:?set UAT_NODE_2_ED25519_PUBLIC_KEY in .env.uat}
-      Node__Ed25519PrivateKey: ${UAT_NODE_2_ED25519_PRIVATE_KEY:?set UAT_NODE_2_ED25519_PRIVATE_KEY in .env.uat}
       Node__PublicPort: "20444"
       Node__PublicPeerRpcPort: "22022"
       Node__PublicPeerRpcEndpoint: http://${DEEP_LAN_IP:-192.168.1.44}:22022/api/peer/onion
       Vless__PublicPort: "20444"
       RegistryRegistration__Ed25519PublicKey: ${UAT_NODE_2_ED25519_PUBLIC_KEY:?set UAT_NODE_2_ED25519_PUBLIC_KEY in .env.uat}
-      RegistryRegistration__BlsPrivateKey: ${UAT_NODE_2_BLS_PRIVATE_KEY:?set UAT_NODE_2_BLS_PRIVATE_KEY in .env.uat}
     ports:
       - "29282:8080"
       - "22022:8081"
@@ -262,17 +263,17 @@ services:
 
   xnode-3:
     build: *router-build
+    env_file:
+      - ${UAT_NODE_3_SECRET_ENV_FILE:?set UAT_NODE_3_SECRET_ENV_FILE in .env.uat}
     environment:
       <<: *router-common-env
       Node__DataDirectory: /var/lib/xnode-node-3
       Node__RouterId: ${UAT_NODE_3_ED25519_PUBLIC_KEY:?set UAT_NODE_3_ED25519_PUBLIC_KEY in .env.uat}
-      Node__Ed25519PrivateKey: ${UAT_NODE_3_ED25519_PRIVATE_KEY:?set UAT_NODE_3_ED25519_PRIVATE_KEY in .env.uat}
       Node__PublicPort: "20445"
       Node__PublicPeerRpcPort: "22023"
       Node__PublicPeerRpcEndpoint: http://${DEEP_LAN_IP:-192.168.1.44}:22023/api/peer/onion
       Vless__PublicPort: "20445"
       RegistryRegistration__Ed25519PublicKey: ${UAT_NODE_3_ED25519_PUBLIC_KEY:?set UAT_NODE_3_ED25519_PUBLIC_KEY in .env.uat}
-      RegistryRegistration__BlsPrivateKey: ${UAT_NODE_3_BLS_PRIVATE_KEY:?set UAT_NODE_3_BLS_PRIVATE_KEY in .env.uat}
     ports:
       - "29283:8080"
       - "22023:8081"

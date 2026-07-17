@@ -78,8 +78,13 @@ jobs:
           node --test ./tools/push-service/push-service-runtime.test.mjs
           node --test ./tools/calls-service/calls-service-runtime.test.mjs
 
-      - name: Upload unit artifacts
+      - name: Scan failed-test workspace before artifact upload
+        id: unit_secret_scan
         if: failure()
+        run: node deep-devops/scripts/secret-scan.mjs --root . --no-tracked --path . --summary deep-devops/artifacts/security/unit-upload-secret-scan.json
+
+      - name: Upload unit artifacts
+        if: ${{ failure() && steps.unit_secret_scan.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: unit-artifacts
@@ -163,8 +168,13 @@ jobs:
       - name: Run security gate
         run: node deep-devops/scripts/security-gate.mjs
 
-      - name: Upload security artifacts
+      - name: Scan security artifacts for secrets
+        id: security_secret_scan
         if: always()
+        run: node deep-devops/scripts/secret-scan.mjs --artifacts deep-devops/artifacts/security
+
+      - name: Upload security artifacts
+        if: ${{ always() && steps.security_secret_scan.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: security-gate-artifacts
@@ -215,8 +225,18 @@ jobs:
         env:
           DEEP_RELEASE_CONTRACT_ARTIFACT_ROOT: ${{ runner.temp }}/deep-release-gate-contracts
 
-      - name: Upload release gate contract artifacts
+      - name: Scan release gate contract artifacts for secrets
+        id: release_contract_secret_scan
         if: always()
+        run: >
+          node deep-devops/scripts/secret-scan.mjs
+          --root "${{ runner.temp }}"
+          --no-tracked
+          --artifacts "${{ runner.temp }}/deep-release-gate-contracts"
+          --summary "${{ runner.temp }}/deep-release-gate-contracts/security/pre-upload-secret-scan.json"
+
+      - name: Upload release gate contract artifacts
+        if: ${{ always() && steps.release_contract_secret_scan.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: release-gate-contract-artifacts

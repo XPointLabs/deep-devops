@@ -8,5 +8,9 @@ artifacts/packages/survival-v2.0.0/*
 .env
 .env.uat
 .env.*.local
+.secrets/
+*.resolved.yml
+*.resolved.yaml
+compose.log
 **/bin/
 **/obj/

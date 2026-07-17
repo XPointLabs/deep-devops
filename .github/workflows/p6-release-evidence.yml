@@ -126,8 +126,13 @@ jobs:
           }
           "value=$requested" >> $env:GITHUB_OUTPUT
 
-      - name: Upload P6 release evidence
+      - name: Scan P6 release evidence for secrets
+        id: secret_scan
         if: always()
+        run: node deep-devops/scripts/secret-scan.mjs --artifacts deep-devops/artifacts/release
+
+      - name: Upload P6 release evidence
+        if: ${{ always() && steps.secret_scan.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.artifact_name.outputs.value }}

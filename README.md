@@ -147,6 +147,16 @@ node --test .\deep-devops\tools\calls-service\calls-service-runtime.test.mjs
 node --test .\deep-devops\tools\push-service\push-service-runtime.test.mjs
 ```
 
+The artifact collector writes only a redacted Compose topology, a recursively
+redacted runtime snapshot, and a zero-finding secret-scan summary. It never
+writes resolved Compose configuration or unrestricted container logs. See
+`deep-devops/docs/SECRET_SAFE_EVIDENCE.md`.
+
+Local test and rehearsal scripts generate matching ephemeral node identities in
+memory and clear the generated process variables during cleanup. For a direct
+manual Compose invocation, copy `.env.example` to the ignored `.env` and
+replace every placeholder with a fresh local-only value.
+
 Host ports:
 
 - registry: `http://127.0.0.1:18080`

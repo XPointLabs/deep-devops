@@ -53,8 +53,13 @@ jobs:
         shell: pwsh
         run: ./deep-devops/scripts/test-env.ps1 -Suite full -BackendMode external -ManagedExternalProfile backend-external -RequireRouterNoMock
 
-      - name: Upload logs and configs
+      - name: Scan nightly evidence for secrets
+        id: secret_scan
         if: always()
+        run: node deep-devops/scripts/secret-scan.mjs --artifacts deep-devops/artifacts
+
+      - name: Upload redacted nightly evidence
+        if: ${{ always() && steps.secret_scan.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: nightly-e2e-artifacts

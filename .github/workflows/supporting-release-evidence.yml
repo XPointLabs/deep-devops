@@ -130,8 +130,13 @@ jobs:
           PUSH_PROVIDER_HUAWEI_AUTH_HEADER: ${{ secrets.PUSH_PROVIDER_HUAWEI_AUTH_HEADER }}
           PUSH_PROVIDER_HUAWEI_BEARER_TOKEN: ${{ secrets.PUSH_PROVIDER_HUAWEI_BEARER_TOKEN }}
 
-      - name: Upload release secret preflight summary
+      - name: Scan release secret preflight summary
+        id: preflight_secret_scan
         if: always()
+        run: node deep-devops/scripts/secret-scan.mjs --artifacts deep-devops/artifacts/release
+
+      - name: Upload release secret preflight summary
+        if: ${{ always() && steps.preflight_secret_scan.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: release-secret-preflight-${{ inputs.release_candidate }}
@@ -306,8 +311,13 @@ jobs:
 
           node @bundleArgs
 
-      - name: Upload supporting release evidence bundle
+      - name: Scan supporting release evidence bundle
+        id: bundle_secret_scan
         if: ${{ always() && steps.provider_config.outcome == 'success' && steps.p6_inputs.outcome == 'success' }}
+        run: node deep-devops/scripts/secret-scan.mjs --artifacts deep-devops/artifacts/supporting-release-evidence
+
+      - name: Upload supporting release evidence bundle
+        if: ${{ always() && steps.provider_config.outcome == 'success' && steps.p6_inputs.outcome == 'success' && steps.bundle_secret_scan.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.artifact_name || format('supporting-release-evidence-{0}', inputs.release_candidate) }}
@@ -356,6 +366,9 @@ jobs:
             }
             if ('${{ steps.bundle.outcome }}' -ne 'success') {
               $failed += 'bundle'
+            }
+            if ('${{ steps.bundle_secret_scan.outcome }}' -ne 'success') {
+              $failed += 'bundle_secret_scan'
             }
           }
 

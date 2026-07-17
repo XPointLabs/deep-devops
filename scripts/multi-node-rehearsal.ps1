@@ -18,6 +18,8 @@ $env:DEEP_COMPOSE_FILE = $ComposeFile
 $env:DEEP_ARTIFACT_DIR = $TestResultDir
 $env:DEEP_REGISTRY_URL = "http://127.0.0.1:18080"
 $env:DEEP_MULTI_NODE_ROUTER_URLS = "http://127.0.0.1:19281,http://127.0.0.1:19282,http://127.0.0.1:19283"
+. (Join-Path $ScriptDir "ephemeral-compose-secrets.ps1")
+$generatedComposeSecretNames = @(Initialize-DeepEphemeralComposeSecrets -ScriptDirectory $ScriptDir)
 
 if ($AllowMockRouter) {
     $env:DEEP_MULTI_NODE_REQUIRE_NO_MOCK = "false"
@@ -142,4 +144,5 @@ finally {
             Write-Warning "docker compose cleanup for multi-node profile failed with exit code $script:LastDockerExitCode"
         }
     }
+    Clear-DeepEphemeralComposeSecrets -GeneratedNames $generatedComposeSecretNames
 }

@@ -208,7 +208,7 @@ function buildChecklist(blockers, releaseCandidate) {
       id: 'release-artifact-bundle',
       area: 'Release artifact bundle',
       ownerRole: 'Release / Ops lead',
-      blockerPrefixes: ['gate-command:session-infra-guard', 'gate-command:release-artifact-bundle', 'release-artifact-bundle'],
+      blockerPrefixes: ['gate-command:secret-scan', 'gate-command:session-infra-guard', 'gate-command:release-artifact-bundle', 'release-artifact-bundle'],
       requiredArtifacts: [
         'artifacts/runtime.gate.json',
         'artifacts/test-results/backend-load-smoke.json',
@@ -218,6 +218,7 @@ function buildChecklist(blockers, releaseCandidate) {
         'artifacts/test-results/registry-recovery.json',
         'artifacts/test-results/rollback-drill.json',
         'artifacts/security/security-gate-summary.json',
+        'artifacts/security/secret-scan-summary.json',
         'artifacts/observability/observability-gate-summary.json',
         'artifacts/release/session-infra-guard-summary.json',
         'artifacts/router-c3-latest.json',
@@ -233,6 +234,7 @@ function buildChecklist(blockers, releaseCandidate) {
         'node .\\deep-devops\\scripts\\bundle-supporting-release-evidence.mjs --source-root <artifact-root> --output-dir <bundle-dir>',
         'node .\\deep-devops\\scripts\\hydrate-release-artifact-bundle.mjs --input-dir <downloaded-artifacts> --allow-missing',
         'node .\\deep-devops\\scripts\\session-infra-guard.mjs',
+        'node .\\deep-devops\\scripts\\secret-scan.mjs',
         'node .\\deep-devops\\scripts\\release-artifact-bundle.mjs --release-candidate <rc>'
       ],
       docs: ['deep-devops/docs/PRODUCTION_READINESS_GATE.md', 'deep-devops/docs/MESSENGER_NODE_PRODUCTION_RUNBOOK.md'],
@@ -348,6 +350,17 @@ function buildChecklist(blockers, releaseCandidate) {
 
 const commandResults = [];
 if (runGates) {
+  commandResults.push(runNode(
+    'secret-scan.mjs',
+    [
+      '--artifacts',
+      artifactRoot,
+      '--summary',
+      path.join(artifactRoot, 'security', 'secret-scan-summary.json')
+    ],
+    'secret-scan'
+  ));
+
   if (strictRelease) {
     commandResults.push(runNode(
       'session-infra-guard.mjs',

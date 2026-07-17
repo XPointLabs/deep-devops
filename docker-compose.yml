@@ -1,4 +1,4 @@
-﻿name: deep-integration
+name: deep-integration
 
 services:
   xnode:
@@ -19,8 +19,8 @@ services:
       Node__ApiListenUrl: http://0.0.0.0:8080
       Node__PeerRpcListenUrl: http://0.0.0.0:8081
       Node__DataDirectory: /var/lib/xnode
-      Node__RouterId: "fe8f458267a9c92015b143d395807a0b99be7303b89af0cee60f37cbaf7941e3"
-      Node__Ed25519PrivateKey: "81722c06866f88623f818a6156a8013f6c5ee8e74c94f2100ea68694534b9a96"
+      Node__RouterId: ${XNODE_1_ROUTER_ID:?set XNODE_1_ROUTER_ID in .env}
+      Node__Ed25519PrivateKey: ${XNODE_1_ED25519_PRIVATE_KEY:?set XNODE_1_ED25519_PRIVATE_KEY in .env}
       Node__Network: devnet
       Node__PublicHost: xnode
       Node__PublicIp: 127.0.0.1
@@ -38,7 +38,7 @@ services:
       Vless__TransportMode: ${XNODE_TRANSPORT_MODE:-Reality}
       Vless__Reality__ServerName: www.microsoft.com
       Vless__Reality__PublicKey: devnet-reality-public-key
-      Vless__Reality__PrivateKey: devnet-reality-private-key
+      Vless__Reality__PrivateKey: ${XNODE_1_REALITY_PRIVATE_KEY:?set XNODE_1_REALITY_PRIVATE_KEY in .env}
       Vless__Reality__ShortId: 0123456789abcdef
       RegistryHeartbeat__Enabled: "false"
     ports:
@@ -69,8 +69,8 @@ services:
       Node__ApiListenUrl: http://0.0.0.0:8080
       Node__PeerRpcListenUrl: http://0.0.0.0:8081
       Node__DataDirectory: /var/lib/xnode-node-1
-      Node__RouterId: "c1f667cb6bba5fbf80c3bc39a32e13e3fea26add89db5b73d752e477d11f208d"
-      Node__Ed25519PrivateKey: "cdf3c15ba213a3132c5088cc0b4a16df226216d0234ed407f717b00e6a249987"
+      Node__RouterId: ${XNODE_2_ROUTER_ID:?set XNODE_2_ROUTER_ID in .env}
+      Node__Ed25519PrivateKey: ${XNODE_2_ED25519_PRIVATE_KEY:?set XNODE_2_ED25519_PRIVATE_KEY in .env}
       Node__Network: devnet
       Node__PublicHost: xnode-1
       Node__PublicIp: 127.0.0.1
@@ -88,7 +88,7 @@ services:
       Vless__TransportMode: ${XNODE_TRANSPORT_MODE:-Reality}
       Vless__Reality__ServerName: www.microsoft.com
       Vless__Reality__PublicKey: devnet-reality-public-key
-      Vless__Reality__PrivateKey: devnet-reality-private-key
+      Vless__Reality__PrivateKey: ${XNODE_2_REALITY_PRIVATE_KEY:?set XNODE_2_REALITY_PRIVATE_KEY in .env}
       Vless__Reality__ShortId: 0123456789abc101
       RegistryHeartbeat__Enabled: "false"
     ports:
@@ -119,8 +119,8 @@ services:
       Node__ApiListenUrl: http://0.0.0.0:8080
       Node__PeerRpcListenUrl: http://0.0.0.0:8081
       Node__DataDirectory: /var/lib/xnode-node-2
-      Node__RouterId: "950462de6f917f4f28725daf96178bba68afbc766739566aec18e3ef407ca406"
-      Node__Ed25519PrivateKey: "430b7d8f95f6547f10492da07a578ec86a2e693cd129c89382294dceb6ffab08"
+      Node__RouterId: ${XNODE_3_ROUTER_ID:?set XNODE_3_ROUTER_ID in .env}
+      Node__Ed25519PrivateKey: ${XNODE_3_ED25519_PRIVATE_KEY:?set XNODE_3_ED25519_PRIVATE_KEY in .env}
       Node__Network: devnet
       Node__PublicHost: xnode-2
       Node__PublicIp: 127.0.0.1
@@ -138,7 +138,7 @@ services:
       Vless__TransportMode: ${XNODE_TRANSPORT_MODE:-Reality}
       Vless__Reality__ServerName: www.microsoft.com
       Vless__Reality__PublicKey: devnet-reality-public-key
-      Vless__Reality__PrivateKey: devnet-reality-private-key
+      Vless__Reality__PrivateKey: ${XNODE_3_REALITY_PRIVATE_KEY:?set XNODE_3_REALITY_PRIVATE_KEY in .env}
       Vless__Reality__ShortId: 0123456789abc102
       RegistryHeartbeat__Enabled: "false"
     ports:
@@ -169,8 +169,8 @@ services:
       Node__ApiListenUrl: http://0.0.0.0:8080
       Node__PeerRpcListenUrl: http://0.0.0.0:8081
       Node__DataDirectory: /var/lib/xnode-node-3
-      Node__RouterId: "7bd5eca39a7fc8f86c7d6b28dc28e1cc439b7d516780a3b06b5104c834cb9d30"
-      Node__Ed25519PrivateKey: "6184adf827cab2e39bc920c59f96cf09c2b05ebcb8e5b4f1b83d80e68cbb9fd9"
+      Node__RouterId: ${XNODE_4_ROUTER_ID:?set XNODE_4_ROUTER_ID in .env}
+      Node__Ed25519PrivateKey: ${XNODE_4_ED25519_PRIVATE_KEY:?set XNODE_4_ED25519_PRIVATE_KEY in .env}
       Node__Network: devnet
       Node__PublicHost: xnode-3
       Node__PublicIp: 127.0.0.1
@@ -188,7 +188,7 @@ services:
       Vless__TransportMode: ${XNODE_TRANSPORT_MODE:-Reality}
       Vless__Reality__ServerName: www.microsoft.com
       Vless__Reality__PublicKey: devnet-reality-public-key
-      Vless__Reality__PrivateKey: devnet-reality-private-key
+      Vless__Reality__PrivateKey: ${XNODE_4_REALITY_PRIVATE_KEY:?set XNODE_4_REALITY_PRIVATE_KEY in .env}
       Vless__Reality__ShortId: 0123456789abc103
       RegistryHeartbeat__Enabled: "false"
     ports:

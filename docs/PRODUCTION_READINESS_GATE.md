@@ -1,5 +1,10 @@
 ﻿# Production Readiness Gate
 
+Every release artifact upload is blocked unless
+`node .\deep-devops\scripts\secret-scan.mjs` reports zero findings. Resolved
+Compose files and unrestricted raw logs are forbidden evidence; follow
+`deep-devops/docs/SECRET_SAFE_EVIDENCE.md`.
+
 `scripts/production-readiness-gate.mjs` is the final program-level gate for the
 Deep messenger launch. It is intentionally stricter than the local
 release preflight: it should pass only when the launch is ready for GA sign-off.

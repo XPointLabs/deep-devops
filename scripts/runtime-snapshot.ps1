@@ -103,6 +103,53 @@ function Get-Snapshot {
     return $result
 }
 
+function Protect-EvidenceValue {
+    param(
+        [object] $Value,
+        [string] $PropertyName = ""
+    )
+
+    if ($PropertyName -match '(?i)(mnemonic|seed.?phrase|private.?key|private.?seed|private.?scalar|password|passwd|secret|authorization|bearer|token|api.?key)') {
+        return "<redacted>"
+    }
+
+    if ($null -eq $Value) {
+        return $null
+    }
+
+    if ($Value -is [string]) {
+        $safe = [string]$Value
+        $safe = $safe -replace '(?i)(https?://[^/\s:@]+):[^/\s@]{8,}@', '$1:<redacted>@'
+        $safe = $safe -replace '(?i)([?&](?:access_token|token|api_key|key|secret|signature)=)[^&#\s"]+', '$1<redacted>'
+        $safe = $safe -replace '(?i)\b(gh[pousr]_|github_pat_)[A-Za-z0-9_]{20,}\b', '<redacted>'
+        $safe = $safe -replace '(?i)-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----', '<redacted>'
+        return $safe
+    }
+
+    if ($Value -is [System.Collections.IDictionary]) {
+        $safeMap = [ordered]@{}
+        foreach ($key in $Value.Keys) {
+            $safeMap[[string]$key] = Protect-EvidenceValue -Value $Value[$key] -PropertyName ([string]$key)
+        }
+        return $safeMap
+    }
+
+    if ($Value -is [System.Collections.IEnumerable] -and $Value -isnot [string]) {
+        return @($Value | ForEach-Object { Protect-EvidenceValue -Value $_ })
+    }
+
+    $properties = @($Value.PSObject.Properties | Where-Object { $_.MemberType -in @("NoteProperty", "Property") })
+    if ($properties.Count -gt 0 -and $Value -isnot [ValueType]) {
+        $safeObject = [ordered]@{}
+        foreach ($property in $properties) {
+            $safeObject[$property.Name] = Protect-EvidenceValue -Value $property.Value -PropertyName $property.Name
+        }
+        return $safeObject
+    }
+
+    return $Value
+}
+
 $backendMode = if ([string]::IsNullOrWhiteSpace($env:DEEP_BACKEND_MODE)) {
     "compat"
 }
@@ -164,11 +211,11 @@ if (-not [string]::IsNullOrWhiteSpace($callsStatsUrl)) {
     $snapshots += (Get-Snapshot -Name $callsStatsName -Url $callsStatsUrl)
 }
 
-$payload = [ordered]@{
+$payload = Protect-EvidenceValue -Value ([ordered]@{
     capturedAtUtc = [DateTimeOffset]::UtcNow.ToString("o")
     backendMode = $backendMode
     snapshots = $snapshots
-}
+})
 
 $targetPath = Join-Path $ArtifactDir "runtime.snapshot.json"
 $payload | ConvertTo-Json -Depth 30 | Out-File -Encoding utf8 $targetPath

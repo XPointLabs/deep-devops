@@ -1,12 +1,20 @@
-﻿# Deep UAT Deployment
+# Deep UAT Deployment
 
-Last updated: 2026-06-18.
+Last updated: 2026-07-18.
 
 This runbook brings up the first QA UAT stack on the LAN host `192.168.1.44`.
 It uses Arbitrum Sepolia for XPNT staking contracts and Docker on this machine
 for the backend, staking portal, product storage/file/calls services, push compatibility service, and three router nodes.
 
-## Current Deployment Status
+## Stop-the-line: credentials retired
+
+All UAT deployer, Ed25519, and BLS private values that were previously tracked
+in this repository are compromised. The old UAT stack and registrations are
+historical evidence only. Do not restart the stack, sign a transaction, claim a
+reward, or reuse any old identity until Mr. X completes the irreversible
+rotation checklist in `docs/SECRET_SAFE_EVIDENCE.md`.
+
+## Historical Deployment Status
 
 Contracts are deployed on Arbitrum Sepolia and are ready for UAT. The current
 staking contract set uses BLS12-381/EIP-2537 precompiles for service node BLS
@@ -57,11 +65,11 @@ Generated UAT deployer:
 
 ```text
 address: 0xb0cE3b1229c00d1B85c7083E31Dae531f3B352C0
-mnemonic: betray track rubber vault ring good naive claim income bus venue carpet
+mnemonic: <removed-compromised-value>
 ```
 
-The mnemonic is intentionally UAT-only and is not treated as a production
-secret.
+The removed mnemonic is compromised. UAT credentials are secrets even when
+they hold no production funds.
 
 ## Contract Addresses
 
@@ -79,21 +87,20 @@ STAKING_REQUIREMENT_ATOMIC=120000000000
 
 ## Deploy Contracts
 
-Skip this section unless the UAT contracts need to be redeployed.
-Before redeploying, make sure the generated UAT deployer still has Arbitrum
-Sepolia ETH for gas.
+This section is blocked until Mr. X provisions a new wallet through the
+protected secret procedure. Never reuse the retired deployer.
 
 Run from `C:\Work\Deep\xpoint-staking-contracts`.
 
 ```powershell
 $env:ARB_SEPOLIA_RPC_URL = "https://arb-sepolia.g.alchemy.com/v2/<alchemy-key>"
 $env:ARB_SEPOLIA_FALLBACK_RPC_URLS = "https://sepolia-rollup.arbitrum.io/rpc"
-$env:ARB_SEPOLIA_MNEMONIC = "betray track rubber vault ring good naive claim income bus venue carpet"
+$env:ARB_SEPOLIA_MNEMONIC = <load-from-protected-secret-store>
 
 docker compose run --rm `
   -e ARB_SEPOLIA_RPC_URL="$env:ARB_SEPOLIA_RPC_URL" `
   -e ARB_SEPOLIA_FALLBACK_RPC_URLS="$env:ARB_SEPOLIA_FALLBACK_RPC_URLS" `
-  -e ARB_SEPOLIA_MNEMONIC="$env:ARB_SEPOLIA_MNEMONIC" `
+  -e ARB_SEPOLIA_MNEMONIC=<load-from-protected-secret-store> `
   contracts-devnet pnpm deploy-uat-arbitrum-sepolia
 ```
 
@@ -113,6 +120,11 @@ Run from `C:\Work\Deep\deep-devops`.
 
 ```powershell
 Copy-Item .env.uat.example .env.uat
+New-Item -ItemType Directory -Force .secrets/uat
+Copy-Item secret-templates/uat/reward-keeper.env.example .secrets/uat/reward-keeper.env
+Copy-Item secret-templates/uat/node-1.env.example .secrets/uat/node-1.env
+Copy-Item secret-templates/uat/node-2.env.example .secrets/uat/node-2.env
+Copy-Item secret-templates/uat/node-3.env.example .secrets/uat/node-3.env
 notepad .env.uat
 ```
 
@@ -127,7 +139,11 @@ Set:
   server-side.
 - Keep the prefilled contract addresses and `UAT_CONTRACT_START_BLOCK` unless UAT contracts were redeployed.
 - Keep `UAT_OPERATOR_ADDRESS` and `UAT_REWARDS_ADDRESS` on the UAT deployer wallet while QA uses deployer-owned nodes.
-- Keep `UAT_DEPLOYER_MNEMONIC` set to the generated UAT mnemonic so `staking-reward-keeper` can checkpoint reward funds.
+- Set only secret-file paths in `.env.uat`. Put the newly generated deployer
+  mnemonic in `.secrets/uat/reward-keeper.env`; put each newly generated
+  Ed25519/BLS private value in its matching node file. Compose injects those
+  variables through `env_file` and the repository never resolves or captures
+  them.
 - Keep the `PRICE_*` / `XPNT_UNISWAP_V3_POOL_ADDRESS` values pointed at the production Arbitrum One XPNT/USDC Uniswap V3 pool. UAT still runs staking on Arbitrum Sepolia, but XPNT price is intentionally read from the production pool for every environment.
 - Router nodes derive their BLS signer URL from the signed peer RPC contact. The staking backend discovers signer metadata through the Docker-only `/api/internal/nodes` catalog, matches it to active on-chain BLS public keys from `ServiceNodeRewards`, and aggregates only signatures returned by registered active nodes. The public `/api/nodes` response never includes signer URLs or transport credentials.
 - The router signing endpoint supports the contract-level quorum messages used by `ServiceNodeRewards`: reward balance updates, normal exits, and liquidations. The staking backend derives service-node obligations from on-chain state plus registry heartbeat/transport health. `/obligations` shows the full status set, `/exit_liquidation_list` exposes only currently eligible exits/liquidations, and direct `/exit/{bls}` or `/liquidation/{bls}` requests are rejected until the indexed state is eligible.
@@ -146,7 +162,8 @@ Set:
 - `STAKING_PORTAL_COMMIT_HASH` to `git -C ..\xpoint-staking-portal rev-parse HEAD`.
 - Keep `NEXT_PUBLIC_ENV_FLAG=prd` for production-like staking portal behavior.
 
-Do not commit `.env.uat`.
+Do not commit `.env.uat` or `.secrets/`. Run
+`node scripts/secret-scan.mjs` before any evidence collection or upload.
 
 ## Start UAT
 
@@ -228,18 +245,18 @@ so the staking portal can show them for the deployer/operator wallet. This mirro
 the original Session flow: the node produces registration data, while staking and
 finalization remain operator actions.
 
-Prepared UAT router identities. The Ed25519 public key is both the signed relay
+Retired UAT router identities. The Ed25519 public key was both the signed relay
 router id and the staking registration `serviceNodePubkey`, matching the
 production model and upstream Session/Oxen HF21 identity model. Contract IDs
 1, 2, and 3 are the old `0201` / `0202` / `0203` registrations and are now in
-`exit-requested` state. The active UAT registrations are contract IDs 4, 5,
-and 6.
+`exit-requested` state. Contract IDs 4, 5, and 6 must also be exited/revoked
+before newly generated identities are registered.
 
-| Router | Active contract ID | Ed25519 serviceNodePubkey / router id | BLS private scalar | API | VLESS |
-| --- | --- | --- | --- | --- | --- |
-| node 1 | `4` | `5979c8dda9c10cff26db46b96cefd9ea3527c2ce90b99886342d71c54e8ed4dc` | `27c2eb7628d717c40af80eb1ebb5821a5ac8b08f7505373d61b3ba74b2b6ae4e` | `http://192.168.1.44:29281` | `192.168.1.44:20443` |
-| node 2 | `5` | `298f4fb1eb601d5f900332c728829d19be6282f5e50c2bd3cea055a27d83c51c` | `71ab7c8130b420da63d3b3346caeea57da64edb53130e76a8a2f703d0c32000d` | `http://192.168.1.44:29282` | `192.168.1.44:20444` |
-| node 3 | `6` | `c08f5aecc314da789193719a15f1fa2e21a1aeadf266a6b53bd667974870c846` | `664eb4f0ee75ac048c9b2f038ee3727ce2cf587a76d750731c1051fb449a79bc` | `http://192.168.1.44:29283` | `192.168.1.44:20445` |
+| Router | Active contract ID | Retired Ed25519 public id | API | VLESS |
+| --- | --- | --- | --- | --- |
+| node 1 | `4` | `5979c8dda9c10cff26db46b96cefd9ea3527c2ce90b99886342d71c54e8ed4dc` | `http://192.168.1.44:29281` | `192.168.1.44:20443` |
+| node 2 | `5` | `298f4fb1eb601d5f900332c728829d19be6282f5e50c2bd3cea055a27d83c51c` | `http://192.168.1.44:29282` | `192.168.1.44:20444` |
+| node 3 | `6` | `c08f5aecc314da789193719a15f1fa2e21a1aeadf266a6b53bd667974870c846` | `http://192.168.1.44:29283` | `192.168.1.44:20445` |
 
 Manual staking flow:
 

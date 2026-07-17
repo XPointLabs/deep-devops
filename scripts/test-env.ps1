@@ -25,6 +25,8 @@ $env:DEEP_TESTS_DIR = (Resolve-Path (Join-Path $WorkspaceRoot "deep-tests-e2e"))
 $env:DEEP_COMPOSE_FILE = $ComposeFile
 $env:E2E_SUITE = $Suite
 $env:DEEP_BACKEND_MODE = $BackendMode
+. (Join-Path $ScriptDir "ephemeral-compose-secrets.ps1")
+$generatedComposeSecretNames = @(Initialize-DeepEphemeralComposeSecrets -ScriptDirectory $ScriptDir)
 
 if (-not $RequireRouterNoMock -and ($env:DEEP_REQUIRE_ROUTER_NO_MOCK -match '^(1|true|yes)$')) {
     $RequireRouterNoMock = $true
@@ -369,4 +371,5 @@ finally {
     if ($script:LastDockerExitCode -ne 0) {
         Write-Warning "docker compose cleanup failed with exit code $script:LastDockerExitCode"
     }
+    Clear-DeepEphemeralComposeSecrets -GeneratedNames $generatedComposeSecretNames
 }
