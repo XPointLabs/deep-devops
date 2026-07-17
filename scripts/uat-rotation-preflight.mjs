@@ -3,7 +3,7 @@ import {
   createPublicKey,
   verify
 } from 'node:crypto';
-import { lstat, readFile, readdir, realpath, stat } from 'node:fs/promises';
+import { lstat, readFile, readdir, realpath } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -17,6 +17,7 @@ const expectedSecretFiles = new Set([
 const ADDRESS_PATTERN = /^0x[0-9a-f]{40}$/i;
 const HASH_PATTERN = /^0x[0-9a-f]{64}$/i;
 const PUBLIC_FINGERPRINT_PATTERN = /^[0-9a-f]{64}$/i;
+const DECIMAL_UINT_PATTERN = /^(0|[1-9][0-9]*)$/;
 const MINIMUM_FINALITY_CONFIRMATIONS = 12;
 
 function parse(argv) {
@@ -41,6 +42,54 @@ function sha256(value) {
   return createHash('sha256').update(value).digest('hex');
 }
 
+function assertExactWindowsAcl(targetPath, isDirectory) {
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    '$target = $env:DEEP_ACL_TARGET',
+    '$acl = Get-Acl -LiteralPath $target',
+    '$owner = $acl.Owner',
+    'try { $owner = ([System.Security.Principal.NTAccount]$owner).Translate([System.Security.Principal.SecurityIdentifier]).Value } catch { }',
+    '$current = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value',
+    '$entries = @($acl.Access | ForEach-Object {',
+    '  $identity = $_.IdentityReference.Value',
+    '  try { $identity = $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value } catch { }',
+    '  [pscustomobject]@{ identity = $identity; type = [string]$_.AccessControlType; rights = [int]$_.FileSystemRights; inherited = $_.IsInherited; inheritance = [int]$_.InheritanceFlags; propagation = [int]$_.PropagationFlags }',
+    '})',
+    '$attributes = (Get-Item -LiteralPath $target -Force).Attributes',
+    '[pscustomobject]@{ owner = $owner; current = $current; protected = $acl.AreAccessRulesProtected; reparsePoint = (($attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0); entries = $entries } | ConvertTo-Json -Compress -Depth 5'
+  ].join('\n');
+  const result = spawnSync('powershell.exe', [
+    '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script
+  ], {
+    encoding: 'utf8',
+    windowsHide: true,
+    env: { ...process.env, DEEP_ACL_TARGET: targetPath }
+  });
+  if (result.status !== 0) throw new Error('unable to validate exact Windows secret ACL');
+  let acl;
+  try {
+    acl = JSON.parse(result.stdout.trim());
+  } catch {
+    throw new Error('unable to parse exact Windows secret ACL');
+  }
+  const entries = Array.isArray(acl.entries) ? acl.entries : acl.entries ? [acl.entries] : [];
+  const expectedSids = new Set([String(acl.current).toUpperCase(), 'S-1-5-18']);
+  const expectedInheritance = isDirectory ? 3 : 0;
+  if (acl.owner !== acl.current
+    || acl.protected !== true
+    || acl.reparsePoint !== false
+    || entries.length !== 2
+    || entries.some(entry => !expectedSids.has(String(entry.identity).toUpperCase())
+      || entry.type !== 'Allow'
+      || entry.rights !== 2032127
+      || entry.inherited !== false
+      || entry.inheritance !== expectedInheritance
+      || entry.propagation !== 0)
+    || new Set(entries.map(entry => String(entry.identity).toUpperCase())).size !== 2) {
+    throw new Error('secret ACL must grant exact non-inherited full control only to the owner and SYSTEM');
+  }
+}
+
 async function assertSecretFile(filePath, secretRootReal) {
   const info = await lstat(filePath);
   if (info.isSymbolicLink() || !info.isFile()) throw new Error('secret files must be canonical regular files without reparse points');
@@ -49,20 +98,18 @@ async function assertSecretFile(filePath, secretRootReal) {
     throw new Error('secret file canonical path escapes the protected directory');
   }
   if (process.platform === 'win32') {
-    const acl = spawnSync('icacls.exe', [canonical], { encoding: 'utf8', windowsHide: true });
-    if (acl.status !== 0) throw new Error('unable to validate secret file ACL');
-    if (/(Everyone|BUILTIN\\Users|Authenticated Users|APPLICATION PACKAGE AUTHORITY)/i.test(acl.stdout)) {
-      throw new Error('secret file ACL grants access to a broad principal');
-    }
-  } else if ((info.mode & 0o077) !== 0) {
-    throw new Error('secret file permissions must not grant group or world access');
+    assertExactWindowsAcl(canonical, false);
+  } else if ((info.mode & 0o777) !== 0o600) {
+    throw new Error('secret file permissions must be exactly 0600');
   }
 }
 
 function exactSet(actual, expected, label) {
   const normalizedExpected = new Set([...expected].map(value => String(value).toLowerCase()));
+  const normalizedActual = actual.map(value => String(value).toLowerCase());
   if (actual.length !== normalizedExpected.size
-    || actual.some(value => !normalizedExpected.has(String(value).toLowerCase()))) {
+    || new Set(normalizedActual).size !== normalizedActual.length
+    || normalizedActual.some(value => !normalizedExpected.has(value))) {
     throw new Error(`${label} does not exactly cover the expected set`);
   }
 }
@@ -90,6 +137,63 @@ function canonicalFingerprint(value, label) {
   return String(value).toLowerCase();
 }
 
+function canonicalUintString(value, label) {
+  if (!DECIMAL_UINT_PATTERN.test(value ?? '')) throw new Error(`${label} must be a canonical unsigned decimal string`);
+  return String(value);
+}
+
+function validateRetirementDecodedArgs(decoded, action, binding) {
+  const commonKeys = ['serviceNodeID', 'initiator', 'pubkeyDataSha256'];
+  exactKeys(
+    decoded,
+    action === 'service-node-exit' ? [...commonKeys, 'returnedAmount'] : commonKeys,
+    'retirement decoded event arguments'
+  );
+  canonicalAddress(decoded.initiator, 'retirement decoded initiator');
+  if (decoded.serviceNodeID !== binding.contractNodeId
+    || canonicalFingerprint(decoded.pubkeyDataSha256, 'retirement decoded BLS fingerprint')
+      !== binding.blsPublicKeySha256
+    || (action === 'service-node-exit'
+      && canonicalUintString(decoded.returnedAmount, 'retirement decoded returnedAmount') !== decoded.returnedAmount)) {
+    throw new Error('retirement decoded event arguments do not exactly bind the retired public identity');
+  }
+}
+
+function validateRegistrationDecodedArgs(decoded, item) {
+  exactKeys(decoded, [
+    'serviceNodeID',
+    'initiator',
+    'pubkeyDataSha256',
+    'serviceNodePubkey',
+    'serviceNodeSignature1',
+    'serviceNodeSignature2',
+    'fee',
+    'contributors'
+  ], 'registration decoded event arguments');
+  if (decoded.serviceNodeID !== item.newContractNodeId
+    || canonicalAddress(decoded.initiator, 'registration decoded initiator')
+      !== canonicalAddress(item.operatorAddress, 'replacement operator address')
+    || canonicalFingerprint(decoded.pubkeyDataSha256, 'registration decoded BLS fingerprint')
+      !== canonicalFingerprint(item.blsPublicKeySha256, 'replacement BLS public fingerprint')
+    || canonicalFingerprint(decoded.serviceNodePubkey, 'registration decoded router public id')
+      !== canonicalFingerprint(item.routerPublicId, 'replacement router public id')
+    || !Number.isSafeInteger(decoded.fee)
+    || decoded.fee < 0
+    || decoded.fee > 65535
+    || !Array.isArray(decoded.contributors)
+    || decoded.contributors.length === 0) {
+    throw new Error('registration decoded event arguments do not exactly bind the replacement identity');
+  }
+  canonicalUintString(decoded.serviceNodeSignature1, 'registration decoded serviceNodeSignature1');
+  canonicalUintString(decoded.serviceNodeSignature2, 'registration decoded serviceNodeSignature2');
+  for (const contributor of decoded.contributors) {
+    exactKeys(contributor, ['addr', 'beneficiary', 'stakedAmount'], 'registration decoded contributor');
+    canonicalAddress(contributor.addr, 'registration decoded contributor address');
+    canonicalAddress(contributor.beneficiary, 'registration decoded contributor beneficiary');
+    canonicalUintString(contributor.stakedAmount, 'registration decoded contributor stake');
+  }
+}
+
 function validateTransactionEvidence(
   transaction,
   expectedContract,
@@ -107,7 +211,8 @@ function validateTransactionEvidence(
     'transactionIndex',
     'logIndex',
     'eventTopic0',
-    'confirmations'
+    'confirmations',
+    'decodedArgs'
   ], `${label} transaction evidence`);
   const transactionHash = String(transaction.transactionHash ?? '').toLowerCase();
   const contractAddress = canonicalAddress(transaction.contractAddress, `${label} contractAddress`);
@@ -130,6 +235,10 @@ function validateTransactionEvidence(
     || transaction.confirmations < minimumConfirmations) {
     throw new Error(`${label} lacks exact successful finalized transaction/log evidence`);
   }
+  if (!transaction.decodedArgs || typeof transaction.decodedArgs !== 'object'
+    || Array.isArray(transaction.decodedArgs)) {
+    throw new Error(`${label} lacks exact ABI-decoded event arguments`);
+  }
   if (seenTransactions.has(transactionHash)) {
     throw new Error('each rotation action must bind a unique transaction hash');
   }
@@ -147,12 +256,13 @@ export async function preflight(options) {
     'network',
     'chainId',
     'serviceNodeRewardsContract',
+    'eventAbi',
     'retiredOperatorAddresses',
     'retiredRouterPublicIds',
     'retiredContractNodeIds',
     'retiredNodeBindings'
   ], 'retired UAT identity manifest');
-  if (retired.schemaVersion !== '2.0.0'
+  if (retired.schemaVersion !== '3.0.0'
     || typeof retired.network !== 'string'
     || !Number.isSafeInteger(retired.chainId)
     || !Array.isArray(retired.retiredOperatorAddresses)
@@ -160,6 +270,20 @@ export async function preflight(options) {
     || !Array.isArray(retired.retiredContractNodeIds)
     || !Array.isArray(retired.retiredNodeBindings)) {
     throw new Error('retired UAT identity manifest schema is invalid');
+  }
+  exactKeys(retired.eventAbi, [
+    'source',
+    'contract',
+    'newServiceNodeV2Topic0',
+    'serviceNodeExitTopic0',
+    'serviceNodeLiquidatedTopic0'
+  ], 'retired UAT event ABI provenance');
+  if (retired.eventAbi.source !== 'xpoint-staking-contracts/contracts/ServiceNodeRewards.sol'
+    || retired.eventAbi.contract !== 'ServiceNodeRewards'
+    || retired.eventAbi.newServiceNodeV2Topic0 !== '0xe4329316e9100fa3706d6ee3f89fdc25cc950ff098b7c6a533f6c89b5b7a949c'
+    || retired.eventAbi.serviceNodeExitTopic0 !== '0x1869657b8fe34c364e4f67b337513e34de4f0a803d6e53ae13d3c17296d2b7da'
+    || retired.eventAbi.serviceNodeLiquidatedTopic0 !== '0x69d6674298663cd2ab512bfbcbffe46965bfb13ada7e933e2befa5044a931716') {
+    throw new Error('retired UAT event ABI topics or provenance are invalid');
   }
   canonicalAddress(retired.serviceNodeRewardsContract, 'retired serviceNodeRewardsContract');
   exactSet(
@@ -173,8 +297,14 @@ export async function preflight(options) {
     'checked-in retired router bindings'
   );
   for (const item of retired.retiredNodeBindings) {
-    exactKeys(item, ['contractNodeId', 'routerPublicId'], 'retired node binding');
+    exactKeys(item, ['contractNodeId', 'routerPublicId', 'blsPublicKeySha256'], 'retired node binding');
     canonicalFingerprint(item.routerPublicId, 'retired node router public id');
+    canonicalFingerprint(item.blsPublicKeySha256, 'retired node BLS public fingerprint');
+  }
+  if (new Set(retired.retiredNodeBindings.map(
+    item => String(item.blsPublicKeySha256).toLowerCase()
+  )).size !== retired.retiredNodeBindings.length) {
+    throw new Error('checked-in retired BLS public fingerprints must be unique');
   }
   const receipt = JSON.parse(await readFile(path.resolve(options.receipt), 'utf8'));
   exactKeys(receipt, [
@@ -272,8 +402,15 @@ export async function preflight(options) {
 
   const retiredBindings = new Map(retired.retiredNodeBindings.map(item => [
     item.contractNodeId,
-    String(item.routerPublicId).toLowerCase()
+    {
+      contractNodeId: item.contractNodeId,
+      routerPublicId: String(item.routerPublicId).toLowerCase(),
+      blsPublicKeySha256: String(item.blsPublicKeySha256).toLowerCase()
+    }
   ]));
+  const retiredBlsFingerprints = new Set(
+    retired.retiredNodeBindings.map(item => String(item.blsPublicKeySha256).toLowerCase())
+  );
   exactSet(
     payload.retiredNodeActions.map(item => item.contractNodeId),
     new Set(retired.retiredContractNodeIds),
@@ -289,8 +426,9 @@ export async function preflight(options) {
       'transaction'
     ], 'retired node action');
     const oldRouter = canonicalFingerprint(item.oldRouterPublicId, 'retired action router public id');
-    if (item.action !== 'exit-or-revocation'
-      || retiredBindings.get(item.contractNodeId) !== oldRouter) {
+    const binding = retiredBindings.get(item.contractNodeId);
+    if (!['service-node-exit', 'service-node-liquidated'].includes(item.action)
+      || binding?.routerPublicId !== oldRouter) {
       throw new Error('retired node action does not match the checked-in node binding');
     }
     validateTransactionEvidence(
@@ -301,6 +439,17 @@ export async function preflight(options) {
       seenTransactions,
       seenLogs,
       `retired node ${item.contractNodeId}`
+    );
+    const expectedTopic = item.action === 'service-node-exit'
+      ? retired.eventAbi.serviceNodeExitTopic0
+      : retired.eventAbi.serviceNodeLiquidatedTopic0;
+    if (item.transaction.eventTopic0.toLowerCase() !== expectedTopic) {
+      throw new Error('retired node action uses an event topic outside the checked-in ABI');
+    }
+    validateRetirementDecodedArgs(
+      item.transaction.decodedArgs,
+      item.action,
+      binding
     );
   }
 
@@ -321,7 +470,7 @@ export async function preflight(options) {
       'action',
       'transaction'
     ], 'replacement registration');
-    const oldRouter = retiredBindings.get(item.replacementForContractNodeId);
+    const oldRouter = retiredBindings.get(item.replacementForContractNodeId)?.routerPublicId;
     const newRouter = canonicalFingerprint(item.routerPublicId, 'replacement router public id');
     const blsFingerprint = canonicalFingerprint(item.blsPublicKeySha256, 'replacement BLS public fingerprint');
     const operator = canonicalAddress(item.operatorAddress, 'replacement operator address');
@@ -332,7 +481,8 @@ export async function preflight(options) {
       || item.newContractNodeId <= 0
       || retired.retiredContractNodeIds.includes(item.newContractNodeId)
       || newContractNodeIds.has(item.newContractNodeId)
-      || blsFingerprints.has(blsFingerprint)) {
+      || blsFingerprints.has(blsFingerprint)
+      || retiredBlsFingerprints.has(blsFingerprint)) {
       throw new Error('replacement registration mapping is incomplete, reused, or inconsistent');
     }
     newContractNodeIds.add(item.newContractNodeId);
@@ -346,6 +496,10 @@ export async function preflight(options) {
       seenLogs,
       `replacement node ${item.newContractNodeId}`
     );
+    if (item.transaction.eventTopic0.toLowerCase() !== retired.eventAbi.newServiceNodeV2Topic0) {
+      throw new Error('replacement registration uses an event topic outside the checked-in ABI');
+    }
+    validateRegistrationDecodedArgs(item.transaction.decodedArgs, item);
   }
 
   const secretDir = path.resolve(options.secretDir);
@@ -354,6 +508,17 @@ export async function preflight(options) {
     throw new Error('secret directory must be canonical and contain no reparse point');
   }
   const secretRootReal = await realpath(secretDir);
+  const sameCanonicalDirectory = process.platform === 'win32'
+    ? secretRootReal.toLowerCase() === secretDir.toLowerCase()
+    : secretRootReal === secretDir;
+  if (!sameCanonicalDirectory) {
+    throw new Error('secret directory must resolve to its exact canonical path');
+  }
+  if (process.platform === 'win32') {
+    assertExactWindowsAcl(secretRootReal, true);
+  } else if ((directoryInfo.mode & 0o777) !== 0o700) {
+    throw new Error('secret directory permissions must be exactly 0700');
+  }
   const entries = await readdir(secretDir, { withFileTypes: true });
   if (entries.some(entry => entry.isSymbolicLink() || !entry.isFile())) {
     throw new Error('secret directory may contain only canonical regular files');

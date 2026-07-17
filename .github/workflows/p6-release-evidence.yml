@@ -57,10 +57,22 @@ jobs:
           token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
           run-id: ${{ inputs.source_run_id }}
 
+      - name: Verify and extract sealed P6 evidence source
+        shell: pwsh
+        run: |
+          $bundles = @(Get-ChildItem -LiteralPath 'deep-devops/artifacts/hydrated/p6-release-evidence-source' -File -Filter '*-sealed-evidence.json')
+          if ($bundles.Count -ne 1) {
+            throw "Expected exactly one sealed P6 source bundle, found $($bundles.Count)"
+          }
+          node deep-devops/scripts/sealed-evidence-bundle.mjs `
+            --bundle $bundles[0].FullName `
+            --extract-dir deep-devops/artifacts/hydrated/p6-release-evidence-extracted `
+            --expected-source-run-id "${{ inputs.source_run_id }}"
+
       - name: Hydrate raw P6 manifests
         run: >
           node deep-devops/scripts/hydrate-release-artifact-bundle.mjs
-          --input-dir deep-devops/artifacts/hydrated/p6-release-evidence-source
+          --input-dir deep-devops/artifacts/hydrated/p6-release-evidence-extracted
           --only client-device-acceptance,ops-deployment-evidence,security-audit-signoff,ga-decision
 
       - name: Validate raw P6 manifest set
@@ -140,6 +152,15 @@ jobs:
           --file deep-devops/artifacts/release/security-audit-signoff-summary.json
           --file deep-devops/artifacts/release/ga-decision.json
           --file deep-devops/artifacts/release/ga-decision-summary.json
+          --require release-artifact-hydration-summary.json
+          --require client-device-acceptance.json
+          --require client-device-acceptance-summary.json
+          --require ops-deployment-evidence.json
+          --require ops-deployment-evidence-summary.json
+          --require security-audit-signoff.json
+          --require security-audit-signoff-summary.json
+          --require ga-decision.json
+          --require ga-decision-summary.json
           --staging "${{ runner.temp }}/deep-upload/p6"
           --manifest "${{ runner.temp }}/deep-upload/p6-manifest.json"
 
@@ -150,13 +171,41 @@ jobs:
           node deep-devops/scripts/artifact-upload-gate.mjs
           --manifest "${{ runner.temp }}/deep-upload/p6-manifest.json"
           --staging-root "${{ runner.temp }}/deep-upload/p6"
+          --require release-artifact-hydration-summary.json
+          --require client-device-acceptance.json
+          --require client-device-acceptance-summary.json
+          --require ops-deployment-evidence.json
+          --require ops-deployment-evidence-summary.json
+          --require security-audit-signoff.json
+          --require security-audit-signoff-summary.json
+          --require ga-decision.json
+          --require ga-decision-summary.json
           --summary "${{ runner.temp }}/deep-upload/p6-scan.json"
+          --bundle "${{ runner.temp }}/deep-upload/p6-sealed-evidence.json"
 
       - name: Upload P6 release evidence
+        id: upload_p6
         if: ${{ always() && steps.prepare_upload.outcome == 'success' && steps.secret_scan.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.artifact_name.outputs.value }}
           if-no-files-found: error
           retention-days: 30
-          path: ${{ runner.temp }}/deep-upload/p6/**
+          path: ${{ runner.temp }}/deep-upload/p6-sealed-evidence.json
+
+      - name: Download sealed P6 release evidence
+        if: ${{ always() && steps.upload_p6.outcome == 'success' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ steps.artifact_name.outputs.value }}
+          path: ${{ runner.temp }}/deep-upload/roundtrip-p6
+
+      - name: Verify sealed P6 release evidence round trip
+        if: ${{ always() && steps.upload_p6.outcome == 'success' }}
+        run: >
+          node deep-devops/scripts/sealed-evidence-bundle.mjs
+          --bundle "${{ runner.temp }}/deep-upload/roundtrip-p6/p6-sealed-evidence.json"
+          --expected-sha256 "${{ steps.secret_scan.outputs.bundle_sha256 }}"
+          --actions-artifact-id "${{ steps.upload_p6.outputs.artifact-id }}"
+          --actions-artifact-digest "${{ steps.upload_p6.outputs.artifact-digest }}"
+          --receipt "${{ runner.temp }}/deep-upload/p6-roundtrip-receipt.json"

@@ -136,6 +136,7 @@ jobs:
         run: >
           node deep-devops/scripts/artifact-upload-manifest.mjs
           --file deep-devops/artifacts/release/release-secret-preflight-summary.json
+          --require release-secret-preflight-summary.json
           --staging "${{ runner.temp }}/deep-upload/supporting-preflight"
           --manifest "${{ runner.temp }}/deep-upload/supporting-preflight-manifest.json"
 
@@ -146,15 +147,35 @@ jobs:
           node deep-devops/scripts/artifact-upload-gate.mjs
           --manifest "${{ runner.temp }}/deep-upload/supporting-preflight-manifest.json"
           --staging-root "${{ runner.temp }}/deep-upload/supporting-preflight"
+          --require release-secret-preflight-summary.json
           --summary "${{ runner.temp }}/deep-upload/supporting-preflight-scan.json"
+          --bundle "${{ runner.temp }}/deep-upload/supporting-preflight-sealed-evidence.json"
 
       - name: Upload release secret preflight summary
+        id: upload_preflight
         if: ${{ always() && steps.prepare_preflight_upload.outcome == 'success' && steps.preflight_secret_scan.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: release-secret-preflight-${{ inputs.release_candidate }}
-          path: ${{ runner.temp }}/deep-upload/supporting-preflight/**
+          path: ${{ runner.temp }}/deep-upload/supporting-preflight-sealed-evidence.json
           if-no-files-found: error
+
+      - name: Download sealed supporting preflight evidence
+        if: ${{ always() && steps.upload_preflight.outcome == 'success' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: release-secret-preflight-${{ inputs.release_candidate }}
+          path: ${{ runner.temp }}/deep-upload/roundtrip-supporting-preflight
+
+      - name: Verify sealed supporting preflight evidence round trip
+        if: ${{ always() && steps.upload_preflight.outcome == 'success' }}
+        run: >
+          node deep-devops/scripts/sealed-evidence-bundle.mjs
+          --bundle "${{ runner.temp }}/deep-upload/roundtrip-supporting-preflight/supporting-preflight-sealed-evidence.json"
+          --expected-sha256 "${{ steps.preflight_secret_scan.outputs.bundle_sha256 }}"
+          --actions-artifact-id "${{ steps.upload_preflight.outputs.artifact-id }}"
+          --actions-artifact-digest "${{ steps.upload_preflight.outputs.artifact-digest }}"
+          --receipt "${{ runner.temp }}/deep-upload/supporting-preflight-roundtrip-receipt.json"
 
       - name: Validate P6 evidence artifact inputs
         id: p6_inputs
@@ -295,13 +316,21 @@ jobs:
           token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
           run-id: ${{ inputs.p6_evidence_run_id }}
 
+      - name: Verify and extract sealed P6 evidence manifests
+        if: ${{ always() && steps.download_p6_evidence.outcome == 'success' }}
+        run: >
+          node deep-devops/scripts/sealed-evidence-bundle.mjs
+          --bundle deep-devops/artifacts/hydrated/p6-evidence/p6-sealed-evidence.json
+          --extract-dir deep-devops/artifacts/hydrated/p6-evidence-extracted
+          --expected-source-run-id "${{ inputs.p6_evidence_run_id }}"
+
       - name: Hydrate P6 evidence manifests
         id: hydrate_p6_evidence
         if: ${{ always() && steps.provider_config.outcome == 'success' && steps.p6_inputs.outcome == 'success' && inputs.p6_evidence_run_id != '' && inputs.p6_evidence_artifact_name != '' }}
         continue-on-error: true
         run: >
           node deep-devops/scripts/hydrate-release-artifact-bundle.mjs
-          --input-dir deep-devops/artifacts/hydrated/p6-evidence
+          --input-dir deep-devops/artifacts/hydrated/p6-evidence-extracted
           --only client-device-acceptance,ops-deployment-evidence,security-audit-signoff,ga-decision
 
       - name: Bundle supporting release evidence
@@ -324,9 +353,35 @@ jobs:
 
           node @bundleArgs
 
+      - name: Fail closed before supporting evidence publication
+        id: generation_complete
+        if: always()
+        shell: pwsh
+        run: |
+          $failed = @()
+          $providerConfigOutcome = '${{ steps.provider_config.outcome }}'
+          $p6InputsOutcome = '${{ steps.p6_inputs.outcome }}'
+          if ($providerConfigOutcome -ne 'success') { $failed += 'provider_config' }
+          if ($providerConfigOutcome -eq 'success' -and $p6InputsOutcome -ne 'success') { $failed += 'p6_inputs' }
+          if ($providerConfigOutcome -eq 'success' -and $p6InputsOutcome -eq 'success') {
+            $p6EvidenceExpected = '${{ inputs.p6_evidence_run_id }}' -ne '' -and '${{ inputs.p6_evidence_artifact_name }}' -ne ''
+            if ('${{ steps.full_suite.outcome }}' -ne 'success') { $failed += 'full_suite' }
+            if ('${{ steps.rollback_drill.outcome }}' -ne 'success') { $failed += 'rollback_drill' }
+            if ('${{ steps.registry_recovery.outcome }}' -ne 'success') { $failed += 'registry_recovery' }
+            if ('${{ steps.attached_ci.outcome }}' -ne 'success') { $failed += 'attached_ci' }
+            if ('${{ steps.download_router_c3.outcome }}' -ne 'success') { $failed += 'download_router_c3' }
+            if ('${{ steps.observability.outcome }}' -ne 'success') { $failed += 'observability' }
+            if ($p6EvidenceExpected -and '${{ steps.download_p6_evidence.outcome }}' -ne 'success') { $failed += 'download_p6_evidence' }
+            if ($p6EvidenceExpected -and '${{ steps.hydrate_p6_evidence.outcome }}' -ne 'success') { $failed += 'hydrate_p6_evidence' }
+            if ('${{ steps.bundle.outcome }}' -ne 'success') { $failed += 'bundle' }
+          }
+          if ($failed.Count -gt 0) {
+            throw "Supporting release evidence generation failed before publication: $($failed -join ', ')"
+          }
+
       - name: Prepare exact supporting evidence upload manifest
         id: prepare_bundle_upload
-        if: ${{ always() && steps.provider_config.outcome == 'success' && steps.p6_inputs.outcome == 'success' }}
+        if: ${{ always() && steps.generation_complete.outcome == 'success' }}
         run: >
           node deep-devops/scripts/artifact-upload-manifest.mjs
           --root deep-devops/artifacts/supporting-release-evidence
@@ -340,7 +395,7 @@ jobs:
 
       - name: Scan exact supporting evidence upload manifest
         id: bundle_secret_scan
-        if: ${{ always() && steps.provider_config.outcome == 'success' && steps.p6_inputs.outcome == 'success' }}
+        if: ${{ always() && steps.generation_complete.outcome == 'success' }}
         run: >
           node deep-devops/scripts/artifact-upload-gate.mjs
           --manifest "${{ runner.temp }}/deep-upload/supporting-bundle-manifest.json"
@@ -351,14 +406,33 @@ jobs:
           --require test-results/registry-recovery.json
           --require observability/observability-gate-summary.json
           --summary "${{ runner.temp }}/deep-upload/supporting-bundle-scan.json"
+          --bundle "${{ runner.temp }}/deep-upload/supporting-bundle-sealed-evidence.json"
 
       - name: Upload supporting release evidence bundle
-        if: ${{ always() && steps.provider_config.outcome == 'success' && steps.p6_inputs.outcome == 'success' && steps.prepare_bundle_upload.outcome == 'success' && steps.bundle_secret_scan.outcome == 'success' }}
+        id: upload_supporting_bundle
+        if: ${{ always() && steps.generation_complete.outcome == 'success' && steps.prepare_bundle_upload.outcome == 'success' && steps.bundle_secret_scan.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.artifact_name || format('supporting-release-evidence-{0}', inputs.release_candidate) }}
-          path: ${{ runner.temp }}/deep-upload/supporting-bundle/**
+          path: ${{ runner.temp }}/deep-upload/supporting-bundle-sealed-evidence.json
           if-no-files-found: error
+
+      - name: Download sealed supporting release evidence
+        if: ${{ always() && steps.upload_supporting_bundle.outcome == 'success' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name || format('supporting-release-evidence-{0}', inputs.release_candidate) }}
+          path: ${{ runner.temp }}/deep-upload/roundtrip-supporting-bundle
+
+      - name: Verify sealed supporting release evidence round trip
+        if: ${{ always() && steps.upload_supporting_bundle.outcome == 'success' }}
+        run: >
+          node deep-devops/scripts/sealed-evidence-bundle.mjs
+          --bundle "${{ runner.temp }}/deep-upload/roundtrip-supporting-bundle/supporting-bundle-sealed-evidence.json"
+          --expected-sha256 "${{ steps.bundle_secret_scan.outputs.bundle_sha256 }}"
+          --actions-artifact-id "${{ steps.upload_supporting_bundle.outputs.artifact-id }}"
+          --actions-artifact-digest "${{ steps.upload_supporting_bundle.outputs.artifact-digest }}"
+          --receipt "${{ runner.temp }}/deep-upload/supporting-bundle-roundtrip-receipt.json"
 
       - name: Fail if supporting evidence generation is incomplete
         if: always()

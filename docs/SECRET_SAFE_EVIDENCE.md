@@ -59,15 +59,40 @@ each file to the current Windows account and `SYSTEM`:
 
 ```powershell
 $secretDir = Resolve-Path .secrets/uat
-icacls $secretDir /inheritance:r
-icacls $secretDir /grant:r "$env:USERNAME:(OI)(CI)F" "SYSTEM:(OI)(CI)F"
-icacls $secretDir /remove:g "Users" "Authenticated Users" "Everyone"
-icacls $secretDir /T
+$owner = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+$system = [System.Security.Principal.SecurityIdentifier]::new('S-1-5-18')
+$allow = [System.Security.AccessControl.AccessControlType]::Allow
+$full = [System.Security.AccessControl.FileSystemRights]::FullControl
+$inherit = [System.Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit'
+$noneInherit = [System.Security.AccessControl.InheritanceFlags]::None
+$nonePropagate = [System.Security.AccessControl.PropagationFlags]::None
+
+$dirAcl = [System.Security.AccessControl.DirectorySecurity]::new()
+$dirAcl.SetOwner($owner)
+$dirAcl.SetAccessRuleProtection($true, $false)
+$dirAcl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new(
+  $owner, $full, $inherit, $nonePropagate, $allow))
+$dirAcl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new(
+  $system, $full, $inherit, $nonePropagate, $allow))
+Set-Acl -LiteralPath $secretDir -AclObject $dirAcl
+
+Get-ChildItem -LiteralPath $secretDir -File | ForEach-Object {
+  $fileAcl = [System.Security.AccessControl.FileSecurity]::new()
+  $fileAcl.SetOwner($owner)
+  $fileAcl.SetAccessRuleProtection($true, $false)
+  $fileAcl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new(
+    $owner, $full, $noneInherit, $nonePropagate, $allow))
+  $fileAcl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new(
+    $system, $full, $noneInherit, $nonePropagate, $allow))
+  Set-Acl -LiteralPath $_.FullName -AclObject $fileAcl
+}
 ```
 
-Review the final ACL output by principal and permission only. Never display file
-contents. On Linux, use owner-only directory mode and owner read/write file
-mode. Backups must be encrypted and managed by the same secret owner.
+Review the final ACL by SID and permission only. The gate requires a protected,
+non-inherited ACL containing exactly the current owner SID and `SYSTEM`, both
+with full control; no third principal is accepted. Never display file contents.
+On Linux, the directory must be exactly `0700` and every file exactly `0600`.
+Backups must be encrypted and managed by the same secret owner.
 
 ## Evidence allowlist
 
@@ -95,7 +120,8 @@ node .\scripts\artifact-upload-manifest.mjs `
 node .\scripts\artifact-upload-gate.mjs `
   --manifest <upload-manifest.json> `
   --staging-root <clean-staging-directory> `
-  --summary <fresh-scan-summary.json>
+  --summary <fresh-scan-summary.json> `
+  --bundle <sealed-evidence.json>
 ```
 
 The manifest records required files, relative path, media type, extension,
@@ -105,14 +131,26 @@ inspect-only schema and hashes before scanning, binds the fresh scanner result
 to the exact manifest, then validates the unchanged manifest and staged file
 hashes again. Scanner crash, timeout, non-zero exit, missing manifest/result,
 policy-field mutation, file mutation, or staging mismatch prevents upload.
+The gate emits one sealed JSON bundle outside the staging root. CI uploads
+exactly that single file, downloads the same artifact to a fresh directory,
+and verifies the bundle SHA256, embedded raw manifest and scan summary, every
+payload hash, and the Actions artifact ID/digest metadata. These receipts
+remain explicitly non-production and untrusted until independent publication
+policy accepts the Actions archive-digest semantics.
+Downstream release workflows first verify the self-seal, embedded hashes,
+producer Actions run ID, and source commit/tree, then extract into a new empty
+directory. They do not accept an unverified raw-artifact fallback.
 
-The scanner checks normalized relative file and archive-entry names, treats
-unknown binary/non-text input as blocking, and recursively inspects ZIP, TAR,
-GZ, APK, AAB, and MSIX entries with traversal, expanded-size, entry-count, and
-depth limits. Raw UI bitmaps and arbitrary logs are never uploadable by
-default. Opaque executable binaries and all `hash-only` handling are blocked.
-They remain blocked until a separate cryptographically signed approval format,
-pinned signer policy, and independent review are implemented.
+The scanner checks normalized relative file and archive-entry names and treats
+unknown binary/non-text input as blocking. Every archive, container, and
+application-package format is currently blocked by extension and file magic,
+including ZIP, TAR, GZIP/TGZ, 7z, RAR, APK, AAB, and MSIX. Parsers still inspect
+recognized formats defensively to report embedded findings, but even a clean
+archive cannot be uploaded. Raw UI bitmaps and arbitrary logs are also never
+uploadable by default. Opaque executable binaries and all `hash-only` handling
+remain blocked until a separate cryptographically signed approval format,
+pinned signer policy, complete metadata parser, and independent review are
+implemented.
 
 Placeholder matching is exact. A credential literal that merely contains words
 such as `REDACTED` or `NOT_COMMITTED` is still a finding. Artifact and archive
@@ -125,15 +163,19 @@ dump, database, or `.env` material.
 `uat-rotation-preflight.mjs` verifies an Ed25519 signature whose public-key
 fingerprint is supplied through the protected Mr. X procedure. The signed
 version-2 payload must map contract node IDs 4, 5, and 6 to unique successful
-exit/revocation transaction and log evidence. It must separately map each node
+`ServiceNodeExit` or `ServiceNodeLiquidated` transaction and log evidence using
+the exact ABI-derived topic and decoded identity arguments. It must separately map each node
 to a unique replacement contract ID, operator address, router public ID, BLS
 public-key SHA256 fingerprint, registration transaction/log, and at least 12
 confirmations relative to the attested finalized block.
 
 This is explicitly a human-signed offline attestation. The script performs no
-network request and cannot prove that the referenced chain data exists. Unit
-tests use synthetic hashes only as fixtures; synthetic receipts are never
-release evidence.
+network request and cannot prove that the referenced chain data exists. It
+does not consume raw receipt/log bytes for local ABI decoding or independently
+recompute BLS event material from a trusted RPC. Therefore it always returns
+`uatRestartAuthorized: false`; restart still requires a reviewed raw-log
+verifier or an independent Mr. X chain review. Unit tests use synthetic hashes
+only as fixtures; synthetic receipts are never release evidence.
 
 ## No-secret rollback
 

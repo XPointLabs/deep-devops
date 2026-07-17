@@ -34,6 +34,9 @@ const forbiddenUploadExtensions = new Set([
   '.bmp', '.gif', '.heic', '.jpeg', '.jpg', '.log', '.png', '.tif', '.tiff', '.webp'
 ]);
 const archiveExtensions = new Set(['.zip', '.apk', '.aab', '.msix', '.tar', '.gz']);
+const blockedArchiveExtensions = new Set([
+  '.7z', '.aab', '.apk', '.gz', '.msix', '.rar', '.tar', '.tgz', '.zip'
+]);
 const ignoredDirectoryNames = new Set(['.git', 'node_modules', 'bin', 'obj']);
 const textExtensions = new Set([
   '.conf', '.cs', '.cmd', '.dockerfile', '.env', '.example', '.html', '.js',
@@ -136,7 +139,7 @@ function hasSensitiveFilename(value) {
 function isPlaceholder(value) {
   const normalized = String(value).trim().replace(/^["'`]|["'`]$/g, '').trim();
   if (normalized.length === 0) return true;
-  return /^\$\{[A-Za-z_][A-Za-z0-9_]*(?::-[^}\r\n]*)?\}$/.test(normalized)
+  return /^\$\{[A-Za-z_][A-Za-z0-9_]*\}$/.test(normalized)
     || /^\$\{\{\s*(?:github\.(?:actor|token)|secrets\.[A-Za-z_][A-Za-z0-9_]*|env\.[A-Za-z_][A-Za-z0-9_]*)\s*\}\}$/.test(normalized)
     || /^\$env:[A-Za-z_][A-Za-z0-9_]*$/i.test(normalized)
     || /^\/run\/secrets\/[A-Za-z0-9._-]+$/.test(normalized)
@@ -234,48 +237,194 @@ function validateEntryName(name) {
   return normalized;
 }
 
-function zipEntries(buffer) {
-  const entries = [];
-  let offset = 0;
-  while (offset + 4 <= buffer.length) {
-    const signature = buffer.readUInt32LE(offset);
-    if (signature === 0x04034b50) {
-      if (offset + 30 > buffer.length) throw new Error('truncated ZIP local header');
-      const flags = buffer.readUInt16LE(offset + 6);
-      const method = buffer.readUInt16LE(offset + 8);
-      const compressedSize = buffer.readUInt32LE(offset + 18);
-      const uncompressedSize = buffer.readUInt32LE(offset + 22);
-      const nameLength = buffer.readUInt16LE(offset + 26);
-      const extraLength = buffer.readUInt16LE(offset + 28);
-      if ((flags & 0x08) !== 0) throw new Error('ZIP data descriptors are not accepted for evidence');
-      const nameStart = offset + 30;
-      const dataStart = nameStart + nameLength + extraLength;
-      const dataEnd = dataStart + compressedSize;
-      if (dataEnd > buffer.length) throw new Error('truncated ZIP entry');
-      const name = validateEntryName(buffer.subarray(nameStart, nameStart + nameLength).toString('utf8'));
-      if (!name.endsWith('/')) {
-        let data;
-        if (method === 0) data = buffer.subarray(dataStart, dataEnd);
-        else if (method === 8) data = inflateRawSync(buffer.subarray(dataStart, dataEnd), { maxOutputLength: MAX_ENTRY_BYTES + 1 });
-        else throw new Error('unsupported ZIP compression method');
-        if (data.length !== uncompressedSize) throw new Error('ZIP expanded size mismatch');
-        entries.push({ name, data });
-      }
-      offset = dataEnd;
-      continue;
+function crc32(buffer) {
+  let value = 0xffffffff;
+  for (const byte of buffer) {
+    value ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) {
+      value = (value >>> 1) ^ ((value & 1) ? 0xedb88320 : 0);
     }
-    if (signature === 0x02014b50 || signature === 0x06054b50) break;
-    throw new Error('invalid ZIP structure');
+  }
+  return (value ^ 0xffffffff) >>> 0;
+}
+
+function decodeZipName(buffer, flags) {
+  if ((flags & 0x800) === 0 && buffer.some(byte => byte > 0x7f)) {
+    throw new Error('ZIP non-ASCII names require the UTF-8 flag');
+  }
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(buffer);
+  } catch {
+    throw new Error('ZIP contains an invalid UTF-8 name or comment');
+  }
+}
+
+function zipEntries(buffer) {
+  if (buffer.length < 22) throw new Error('truncated ZIP end-of-central-directory record');
+  let eocdOffset = -1;
+  const minimumOffset = Math.max(0, buffer.length - 22 - 0xffff);
+  for (let offset = buffer.length - 22; offset >= minimumOffset; offset -= 1) {
+    if (buffer.readUInt32LE(offset) !== 0x06054b50) continue;
+    const commentLength = buffer.readUInt16LE(offset + 20);
+    if (offset + 22 + commentLength === buffer.length) {
+      eocdOffset = offset;
+      break;
+    }
+  }
+  if (eocdOffset < 0) throw new Error('ZIP EOCD is missing or trailing bytes remain unparsed');
+  if (eocdOffset >= 20 && buffer.readUInt32LE(eocdOffset - 20) === 0x07064b50) {
+    throw new Error('ZIP64 archives are not accepted for evidence');
+  }
+  const disk = buffer.readUInt16LE(eocdOffset + 4);
+  const centralDisk = buffer.readUInt16LE(eocdOffset + 6);
+  const diskEntries = buffer.readUInt16LE(eocdOffset + 8);
+  const totalEntries = buffer.readUInt16LE(eocdOffset + 10);
+  const centralSize = buffer.readUInt32LE(eocdOffset + 12);
+  const centralOffset = buffer.readUInt32LE(eocdOffset + 16);
+  const eocdCommentLength = buffer.readUInt16LE(eocdOffset + 20);
+  if (disk !== 0
+    || centralDisk !== 0
+    || diskEntries !== totalEntries
+    || totalEntries === 0xffff
+    || centralSize === 0xffffffff
+    || centralOffset === 0xffffffff
+    || centralOffset + centralSize !== eocdOffset) {
+    throw new Error('ZIP multi-disk, ZIP64, or inconsistent central directory is not accepted');
+  }
+  const entries = [];
+  const centralRecords = [];
+  let centralCursor = centralOffset;
+  for (let index = 0; index < totalEntries; index += 1) {
+    if (centralCursor + 46 > eocdOffset || buffer.readUInt32LE(centralCursor) !== 0x02014b50) {
+      throw new Error('ZIP central directory is truncated or malformed');
+    }
+    const versionMadeBy = buffer.readUInt16LE(centralCursor + 4);
+    const flags = buffer.readUInt16LE(centralCursor + 8);
+    const method = buffer.readUInt16LE(centralCursor + 10);
+    const expectedCrc = buffer.readUInt32LE(centralCursor + 16);
+    const compressedSize = buffer.readUInt32LE(centralCursor + 20);
+    const uncompressedSize = buffer.readUInt32LE(centralCursor + 24);
+    const nameLength = buffer.readUInt16LE(centralCursor + 28);
+    const extraLength = buffer.readUInt16LE(centralCursor + 30);
+    const commentLength = buffer.readUInt16LE(centralCursor + 32);
+    const diskStart = buffer.readUInt16LE(centralCursor + 34);
+    const externalAttributes = buffer.readUInt32LE(centralCursor + 38);
+    const localOffset = buffer.readUInt32LE(centralCursor + 42);
+    const recordEnd = centralCursor + 46 + nameLength + extraLength + commentLength;
+    if (recordEnd > eocdOffset
+      || (flags & ~0x800) !== 0
+      || ![0, 8].includes(method)
+      || compressedSize === 0xffffffff
+      || uncompressedSize === 0xffffffff
+      || localOffset === 0xffffffff
+      || diskStart !== 0
+      || extraLength !== 0) {
+      throw new Error('ZIP encrypted, descriptor, ZIP64, extra-field, or unsupported form is not accepted');
+    }
+    const unixType = (versionMadeBy >>> 8) === 3 ? (externalAttributes >>> 16) & 0xf000 : 0;
+    if (unixType === 0xa000) throw new Error('ZIP symbolic-link entries are not accepted');
+    const nameBytes = buffer.subarray(centralCursor + 46, centralCursor + 46 + nameLength);
+    const name = validateEntryName(decodeZipName(nameBytes, flags));
+    const commentStart = centralCursor + 46 + nameLength + extraLength;
+    const comment = buffer.subarray(commentStart, commentStart + commentLength);
+    if (comment.length > 0) {
+      entries.push({ name: `${name}.__central_comment.txt`, data: comment, metadata: true });
+    }
+    centralRecords.push({
+      name,
+      nameBytes,
+      flags,
+      method,
+      expectedCrc,
+      compressedSize,
+      uncompressedSize,
+      localOffset
+    });
+    centralCursor = recordEnd;
+  }
+  if (centralCursor !== eocdOffset) throw new Error('ZIP central directory has unparsed bytes');
+
+  let localCursor = 0;
+  for (const record of [...centralRecords].sort((left, right) => left.localOffset - right.localOffset)) {
+    if (record.localOffset !== localCursor
+      || localCursor + 30 > centralOffset
+      || buffer.readUInt32LE(localCursor) !== 0x04034b50) {
+      throw new Error('ZIP local entries are missing, reordered, or have unparsed gaps');
+    }
+    const flags = buffer.readUInt16LE(localCursor + 6);
+    const method = buffer.readUInt16LE(localCursor + 8);
+    const expectedCrc = buffer.readUInt32LE(localCursor + 14);
+    const compressedSize = buffer.readUInt32LE(localCursor + 18);
+    const uncompressedSize = buffer.readUInt32LE(localCursor + 22);
+    const nameLength = buffer.readUInt16LE(localCursor + 26);
+    const extraLength = buffer.readUInt16LE(localCursor + 28);
+    const nameStart = localCursor + 30;
+    const dataStart = nameStart + nameLength + extraLength;
+    const dataEnd = dataStart + compressedSize;
+    if (dataEnd > centralOffset
+      || extraLength !== 0
+      || flags !== record.flags
+      || method !== record.method
+      || expectedCrc !== record.expectedCrc
+      || compressedSize !== record.compressedSize
+      || uncompressedSize !== record.uncompressedSize
+      || !buffer.subarray(nameStart, nameStart + nameLength).equals(record.nameBytes)) {
+      throw new Error('ZIP local and central entry metadata do not match');
+    }
+    let data;
+    if (method === 0) data = buffer.subarray(dataStart, dataEnd);
+    else data = inflateRawSync(buffer.subarray(dataStart, dataEnd), { maxOutputLength: MAX_ENTRY_BYTES + 1 });
+    if (data.length !== uncompressedSize || crc32(data) !== expectedCrc) {
+      throw new Error('ZIP expanded size or CRC mismatch');
+    }
+    if (!record.name.endsWith('/')) entries.push({ name: record.name, data });
+    else if (data.length !== 0) throw new Error('ZIP directory entry contains data');
+    localCursor = dataEnd;
+  }
+  if (localCursor !== centralOffset) throw new Error('ZIP local region has trailing or unparsed bytes');
+  const eocdComment = buffer.subarray(eocdOffset + 22, eocdOffset + 22 + eocdCommentLength);
+  if (eocdComment.length > 0) {
+    entries.push({ name: '__archive_comment.txt', data: eocdComment, metadata: true });
   }
   return entries;
 }
 
+function tarChecksum(header) {
+  let sum = 0;
+  for (let index = 0; index < header.length; index += 1) {
+    sum += index >= 148 && index < 156 ? 0x20 : header[index];
+  }
+  return sum;
+}
+
+function tarString(buffer) {
+  return buffer.toString('utf8').replace(/\0.*$/, '').trim();
+}
+
 function tarEntries(buffer) {
+  if (buffer.length < 1024 || buffer.length % 512 !== 0) {
+    throw new Error('TAR must contain complete 512-byte records and end blocks');
+  }
   const entries = [];
-  for (let offset = 0; offset + 512 <= buffer.length;) {
+  let offset = 0;
+  let endBlocks = 0;
+  while (offset + 512 <= buffer.length) {
     const header = buffer.subarray(offset, offset + 512);
-    if (header.every(byte => byte === 0)) break;
-    const name = validateEntryName(header.subarray(0, 100).toString('utf8').replace(/\0.*$/, ''));
+    if (header.every(byte => byte === 0)) {
+      endBlocks += 1;
+      offset += 512;
+      if (endBlocks === 2) break;
+      continue;
+    }
+    if (endBlocks > 0) throw new Error('TAR contains data between end-of-archive blocks');
+    const storedChecksumText = tarString(header.subarray(148, 156));
+    if (!/^[0-7]+$/.test(storedChecksumText)
+      || Number.parseInt(storedChecksumText, 8) !== tarChecksum(header)) {
+      throw new Error('TAR header checksum is invalid');
+    }
+    const prefix = tarString(header.subarray(345, 500));
+    const baseName = tarString(header.subarray(0, 100));
+    const name = validateEntryName(prefix ? `${prefix}/${baseName}` : baseName);
     const sizeText = header.subarray(124, 136).toString('ascii').replace(/\0.*$/, '').trim();
     if (!/^[0-7]*$/.test(sizeText)) throw new Error('invalid TAR entry size');
     const size = Number.parseInt(sizeText || '0', 8);
@@ -283,9 +432,26 @@ function tarEntries(buffer) {
     const dataStart = offset + 512;
     const dataEnd = dataStart + size;
     if (!Number.isSafeInteger(size) || dataEnd > buffer.length) throw new Error('truncated TAR entry');
+    const paddedEnd = dataStart + Math.ceil(size / 512) * 512;
+    if (paddedEnd > buffer.length) throw new Error('truncated TAR entry padding');
+    if (buffer.subarray(dataEnd, paddedEnd).some(byte => byte !== 0)) {
+      throw new Error('TAR entry padding contains unparsed nonzero bytes');
+    }
     if (type === 0 || type === 48) entries.push({ name, data: buffer.subarray(dataStart, dataEnd) });
-    else if (![53].includes(type)) throw new Error('TAR links and special entries are not accepted');
-    offset = dataStart + Math.ceil(size / 512) * 512;
+    else if (type === 53) {
+      if (size !== 0) throw new Error('TAR directory entry contains data');
+    } else throw new Error('TAR links, extensions, and special entries are not accepted');
+    for (const [field, value] of [
+      ['uname', tarString(header.subarray(265, 297))],
+      ['gname', tarString(header.subarray(297, 329))]
+    ]) {
+      if (value) entries.push({ name: `${name}.__tar_${field}.txt`, data: Buffer.from(value), metadata: true });
+    }
+    offset = paddedEnd;
+  }
+  if (endBlocks !== 2) throw new Error('TAR is missing two end-of-archive blocks');
+  if (buffer.subarray(offset).some(byte => byte !== 0)) {
+    throw new Error('TAR has nonzero trailing bytes after end-of-archive blocks');
   }
   return entries;
 }
@@ -329,6 +495,18 @@ function inspectBuffer(
     findings.push(finding('sensitive-filename', logicalName));
   }
   const extension = path.extname(logicalName).toLowerCase();
+  const blockedArchiveMagic = (buffer.length >= 4
+    && ['504b0304', '504b0506', '504b0708', '52617221'].includes(buffer.subarray(0, 4).toString('hex')))
+    || (buffer.length >= 6 && buffer.subarray(0, 6).toString('hex') === '377abcaf271c')
+    || (buffer.length >= 2 && buffer[0] === 0x1f && buffer[1] === 0x8b)
+    || (buffer.length >= 512 && (() => {
+      const checksumText = buffer.subarray(148, 156).toString('ascii').replace(/\0.*$/, '').trim();
+      return /^[0-7]+$/.test(checksumText)
+        && Number.parseInt(checksumText, 8) === tarChecksum(buffer.subarray(0, 512));
+    })());
+  if (blockedArchiveExtensions.has(extension) || blockedArchiveMagic) {
+    findings.push(finding('forbidden-archive-artifact', logicalName));
+  }
   if (archiveExtensions.has(extension)) {
     if (depth >= MAX_ARCHIVE_DEPTH) throw new Error('archive recursion depth exceeded');
     let entries;
@@ -339,8 +517,23 @@ function inspectBuffer(
       return;
     }
     entries = extension === '.tar' ? tarEntries(buffer) : zipEntries(buffer);
-    for (const entry of entries) {
-      inspectBuffer(entry.data, `${logicalName}::${entry.name}`, findings, state, depth + 1, null, enforceFilenamePolicy);
+    for (const [index, entry] of entries.entries()) {
+      const metadataPath = `${logicalName}::entry-${index}-name`;
+      inspectText(entry.name, metadataPath, findings);
+      if (sensitiveFilenameRegex.test(entry.name) || hasSensitiveFilename(entry.name)) {
+        findings.push(finding('sensitive-filename', metadataPath));
+      }
+      const extension = path.extname(entry.name).toLowerCase();
+      const nestedArchiveSuffix = archiveExtensions.has(extension) ? extension : '';
+      inspectBuffer(
+        entry.data,
+        `${logicalName}::entry-${index}${nestedArchiveSuffix}`,
+        findings,
+        state,
+        depth + 1,
+        null,
+        enforceFilenamePolicy
+      );
     }
     return;
   }

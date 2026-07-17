@@ -1,8 +1,15 @@
 {
-  "schemaVersion": "2.0.0",
+  "schemaVersion": "3.0.0",
   "network": "arbitrum-sepolia",
   "chainId": 421614,
   "serviceNodeRewardsContract": "0x08A5a47E67fCd18e14AdFB535e8d8644476D4197",
+  "eventAbi": {
+    "source": "xpoint-staking-contracts/contracts/ServiceNodeRewards.sol",
+    "contract": "ServiceNodeRewards",
+    "newServiceNodeV2Topic0": "0xe4329316e9100fa3706d6ee3f89fdc25cc950ff098b7c6a533f6c89b5b7a949c",
+    "serviceNodeExitTopic0": "0x1869657b8fe34c364e4f67b337513e34de4f0a803d6e53ae13d3c17296d2b7da",
+    "serviceNodeLiquidatedTopic0": "0x69d6674298663cd2ab512bfbcbffe46965bfb13ada7e933e2befa5044a931716"
+  },
   "retiredOperatorAddresses": [
     "0xb0cE3b1229c00d1B85c7083E31Dae531f3B352C0"
   ],
@@ -19,15 +26,18 @@
   "retiredNodeBindings": [
     {
       "contractNodeId": 4,
-      "routerPublicId": "5979c8dda9c10cff26db46b96cefd9ea3527c2ce90b99886342d71c54e8ed4dc"
+      "routerPublicId": "5979c8dda9c10cff26db46b96cefd9ea3527c2ce90b99886342d71c54e8ed4dc",
+      "blsPublicKeySha256": "97791df8223257e727a75c90b8e94ee9961a113c2416b48de39186770c20e8dc"
     },
     {
       "contractNodeId": 5,
-      "routerPublicId": "298f4fb1eb601d5f900332c728829d19be6282f5e50c2bd3cea055a27d83c51c"
+      "routerPublicId": "298f4fb1eb601d5f900332c728829d19be6282f5e50c2bd3cea055a27d83c51c",
+      "blsPublicKeySha256": "926445fb2575f94b0e6897ce1d7256b0dc8b2afeafd5c93cb7ad0e4a74a6a9f8"
     },
     {
       "contractNodeId": 6,
-      "routerPublicId": "c08f5aecc314da789193719a15f1fa2e21a1aeadf266a6b53bd667974870c846"
+      "routerPublicId": "c08f5aecc314da789193719a15f1fa2e21a1aeadf266a6b53bd667974870c846",
+      "blsPublicKeySha256": "b99fa60b5f4ce8d9e49af05c7dcb9957ddf5a9c04811676f225ec8e4b4726b70"
     }
   ]
 }

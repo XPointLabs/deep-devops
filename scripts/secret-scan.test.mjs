@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { spawnSync } from 'node:child_process';
+import { deflateRawSync } from 'node:zlib';
 import { scan } from './secret-scan.mjs';
 import { prepareUpload } from './artifact-upload-manifest.mjs';
 
@@ -140,7 +141,7 @@ test('confirmed bypass: scans relative archive entry names and redacts a sensiti
     const result = await scan({ root, includeTracked: false, artifactRoots: [path.join(root, 'artifacts')] });
     assert.equal(result.status, 'failed');
     assert.ok(result.findings.some(item => item.ruleId === 'sensitive-filename'));
-    assert.ok(result.findings.some(item => item.path === '<redacted-sensitive-filename>'));
+    assert.ok(!JSON.stringify(result).includes('password=Canary123456789.txt'));
   } finally {
     await remove(root);
   }
@@ -185,6 +186,30 @@ test('placeholder matching is exact and rejects literals with a REDACTED prefix'
   }
 });
 
+test('environment placeholders with literal defaults, nesting, or Unicode punctuation are never safe', async () => {
+  const root = await fixture();
+  try {
+    const variable = ['PASS', 'WORD'].join('');
+    const start = name => ['$', '{', name].join('');
+    const cases = [
+      `${start(variable)}:-LiteralCanary123}`,
+      `${start(variable)}:-${start(`OTHER_${variable}`)}}`,
+      `${start(variable)}：-UnicodeCanary123}`,
+      `${start(variable)}-Canary123}`
+    ];
+    await writeFile(
+      path.join(root, 'artifacts', 'placeholder-cases.yml'),
+      cases.map(value => `password: ${value}`).join('\n')
+    );
+    const result = await scan({ root, includeTracked: false, artifactRoots: [path.join(root, 'artifacts')] });
+    assert.equal(result.status, 'failed');
+    assert.ok(result.findings.filter(item => item.ruleId === 'sensitive-assignment').length >= cases.length);
+    assert.ok(cases.every(value => !JSON.stringify(result).includes(value)));
+  } finally {
+    await remove(root);
+  }
+});
+
 test('recursively inspects ZIP text entries and rejects malformed archives', async () => {
   const root = await fixture();
   try {
@@ -194,13 +219,193 @@ test('recursively inspects ZIP text entries and rejects malformed archives', asy
       storedZip('nested/config.env', Buffer.from(`PASSWORD=${canary}\n`))
     );
     let result = await scan({ root, includeTracked: false, artifactRoots: [path.join(root, 'artifacts')] });
-    assert.ok(result.findings.some(item => item.path.includes('nested/config.env')));
+    assert.ok(result.findings.some(item => item.path.includes('entry-0')));
     assert.ok(!JSON.stringify(result).includes(canary));
     await writeFile(path.join(root, 'artifacts', 'evidence.zip'), Buffer.from('PK\x03\x04broken'));
     await assert.rejects(
       scan({ root, includeTracked: false, artifactRoots: [path.join(root, 'artifacts')] }),
       /truncated ZIP/
     );
+  } finally {
+    await remove(root);
+  }
+});
+
+test('ZIP and TAR entry names are secret-scanned without publishing the literal name', async () => {
+  const root = await fixture();
+  try {
+    const token = ['ghp', Array.from({ length: 32 }, () => 'A').join('')].join('_');
+    for (const [extension, archive] of [
+      ['zip', storedZip(`${token}.txt`, Buffer.from('safe\n'))],
+      ['tar', storedTar(`${token}.txt`, Buffer.from('safe\n'))]
+    ]) {
+      const artifactRoot = path.join(root, `entry-name-${extension}`);
+      await mkdir(artifactRoot);
+      await writeFile(path.join(artifactRoot, `case.${extension}`), archive);
+      const result = await scan({ root, includeTracked: false, artifactRoots: [artifactRoot] });
+      assert.equal(result.status, 'failed');
+      assert.ok(result.findings.some(item => item.ruleId === 'known-provider-token'));
+      assert.ok(!JSON.stringify(result).includes(token));
+    }
+  } finally {
+    await remove(root);
+  }
+});
+
+test('Lead ZIP repro rejects valid EOCD followed by unparsed credential bytes', async () => {
+  const root = await fixture();
+  try {
+    const archive = Buffer.concat([
+      storedZip('safe.txt', Buffer.from('safe\n')),
+      Buffer.from('PASSWORD=ArchiveCanary123\n')
+    ]);
+    await writeFile(path.join(root, 'artifacts', 'trailing.zip'), archive);
+    await assert.rejects(
+      scan({ root, includeTracked: false, artifactRoots: [path.join(root, 'artifacts')] }),
+      /EOCD is missing or trailing bytes/
+    );
+  } finally {
+    await remove(root);
+  }
+});
+
+test('ZIP comments are scanned without returning credential values', async () => {
+  const root = await fixture();
+  try {
+    const canary = 'ArchiveCommentCanary123';
+    await writeFile(
+      path.join(root, 'artifacts', 'comments.zip'),
+      storedZip('safe.txt', Buffer.from('safe\n'), {
+        centralComment: `password=${canary}`,
+        archiveComment: `api_key=${canary}`
+      })
+    );
+    const result = await scan({ root, includeTracked: false, artifactRoots: [path.join(root, 'artifacts')] });
+    assert.equal(result.status, 'failed');
+    assert.ok(result.findings.some(item => item.ruleId === 'sensitive-assignment'));
+    assert.ok(!JSON.stringify(result).includes(canary));
+  } finally {
+    await remove(root);
+  }
+});
+
+test('ZIP central-only, ZIP64, encrypted, and mismatched forms fail closed', async () => {
+  const root = await fixture();
+  try {
+    const valid = storedZip('safe.txt', Buffer.from('safe\n'));
+    const centralOffset = valid.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
+    const centralOnly = Buffer.from(valid.subarray(centralOffset));
+    const centralOnlyEocd = centralOnly.indexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+    centralOnly.writeUInt32LE(0, centralOnlyEocd + 16);
+
+    const zip64 = Buffer.from(valid);
+    const zip64Eocd = zip64.indexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+    zip64.writeUInt16LE(0xffff, zip64Eocd + 8);
+    zip64.writeUInt16LE(0xffff, zip64Eocd + 10);
+
+    const encrypted = Buffer.from(valid);
+    encrypted.writeUInt16LE(1, 6);
+    encrypted.writeUInt16LE(1, centralOffset + 8);
+
+    const mismatched = Buffer.from(valid);
+    mismatched[30] ^= 1;
+
+    for (const [index, archive] of [centralOnly, zip64, encrypted, mismatched].entries()) {
+      const artifactRoot = path.join(root, `zip-negative-${index}`);
+      await mkdir(artifactRoot);
+      await writeFile(path.join(artifactRoot, 'case.zip'), archive);
+      await assert.rejects(
+        scan({ root, includeTracked: false, artifactRoots: [artifactRoot] }),
+        /ZIP/
+      );
+    }
+  } finally {
+    await remove(root);
+  }
+});
+
+test('Lead TAR repro rejects nonzero bytes after valid end blocks and invalid checksums', async () => {
+  const root = await fixture();
+  try {
+    const valid = storedTar('safe.txt', Buffer.from('safe\n'));
+    const trailingBlock = Buffer.alloc(512);
+    Buffer.from('PASSWORD=TarCanary123').copy(trailingBlock);
+    const trailing = Buffer.concat([valid, trailingBlock]);
+    const invalidChecksum = Buffer.from(valid);
+    invalidChecksum[0] ^= 1;
+    for (const [index, archive] of [trailing, invalidChecksum].entries()) {
+      const artifactRoot = path.join(root, `tar-negative-${index}`);
+      await mkdir(artifactRoot);
+      await writeFile(path.join(artifactRoot, 'case.tar'), archive);
+      await assert.rejects(
+        scan({ root, includeTracked: false, artifactRoots: [artifactRoot] }),
+        /TAR/
+      );
+    }
+  } finally {
+    await remove(root);
+  }
+});
+
+test('all archive artifacts and disguised archive magic are blocked, including GZIP FNAME metadata', async () => {
+  const root = await fixture();
+  try {
+    const token = ['AKIA', Array.from({ length: 16 }, () => 'A').join('')].join('');
+    const content = Buffer.from('safe\n');
+    const gzipHeader = Buffer.from([0x1f, 0x8b, 8, 8, 0, 0, 0, 0, 0, 255]);
+    const trailer = Buffer.alloc(8);
+    trailer.writeUInt32LE(crc32(content), 0);
+    trailer.writeUInt32LE(content.length, 4);
+    const gzip = Buffer.concat([
+      gzipHeader,
+      Buffer.from(`${token}.txt\0`),
+      deflateRawSync(content),
+      trailer
+    ]);
+    const cases = [
+      ['safe.zip', storedZip('safe.txt', content)],
+      ['safe.tar', storedTar('safe.txt', content)],
+      ['safe.gz', gzip],
+      ['disguised.bin', storedZip('safe.txt', content)]
+    ];
+    for (const [name, archive] of cases) {
+      const artifactRoot = path.join(root, name.replace('.', '-'));
+      await mkdir(artifactRoot);
+      await writeFile(path.join(artifactRoot, name), archive);
+      const result = await scan({ root, includeTracked: false, artifactRoots: [artifactRoot] });
+      assert.equal(result.status, 'failed');
+      assert.ok(result.findings.some(item => item.ruleId === 'forbidden-archive-artifact'));
+      assert.ok(!JSON.stringify(result).includes(token));
+    }
+  } finally {
+    await remove(root);
+  }
+});
+
+test('tracked archives are blocked before ignored TAR linkname metadata can hide a token', async () => {
+  const root = await fixture();
+  try {
+    const token = ['AKIA', Array.from({ length: 16 }, () => 'B').join('')].join('');
+    const archive = storedTar('safe.txt', Buffer.from('safe\n'));
+    archive.fill(0, 157, 257);
+    Buffer.from(token).copy(archive, 157);
+    archive.fill(0x20, 148, 156);
+    let checksum = 0;
+    for (let index = 0; index < 512; index += 1) checksum += archive[index];
+    const checksumText = checksum.toString(8).padStart(6, '0');
+    archive.write(checksumText, 148, 'ascii');
+    archive[154] = 0;
+    archive[155] = 0x20;
+    await writeFile(path.join(root, 'fixture.tar'), archive);
+    spawnSync('git', ['add', 'fixture.tar'], { cwd: root, windowsHide: true });
+    const result = await scan({ root, artifactRoots: [] });
+    assert.equal(result.status, 'failed');
+    assert.ok(result.findings.some(item => item.ruleId === 'forbidden-archive-artifact'));
+    assert.ok(!JSON.stringify(result).includes(token));
+    await writeFile(path.join(root, 'fixture.tar'), storedTar('safe.txt', Buffer.from('safe\n')));
+    const benign = await scan({ root, artifactRoots: [] });
+    assert.equal(benign.status, 'failed');
+    assert.ok(benign.findings.some(item => item.ruleId === 'forbidden-archive-artifact'));
   } finally {
     await remove(root);
   }
@@ -262,15 +467,71 @@ test('manifest policy fields cannot be mutated to bypass unknown-binary inspecti
   }
 });
 
-function storedZip(name, content) {
+function storedZip(name, content, options = {}) {
   const nameBuffer = Buffer.from(name);
-  const header = Buffer.alloc(30);
-  header.writeUInt32LE(0x04034b50, 0);
-  header.writeUInt16LE(20, 4);
-  header.writeUInt16LE(0, 6);
-  header.writeUInt16LE(0, 8);
-  header.writeUInt32LE(content.length, 18);
-  header.writeUInt32LE(content.length, 22);
-  header.writeUInt16LE(nameBuffer.length, 26);
-  return Buffer.concat([header, nameBuffer, content]);
+  const checksum = crc32(content);
+  const local = Buffer.alloc(30);
+  local.writeUInt32LE(0x04034b50, 0);
+  local.writeUInt16LE(20, 4);
+  local.writeUInt16LE(0x800, 6);
+  local.writeUInt16LE(0, 8);
+  local.writeUInt32LE(checksum, 14);
+  local.writeUInt32LE(content.length, 18);
+  local.writeUInt32LE(content.length, 22);
+  local.writeUInt16LE(nameBuffer.length, 26);
+  const localRegion = Buffer.concat([local, nameBuffer, content]);
+
+  const centralComment = Buffer.from(options.centralComment ?? '');
+  const central = Buffer.alloc(46);
+  central.writeUInt32LE(0x02014b50, 0);
+  central.writeUInt16LE(20, 4);
+  central.writeUInt16LE(20, 6);
+  central.writeUInt16LE(0x800, 8);
+  central.writeUInt16LE(0, 10);
+  central.writeUInt32LE(checksum, 16);
+  central.writeUInt32LE(content.length, 20);
+  central.writeUInt32LE(content.length, 24);
+  central.writeUInt16LE(nameBuffer.length, 28);
+  central.writeUInt16LE(centralComment.length, 32);
+  const centralRegion = Buffer.concat([central, nameBuffer, centralComment]);
+
+  const archiveComment = Buffer.from(options.archiveComment ?? '');
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(1, 8);
+  eocd.writeUInt16LE(1, 10);
+  eocd.writeUInt32LE(centralRegion.length, 12);
+  eocd.writeUInt32LE(localRegion.length, 16);
+  eocd.writeUInt16LE(archiveComment.length, 20);
+  return Buffer.concat([localRegion, centralRegion, eocd, archiveComment]);
+}
+
+function storedTar(name, content) {
+  const header = Buffer.alloc(512);
+  Buffer.from(name).copy(header, 0, 0, 100);
+  Buffer.from('0000600\0').copy(header, 100);
+  Buffer.from('0000000\0').copy(header, 108);
+  Buffer.from('0000000\0').copy(header, 116);
+  Buffer.from(`${content.length.toString(8).padStart(11, '0')}\0`).copy(header, 124);
+  Buffer.from('00000000000\0').copy(header, 136);
+  Buffer.from('        ').copy(header, 148);
+  header[156] = 48;
+  Buffer.from('ustar\0').copy(header, 257);
+  Buffer.from('00').copy(header, 263);
+  let checksum = 0;
+  for (const byte of header) checksum += byte;
+  Buffer.from(`${checksum.toString(8).padStart(6, '0')}\0 `).copy(header, 148);
+  const padding = Buffer.alloc(Math.ceil(content.length / 512) * 512 - content.length);
+  return Buffer.concat([header, content, padding, Buffer.alloc(1024)]);
+}
+
+function crc32(buffer) {
+  let value = 0xffffffff;
+  for (const byte of buffer) {
+    value ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) {
+      value = (value >>> 1) ^ ((value & 1) ? 0xedb88320 : 0);
+    }
+  }
+  return (value ^ 0xffffffff) >>> 0;
 }

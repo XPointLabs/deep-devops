@@ -7,6 +7,10 @@ import {
   validatePreparedManifest,
   verifyPreparedStaging
 } from './artifact-upload-manifest.mjs';
+import {
+  sealEvidenceBundle,
+  writeGithubOutputs
+} from './sealed-evidence-bundle.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const scannerPath = path.join(__dirname, 'secret-scan.mjs');
@@ -20,12 +24,13 @@ function parse(argv) {
     if (name === '--manifest') options.manifest = value;
     else if (name === '--staging-root') options.stagingRoot = value;
     else if (name === '--summary') options.summary = value;
+    else if (name === '--bundle') options.bundle = value;
     else if (name === '--require') options.requiredFiles.push(value);
     else if (name === '--timeout-ms') options.timeoutMs = Number(value);
     else throw new Error(`unknown argument: ${name}`);
   }
-  if (!options.manifest || !options.stagingRoot || !options.summary) {
-    throw new Error('manifest, staging root, and fresh summary path are required');
+  if (!options.manifest || !options.stagingRoot || !options.summary || !options.bundle) {
+    throw new Error('manifest, staging root, fresh summary, and sealed bundle paths are required');
   }
   return options;
 }
@@ -80,11 +85,28 @@ export async function gate(options) {
     || summary.selectedManifestSha256 !== initialDigest) {
     throw new Error('secret scanner result does not prove the selected upload manifest');
   }
-  return {
+  const sealed = await sealEvidenceBundle({
+    manifestPath,
+    stagingRoot,
+    scanSummaryPath: summaryPath,
+    bundlePath: path.resolve(options.bundle)
+  });
+  const response = {
     status: 'ok',
     manifestedFiles: finalManifest.fileCount,
-    manifestSha256: initialDigest
+    manifestSha256: initialDigest,
+    bundlePath: path.resolve(options.bundle),
+    bundleSha256: sealed.sha256,
+    bundleSize: sealed.size,
+    productionReady: false,
+    trustedArtifactPublication: false
   };
+  await writeGithubOutputs({
+    bundlePath: response.bundlePath,
+    sha256: response.bundleSha256,
+    size: response.bundleSize
+  });
+  return response;
 }
 
 export async function main(argv = process.argv.slice(2)) {

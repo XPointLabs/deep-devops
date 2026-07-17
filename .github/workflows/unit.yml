@@ -95,14 +95,33 @@ jobs:
           --manifest "${{ runner.temp }}/deep-upload/unit-manifest.json"
           --staging-root "${{ runner.temp }}/deep-upload/unit"
           --summary deep-devops/artifacts/security/unit-upload-secret-scan.json
+          --bundle "${{ runner.temp }}/deep-upload/unit-sealed-evidence.json"
 
       - name: Upload unit artifacts
+        id: upload_unit
         if: ${{ failure() && steps.prepare_unit_upload.outcome == 'success' && steps.unit_secret_scan.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: unit-artifacts
-          path: ${{ runner.temp }}/deep-upload/unit/**
+          path: ${{ runner.temp }}/deep-upload/unit-sealed-evidence.json
           if-no-files-found: error
+
+      - name: Download sealed unit evidence
+        if: ${{ always() && steps.upload_unit.outcome == 'success' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: unit-artifacts
+          path: ${{ runner.temp }}/deep-upload/roundtrip-unit
+
+      - name: Verify sealed unit evidence round trip
+        if: ${{ always() && steps.upload_unit.outcome == 'success' }}
+        run: >
+          node deep-devops/scripts/sealed-evidence-bundle.mjs
+          --bundle "${{ runner.temp }}/deep-upload/roundtrip-unit/unit-sealed-evidence.json"
+          --expected-sha256 "${{ steps.unit_secret_scan.outputs.bundle_sha256 }}"
+          --actions-artifact-id "${{ steps.upload_unit.outputs.artifact-id }}"
+          --actions-artifact-digest "${{ steps.upload_unit.outputs.artifact-digest }}"
+          --receipt "${{ runner.temp }}/deep-upload/unit-roundtrip-receipt.json"
 
   security-gate:
     runs-on: ubuntu-latest
@@ -205,14 +224,33 @@ jobs:
           --require dependency-audit.json
           --require security-gate-summary.json
           --summary "${{ runner.temp }}/deep-upload/security-scan.json"
+          --bundle "${{ runner.temp }}/deep-upload/security-sealed-evidence.json"
 
       - name: Upload security artifacts
+        id: upload_security
         if: ${{ always() && steps.prepare_security_upload.outcome == 'success' && steps.security_secret_scan.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: security-gate-artifacts
-          path: ${{ runner.temp }}/deep-upload/security/**
+          path: ${{ runner.temp }}/deep-upload/security-sealed-evidence.json
           if-no-files-found: error
+
+      - name: Download sealed security evidence
+        if: ${{ always() && steps.upload_security.outcome == 'success' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: security-gate-artifacts
+          path: ${{ runner.temp }}/deep-upload/roundtrip-security
+
+      - name: Verify sealed security evidence round trip
+        if: ${{ always() && steps.upload_security.outcome == 'success' }}
+        run: >
+          node deep-devops/scripts/sealed-evidence-bundle.mjs
+          --bundle "${{ runner.temp }}/deep-upload/roundtrip-security/security-sealed-evidence.json"
+          --expected-sha256 "${{ steps.security_secret_scan.outputs.bundle_sha256 }}"
+          --actions-artifact-id "${{ steps.upload_security.outputs.artifact-id }}"
+          --actions-artifact-digest "${{ steps.upload_security.outputs.artifact-digest }}"
+          --receipt "${{ runner.temp }}/deep-upload/security-roundtrip-receipt.json"
 
   release-gate-contracts:
     runs-on: ubuntu-latest
@@ -278,11 +316,30 @@ jobs:
           --staging-root "${{ runner.temp }}/deep-upload/release-contracts"
           --require release/release-gate-contract-summary.json
           --summary "${{ runner.temp }}/deep-release-gate-contracts/security/pre-upload-secret-scan.json"
+          --bundle "${{ runner.temp }}/deep-upload/release-contracts-sealed-evidence.json"
 
       - name: Upload release gate contract artifacts
+        id: upload_release_contracts
         if: ${{ always() && steps.prepare_release_contract_upload.outcome == 'success' && steps.release_contract_secret_scan.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: release-gate-contract-artifacts
-          path: ${{ runner.temp }}/deep-upload/release-contracts/**
+          path: ${{ runner.temp }}/deep-upload/release-contracts-sealed-evidence.json
           if-no-files-found: error
+
+      - name: Download sealed release gate contract evidence
+        if: ${{ always() && steps.upload_release_contracts.outcome == 'success' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: release-gate-contract-artifacts
+          path: ${{ runner.temp }}/deep-upload/roundtrip-release-contracts
+
+      - name: Verify sealed release gate contract evidence round trip
+        if: ${{ always() && steps.upload_release_contracts.outcome == 'success' }}
+        run: >
+          node deep-devops/scripts/sealed-evidence-bundle.mjs
+          --bundle "${{ runner.temp }}/deep-upload/roundtrip-release-contracts/release-contracts-sealed-evidence.json"
+          --expected-sha256 "${{ steps.release_contract_secret_scan.outputs.bundle_sha256 }}"
+          --actions-artifact-id "${{ steps.upload_release_contracts.outputs.artifact-id }}"
+          --actions-artifact-digest "${{ steps.upload_release_contracts.outputs.artifact-digest }}"
+          --receipt "${{ runner.temp }}/deep-upload/release-contracts-roundtrip-receipt.json"

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
@@ -34,20 +35,58 @@ function runMachineCheck(args, label) {
   if (result.error || result.status !== 0) {
     throw new Error(`${label} failed closed`);
   }
-  return `${result.stdout}\n${result.stderr}`;
+  const output = `${result.stdout}\n${result.stderr}`;
+  return {
+    output,
+    sha256: createHash('sha256').update(output).digest('hex')
+  };
 }
 
-function tapCounters(output) {
-  const value = name => Number.parseInt(output.match(new RegExp(`^# ${name} (\\d+)$`, 'm'))?.[1] ?? '', 10);
+export function tapCounters(output) {
+  const value = name => {
+    const matches = [...output.matchAll(new RegExp(`^# ${name} (\\d+)$`, 'gm'))];
+    if (matches.length !== 1) throw new Error('TAP terminal summary contains missing or duplicate counters');
+    return Number.parseInt(matches[0][1], 10);
+  };
   const counters = {
     tests: value('tests'),
     passed: value('pass'),
-    failed: value('fail')
+    failed: value('fail'),
+    cancelled: value('cancelled'),
+    skipped: value('skipped'),
+    todo: value('todo')
   };
   if (Object.values(counters).some(item => !Number.isSafeInteger(item))) {
-    throw new Error('unable to derive adversarial test counters');
+    throw new Error('unable to derive complete TAP test counters');
+  }
+  if (counters.tests <= 0
+    || counters.passed !== counters.tests
+    || counters.failed !== 0
+    || counters.cancelled !== 0
+    || counters.skipped !== 0
+    || counters.todo !== 0) {
+    throw new Error('TAP test run was empty, incomplete, failed, cancelled, skipped, or todo');
   }
   return counters;
+}
+
+function gitValue(args, label) {
+  const result = spawnSync('git', args, {
+    cwd: repositoryRoot,
+    encoding: 'utf8',
+    windowsHide: true
+  });
+  if (result.status !== 0 || !result.stdout.trim()) throw new Error(`unable to bind evidence to ${label}`);
+  return result.stdout.trim();
+}
+
+function trackedWorktreeClean() {
+  for (const args of [['diff', '--quiet'], ['diff', '--cached', '--quiet']]) {
+    const result = spawnSync('git', args, { cwd: repositoryRoot, windowsHide: true });
+    if (result.status === 1) return false;
+    if (result.status !== 0) throw new Error('unable to derive tracked working tree state');
+  }
+  return true;
 }
 
 export async function main(argv = process.argv.slice(2)) {
@@ -66,24 +105,27 @@ export async function main(argv = process.argv.slice(2)) {
   if (initialScan.status !== 'ok') {
     throw new Error(`secret scan has ${initialScan.findingCount} finding(s)`);
   }
-  const adversarialCounters = tapCounters(runMachineCheck(
+  const adversarialRun = runMachineCheck(
     ['--test', '--test-reporter=tap', 'scripts/secret-scan.test.mjs'],
     'secret scanner adversarial tests'
-  ));
-  const uploadGateCounters = tapCounters(runMachineCheck(
+  );
+  const uploadGateRun = runMachineCheck(
     ['--test', '--test-reporter=tap', 'scripts/artifact-upload-gate.test.mjs'],
     'artifact upload fail-closed tests'
-  ));
-  const rotationGateCounters = tapCounters(runMachineCheck(
+  );
+  const rotationGateRun = runMachineCheck(
     ['--test', '--test-reporter=tap', 'scripts/uat-rotation-preflight.test.mjs'],
     'offline rotation attestation tests'
-  ));
-  const workflowOutput = runMachineCheck(
+  );
+  const workflowRun = runMachineCheck(
     ['scripts/workflow-upload-contracts.mjs'],
     'workflow upload contracts'
   );
+  const adversarialCounters = tapCounters(adversarialRun.output);
+  const uploadGateCounters = tapCounters(uploadGateRun.output);
+  const rotationGateCounters = tapCounters(rotationGateRun.output);
   const stagedUploadCount = Number.parseInt(
-    workflowOutput.match(/passed \((\d+) exact staged uploads\)/)?.[1] ?? '',
+    workflowRun.output.match(/passed \((\d+) sealed round-trip uploads\)/)?.[1] ?? '',
     10
   );
   if (!Number.isSafeInteger(stagedUploadCount)) {
@@ -92,13 +134,21 @@ export async function main(argv = process.argv.slice(2)) {
 
   const evidence = {
     schemaVersion: '1.0.0',
-    workPackage: 'I01A.2-SEC-CORRECTIVE',
+    workPackage: 'I01A.3-SEC-CORRECTIVE',
     status: 'blocked-pending-rotation-and-independent-chain-verification',
     codeStatus: 'ready-for-review',
     productionReady: false,
+    trustedArtifactPublication: false,
     uatRestartAuthorized: false,
     programRevisionSha256: PROGRAM_REVISION_SHA,
     generatedAt,
+    source: {
+      commit: gitValue(['rev-parse', 'HEAD'], 'source commit'),
+      tree: gitValue(['rev-parse', 'HEAD^{tree}'], 'source tree'),
+      runId: process.env.GITHUB_RUN_ID ?? 'local-not-ci',
+      runAttempt: process.env.GITHUB_RUN_ATTEMPT ?? 'local-not-ci',
+      trackedWorkingTreeClean: trackedWorktreeClean()
+    },
     verification: {
       secretScan: {
         status: initialScan.status,
@@ -107,10 +157,13 @@ export async function main(argv = process.argv.slice(2)) {
         archiveEntriesInspected: initialScan.archiveEntriesInspected,
         findingCount: initialScan.findingCount
       },
-      adversarialTests: adversarialCounters,
-      uploadFailClosedTests: uploadGateCounters,
-      offlineRotationAttestationTests: rotationGateCounters,
-      exactStagedArtifactUploads: stagedUploadCount
+      adversarialTests: { ...adversarialCounters, outputSha256: adversarialRun.sha256 },
+      uploadFailClosedTests: { ...uploadGateCounters, outputSha256: uploadGateRun.sha256 },
+      offlineRotationAttestationTests: { ...rotationGateCounters, outputSha256: rotationGateRun.sha256 },
+      workflowUploadContracts: {
+        sealedRoundTripUploads: stagedUploadCount,
+        outputSha256: workflowRun.sha256
+      }
     },
     controls: [
       'tracked-secret-literals-removed',
@@ -121,11 +174,13 @@ export async function main(argv = process.argv.slice(2)) {
       'fail-closed-inspect-only-exact-manifest-pre-and-post-scan-verification',
       'normalized-sensitive-artifact-filename-denylist',
       'exact-placeholder-allowlist',
-      'mr-x-signed-offline-exact-node-rotation-attestation'
+      'mr-x-signed-offline-exact-node-rotation-attestation',
+      'abi-pinned-exact-rotation-event-arguments',
+      'single-file-sealed-evidence-actions-roundtrip'
     ],
     blockers: [
       'Mr. X must rotate the retired UAT deployer and all three Ed25519/BLS identities.',
-      'Mr. X must complete on-chain exit/revocation or redeploy affected UAT contracts before restart.',
+      'Mr. X must complete ABI-verified ServiceNodeExit/ServiceNodeLiquidated actions or redeploy affected UAT contracts before restart.',
       'Independent chain verification is not implemented; the offline attestation never authorizes UAT restart.'
     ],
     evidenceFiles: [
@@ -136,10 +191,11 @@ export async function main(argv = process.argv.slice(2)) {
   };
   const handoff = {
     schemaVersion: '1.0.0',
-    workPackage: 'I01A.2-SEC-CORRECTIVE',
+    workPackage: 'I01A.3-SEC-CORRECTIVE',
     status: 'blocked',
     codeStatus: 'ready-for-review',
     productionReady: false,
+    trustedArtifactPublication: false,
     uatRestartAuthorized: false,
     accountableHuman: 'Mr. X',
     evidencePath: relativeOutput(evidencePath),
@@ -163,7 +219,7 @@ export async function main(argv = process.argv.slice(2)) {
   if (finalScan.status !== 'ok') {
     throw new Error(`generated I01 artifacts failed secret scan with ${finalScan.findingCount} finding(s)`);
   }
-  console.log('I01A.2 corrective security evidence generated; UAT remains blocked pending independent chain verification.');
+  console.log('I01A.3 corrective security evidence generated; UAT remains blocked pending independent chain verification.');
   return { evidence, handoff };
 }
 

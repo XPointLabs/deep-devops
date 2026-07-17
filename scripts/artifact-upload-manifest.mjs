@@ -10,17 +10,24 @@ import {
   stat,
   writeFile
 } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(__dirname, '..');
 const DEFAULT_MAX_FILE_BYTES = 64 * 1024 * 1024;
-const MANIFEST_SCHEMA_VERSION = '1.1.0';
+const MANIFEST_SCHEMA_VERSION = '1.2.0';
+const MAX_EVIDENCE_AGE_MS = 24 * 60 * 60 * 1000;
 const forbiddenExtensions = new Set([
   '.bmp', '.gif', '.heic', '.jpeg', '.jpg', '.log', '.png', '.tif', '.tiff', '.webp'
 ]);
-const opaqueExtensions = new Set(['.dll', '.dylib', '.exe', '.node', '.so', '.wasm']);
+const opaqueExtensions = new Set([
+  '.aab', '.apk', '.dll', '.dylib', '.exe', '.msix', '.node', '.so', '.wasm'
+]);
+const blockedArchiveExtensions = new Set([
+  '.7z', '.aab', '.apk', '.gz', '.msix', '.rar', '.tar', '.tgz', '.zip'
+]);
 const mediaTypes = new Map([
   ['.json', 'application/json'],
   ['.md', 'text/markdown'],
@@ -111,6 +118,404 @@ function mediaTypeFor(filePath) {
   return mediaTypes.get(path.extname(filePath).toLowerCase()) ?? 'application/octet-stream';
 }
 
+function hasBlockedArchiveMagic(buffer) {
+  if (buffer.length >= 4) {
+    const signature = buffer.subarray(0, 4).toString('hex');
+    if (['504b0304', '504b0506', '504b0708', '52617221'].includes(signature)) return true;
+  }
+  if (buffer.length >= 6 && buffer.subarray(0, 6).toString('hex') === '377abcaf271c') return true;
+  if (buffer.length >= 2 && buffer[0] === 0x1f && buffer[1] === 0x8b) return true;
+  if (buffer.length >= 512) {
+    const checksumText = buffer.subarray(148, 156).toString('ascii').replace(/\0.*$/, '').trim();
+    if (/^[0-7]+$/.test(checksumText)) {
+      let checksum = 0;
+      for (let index = 0; index < 512; index += 1) {
+        checksum += index >= 148 && index < 156 ? 0x20 : buffer[index];
+      }
+      if (Number.parseInt(checksumText, 8) === checksum) return true;
+    }
+  }
+  return false;
+}
+
+function walkSemanticValue(value, label, failures) {
+  if (!value || typeof value !== 'object') return;
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => walkSemanticValue(item, `${label}[${index}]`, failures));
+    return;
+  }
+  for (const [key, item] of Object.entries(value)) {
+    if (key === 'status' && typeof item === 'string'
+      && /^(?:failed|failure|error|blocked|skipped|cancelled)$/i.test(item)) {
+      failures.push(`${label}.${key} is ${item}`);
+    }
+    if (/^(?:failed|failures|skipped|cancelled|todo|errors)$/i.test(key)
+      && Number.isFinite(item) && item !== 0) {
+      failures.push(`${label}.${key} must be zero`);
+    }
+    if (/^(?:failedChecks|failedCommands|failedHard|reconciliationIssues|missingFiles)$/i.test(key)
+      && Array.isArray(item) && item.length !== 0) {
+      failures.push(`${label}.${key} must be empty`);
+    }
+    walkSemanticValue(item, `${label}.${key}`, failures);
+  }
+}
+
+function exactSameSet(left, right) {
+  return Array.isArray(left)
+    && Array.isArray(right)
+    && left.length > 0
+    && left.length === right.length
+    && [...left].sort().every((item, index) => item === [...right].sort()[index]);
+}
+
+function gitValue(args) {
+  const result = spawnSync('git', args, {
+    cwd: repositoryRoot,
+    encoding: 'utf8',
+    windowsHide: true
+  });
+  if (result.status !== 0 || !result.stdout.trim()) {
+    throw new Error('unable to bind required evidence validation to Git');
+  }
+  return result.stdout.trim();
+}
+
+function currentEvidenceBinding(generatedAt = new Date().toISOString()) {
+  return {
+    generatedAt,
+    source: {
+      commit: gitValue(['rev-parse', 'HEAD']),
+      tree: gitValue(['rev-parse', 'HEAD^{tree}']),
+      runId: process.env.GITHUB_RUN_ID ?? 'local-not-ci',
+      runAttempt: process.env.GITHUB_RUN_ATTEMPT ?? 'local-not-ci'
+    }
+  };
+}
+
+function positiveStatus(document, required, failures) {
+  if (!/^(?:ok|passed|success|delivered)$/i.test(document.status ?? '')) {
+    failures.push(`${required}: top-level status must be explicitly successful`);
+  }
+}
+
+function nonemptyPassedChecks(document, required, failures) {
+  if (!Array.isArray(document.checks)
+    || document.checks.length === 0
+    || document.checks.some(check => check?.passed !== true)) {
+    failures.push(`${required}: checks must be nonempty and every check must pass`);
+  }
+}
+
+function hasPositiveNumber(value) {
+  if (!value || typeof value !== 'object') return false;
+  return Object.values(value).some(item =>
+    (typeof item === 'number' && Number.isFinite(item) && item > 0) || hasPositiveNumber(item));
+}
+
+function validateKnownEvidence(required, document, failures) {
+  if (Object.keys(document).length === 0) {
+    failures.push(`${required}: empty JSON is not evidence`);
+    return;
+  }
+  if (required === 'runtime.gate.json') {
+    if (!Array.isArray(document.failedHard)
+      || document.failedHard.length !== 0
+      || document.requireRouterNoMock !== true
+      || document.routerTransportMocked !== false
+      || document.requirePushProviderCanary !== true
+      || document.pushProviderCanaryDelivered !== true
+      || document.pushProviderCanaryStatus !== 'delivered') {
+      failures.push(`${required}: runtime release gate did not prove required real transports`);
+    }
+    return;
+  }
+  if (required === 'release-artifact-hydration-summary.json'
+    || /^(?:client-device-acceptance|ops-deployment-evidence|security-audit-signoff|ga-decision)-summary\.json$/.test(required)) {
+    positiveStatus(document, required, failures);
+    nonemptyPassedChecks(document, required, failures);
+    if (!Array.isArray(document.failedChecks) || document.failedChecks.length !== 0) {
+      failures.push(`${required}: P6 summary has failed checks`);
+    }
+    if (required === 'release-artifact-hydration-summary.json'
+      && (!Array.isArray(document.hydratedArtifacts)
+        || document.hydratedArtifacts.length === 0
+        || document.hydratedArtifacts.some(item => item?.hydrated !== true))) {
+      failures.push(`${required}: every selected P6 source artifact must be hydrated`);
+    }
+    return;
+  }
+  if (required === 'client-device-acceptance.json') {
+    positiveStatus(document, required, failures);
+    const platforms = new Map((document.platforms ?? []).map(item => [item.platform, item.status]));
+    if (platforms.get('android') !== 'passed'
+      || platforms.get('ios') !== 'passed'
+      || platforms.get('windows') !== 'passed'
+      || !Array.isArray(document.scenarios)
+      || document.scenarios.length === 0
+      || document.scenarios.some(item => item?.status !== 'passed')
+      || document.releaseGuards?.noStubTransport !== true
+      || document.releaseGuards?.noSessionEndpoints !== true) {
+      failures.push(`${required}: Android/iOS/Windows scenarios and no-mock guards must pass`);
+    }
+    return;
+  }
+  if (required === 'ops-deployment-evidence.json') {
+    positiveStatus(document, required, failures);
+    if (document.dashboards?.deployed !== true
+      || document.alerts?.routesTested !== true
+      || document.postDeployVerification?.status !== 'passed'
+      || document.postDeployVerification?.runtimeHealth?.status !== 'ok'
+      || !document.recovery?.rollbackDrill?.url) {
+      failures.push(`${required}: deployment, observability, smoke, and recovery evidence is incomplete`);
+    }
+    return;
+  }
+  if (required === 'security-audit-signoff.json') {
+    if (document.status !== 'approved'
+      || document.externalAudit?.status !== 'closed'
+      || document.openFindings?.critical !== 0
+      || document.openFindings?.high !== 0
+      || document.securityGate?.status !== 'passed'
+      || document.sbom?.attested !== true) {
+      failures.push(`${required}: security approval, audit closure, findings, gate, or SBOM attestation failed`);
+    }
+    return;
+  }
+  if (required === 'ga-decision.json') {
+    const approvals = new Map((document.approvals ?? []).map(item => [item.role, item.status]));
+    if (document.decision !== 'go'
+      || approvals.get('engineering') !== 'approved'
+      || approvals.get('security') !== 'approved'
+      || approvals.get('ops') !== 'approved'
+      || !Array.isArray(document.releaseBlockers)
+      || document.releaseBlockers.some(item => !['closed', 'accepted'].includes(item?.status))) {
+      failures.push(`${required}: GA decision, approvals, or blocker disposition is incomplete`);
+    }
+    return;
+  }
+  if (required === 'runtime.snapshot.json') {
+    if (document.schemaVersion !== '2.0.0'
+      || !Array.isArray(document.snapshots)
+      || document.snapshots.length === 0
+      || document.snapshots.some(item => item?.ok !== true)) {
+      failures.push(`${required}: every allowlisted runtime snapshot must succeed`);
+    }
+    return;
+  }
+  if (required === 'compose.topology.redacted.json') {
+    positiveStatus(document, required, failures);
+    if (!Array.isArray(document.containers)
+      || document.containers.length === 0
+      || document.containerCount !== document.containers.length) {
+      failures.push(`${required}: topology must contain the exact nonempty container count`);
+    }
+    return;
+  }
+  if (required.endsWith('secret-scan-summary.json') || required === 'secret-scan.json') {
+    positiveStatus(document, required, failures);
+    const findings = document.findings;
+    if ((Array.isArray(findings) && findings.length !== 0)
+      || ('findingCount' in document && document.findingCount !== 0)) {
+      failures.push(`${required}: secret scan must contain zero findings`);
+    }
+    return;
+  }
+  if (required.endsWith('/multi-node-topology.json')) {
+    positiveStatus(document, required, failures);
+    if (!Array.isArray(document.routers)
+      || document.routers.length < 3
+      || document.routers.some(router => router?.transportMocked !== false)
+      || !Number.isSafeInteger(document.registryRuntime?.totalNodes)
+      || document.registryRuntime.totalNodes < 3
+      || !Number.isSafeInteger(document.selectedPath?.distinctHops)
+      || document.selectedPath.distinctHops < 3) {
+      failures.push(`${required}: three real routers and three distinct hops are required`);
+    }
+    return;
+  }
+  if (required.endsWith('/backend-load-smoke.json')) {
+    if (!document.statsDelta || !document.statsAfter || !hasPositiveNumber(document.statsDelta)) {
+      failures.push(`${required}: load smoke must prove positive traffic with final stats`);
+    }
+    return;
+  }
+  if (required.endsWith('/backend-restart-smoke.json')) {
+    positiveStatus(document, required, failures);
+    if (!document.retrievedAfterRestart || !document.retrievedFinal || !document.statsAfterRehearsal) {
+      failures.push(`${required}: restart smoke lacks post-restart retrieval evidence`);
+    }
+    return;
+  }
+  if (required === 'production-readiness-status.json') {
+    positiveStatus(document, required, failures);
+    if (!Array.isArray(document.blockers) || document.blockers.length !== 0) {
+      failures.push(`${required}: production readiness blockers must be empty`);
+    }
+    return;
+  }
+  if (required === 'production-readiness-checklist.json') {
+    positiveStatus(document, required, failures);
+    if (!Array.isArray(document.items)
+      || document.items.length === 0
+      || !Array.isArray(document.blockedItems)
+      || document.blockedItems.length !== 0) {
+      failures.push(`${required}: readiness checklist must be nonempty with no blocked items`);
+    }
+    return;
+  }
+  if (required === 'release-secret-preflight-summary.json') {
+    positiveStatus(document, required, failures);
+    nonemptyPassedChecks(document, required, failures);
+    if (!Array.isArray(document.failedChecks) || document.failedChecks.length !== 0) {
+      failures.push(`${required}: release secret preflight has failed checks`);
+    }
+    return;
+  }
+  if (required === 'supporting-release-evidence-summary.json') {
+    positiveStatus(document, required, failures);
+    nonemptyPassedChecks(document, required, failures);
+    if (!Array.isArray(document.copiedArtifacts)
+      || document.copiedArtifacts.filter(item => item?.copied === true).length === 0) {
+      failures.push(`${required}: supporting evidence copied no artifacts`);
+    }
+    return;
+  }
+  if (required.endsWith('/push-provider-canary.json')) {
+    positiveStatus(document, required, failures);
+    if (document.provider?.status !== 'delivered' || document.provider?.attempts < 1) {
+      failures.push(`${required}: push provider canary was not delivered`);
+    }
+    return;
+  }
+  if (required.endsWith('/rollback-drill.json')) {
+    positiveStatus(document, required, failures);
+    if (document.postRollbackSmoke?.status !== 'ok' || document.executed !== true) {
+      failures.push(`${required}: rollback and post-rollback smoke must execute successfully`);
+    }
+    return;
+  }
+  if (required.endsWith('/registry-recovery.json')) {
+    positiveStatus(document, required, failures);
+    if (!exactSameSet(document.requiredTests, document.passedTests)) {
+      failures.push(`${required}: every required recovery test must pass`);
+    }
+    return;
+  }
+  if (required.endsWith('/observability-gate-summary.json')) {
+    positiveStatus(document, required, failures);
+    if (!Array.isArray(document.failedChecks)
+      || document.failedChecks.length !== 0
+      || !Array.isArray(document.alertRules)
+      || document.alertRules.length === 0) {
+      failures.push(`${required}: observability checks and alert rules are incomplete`);
+    }
+    return;
+  }
+  if (required === 'sbom.json') {
+    if (document.bomFormat !== 'Deep-SBOM'
+      || !Array.isArray(document.components)
+      || document.componentCount !== document.components.length
+      || document.componentCount <= 0) {
+      failures.push(`${required}: SBOM must contain an exact nonempty component inventory`);
+    }
+    return;
+  }
+  if (required === 'dependency-audit.json' || required === 'security-gate-summary.json'
+    || required.endsWith('/release-gate-contract-summary.json')) {
+    positiveStatus(document, required, failures);
+    return;
+  }
+  failures.push(`${required}: no explicit semantic evidence contract is registered`);
+}
+
+export async function validateRequiredEvidence(
+  discovered,
+  requiredFiles,
+  now = new Date(),
+  binding = currentEvidenceBinding(now.toISOString())
+) {
+  const failures = [];
+  let freshnessChecked = 0;
+  const evidenceBindings = [];
+  let rollbackExecutedAndPassed = !requiredFiles.includes('test-results/rollback-drill.json');
+  for (const required of requiredFiles) {
+    if (path.posix.extname(required).toLowerCase() !== '.json') {
+      failures.push(`${required}: required release evidence must be JSON`);
+      continue;
+    }
+    const selected = discovered.find(item => item.relative === required);
+    let document;
+    let raw;
+    try {
+      raw = await readFile(selected.filePath);
+      document = JSON.parse(raw.toString('utf8').replace(/^\uFEFF/, ''));
+    } catch {
+      failures.push(`${required}: required release evidence is not valid JSON`);
+      continue;
+    }
+    if (!document || typeof document !== 'object' || Array.isArray(document)) {
+      failures.push(`${required}: required release evidence must be an object`);
+      continue;
+    }
+    validateKnownEvidence(required, document, failures);
+    walkSemanticValue(document, required, failures);
+    const observedGeneratedAt = [
+      document.generatedAt,
+      document.capturedAt,
+      document.capturedAtUtc,
+      document.evaluatedAtUtc
+    ].find(value => typeof value === 'string' && value.length > 0);
+    freshnessChecked += 1;
+    const generated = Date.parse(observedGeneratedAt ?? '');
+    const age = now.getTime() - generated;
+    if (!Number.isFinite(generated) || age < -5 * 60 * 1000 || age > MAX_EVIDENCE_AGE_MS) {
+      failures.push(`${required}: evidence timestamp is missing, invalid, stale, or from the future`);
+    }
+    evidenceBindings.push({
+      path: required,
+      sha256: sha256(raw),
+      generatedAt: observedGeneratedAt ?? null,
+      source: binding.source
+    });
+    if (required.endsWith('/rollback-drill.json')) {
+      rollbackExecutedAndPassed = document.status === 'ok'
+        && document.postRollbackSmoke?.status === 'ok'
+        && document.executed === true;
+      if (!rollbackExecutedAndPassed) {
+        failures.push(`${required}: rollback must execute and its post-rollback smoke must pass`);
+      }
+    }
+    if (required.endsWith('/registry-recovery.json')
+      && !exactSameSet(document.requiredTests, document.passedTests)) {
+      failures.push(`${required}: every required recovery test must pass`);
+    }
+    if (required.endsWith('secret-scan-summary.json')
+      && (document.status !== 'ok' || document.findingCount !== 0)) {
+      failures.push(`${required}: secret scan must be successful with zero findings`);
+    }
+  }
+  if (failures.length > 0) {
+    throw new Error(`required evidence semantic validation failed: ${failures.join('; ')}`);
+  }
+  return {
+    schemaVersion: 'deep-required-evidence-validation-v1',
+    status: 'passed',
+    requiredFileCount: requiredFiles.length,
+    jsonFilesValidated: requiredFiles.length,
+    freshnessChecked,
+    countersValidated: true,
+    rollbackExecutedAndPassed,
+    skippedChecks: 0,
+    schemaContractsValidated: requiredFiles.length,
+    bindingFreshnessValidated: true,
+    semanticContracts: [...requiredFiles],
+    evidenceBindings,
+    generatedAt: binding.generatedAt,
+    source: binding.source
+  };
+}
+
 function parse(argv) {
   const options = { roots: [], files: [], requiredFiles: [] };
   for (let index = 0; index < argv.length; index += 1) {
@@ -134,7 +539,7 @@ function parse(argv) {
   return options;
 }
 
-export function validatePreparedManifest(document) {
+export function validatePreparedManifest(document, options = {}) {
   exactKeys(document, [
     'schemaVersion',
     'status',
@@ -142,6 +547,7 @@ export function validatePreparedManifest(document) {
     'totalBytes',
     'stagingRoot',
     'requiredFiles',
+    'requiredEvidenceValidation',
     'files'
   ], 'upload manifest');
   if (document.schemaVersion !== MANIFEST_SCHEMA_VERSION
@@ -152,6 +558,7 @@ export function validatePreparedManifest(document) {
     || document.totalBytes < 0
     || typeof document.stagingRoot !== 'string'
     || !Array.isArray(document.requiredFiles)
+    || !document.requiredEvidenceValidation
     || !Array.isArray(document.files)
     || document.files.length !== document.fileCount) {
     throw new Error('upload manifest has an unsupported schema or empty/inconsistent content');
@@ -159,6 +566,67 @@ export function validatePreparedManifest(document) {
   const requiredFiles = document.requiredFiles.map(normalizeRequiredPath);
   if (new Set(requiredFiles).size !== requiredFiles.length) {
     throw new Error('upload manifest required paths must be unique');
+  }
+  exactKeys(document.requiredEvidenceValidation, [
+    'schemaVersion',
+    'status',
+    'requiredFileCount',
+    'jsonFilesValidated',
+    'freshnessChecked',
+    'countersValidated',
+    'rollbackExecutedAndPassed',
+    'skippedChecks',
+    'schemaContractsValidated',
+    'bindingFreshnessValidated',
+    'semanticContracts',
+    'evidenceBindings',
+    'generatedAt',
+    'source'
+  ], 'required evidence validation');
+  const validation = document.requiredEvidenceValidation;
+  exactKeys(validation.source, ['commit', 'tree', 'runId', 'runAttempt'], 'required evidence source binding');
+  const generatedAt = Date.parse(validation.generatedAt);
+  const currentBinding = currentEvidenceBinding(validation.generatedAt);
+  const expectedSource = options.expectedSourceRunId === undefined
+    ? currentBinding.source
+    : {
+      commit: currentBinding.source.commit,
+      tree: currentBinding.source.tree,
+      runId: String(options.expectedSourceRunId),
+      runAttempt: validation.source.runAttempt
+    };
+  if (validation.schemaVersion !== 'deep-required-evidence-validation-v1'
+    || validation.status !== 'passed'
+    || validation.requiredFileCount !== requiredFiles.length
+    || validation.jsonFilesValidated !== requiredFiles.length
+    || !Number.isSafeInteger(validation.freshnessChecked)
+    || validation.freshnessChecked < 0
+    || validation.freshnessChecked !== requiredFiles.length
+    || validation.countersValidated !== true
+    || validation.rollbackExecutedAndPassed !== true
+    || validation.skippedChecks !== 0
+    || validation.schemaContractsValidated !== requiredFiles.length
+    || validation.bindingFreshnessValidated !== true
+    || JSON.stringify(validation.semanticContracts) !== JSON.stringify(requiredFiles)
+    || !Array.isArray(validation.evidenceBindings)
+    || validation.evidenceBindings.length !== requiredFiles.length
+    || !Number.isFinite(generatedAt)
+    || Date.now() - generatedAt < -5 * 60 * 1000
+    || Date.now() - generatedAt > MAX_EVIDENCE_AGE_MS
+    || JSON.stringify(validation.source) !== JSON.stringify(expectedSource)) {
+    throw new Error('required evidence validation receipt is invalid');
+  }
+  for (const [index, binding] of validation.evidenceBindings.entries()) {
+    exactKeys(binding, ['path', 'sha256', 'generatedAt', 'source'], 'required evidence file binding');
+    exactKeys(binding.source, ['commit', 'tree', 'runId', 'runAttempt'], 'required evidence file source');
+    const required = requiredFiles[index];
+    const file = document.files.find(entry => entry.path === required);
+    if (binding.path !== required
+      || binding.sha256 !== file?.sha256
+      || !Number.isFinite(Date.parse(binding.generatedAt ?? ''))
+      || JSON.stringify(binding.source) !== JSON.stringify(validation.source)) {
+      throw new Error('required evidence file provenance binding is invalid');
+    }
   }
   let totalBytes = 0;
   const paths = new Set();
@@ -226,6 +694,21 @@ export async function verifyPreparedStaging(document, stagingRoot) {
       throw new Error('manifested artifact changed after manifest preparation');
     }
   }
+  const recomputedValidation = await validateRequiredEvidence(
+    discovered.map(filePath => ({
+      filePath,
+      relative: toPosix(path.relative(resolvedRoot, filePath))
+    })),
+    document.requiredFiles,
+    new Date(),
+    {
+      generatedAt: document.requiredEvidenceValidation.generatedAt,
+      source: document.requiredEvidenceValidation.source
+    }
+  );
+  if (JSON.stringify(recomputedValidation) !== JSON.stringify(document.requiredEvidenceValidation)) {
+    throw new Error('required evidence validation receipt does not match staged content');
+  }
 }
 
 export async function prepareUpload(options) {
@@ -235,8 +718,10 @@ export async function prepareUpload(options) {
   const manifestPath = path.resolve(options.manifest);
   const maxFileBytes = options.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES;
   const requiredFiles = [...new Set((options.requiredFiles ?? []).map(normalizeRequiredPath))].sort();
-  if (requiredFiles.length > 0 && (roots.length !== 1 || explicitFiles.length !== 0)) {
-    throw new Error('required artifact contracts currently require exactly one upload root');
+  if (requiredFiles.length > 0
+    && !((roots.length === 1 && explicitFiles.length === 0)
+      || (roots.length === 0 && explicitFiles.length > 0))) {
+    throw new Error('required artifact contracts require one root or an explicit file set');
   }
   const discovered = [];
   for (const [rootIndex, root] of roots.entries()) {
@@ -269,6 +754,7 @@ export async function prepareUpload(options) {
       throw new Error(`required artifact is missing from upload selection: ${required}`);
     }
   }
+  const requiredEvidenceValidation = await validateRequiredEvidence(discovered, requiredFiles);
 
   await rm(staging, { recursive: true, force: true });
   await mkdir(staging, { recursive: true });
@@ -281,12 +767,15 @@ export async function prepareUpload(options) {
     if (forbiddenExtensions.has(extension)) {
       throw new Error('raw UI bitmaps and arbitrary logs are not uploadable');
     }
-    const stagedRelative = roots.length + explicitFiles.length === 1
+    const stagedRelative = roots.length <= 1 && (roots.length === 0 || explicitFiles.length === 0)
       ? item.relative
       : `${item.rootIndex}/${item.relative}`;
     if (seen.has(stagedRelative)) throw new Error('duplicate staged artifact path');
     seen.add(stagedRelative);
     const buffer = await readFile(item.filePath);
+    if (blockedArchiveExtensions.has(extension) || hasBlockedArchiveMagic(buffer)) {
+      throw new Error('archive and application-package uploads are blocked pending cryptographic approval');
+    }
     const digest = sha256(buffer);
     const mediaType = mediaTypeFor(item.filePath);
     if (opaqueExtensions.has(extension)) {
@@ -313,6 +802,7 @@ export async function prepareUpload(options) {
     totalBytes: entries.reduce((sum, entry) => sum + entry.size, 0),
     stagingRoot: toPosix(path.relative(repositoryRoot, staging)),
     requiredFiles,
+    requiredEvidenceValidation,
     files: entries
   };
   validatePreparedManifest(manifest);

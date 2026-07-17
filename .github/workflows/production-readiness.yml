@@ -161,6 +161,42 @@ jobs:
           token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
           run-id: ${{ inputs.supporting_evidence_run_id }}
 
+      - name: Verify and extract sealed prerequisite evidence
+        shell: pwsh
+        run: |
+          $sources = @(
+            @{
+              Bundle = 'deep-devops/artifacts/hydrated/devops-integration/integration-sealed-evidence.json'
+              Output = 'deep-devops/artifacts/hydrated/extracted-devops-integration'
+              RunId = '${{ steps.attached_ci.outputs.devops_integration_run_id }}'
+            },
+            @{
+              Bundle = 'deep-devops/artifacts/hydrated/devops-nightly-full-e2e/nightly-sealed-evidence.json'
+              Output = 'deep-devops/artifacts/hydrated/extracted-devops-nightly-full-e2e'
+              RunId = '${{ steps.attached_ci.outputs.devops_nightly_full_e2e_run_id }}'
+            },
+            @{
+              Bundle = 'deep-devops/artifacts/hydrated/devops-security-gate/security-sealed-evidence.json'
+              Output = 'deep-devops/artifacts/hydrated/extracted-devops-security-gate'
+              RunId = '${{ steps.attached_ci.outputs.devops_security_gate_run_id }}'
+            }
+          )
+          foreach ($source in $sources) {
+            node deep-devops/scripts/sealed-evidence-bundle.mjs `
+              --bundle $source.Bundle `
+              --extract-dir $source.Output `
+              --expected-source-run-id $source.RunId
+            if ($LASTEXITCODE -ne 0) { throw "Sealed prerequisite extraction failed: $($source.Bundle)" }
+          }
+
+      - name: Verify and extract optional supporting evidence
+        if: ${{ inputs.supporting_evidence_run_id != '' && inputs.supporting_evidence_artifact_name != '' }}
+        run: >
+          node deep-devops/scripts/sealed-evidence-bundle.mjs
+          --bundle deep-devops/artifacts/hydrated/supporting-evidence/supporting-bundle-sealed-evidence.json
+          --extract-dir deep-devops/artifacts/hydrated/extracted-supporting-evidence
+          --expected-source-run-id "${{ inputs.supporting_evidence_run_id }}"
+
       - name: Hydrate release artifact bundle
         run: >
           node deep-devops/scripts/hydrate-release-artifact-bundle.mjs
@@ -239,11 +275,30 @@ jobs:
           --require production-readiness-status.json
           --require production-readiness-checklist.json
           --summary "${{ runner.temp }}/deep-upload/production-readiness-scan.json"
+          --bundle "${{ runner.temp }}/deep-upload/production-readiness-sealed-evidence.json"
 
       - name: Upload production readiness artifacts
+        id: upload_production_readiness
         if: ${{ always() && steps.prepare_upload.outcome == 'success' && steps.secret_scan.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: production-readiness-artifacts
-          path: ${{ runner.temp }}/deep-upload/production-readiness/**
+          path: ${{ runner.temp }}/deep-upload/production-readiness-sealed-evidence.json
           if-no-files-found: error
+
+      - name: Download sealed production readiness evidence
+        if: ${{ always() && steps.upload_production_readiness.outcome == 'success' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: production-readiness-artifacts
+          path: ${{ runner.temp }}/deep-upload/roundtrip-production-readiness
+
+      - name: Verify sealed production readiness evidence round trip
+        if: ${{ always() && steps.upload_production_readiness.outcome == 'success' }}
+        run: >
+          node deep-devops/scripts/sealed-evidence-bundle.mjs
+          --bundle "${{ runner.temp }}/deep-upload/roundtrip-production-readiness/production-readiness-sealed-evidence.json"
+          --expected-sha256 "${{ steps.secret_scan.outputs.bundle_sha256 }}"
+          --actions-artifact-id "${{ steps.upload_production_readiness.outputs.artifact-id }}"
+          --actions-artifact-digest "${{ steps.upload_production_readiness.outputs.artifact-digest }}"
+          --receipt "${{ runner.temp }}/deep-upload/production-readiness-roundtrip-receipt.json"

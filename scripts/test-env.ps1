@@ -345,6 +345,8 @@ finally {
                 $loadArtifact.statsDelta.push.pushNotificationsQueued -lt 1) {
                 throw "Backend load evidence artifact is missing expected storage/file/avatar/push activity deltas: $loadArtifactPath"
             }
+            $loadArtifact | Add-Member -NotePropertyName generatedAt -NotePropertyValue ([DateTimeOffset]::UtcNow.ToString("o")) -Force
+            $loadArtifact | ConvertTo-Json -Depth 40 | Out-File -Encoding utf8 $loadArtifactPath
 
             if ($managedExternalServices.Count -gt 0) {
                 $restartArtifactPath = Join-Path $loadArtifactDir "backend-restart-smoke.json"
@@ -356,6 +358,8 @@ finally {
                 if ($restartArtifact.status -ne "ok") {
                     throw "Managed backend-external restart rehearsal artifact reported failure: $restartArtifactPath"
                 }
+                $restartArtifact | Add-Member -NotePropertyName generatedAt -NotePropertyValue ([DateTimeOffset]::UtcNow.ToString("o")) -Force
+                $restartArtifact | ConvertTo-Json -Depth 40 | Out-File -Encoding utf8 $restartArtifactPath
             }
         }
     }

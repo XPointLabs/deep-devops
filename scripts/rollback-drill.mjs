@@ -354,6 +354,7 @@ async function main() {
     const completedAt = Date.now();
     writeArtifact({
       status: 'ok',
+      executed: true,
       drill: 'compose-known-good-rollback',
       generatedAt: new Date(completedAt).toISOString(),
       composeProject: projectName,

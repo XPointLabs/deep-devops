@@ -15,7 +15,13 @@ import { preflight } from './uat-rotation-preflight.mjs';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(__dirname, '..');
 
-function transactionEvidence(index, contractAddress, observedFinalizedBlock = 1000) {
+function transactionEvidence(
+  index,
+  contractAddress,
+  eventTopic0,
+  decodedArgs,
+  observedFinalizedBlock = 1000
+) {
   const blockNumber = 900 + index;
   return {
     transactionHash: `0x${index.toString(16).padStart(64, '0')}`,
@@ -25,8 +31,9 @@ function transactionEvidence(index, contractAddress, observedFinalizedBlock = 10
     blockHash: `0x${(100 + index).toString(16).padStart(64, '0')}`,
     transactionIndex: index,
     logIndex: index,
-    eventTopic0: `0x${(200 + index).toString(16).padStart(64, '0')}`,
-    confirmations: observedFinalizedBlock - blockNumber + 1
+    eventTopic0,
+    confirmations: observedFinalizedBlock - blockNumber + 1,
+    decodedArgs
   };
 }
 
@@ -35,11 +42,29 @@ async function fixture({
   duplicateTransaction = false,
   insufficientFinality = false,
   wrongContract = false,
-  reusedReplacementIdentity = false
+  reusedReplacementIdentity = false,
+  wrongEventTopic = false,
+  wrongDecodedArguments = false,
+  reusedRetiredBlsIdentity = false,
+  duplicateRetiredCoverage = false,
+  duplicateReplacementCoverage = false,
+  permissiveAcl = false
 } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'deep-uat-rotation-'));
   const secretDir = path.join(root, 'secrets');
   await mkdir(secretDir);
+  if (process.platform === 'win32') {
+    const directoryAcl = spawnSync('icacls.exe', [
+      secretDir,
+      '/inheritance:r',
+      '/grant:r',
+      `${process.env.USERNAME}:(OI)(CI)F`,
+      'SYSTEM:(OI)(CI)F'
+    ], { encoding: 'utf8', windowsHide: true });
+    assert.equal(directoryAcl.status, 0, directoryAcl.stderr);
+  } else {
+    await chmod(secretDir, 0o700);
+  }
   for (const name of ['reward-keeper.env', 'node-1.env', 'node-2.env', 'node-3.env']) {
     const filePath = path.join(secretDir, name);
     await writeFile(filePath, 'VALUE=__REQUIRED_SECRET_NOT_COMMITTED__\n');
@@ -70,8 +95,19 @@ async function fixture({
   const retiredNodeActions = retired.retiredNodeBindings.map((binding, index) => ({
     contractNodeId: binding.contractNodeId,
     oldRouterPublicId: binding.routerPublicId,
-    action: 'exit-or-revocation',
-    transaction: transactionEvidence(index + 1, retired.serviceNodeRewardsContract, observedFinalizedBlock)
+    action: 'service-node-exit',
+    transaction: transactionEvidence(
+      index + 1,
+      retired.serviceNodeRewardsContract,
+      retired.eventAbi.serviceNodeExitTopic0,
+      {
+        serviceNodeID: binding.contractNodeId,
+        initiator: retired.retiredOperatorAddresses[0],
+        pubkeyDataSha256: binding.blsPublicKeySha256,
+        returnedAmount: '1000000000000000000'
+      },
+      observedFinalizedBlock
+    )
   }));
   const replacementRegistrations = retired.retiredNodeBindings.map((binding, index) => ({
     replacementForContractNodeId: binding.contractNodeId,
@@ -80,7 +116,26 @@ async function fixture({
     routerPublicId: rotatedRouterPublicIds[index].newPublicId,
     blsPublicKeySha256: String.fromCharCode(97 + index).repeat(64),
     action: 'replacement-identity-registration',
-    transaction: transactionEvidence(index + 4, retired.serviceNodeRewardsContract, observedFinalizedBlock)
+    transaction: transactionEvidence(
+      index + 4,
+      retired.serviceNodeRewardsContract,
+      retired.eventAbi.newServiceNodeV2Topic0,
+      {
+        serviceNodeID: 7 + index,
+        initiator: rotatedOperatorAddresses[0].newAddress,
+        pubkeyDataSha256: String.fromCharCode(97 + index).repeat(64),
+        serviceNodePubkey: rotatedRouterPublicIds[index].newPublicId,
+        serviceNodeSignature1: String(1000 + index),
+        serviceNodeSignature2: String(2000 + index),
+        fee: 100,
+        contributors: [{
+          addr: rotatedOperatorAddresses[0].newAddress,
+          beneficiary: rotatedOperatorAddresses[0].newAddress,
+          stakedAmount: '15000000000000000000000'
+        }]
+      },
+      observedFinalizedBlock
+    )
   }));
   if (omitRegistration) replacementRegistrations.pop();
   if (duplicateTransaction) {
@@ -95,6 +150,40 @@ async function fixture({
   }
   if (reusedReplacementIdentity) {
     replacementRegistrations[1].routerPublicId = replacementRegistrations[0].routerPublicId;
+  }
+  if (wrongEventTopic) {
+    replacementRegistrations[0].transaction.eventTopic0 = retired.eventAbi.serviceNodeExitTopic0;
+  }
+  if (wrongDecodedArguments) {
+    replacementRegistrations[0].transaction.decodedArgs.serviceNodeID = 999;
+  }
+  if (reusedRetiredBlsIdentity) {
+    replacementRegistrations[0].blsPublicKeySha256 = retired.retiredNodeBindings[0].blsPublicKeySha256;
+    replacementRegistrations[0].transaction.decodedArgs.pubkeyDataSha256 =
+      retired.retiredNodeBindings[0].blsPublicKeySha256;
+  }
+  if (duplicateRetiredCoverage) {
+    retiredNodeActions[2].contractNodeId = retiredNodeActions[0].contractNodeId;
+    retiredNodeActions[2].oldRouterPublicId = retiredNodeActions[0].oldRouterPublicId;
+    retiredNodeActions[2].transaction.decodedArgs.serviceNodeID = retiredNodeActions[0].contractNodeId;
+    retiredNodeActions[2].transaction.decodedArgs.pubkeyDataSha256 =
+      retiredNodeActions[0].transaction.decodedArgs.pubkeyDataSha256;
+  }
+  if (duplicateReplacementCoverage) {
+    replacementRegistrations[2].replacementForContractNodeId =
+      replacementRegistrations[0].replacementForContractNodeId;
+  }
+  if (permissiveAcl) {
+    if (process.platform === 'win32') {
+      const acl = spawnSync('icacls.exe', [
+        secretDir,
+        '/grant',
+        'Everyone:(RX)'
+      ], { encoding: 'utf8', windowsHide: true });
+      assert.equal(acl.status, 0, acl.stderr);
+    } else {
+      await chmod(secretDir, 0o750);
+    }
   }
   const payload = {
     schemaVersion: '2.0.0',
@@ -156,6 +245,24 @@ test('fails closed when a replacement registration mapping is missing', async ()
   }
 });
 
+test('fails closed when duplicate retired IDs hide a missing identity', async () => {
+  const item = await fixture({ duplicateRetiredCoverage: true });
+  try {
+    await assert.rejects(preflight(item), /does not exactly cover/);
+  } finally {
+    await rm(item.root, { recursive: true, force: true });
+  }
+});
+
+test('fails closed when duplicate replacement mappings hide a missing retired identity', async () => {
+  const item = await fixture({ duplicateReplacementCoverage: true });
+  try {
+    await assert.rejects(preflight(item), /does not exactly cover/);
+  } finally {
+    await rm(item.root, { recursive: true, force: true });
+  }
+});
+
 test('fails closed when two node actions reuse a synthetic transaction fixture', async () => {
   const item = await fixture({ duplicateTransaction: true });
   try {
@@ -187,6 +294,45 @@ test('fails closed when a replacement router identity is reused', async () => {
   const item = await fixture({ reusedReplacementIdentity: true });
   try {
     await assert.rejects(preflight(item), /incomplete, reused, or inconsistent/);
+  } finally {
+    await rm(item.root, { recursive: true, force: true });
+  }
+});
+
+test('fails closed when an event topic is not the exact ABI-derived topic', async () => {
+  const item = await fixture({ wrongEventTopic: true });
+  try {
+    await assert.rejects(preflight(item), /event topic outside the checked-in ABI/);
+  } finally {
+    await rm(item.root, { recursive: true, force: true });
+  }
+});
+
+test('fails closed when decoded event arguments do not bind the signed mapping', async () => {
+  const item = await fixture({ wrongDecodedArguments: true });
+  try {
+    await assert.rejects(preflight(item), /decoded event arguments do not exactly bind/);
+  } finally {
+    await rm(item.root, { recursive: true, force: true });
+  }
+});
+
+test('fails closed when a replacement reuses a retired BLS public identity', async () => {
+  const item = await fixture({ reusedRetiredBlsIdentity: true });
+  try {
+    await assert.rejects(preflight(item), /incomplete, reused, or inconsistent/);
+  } finally {
+    await rm(item.root, { recursive: true, force: true });
+  }
+});
+
+test('fails closed when the secret directory ACL or mode grants an extra principal', async () => {
+  const item = await fixture({ permissiveAcl: true });
+  try {
+    await assert.rejects(
+      preflight(item),
+      process.platform === 'win32' ? /exact non-inherited full control/ : /exactly 0700/
+    );
   } finally {
     await rm(item.root, { recursive: true, force: true });
   }
