@@ -16,6 +16,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(__dirname, '..');
 const DEFAULT_MAX_FILE_BYTES = 64 * 1024 * 1024;
+const MANIFEST_SCHEMA_VERSION = '1.1.0';
 const forbiddenExtensions = new Set([
   '.bmp', '.gif', '.heic', '.jpeg', '.jpg', '.log', '.png', '.tif', '.tiff', '.webp'
 ]);
@@ -38,6 +39,28 @@ const mediaTypes = new Map([
 
 function toPosix(value) {
   return value.split(path.sep).join('/');
+}
+
+function exactKeys(value, expected, label) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${label} must be an object`);
+  }
+  const actual = Object.keys(value).sort();
+  const wanted = [...expected].sort();
+  if (actual.length !== wanted.length || actual.some((key, index) => key !== wanted[index])) {
+    throw new Error(`${label} contains unsupported or missing fields`);
+  }
+}
+
+function normalizeRequiredPath(value) {
+  const normalized = String(value).normalize('NFKC').replaceAll('\\', '/');
+  if (!normalized
+    || normalized.startsWith('/')
+    || /^[A-Za-z]:/.test(normalized)
+    || normalized.split('/').some(part => part === '' || part === '.' || part === '..')) {
+    throw new Error('required artifact paths must be canonical relative paths');
+  }
+  return normalized;
 }
 
 function inside(root, target) {
@@ -89,16 +112,16 @@ function mediaTypeFor(filePath) {
 }
 
 function parse(argv) {
-  const options = { roots: [], files: [], opaqueApprovalManifest: null };
+  const options = { roots: [], files: [], requiredFiles: [] };
   for (let index = 0; index < argv.length; index += 1) {
     const name = argv[index];
     const value = argv[index + 1];
     if (!value || value.startsWith('--')) throw new Error(`${name} requires a value`);
     if (name === '--root') options.roots.push(value);
     else if (name === '--file') options.files.push(value);
+    else if (name === '--require') options.requiredFiles.push(value);
     else if (name === '--staging') options.staging = value;
     else if (name === '--manifest') options.manifest = value;
-    else if (name === '--opaque-approvals') options.opaqueApprovalManifest = value;
     else if (name === '--max-file-bytes') options.maxFileBytes = Number(value);
     else throw new Error(`unknown argument: ${name}`);
     index += 1;
@@ -111,23 +134,98 @@ function parse(argv) {
   return options;
 }
 
-async function loadOpaqueApprovals(filePath) {
-  if (!filePath) return new Map();
-  const document = JSON.parse(await readFile(path.resolve(filePath), 'utf8'));
-  if (document.schemaVersion !== '1.0.0' || !Array.isArray(document.files)) {
-    throw new Error('opaque approval manifest has an unsupported schema');
+export function validatePreparedManifest(document) {
+  exactKeys(document, [
+    'schemaVersion',
+    'status',
+    'fileCount',
+    'totalBytes',
+    'stagingRoot',
+    'requiredFiles',
+    'files'
+  ], 'upload manifest');
+  if (document.schemaVersion !== MANIFEST_SCHEMA_VERSION
+    || document.status !== 'prepared'
+    || !Number.isSafeInteger(document.fileCount)
+    || document.fileCount <= 0
+    || !Number.isSafeInteger(document.totalBytes)
+    || document.totalBytes < 0
+    || typeof document.stagingRoot !== 'string'
+    || !Array.isArray(document.requiredFiles)
+    || !Array.isArray(document.files)
+    || document.files.length !== document.fileCount) {
+    throw new Error('upload manifest has an unsupported schema or empty/inconsistent content');
   }
-  const approvals = new Map();
+  const requiredFiles = document.requiredFiles.map(normalizeRequiredPath);
+  if (new Set(requiredFiles).size !== requiredFiles.length) {
+    throw new Error('upload manifest required paths must be unique');
+  }
+  let totalBytes = 0;
+  const paths = new Set();
   for (const entry of document.files) {
-    if (!entry || entry.approvedOpaqueSignedBinary !== true || entry.handling !== 'hash-only') {
-      throw new Error('opaque approval must explicitly select signed hash-only handling');
+    exactKeys(entry, [
+      'path',
+      'size',
+      'sha256',
+      'extension',
+      'mediaType',
+      'handling',
+      'approvedOpaqueSignedBinary'
+    ], 'upload manifest entry');
+    const entryPath = normalizeRequiredPath(entry.path);
+    if (entryPath !== entry.path || paths.has(entryPath)) {
+      throw new Error('upload manifest paths must be canonical and unique');
     }
-    if (!Number.isSafeInteger(entry.size) || !/^[0-9a-f]{64}$/i.test(entry.sha256 ?? '')) {
-      throw new Error('opaque approval requires exact size and SHA256');
+    paths.add(entryPath);
+    if (!Number.isSafeInteger(entry.size)
+      || entry.size < 0
+      || !/^[0-9a-f]{64}$/.test(entry.sha256 ?? '')
+      || entry.extension !== path.posix.extname(entry.path).toLowerCase()
+      || entry.mediaType !== mediaTypeFor(entry.path)
+      || entry.handling !== 'inspect'
+      || entry.approvedOpaqueSignedBinary !== false) {
+      throw new Error('upload manifest entry violates the inspect-only policy');
     }
-    approvals.set(toPosix(entry.path), entry);
+    totalBytes += entry.size;
+    if (!Number.isSafeInteger(totalBytes)) throw new Error('upload manifest total size overflow');
   }
-  return approvals;
+  if (totalBytes !== document.totalBytes) throw new Error('upload manifest total byte count mismatch');
+  for (const required of requiredFiles) {
+    if (!paths.has(required)) throw new Error(`required artifact is missing from upload manifest: ${required}`);
+  }
+  return document;
+}
+
+export async function verifyPreparedStaging(document, stagingRoot) {
+  validatePreparedManifest(document);
+  const resolvedRoot = path.resolve(stagingRoot);
+  const rootInfo = await lstat(resolvedRoot);
+  if (rootInfo.isSymbolicLink() || !rootInfo.isDirectory()) {
+    throw new Error('staging root must be a canonical directory');
+  }
+  const realRoot = await realpath(resolvedRoot);
+  const discovered = await walk(resolvedRoot);
+  if (discovered.length !== document.fileCount) {
+    throw new Error('staging root contains unmanifested or missing files');
+  }
+  const expectedPaths = new Set(document.files.map(entry => entry.path));
+  for (const filePath of discovered) {
+    const relative = toPosix(path.relative(resolvedRoot, filePath));
+    if (!expectedPaths.has(relative)) throw new Error('staging root contains an unmanifested file');
+  }
+  for (const entry of document.files) {
+    const filePath = path.resolve(resolvedRoot, ...entry.path.split('/'));
+    if (!inside(resolvedRoot, filePath)) throw new Error('upload manifest path escapes staging root');
+    const info = await lstat(filePath);
+    if (info.isSymbolicLink() || !info.isFile()) throw new Error('manifested artifact is not a regular file');
+    if (!inside(realRoot, await realpath(filePath))) {
+      throw new Error('manifested artifact resolves outside staging root');
+    }
+    const buffer = await readFile(filePath);
+    if (buffer.length !== entry.size || sha256(buffer) !== entry.sha256) {
+      throw new Error('manifested artifact changed after manifest preparation');
+    }
+  }
 }
 
 export async function prepareUpload(options) {
@@ -136,7 +234,10 @@ export async function prepareUpload(options) {
   const staging = path.resolve(options.staging);
   const manifestPath = path.resolve(options.manifest);
   const maxFileBytes = options.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES;
-  const approvals = await loadOpaqueApprovals(options.opaqueApprovalManifest);
+  const requiredFiles = [...new Set((options.requiredFiles ?? []).map(normalizeRequiredPath))].sort();
+  if (requiredFiles.length > 0 && (roots.length !== 1 || explicitFiles.length !== 0)) {
+    throw new Error('required artifact contracts currently require exactly one upload root');
+  }
   const discovered = [];
   for (const [rootIndex, root] of roots.entries()) {
     const rootInfo = await lstat(root);
@@ -159,6 +260,15 @@ export async function prepareUpload(options) {
       explicit: true
     });
   }
+  if (discovered.length === 0) {
+    throw new Error('upload selection is empty');
+  }
+  const discoveredRelative = new Set(discovered.map(item => item.relative));
+  for (const required of requiredFiles) {
+    if (!discoveredRelative.has(required)) {
+      throw new Error(`required artifact is missing from upload selection: ${required}`);
+    }
+  }
 
   await rm(staging, { recursive: true, force: true });
   await mkdir(staging, { recursive: true });
@@ -179,19 +289,8 @@ export async function prepareUpload(options) {
     const buffer = await readFile(item.filePath);
     const digest = sha256(buffer);
     const mediaType = mediaTypeFor(item.filePath);
-    let handling = 'inspect';
-    let approvedOpaqueSignedBinary = false;
     if (opaqueExtensions.has(extension)) {
-      const approval = approvals.get(item.relative);
-      if (!approval
-        || approval.size !== info.size
-        || approval.sha256.toLowerCase() !== digest
-        || approval.extension !== extension
-        || approval.mediaType !== mediaType) {
-        throw new Error('opaque binary lacks an exact signed-binary approval');
-      }
-      handling = 'hash-only';
-      approvedOpaqueSignedBinary = true;
+      throw new Error('opaque executable binaries are blocked until cryptographic approval verification exists');
     }
     const stagedPath = path.join(staging, ...stagedRelative.split('/'));
     await mkdir(path.dirname(stagedPath), { recursive: true });
@@ -202,19 +301,21 @@ export async function prepareUpload(options) {
       sha256: digest,
       extension,
       mediaType,
-      handling,
-      approvedOpaqueSignedBinary
+      handling: 'inspect',
+      approvedOpaqueSignedBinary: false
     });
   }
   entries.sort((left, right) => left.path.localeCompare(right.path));
   const manifest = {
-    schemaVersion: '1.0.0',
+    schemaVersion: MANIFEST_SCHEMA_VERSION,
     status: 'prepared',
     fileCount: entries.length,
     totalBytes: entries.reduce((sum, entry) => sum + entry.size, 0),
     stagingRoot: toPosix(path.relative(repositoryRoot, staging)),
+    requiredFiles,
     files: entries
   };
+  validatePreparedManifest(manifest);
   await mkdir(path.dirname(manifestPath), { recursive: true });
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
   return manifest;

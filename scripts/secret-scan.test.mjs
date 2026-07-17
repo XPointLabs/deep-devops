@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
-import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -147,6 +146,45 @@ test('confirmed bypass: scans relative archive entry names and redacts a sensiti
   }
 });
 
+test('blocks normalized secret-shaped artifact filenames including Unicode punctuation variants', async () => {
+  const root = await fixture();
+  try {
+    const names = [
+      'wallet-mnemonic.txt',
+      'private＿key.json',
+      'service.credentials.yaml',
+      'backup-keystore.txt',
+      'state-database.json',
+      '.env.production'
+    ];
+    for (const [index, name] of names.entries()) {
+      const artifactRoot = path.join(root, `artifact-case-${index}`);
+      await mkdir(artifactRoot);
+      await writeFile(path.join(artifactRoot, name), 'safe synthetic content\n');
+      const result = await scan({ root, includeTracked: false, artifactRoots: [artifactRoot] });
+      assert.equal(result.status, 'failed');
+      assert.ok(result.findings.some(item => item.ruleId === 'sensitive-filename'));
+      assert.ok(result.findings.every(item => item.path === '<redacted-sensitive-filename>'));
+    }
+  } finally {
+    await remove(root);
+  }
+});
+
+test('placeholder matching is exact and rejects literals with a REDACTED prefix', async () => {
+  const root = await fixture();
+  try {
+    const canary = 'REDACTED-but-still-a-literal';
+    await writeFile(path.join(root, 'artifacts', 'evidence.json'), JSON.stringify({ password: canary }));
+    const result = await scan({ root, includeTracked: false, artifactRoots: [path.join(root, 'artifacts')] });
+    assert.equal(result.status, 'failed');
+    assert.ok(result.findings.some(item => item.ruleId === 'sensitive-assignment'));
+    assert.ok(!JSON.stringify(result).includes(canary));
+  } finally {
+    await remove(root);
+  }
+});
+
 test('recursively inspects ZIP text entries and rejects malformed archives', async () => {
   const root = await fixture();
   try {
@@ -168,7 +206,7 @@ test('recursively inspects ZIP text entries and rejects malformed archives', asy
   }
 });
 
-test('manifest scan verifies the exact staged files and permits only exact approved large opaque binaries', async () => {
+test('manifest scan verifies exact staged files and blocks opaque executable binaries', async () => {
   const root = await fixture();
   try {
     const source = path.join(root, 'source');
@@ -183,32 +221,42 @@ test('manifest scan verifies the exact staged files and permits only exact appro
     await writeFile(path.join(staging, 'evidence.json'), '{"status":"changed"}\n');
     await assert.rejects(scan({ root, manifest: manifestPath, stagingRoot: staging }), /changed after manifest/);
 
-    const binary = Buffer.alloc(9 * 1024 * 1024, 0);
-    await writeFile(path.join(source, 'signed.exe'), binary);
-    const digest = createSha256(binary);
-    const approvals = path.join(root, 'opaque-approvals.json');
-    await writeFile(approvals, `${JSON.stringify({
-      schemaVersion: '1.0.0',
-      files: [{
-        path: 'signed.exe',
-        size: binary.length,
-        sha256: digest,
-        extension: '.exe',
-        mediaType: 'application/octet-stream',
-        handling: 'hash-only',
-        approvedOpaqueSignedBinary: true
-      }]
-    })}\n`);
-    const approved = await prepareUpload({
-      roots: [source],
-      staging,
-      manifest: manifestPath,
-      opaqueApprovalManifest: approvals,
-      maxFileBytes: 16 * 1024 * 1024
-    });
-    assert.equal(approved.fileCount, 2);
-    const approvedResult = await scan({ root, manifest: manifestPath, stagingRoot: staging });
-    assert.equal(approvedResult.status, 'ok');
+    await writeFile(path.join(source, 'blocked.exe'), Buffer.from([0, 1, 2, 3]));
+    await assert.rejects(
+      prepareUpload({ roots: [source], staging, manifest: manifestPath }),
+      /opaque executable binaries are blocked/
+    );
+  } finally {
+    await remove(root);
+  }
+});
+
+test('manifest policy fields cannot be mutated to bypass unknown-binary inspection', async () => {
+  const root = await fixture();
+  try {
+    const source = path.join(root, 'source');
+    const staging = path.join(root, 'staged');
+    const manifestPath = path.join(root, 'upload-manifest.json');
+    await mkdir(source);
+    await writeFile(path.join(source, 'payload.bin'), Buffer.from([0, 1, 2, 3, 4]));
+    await prepareUpload({ roots: [source], staging, manifest: manifestPath });
+    const original = JSON.parse(await readFile(manifestPath, 'utf8'));
+    const mutations = [
+      entry => { entry.handling = 'hash-only'; },
+      entry => { entry.approvedOpaqueSignedBinary = true; },
+      entry => { entry.extension = '.txt'; },
+      entry => { entry.mediaType = 'text/plain'; },
+      entry => { entry.untrustedPolicyOverride = true; }
+    ];
+    for (const mutate of mutations) {
+      const document = structuredClone(original);
+      mutate(document.files[0]);
+      await writeFile(manifestPath, `${JSON.stringify(document, null, 2)}\n`);
+      await assert.rejects(
+        scan({ root, manifest: manifestPath, stagingRoot: staging }),
+        /unsupported or missing fields|inspect-only policy/
+      );
+    }
   } finally {
     await remove(root);
   }
@@ -225,8 +273,4 @@ function storedZip(name, content) {
   header.writeUInt32LE(content.length, 22);
   header.writeUInt16LE(nameBuffer.length, 26);
   return Buffer.concat([header, nameBuffer, content]);
-}
-
-function createSha256(buffer) {
-  return createHash('sha256').update(buffer).digest('hex');
 }

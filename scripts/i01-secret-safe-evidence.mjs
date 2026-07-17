@@ -74,6 +74,10 @@ export async function main(argv = process.argv.slice(2)) {
     ['--test', '--test-reporter=tap', 'scripts/artifact-upload-gate.test.mjs'],
     'artifact upload fail-closed tests'
   ));
+  const rotationGateCounters = tapCounters(runMachineCheck(
+    ['--test', '--test-reporter=tap', 'scripts/uat-rotation-preflight.test.mjs'],
+    'offline rotation attestation tests'
+  ));
   const workflowOutput = runMachineCheck(
     ['scripts/workflow-upload-contracts.mjs'],
     'workflow upload contracts'
@@ -88,9 +92,11 @@ export async function main(argv = process.argv.slice(2)) {
 
   const evidence = {
     schemaVersion: '1.0.0',
-    workPackage: 'I01A.1-SEC-HARDENING',
-    status: 'blocked-pending-credential-rotation',
+    workPackage: 'I01A.2-SEC-CORRECTIVE',
+    status: 'blocked-pending-rotation-and-independent-chain-verification',
     codeStatus: 'ready-for-review',
+    productionReady: false,
+    uatRestartAuthorized: false,
     programRevisionSha256: PROGRAM_REVISION_SHA,
     generatedAt,
     verification: {
@@ -103,6 +109,7 @@ export async function main(argv = process.argv.slice(2)) {
       },
       adversarialTests: adversarialCounters,
       uploadFailClosedTests: uploadGateCounters,
+      offlineRotationAttestationTests: rotationGateCounters,
       exactStagedArtifactUploads: stagedUploadCount
     },
     controls: [
@@ -111,12 +118,15 @@ export async function main(argv = process.argv.slice(2)) {
       'ephemeral-local-node-identities',
       'redacted-allowlisted-evidence',
       'schema-allowlisted-runtime-evidence',
-      'fail-closed-exact-manifest-pre-upload-secret-scan',
-      'signed-public-fingerprint-uat-rotation-preflight'
+      'fail-closed-inspect-only-exact-manifest-pre-and-post-scan-verification',
+      'normalized-sensitive-artifact-filename-denylist',
+      'exact-placeholder-allowlist',
+      'mr-x-signed-offline-exact-node-rotation-attestation'
     ],
     blockers: [
       'Mr. X must rotate the retired UAT deployer and all three Ed25519/BLS identities.',
-      'Mr. X must complete on-chain exit/revocation or redeploy affected UAT contracts before restart.'
+      'Mr. X must complete on-chain exit/revocation or redeploy affected UAT contracts before restart.',
+      'Independent chain verification is not implemented; the offline attestation never authorizes UAT restart.'
     ],
     evidenceFiles: [
       relativeOutput(evidencePath),
@@ -126,9 +136,11 @@ export async function main(argv = process.argv.slice(2)) {
   };
   const handoff = {
     schemaVersion: '1.0.0',
-    workPackage: 'I01A.1-SEC-HARDENING',
+    workPackage: 'I01A.2-SEC-CORRECTIVE',
     status: 'blocked',
     codeStatus: 'ready-for-review',
+    productionReady: false,
+    uatRestartAuthorized: false,
     accountableHuman: 'Mr. X',
     evidencePath: relativeOutput(evidencePath),
     blockers: evidence.blockers,
@@ -151,7 +163,7 @@ export async function main(argv = process.argv.slice(2)) {
   if (finalScan.status !== 'ok') {
     throw new Error(`generated I01 artifacts failed secret scan with ${finalScan.findingCount} finding(s)`);
   }
-  console.log('I01A.1 security-hardening evidence generated; UAT remains blocked pending irreversible rotation.');
+  console.log('I01A.2 corrective security evidence generated; UAT remains blocked pending independent chain verification.');
   return { evidence, handoff };
 }
 

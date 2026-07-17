@@ -186,6 +186,10 @@ jobs:
         run: >
           node deep-devops/scripts/artifact-upload-manifest.mjs
           --root deep-devops/artifacts/security
+          --require secret-scan.json
+          --require sbom.json
+          --require dependency-audit.json
+          --require security-gate-summary.json
           --staging "${{ runner.temp }}/deep-upload/security"
           --manifest "${{ runner.temp }}/deep-upload/security-manifest.json"
 
@@ -196,6 +200,10 @@ jobs:
           node deep-devops/scripts/artifact-upload-gate.mjs
           --manifest "${{ runner.temp }}/deep-upload/security-manifest.json"
           --staging-root "${{ runner.temp }}/deep-upload/security"
+          --require secret-scan.json
+          --require sbom.json
+          --require dependency-audit.json
+          --require security-gate-summary.json
           --summary "${{ runner.temp }}/deep-upload/security-scan.json"
 
       - name: Upload security artifacts
@@ -257,6 +265,7 @@ jobs:
         run: >
           node deep-devops/scripts/artifact-upload-manifest.mjs
           --root "${{ runner.temp }}/deep-release-gate-contracts"
+          --require release/release-gate-contract-summary.json
           --staging "${{ runner.temp }}/deep-upload/release-contracts"
           --manifest "${{ runner.temp }}/deep-upload/release-contracts-manifest.json"
 
@@ -267,6 +276,7 @@ jobs:
           node deep-devops/scripts/artifact-upload-gate.mjs
           --manifest "${{ runner.temp }}/deep-upload/release-contracts-manifest.json"
           --staging-root "${{ runner.temp }}/deep-upload/release-contracts"
+          --require release/release-gate-contract-summary.json
           --summary "${{ runner.temp }}/deep-release-gate-contracts/security/pre-upload-secret-scan.json"
 
       - name: Upload release gate contract artifacts

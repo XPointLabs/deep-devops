@@ -58,6 +58,12 @@ jobs:
         run: >
           node deep-devops/scripts/artifact-upload-manifest.mjs
           --root deep-devops/artifacts
+          --require runtime.gate.json
+          --require runtime.snapshot.json
+          --require compose.topology.redacted.json
+          --require security/secret-scan-summary.json
+          --require test-results/backend-load-smoke.json
+          --require test-results/backend-restart-smoke.json
           --staging "${{ runner.temp }}/deep-upload/nightly"
           --manifest "${{ runner.temp }}/deep-upload/nightly-manifest.json"
 
@@ -68,6 +74,12 @@ jobs:
           node deep-devops/scripts/artifact-upload-gate.mjs
           --manifest "${{ runner.temp }}/deep-upload/nightly-manifest.json"
           --staging-root "${{ runner.temp }}/deep-upload/nightly"
+          --require runtime.gate.json
+          --require runtime.snapshot.json
+          --require compose.topology.redacted.json
+          --require security/secret-scan-summary.json
+          --require test-results/backend-load-smoke.json
+          --require test-results/backend-restart-smoke.json
           --summary "${{ runner.temp }}/deep-upload/nightly-scan.json"
 
       - name: Upload redacted nightly evidence

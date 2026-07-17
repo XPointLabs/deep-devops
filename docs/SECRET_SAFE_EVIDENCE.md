@@ -35,13 +35,17 @@ Mr. X must complete these steps in order:
 7. Register the new public identities, verify proof of possession and on-chain
    membership, then validate registry/router mapping without printing private
    values.
-8. Create a signed rotation receipt that binds the checked-in retired public
-   fingerprint manifest, replacement public identities, and successful
-   on-chain transaction receipt metadata. Run
+8. Create a Mr. X-signed offline chain-verification attestation that binds the
+   checked-in retired public fingerprint manifest, every retired contract node
+   ID, every replacement operator/router/BLS public fingerprint, and exact
+   transaction, contract, block, log, and finality metadata. Run
    `node scripts/uat-rotation-preflight.mjs --receipt <receipt.json> --secret-dir
    .secrets/uat --trusted-signer-sha256 <Mr-X-public-signing-key-sha256>`.
-9. Run `node scripts/secret-scan.mjs`. Reactivate UAT only after both gates
-   report zero findings. Neither gate reads or records old secret values.
+9. Run `node scripts/secret-scan.mjs`. The offline attestation gate does not
+   call a trusted RPC and is not independent on-chain proof; it always reports
+   `uatRestartAuthorized: false`. Keep UAT stopped until a separate reviewed
+   chain verifier or Mr. X-approved independent chain review closes that
+   blocker. Neither gate reads or records old secret values.
 
 This rotation is intentionally irreversible. Rollback means returning to a
 stopped UAT stack and removing the newly created local secret files; it never
@@ -85,6 +89,7 @@ Every CI upload is prepared and scanned as an exact immutable set:
 ```powershell
 node .\scripts\artifact-upload-manifest.mjs `
   --root .\artifacts\release `
+  --require production-readiness-status.json `
   --staging <clean-staging-directory> `
   --manifest <upload-manifest.json>
 node .\scripts\artifact-upload-gate.mjs `
@@ -93,18 +98,42 @@ node .\scripts\artifact-upload-gate.mjs `
   --summary <fresh-scan-summary.json>
 ```
 
-The manifest records relative path, media type, extension, size, and SHA256 for
-every subsequently uploaded file. The scanner revalidates those fields and
-fails if a file changed. Scanner crash, timeout, non-zero exit, missing
-manifest/result, or staging mismatch prevents upload.
+The manifest records required files, relative path, media type, extension,
+size, and SHA256 for every subsequently uploaded file. Empty selections and
+missing lane-required evidence fail before staging. The gate validates the
+inspect-only schema and hashes before scanning, binds the fresh scanner result
+to the exact manifest, then validates the unchanged manifest and staged file
+hashes again. Scanner crash, timeout, non-zero exit, missing manifest/result,
+policy-field mutation, file mutation, or staging mismatch prevents upload.
 
-The scanner checks relative file and archive-entry names, treats unknown
-binary/non-text input as blocking, and recursively inspects ZIP, TAR, GZ, APK,
-AAB, and MSIX entries with traversal, expanded-size, entry-count, and depth
-limits. Raw UI bitmaps and arbitrary logs are never uploadable by default.
-Opaque signed executable binaries require a separate explicit approval
-manifest with exact extension, MIME type, size, SHA256, and
-`approvedOpaqueSignedBinary: true`; their contents are handled hash-only.
+The scanner checks normalized relative file and archive-entry names, treats
+unknown binary/non-text input as blocking, and recursively inspects ZIP, TAR,
+GZ, APK, AAB, and MSIX entries with traversal, expanded-size, entry-count, and
+depth limits. Raw UI bitmaps and arbitrary logs are never uploadable by
+default. Opaque executable binaries and all `hash-only` handling are blocked.
+They remain blocked until a separate cryptographically signed approval format,
+pinned signer policy, and independent review are implemented.
+
+Placeholder matching is exact. A credential literal that merely contains words
+such as `REDACTED` or `NOT_COMMITTED` is still a finding. Artifact and archive
+entry names normalized with Unicode NFKC and punctuation folding are rejected
+when they represent mnemonic, seed, private-key, credential, wallet, keystore,
+dump, database, or `.env` material.
+
+## Rotation attestation boundary
+
+`uat-rotation-preflight.mjs` verifies an Ed25519 signature whose public-key
+fingerprint is supplied through the protected Mr. X procedure. The signed
+version-2 payload must map contract node IDs 4, 5, and 6 to unique successful
+exit/revocation transaction and log evidence. It must separately map each node
+to a unique replacement contract ID, operator address, router public ID, BLS
+public-key SHA256 fingerprint, registration transaction/log, and at least 12
+confirmations relative to the attested finalized block.
+
+This is explicitly a human-signed offline attestation. The script performs no
+network request and cannot prove that the referenced chain data exists. Unit
+tests use synthetic hashes only as fixtures; synthetic receipts are never
+release evidence.
 
 ## No-secret rollback
 

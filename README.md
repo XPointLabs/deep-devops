@@ -2,6 +2,14 @@
 
 Reproducible local and CI integration environment for Deep.
 
+Release evidence uploads are inspect-only and fail closed. Empty selections,
+missing lane-required files, manifest/staging mutation, unknown binaries,
+opaque executables, raw screenshots, and unrestricted logs prevent upload.
+`hash-only` handling is disabled until a cryptographically signed approval
+format and pinned signer policy are independently reviewed. The UAT rotation
+preflight accepts only an exact Mr. X-signed offline attestation and never
+authorizes UAT restart; see `docs/SECRET_SAFE_EVIDENCE.md`.
+
 ## Agent Specs
 
 - Start with [`AGENTS.md`](AGENTS.md) before changing orchestration, CI gates, release scripts, or compatibility services.

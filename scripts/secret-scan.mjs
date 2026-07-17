@@ -13,6 +13,10 @@ import { spawnSync } from 'node:child_process';
 import { gunzipSync, inflateRawSync } from 'node:zlib';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import {
+  validatePreparedManifest,
+  verifyPreparedStaging
+} from './artifact-upload-manifest.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const repositoryRoot = path.resolve(__dirname, '..');
@@ -58,10 +62,24 @@ const directRules = [
   }
 ];
 const assignmentRegex = new RegExp(
-  `(?:^|[,\\{;])[\t ]*(?:export[\t ]+)?["']?(${assignmentName})["']?[\t ]*(?:=|:|=>)[\t ]*(?:["'\`])?([^\\r\\n"',};#]+)`,
+  `(?:^|[,\\{;])[\t ]*(?:export[\t ]+)?["']?(${assignmentName})["']?[\t ]*(?:=|:|=>)[\t ]*(?:["'\`])?(\\$\\{\\{[^\\r\\n]+?\\}\\}|\\$\\{[^}\\r\\n]+\\}|[^\\r\\n"',};#]+)`,
   'gim'
 );
 const sensitiveFilenameRegex = new RegExp(`${assignmentName}\\s*(?:=|:|=>)\\s*[^/\\\\:]+`, 'i');
+const forbiddenFilenameTokens = new Set([
+  'mnemonic',
+  'seed',
+  'seed phrase',
+  'private key',
+  'privatekey',
+  'credential',
+  'credentials',
+  'wallet',
+  'keystore',
+  'key store',
+  'dump',
+  'database'
+]);
 
 function toPosix(value) {
   return value.split(path.sep).join('/');
@@ -84,29 +102,49 @@ function logicalPath(root, filePath, externalRoots = []) {
 }
 
 function safeDisplayPath(value) {
-  return sensitiveFilenameRegex.test(value) ? '<redacted-sensitive-filename>' : value;
+  return sensitiveFilenameRegex.test(value) || hasSensitiveFilename(value)
+    ? '<redacted-sensitive-filename>'
+    : value;
+}
+
+function normalizedFilenameParts(value) {
+  return String(value)
+    .normalize('NFKC')
+    .split(/::|[/\\]/)
+    .filter(Boolean)
+    .map(part => ({
+      raw: part.toLowerCase(),
+      normalized: part
+        .toLowerCase()
+        .replace(/[\p{P}\p{S}_]+/gu, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+    }));
+}
+
+function hasSensitiveFilename(value) {
+  return normalizedFilenameParts(value).some(({ raw, normalized }) => {
+    if (raw === '.env' || raw.startsWith('.env.') || normalized === 'env') return true;
+    const words = normalized.split(' ');
+    return forbiddenFilenameTokens.has(normalized)
+      || [...forbiddenFilenameTokens].some(token => token.includes(' ')
+        ? normalized.includes(token)
+        : words.includes(token));
+  });
 }
 
 function isPlaceholder(value) {
   const normalized = String(value).trim().replace(/^["'`]|["'`]$/g, '').trim();
   if (normalized.length === 0) return true;
-  return normalized.startsWith('${')
-    || normalized.startsWith('$env:')
-    || normalized.startsWith('$$(')
-    || normalized.startsWith('$(')
-    || normalized.startsWith('/run/secrets/')
-    || normalized.startsWith('process.env')
-    || normalized.startsWith('Buffer.')
-    || normalized.startsWith('createPrivateKey(')
-    || normalized.startsWith('privateKeyToAccount(')
-    || normalized.startsWith('mnemonicToAccount(')
-    || (normalized.includes('${') && normalized.includes('}'))
-    || normalized.startsWith('<')
-    || normalized.startsWith('__REQUIRED_')
-    || normalized.includes('REDACTED')
-    || normalized.includes('NOT_COMMITTED')
-    || normalized.includes('SECRET_FILE')
-    || normalized.includes('example.invalid');
+  return /^\$\{[A-Za-z_][A-Za-z0-9_]*(?::-[^}\r\n]*)?\}$/.test(normalized)
+    || /^\$\{\{\s*(?:github\.(?:actor|token)|secrets\.[A-Za-z_][A-Za-z0-9_]*|env\.[A-Za-z_][A-Za-z0-9_]*)\s*\}\}$/.test(normalized)
+    || /^\$env:[A-Za-z_][A-Za-z0-9_]*$/i.test(normalized)
+    || /^\/run\/secrets\/[A-Za-z0-9._-]+$/.test(normalized)
+    || /^process\.env\.[A-Za-z_][A-Za-z0-9_]*$/.test(normalized)
+    || /^<(?:(?:removed-)?compromised-value|redacted|load-from-protected-secret-store|alchemy-key)>$/i.test(normalized)
+    || /^__(?:REQUIRED_[A-Z0-9_]+|REDACTED|NOT_COMMITTED|SECRET_FILE)__$/.test(normalized)
+    || /^(?:REDACTED|NOT_COMMITTED|SECRET_FILE)$/.test(normalized)
+    || /^https?:\/\/example\.invalid(?:\/[^\s]*)?$/i.test(normalized);
 }
 
 function looksLikeLiteralSecret(value, logicalName = '') {
@@ -271,17 +309,23 @@ function inspectText(content, logicalName, findings) {
   }
 }
 
-function inspectBuffer(buffer, logicalName, findings, state, depth = 0, manifestEntry = null) {
+function inspectBuffer(
+  buffer,
+  logicalName,
+  findings,
+  state,
+  depth = 0,
+  manifestEntry = null,
+  enforceFilenamePolicy = false) {
   state.entries += 1;
   state.expandedBytes += buffer.length;
   if (state.entries > MAX_ARCHIVE_ENTRIES) throw new Error('archive entry limit exceeded');
   if (state.expandedBytes > MAX_ARCHIVE_EXPANDED_BYTES) throw new Error('archive expanded-size limit exceeded');
   if (buffer.length > MAX_ENTRY_BYTES) {
-    if (manifestEntry?.handling === 'hash-only' && manifestEntry?.approvedOpaqueSignedBinary === true) return;
     findings.push(finding('unscannable-large-file', logicalName));
     return;
   }
-  if (sensitiveFilenameRegex.test(logicalName)) {
+  if (sensitiveFilenameRegex.test(logicalName) || (enforceFilenamePolicy && hasSensitiveFilename(logicalName))) {
     findings.push(finding('sensitive-filename', logicalName));
   }
   const extension = path.extname(logicalName).toLowerCase();
@@ -291,12 +335,12 @@ function inspectBuffer(buffer, logicalName, findings, state, depth = 0, manifest
     if (extension === '.gz') {
       const uncompressed = gunzipSync(buffer, { maxOutputLength: MAX_ARCHIVE_EXPANDED_BYTES + 1 });
       const nestedName = logicalName.slice(0, -3) || `${logicalName}.payload`;
-      inspectBuffer(uncompressed, nestedName, findings, state, depth + 1);
+      inspectBuffer(uncompressed, nestedName, findings, state, depth + 1, null, enforceFilenamePolicy);
       return;
     }
     entries = extension === '.tar' ? tarEntries(buffer) : zipEntries(buffer);
     for (const entry of entries) {
-      inspectBuffer(entry.data, `${logicalName}::${entry.name}`, findings, state, depth + 1);
+      inspectBuffer(entry.data, `${logicalName}::${entry.name}`, findings, state, depth + 1, null, enforceFilenamePolicy);
     }
     return;
   }
@@ -305,16 +349,13 @@ function inspectBuffer(buffer, logicalName, findings, state, depth = 0, manifest
     state.textFiles += 1;
     return;
   }
-  if (manifestEntry?.handling === 'hash-only' && manifestEntry?.approvedOpaqueSignedBinary === true) return;
   findings.push(finding('unknown-binary-file', logicalName));
 }
 
 async function loadManifest(filePath) {
   const raw = await readFile(filePath);
   const document = JSON.parse(raw.toString('utf8'));
-  if (document.schemaVersion !== '1.0.0' || document.status !== 'prepared' || !Array.isArray(document.files)) {
-    throw new Error('upload manifest has an unsupported schema or status');
-  }
+  validatePreparedManifest(document);
   return {
     document,
     sha256: createHash('sha256').update(raw).digest('hex')
@@ -335,6 +376,7 @@ export async function scan(options = {}) {
     const stagingRoot = options.stagingRoot
       ? path.resolve(options.stagingRoot)
       : path.resolve(path.dirname(path.resolve(options.manifest)), manifest.stagingRoot ?? '');
+    await verifyPreparedStaging(manifest, stagingRoot);
     const realStagingRoot = await realpath(stagingRoot);
     for (const entry of manifest.files) {
       if (!entry || typeof entry.path !== 'string' || !/^[0-9a-f]{64}$/i.test(entry.sha256 ?? '')) {
@@ -369,18 +411,20 @@ export async function scan(options = {}) {
   const state = { entries: 0, expandedBytes: 0, textFiles: 0 };
   for (const [filePath, metadata] of [...candidates.entries()].sort(([left], [right]) => left.localeCompare(right))) {
     const logical = metadata.logical ?? logicalPath(root, filePath, [...artifactRoots, ...explicitPaths]);
-    const artifactRelative = Boolean(options.manifest) || artifactRoots.some(artifactRoot => inside(artifactRoot, filePath));
+    const artifactRelative = Boolean(options.manifest)
+      || artifactRoots.some(artifactRoot => inside(artifactRoot, filePath))
+      || explicitPaths.some(target => inside(target, filePath) || path.resolve(target) === path.resolve(filePath));
     const extension = path.extname(filePath).toLowerCase();
     if (artifactRelative && (forbiddenArtifactNames.has(path.basename(filePath).toLowerCase()) || forbiddenUploadExtensions.has(extension))) {
       findings.push(finding('forbidden-raw-artifact', logical));
     }
     const fileInfo = await stat(filePath);
     const buffer = metadata.buffer ?? await readFile(filePath);
-    if (fileInfo.size > MAX_FILE_BYTES && !(metadata.entry?.handling === 'hash-only' && metadata.entry?.approvedOpaqueSignedBinary === true)) {
+    if (fileInfo.size > MAX_FILE_BYTES) {
       findings.push(finding('unscannable-large-file', logical));
       continue;
     }
-    inspectBuffer(buffer, logical, findings, state, 0, metadata.entry);
+    inspectBuffer(buffer, logical, findings, state, 0, metadata.entry, artifactRelative);
   }
 
   const unique = [...new Map(findings.map(item => [

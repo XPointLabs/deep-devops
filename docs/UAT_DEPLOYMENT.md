@@ -167,8 +167,8 @@ Do not commit `.env.uat` or `.secrets/`. Run
 
 ## Start UAT
 
-The start remains technically blocked until the signed, public-only rotation
-receipt and protected secret-file metadata pass:
+The start remains blocked. The following command validates a signed,
+public-only Mr. X offline attestation and protected secret-file metadata:
 
 ```powershell
 node scripts/uat-rotation-preflight.mjs `
@@ -177,12 +177,19 @@ node scripts/uat-rotation-preflight.mjs `
   --trusted-signer-sha256 <Mr-X-public-signing-key-sha256>
 ```
 
-The receipt contains only retired/replacement public identities and successful
-transaction receipt metadata. Never place an old mnemonic, private scalar,
-private key, or its hash in this receipt. The preflight cryptographically
-verifies the receipt, requires exit/revocation and replacement-registration
-transaction metadata, and rejects non-canonical, reparse-linked, broadly
-readable, or unexpected secret files without reading their contents.
+The receipt contains only retired/replacement public identities, BLS public-key
+fingerprints, and exact transaction/contract/block/log/finality metadata. Never
+place an old mnemonic, private scalar, private key, or its hash in this receipt.
+The preflight cryptographically verifies the Mr. X signature and exact mapping,
+and rejects non-canonical, reparse-linked, broadly readable, or unexpected
+secret files without reading their contents.
+
+This offline gate does not query Arbitrum Sepolia and returns
+`uatRestartAuthorized: false`. It is accountable human attestation, not
+independent on-chain proof. Do not execute the Compose start command below
+until a separate reviewed chain verifier or Mr. X-approved independent chain
+review has confirmed the referenced events and the overall I01A re-review has
+removed the restart block.
 
 ```powershell
 docker compose -f docker-compose.uat.yml --env-file .env.uat up -d --build

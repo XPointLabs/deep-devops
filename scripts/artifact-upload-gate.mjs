@@ -3,12 +3,16 @@ import { readFile, rm } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import {
+  validatePreparedManifest,
+  verifyPreparedStaging
+} from './artifact-upload-manifest.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const scannerPath = path.join(__dirname, 'secret-scan.mjs');
 
 function parse(argv) {
-  const options = {};
+  const options = { requiredFiles: [] };
   for (let index = 0; index < argv.length; index += 2) {
     const name = argv[index];
     const value = argv[index + 1];
@@ -16,6 +20,7 @@ function parse(argv) {
     if (name === '--manifest') options.manifest = value;
     else if (name === '--staging-root') options.stagingRoot = value;
     else if (name === '--summary') options.summary = value;
+    else if (name === '--require') options.requiredFiles.push(value);
     else if (name === '--timeout-ms') options.timeoutMs = Number(value);
     else throw new Error(`unknown argument: ${name}`);
   }
@@ -30,7 +35,17 @@ export async function gate(options) {
   const stagingRoot = path.resolve(options.stagingRoot);
   const summaryPath = path.resolve(options.summary);
   await rm(summaryPath, { force: true });
-  const selectedScanner = options.scannerPath ?? process.env.DEEP_SECRET_SCANNER_PATH ?? scannerPath;
+  const initialManifestRaw = await readFile(manifestPath);
+  const initialManifest = JSON.parse(initialManifestRaw.toString('utf8'));
+  validatePreparedManifest(initialManifest);
+  const externallyRequiredFiles = [...new Set((options.requiredFiles ?? [])
+    .map(value => String(value).normalize('NFKC').replaceAll('\\', '/')))].sort();
+  if (JSON.stringify(initialManifest.requiredFiles) !== JSON.stringify(externallyRequiredFiles)) {
+    throw new Error('upload manifest required-file contract differs from the gate invocation');
+  }
+  await verifyPreparedStaging(initialManifest, stagingRoot);
+  const initialDigest = createHash('sha256').update(initialManifestRaw).digest('hex');
+  const selectedScanner = options.scannerPath ?? scannerPath;
   const result = spawnSync(process.execPath, [
     selectedScanner,
     '--manifest', manifestPath,
@@ -50,19 +65,25 @@ export async function gate(options) {
   } catch {
     throw new Error('secret scanner result is missing or unreadable');
   }
-  const manifestRaw = await readFile(manifestPath);
-  const manifest = JSON.parse(manifestRaw.toString('utf8'));
-  const digest = createHash('sha256').update(manifestRaw).digest('hex');
-  if (summary.status !== 'ok'
+  const finalManifestRaw = await readFile(manifestPath);
+  const finalDigest = createHash('sha256').update(finalManifestRaw).digest('hex');
+  if (finalDigest !== initialDigest || !finalManifestRaw.equals(initialManifestRaw)) {
+    throw new Error('upload manifest changed while the scanner was running');
+  }
+  const finalManifest = JSON.parse(finalManifestRaw.toString('utf8'));
+  validatePreparedManifest(finalManifest);
+  await verifyPreparedStaging(finalManifest, stagingRoot);
+  if (summary.schemaVersion !== '2.0.0'
+    || summary.status !== 'ok'
     || summary.findingCount !== 0
-    || summary.scannedFiles !== manifest.fileCount
-    || summary.selectedManifestSha256 !== digest) {
+    || summary.scannedFiles !== finalManifest.fileCount
+    || summary.selectedManifestSha256 !== initialDigest) {
     throw new Error('secret scanner result does not prove the selected upload manifest');
   }
   return {
     status: 'ok',
-    manifestedFiles: manifest.fileCount,
-    manifestSha256: digest
+    manifestedFiles: finalManifest.fileCount,
+    manifestSha256: initialDigest
   };
 }
 

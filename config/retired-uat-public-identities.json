@@ -1,7 +1,8 @@
 {
-  "schemaVersion": "1.0.0",
+  "schemaVersion": "2.0.0",
   "network": "arbitrum-sepolia",
   "chainId": 421614,
+  "serviceNodeRewardsContract": "0x08A5a47E67fCd18e14AdFB535e8d8644476D4197",
   "retiredOperatorAddresses": [
     "0xb0cE3b1229c00d1B85c7083E31Dae531f3B352C0"
   ],
@@ -15,8 +16,18 @@
     5,
     6
   ],
-  "requiredOnChainActions": [
-    "retired-node-exit-or-revocation",
-    "replacement-identity-registration"
+  "retiredNodeBindings": [
+    {
+      "contractNodeId": 4,
+      "routerPublicId": "5979c8dda9c10cff26db46b96cefd9ea3527c2ce90b99886342d71c54e8ed4dc"
+    },
+    {
+      "contractNodeId": 5,
+      "routerPublicId": "298f4fb1eb601d5f900332c728829d19be6282f5e50c2bd3cea055a27d83c51c"
+    },
+    {
+      "contractNodeId": 6,
+      "routerPublicId": "c08f5aecc314da789193719a15f1fa2e21a1aeadf266a6b53bd667974870c846"
+    }
   ]
 }

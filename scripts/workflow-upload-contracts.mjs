@@ -5,6 +5,37 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(__dirname, '..');
 const workflowRoot = path.join(repositoryRoot, '.github', 'workflows');
+const requiredLaneEvidence = new Map([
+  ['integration.yml', [
+    'runtime.gate.json',
+    'runtime.snapshot.json',
+    'compose.topology.redacted.json',
+    'security/secret-scan-summary.json',
+    'test-results/multi-node-topology.json'
+  ]],
+  ['nightly-full-e2e.yml', [
+    'runtime.gate.json',
+    'runtime.snapshot.json',
+    'compose.topology.redacted.json',
+    'security/secret-scan-summary.json',
+    'test-results/backend-load-smoke.json',
+    'test-results/backend-restart-smoke.json'
+  ]],
+  ['production-readiness.yml', [
+    'production-readiness-status.json',
+    'production-readiness-checklist.json'
+  ]],
+  ['release-secret-preflight.yml', [
+    'release-secret-preflight-summary.json'
+  ]],
+  ['supporting-release-evidence.yml', [
+    'supporting-release-evidence-summary.json',
+    'test-results/push-provider-canary.json',
+    'test-results/rollback-drill.json',
+    'test-results/registry-recovery.json',
+    'observability/observability-gate-summary.json'
+  ]]
+]);
 
 export async function validateWorkflows() {
   const failures = [];
@@ -35,6 +66,15 @@ export async function validateWorkflows() {
     }
     if (/path:\s*deep-devops\/artifacts\/.*\*\*/.test(content)) {
       failures.push(`${name}: broad artifact glob remains uploadable`);
+    }
+    for (const requiredPath of requiredLaneEvidence.get(name) ?? []) {
+      const token = `--require ${requiredPath}`;
+      const occurrences = content.split(token).length - 1;
+      if (occurrences !== 2) {
+        failures.push(
+          `${name}: required lane evidence must be bound once during preparation and once during gating: ${requiredPath}`
+        );
+      }
     }
   }
   if (uploadCount === 0) failures.push('no artifact uploads were found');

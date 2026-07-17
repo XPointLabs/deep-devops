@@ -62,6 +62,11 @@ jobs:
         run: >
           node deep-devops/scripts/artifact-upload-manifest.mjs
           --root deep-devops/artifacts
+          --require runtime.gate.json
+          --require runtime.snapshot.json
+          --require compose.topology.redacted.json
+          --require security/secret-scan-summary.json
+          --require test-results/multi-node-topology.json
           --staging "${{ runner.temp }}/deep-upload/integration"
           --manifest "${{ runner.temp }}/deep-upload/integration-manifest.json"
 
@@ -72,6 +77,11 @@ jobs:
           node deep-devops/scripts/artifact-upload-gate.mjs
           --manifest "${{ runner.temp }}/deep-upload/integration-manifest.json"
           --staging-root "${{ runner.temp }}/deep-upload/integration"
+          --require runtime.gate.json
+          --require runtime.snapshot.json
+          --require compose.topology.redacted.json
+          --require security/secret-scan-summary.json
+          --require test-results/multi-node-topology.json
           --summary "${{ runner.temp }}/deep-upload/integration-scan.json"
 
       - name: Upload integration artifacts
