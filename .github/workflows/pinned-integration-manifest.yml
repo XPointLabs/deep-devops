@@ -1,0 +1,36 @@
+name: Pinned integration manifest
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/pinned-integration-manifest.yml"
+      - "release/**"
+      - "scripts/pinned-integration-manifest.mjs"
+      - "scripts/pinned-integration-manifest.test.mjs"
+      - "scripts/release-gate-contracts.mjs"
+      - "docs/PINNED_INTEGRATION_MANIFEST.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout DevOps evidence factory
+        uses: actions/checkout@v4
+
+      - name: Configure Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Validate pinned release contract
+        shell: pwsh
+        run: node .\scripts\pinned-integration-manifest.mjs --validate-only
+
+      - name: Exercise fail-closed isolated checkout
+        shell: pwsh
+        run: node --test .\scripts\pinned-integration-manifest.test.mjs

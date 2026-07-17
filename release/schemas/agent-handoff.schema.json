@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "deep-agent-handoff/1.0.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "status",
+    "releaseId",
+    "evidencePath",
+    "blockers",
+    "rollback"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0.0"
+    },
+    "status": {
+      "enum": [
+        "ready-for-review",
+        "blocked"
+      ]
+    },
+    "releaseId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "evidencePath": {
+      "type": "string",
+      "minLength": 1
+    },
+    "blockers": {
+      "type": "array"
+    },
+    "rollback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "strategy",
+        "safeToDeleteCheckoutRoot"
+      ],
+      "properties": {
+        "strategy": {
+          "const": "delete-isolated-checkout-root"
+        },
+        "safeToDeleteCheckoutRoot": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

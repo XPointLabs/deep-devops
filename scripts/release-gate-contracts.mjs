@@ -22,6 +22,7 @@ const negativeStaleClientDeviceAcceptancePath = path.join(negativeStaleEvidenceR
 const summaryPath = path.join(releaseDir, 'release-gate-contract-summary.json');
 
 const scriptNames = [
+  'pinned-integration-manifest.mjs',
   'release-ci-lanes.mjs',
   'release-evidence-guards.mjs',
   'release-secret-preflight.mjs',
@@ -123,6 +124,20 @@ for (const scriptName of scriptNames) {
   if (!result.passed) {
     break;
   }
+}
+
+if (commandResults.every(result => result.passed)) {
+  runNode(
+    ['scripts/pinned-integration-manifest.mjs', '--validate-only'],
+    'pinned-integration-manifest:validate'
+  );
+}
+
+if (commandResults.every(result => result.passed)) {
+  runNode(
+    ['--test', 'scripts/pinned-integration-manifest.test.mjs'],
+    'pinned-integration-manifest:tests'
+  );
 }
 
 if (commandResults.every(result => result.passed)) {
@@ -262,7 +277,7 @@ async function writeJson(filePath, value) {
 }
 
 async function refreshGeneratedAt(filePath) {
-  const parsed = JSON.parse(await readFile(filePath, 'utf8'));
+  const parsed = JSON.parse((await readFile(filePath, 'utf8')).replace(/^\uFEFF/, ''));
   parsed.generatedAt = new Date().toISOString();
   await writeJson(filePath, parsed);
 }
