@@ -1,128 +1,173 @@
-# I01B Private-Only UAT Topology
+# I01B private-only UAT
 
-## Status and hard stop
+## Reality statement
 
-This document describes a chain-free, private-only UAT topology contract. It is
-not a launch authorization or production-readiness claim.
+This change is static, fail-closed DevOps evidence only.
 
 ```text
 uatRestartAuthorized=false
 productionReady=false
+realityVlessEndToEndProven=false
+vless443Published=false
 ```
 
-Do **not** start or restart the retired topology in
-`docker-compose.uat.yml`. Its public identities, secret paths, project name,
-volumes, chain services, and network assumptions are outside the I01B contract.
-No old `.env.uat`, `.secrets/uat`, or `secret-templates/uat` value may be copied
-into the private topology.
+No container was built or started, no real seed was read, and no live route,
+REALITY, VLESS, device, push, attachment, or call exchange was performed.
+Port 443 is an internal container listener and is deliberately not published.
+The old `docker-compose.uat.yml`, old identities, and old secret paths remain
+forbidden.
 
-UAT restart remains blocked until Mr. X supplies and signs the completed
-identity rotation evidence, the existing rotation preflight accepts that
-evidence, and the three replacement router public IDs are proven to match the
-three replacement Ed25519 seed files. Static topology acceptance does not
-remove that block.
+The reviewed XNode functional corrective is commit
+`be81d9939c616d9d42aae08e9ee2cf298b90d692`. A future authorized build must
+supply that exact expected commit (or a separately reviewed successor) as an
+explicit input. The example does not silently select it.
 
-## Standalone scope
+## Fixed topology
 
-`docker-compose.uat-private.yml` has the fixed project name
-`deep-i01b-private-uat` and no optional profile. Its exact seven-service set is:
+`docker-compose.uat-private.yml` has one exact internal bridge network,
+`deep-i01b-private-uat-isolated` (`172.30.81.0/24`), and seven services:
 
-- `xnode-1`, `xnode-2`, and `xnode-3`;
-- `storage`, `file`, `push`, and `calls`.
+- `xnode-1`, `xnode-2`, `xnode-3`;
+- `storage`, `file`, `push`, `calls`.
 
-Staking, registry, indexer, keeper, Ethereum, Arbitrum, contract, and blockchain
-RPC services are deliberately absent. Router registry bootstrap and heartbeat
-are explicitly disabled. Session storage remains connected to the routers at
-`http://storage:8080`; storage-to-push notification delivery uses
-`http://push:8080`.
+There are no chain, registry, staking, keeper, indexer, Docker socket, device,
+host namespace, bind-mount, `extra_hosts`, or host-gateway dependencies. Every
+service drops all capabilities and uses `no-new-privileges`; routers add only
+`NET_BIND_SERVICE`.
 
-All services join one bridge network named
-`deep-i01b-private-uat-isolated`. It is `internal: true` and has the single
-subnet `172.30.81.0/24`. The routers have the fixed addresses
-`172.30.81.11`, `.12`, and `.13`.
+Router APIs are loopback-only at ports 29311, 29312, and 29313. File, push, and
+calls are loopback-only at 29101, 29102, and 29103. Storage, peer RPC 8081, and
+VLESS 443 are not host-published. Router API, peer listener, storage RPC,
+private RPC advertisements, VLESS arguments, volumes, secrets, and network
+membership are exact validator contracts.
 
-## Endpoint contract
+Each router has the exact three-member private allowlist, including itself:
 
-| Service | Container-visible endpoint | Host-visible endpoint |
+| Router | Private IP | Signed peer RPC tuple |
 | --- | --- | --- |
-| `xnode-1` API | `http://172.30.81.11:8080` | `http://127.0.0.1:29311` |
-| `xnode-2` API | `http://172.30.81.12:8080` | `http://127.0.0.1:29312` |
-| `xnode-3` API | `http://172.30.81.13:8080` | `http://127.0.0.1:29313` |
-| `storage` | `http://storage:8080` | none |
-| `file` | `http://file:8080` | `http://127.0.0.1:29101` |
-| `push` | `http://push:8080` | `http://127.0.0.1:29102` |
-| `calls` | `http://calls:8080` | `http://127.0.0.1:29103` |
+| `xnode-1` | `172.30.81.11` | `http://172.30.81.11:8081/api/peer/onion` |
+| `xnode-2` | `172.30.81.12` | `http://172.30.81.12:8081/api/peer/onion` |
+| `xnode-3` | `172.30.81.13` | `http://172.30.81.13:8081/api/peer/onion` |
 
-The ancillary loopback endpoints allow Windows and ADB-reversed physical-device
-E2E to exercise attachments, live `sig_v2` push, and calls without exposing
-those services on a LAN interface. Storage is never host-published. Router peer
-RPC port `8081` and VLESS port `443` are never host-published.
+The runtime switches are explicit:
 
-Each router advertises exactly its literal private peer endpoint:
+```text
+Runtime__EnablePrivatePeerEndpoints=true
+Runtime__EnablePrivateAllowlistMembership=true
+Runtime__AllowPublicPeerEndpoints=false
+Runtime__RequireSignedRelayContacts=true
+Runtime__BootstrapFromStorage=false
+```
 
-- `http://172.30.81.11:8081/api/peer/onion`;
-- `http://172.30.81.12:8081/api/peer/onion`;
-- `http://172.30.81.13:8081/api/peer/onion`.
+Public authorization must remain `DenyAll`. Disabling storage bootstrap is
+valid only with the host bootstrap ceremony below. Before that ceremony,
+`/health/ready` must return HTTP 503.
 
-Every router contains all three exact `(routerId, IPv4, 8081,
-/api/peer/onion)` allowlist tuples, including its own tuple. Both .NET
-environment variables are exactly `UAT`, both private-peer network identities
-are exactly `uat`, signed relay contacts are required, and public peer
-authorization is disabled. The XNode composition therefore selects the
-fail-closed `DenyAll` public-peer authorizer while retaining only the nine
-explicit private tuple mappings.
+## Required supply-chain preflight
 
-## Fresh identities and secrets
+The operator-controlled environment must provide:
 
-`.env.uat-private.example` is a field inventory, not a usable environment.
-Every `__REQUIRED_*__` marker must be replaced in a new operator-controlled
-environment file. The three public IDs must be distinct 64-character Ed25519
-public identities that do not occur in
-`config/retired-uat-public-identities.json`.
+- the canonical clean XNode Git worktree root;
+- the canonical reviewed `docker/xnode-xray.Dockerfile`;
+- the exact expected XNode commit;
+- the exact reviewed Dockerfile SHA-256;
+- .NET SDK and ASP.NET runtime image digests;
+- the exact Xray version and its archive SHA-256.
 
-The files in `secret-templates/uat-private-i01b` contain placeholders only.
-Create three new restricted files outside the repository, put one matching
-Ed25519 seed in each, and set these new variables to their canonical paths:
+There are no defaults. The Dockerfile path cannot be substituted, and ambient
+or dirty source cannot be used. The .NET image references include required
+digests, and `XRAY_SHA256` is passed into the build.
 
-- `I01B_PRIVATE_UAT_NODE_1_ED25519_SECRET_FILE`;
-- `I01B_PRIVATE_UAT_NODE_2_ED25519_SECRET_FILE`;
-- `I01B_PRIVATE_UAT_NODE_3_ED25519_SECRET_FILE`.
-
-Compose mounts each seed as a separate read-only secret. It does not load an
-`env_file`, and no private key is rendered into `environment`.
-
-## Static fail-closed evidence
-
-The allowed checks are static only:
+Before any future authorized build, run the offline source preflight with all
+four explicit arguments:
 
 ```powershell
-node --test .\scripts\i01b-private-uat-topology.test.mjs
+node .\scripts\i01b-private-uat-source-preflight.mjs `
+  --xnode-context <canonical-absolute-clean-xnode-root> `
+  --expected-xnode-commit <exact-lowercase-40-hex-commit> `
+  --dockerfile <canonical-absolute-reviewed-xnode-xray-dockerfile> `
+  --expected-dockerfile-sha256 <exact-lowercase-64-hex-sha256>
+```
+
+It rejects a noncanonical path, symlink/reparse point, wrong Git root, wrong
+commit, any tracked or untracked change, alternate Dockerfile, or hash
+mismatch. The required image digests and Xray hash are additionally enforced
+by Compose interpolation and the topology validator. No real digest is
+invented in this repository.
+
+## Required identity preflight
+
+Create three fresh, distinct Ed25519 seeds outside the repository. For each
+seed, the offline preflight derives the public Ed25519 identity and compares it
+to the exact lowercase `RouterId`:
+
+```powershell
+node .\scripts\i01b-private-uat-identity-preflight.mjs `
+  --node-1-router-id <64-lowercase-hex> --node-1-seed-file <canonical-absolute-path> `
+  --node-2-router-id <64-lowercase-hex> --node-2-seed-file <canonical-absolute-path> `
+  --node-3-router-id <64-lowercase-hex> --node-3-seed-file <canonical-absolute-path>
+```
+
+The preflight never prints seed values. It rejects malformed, uppercase,
+duplicate, retired, mismatched, noncanonical, or linked seed inputs. The files
+under `secret-templates/uat-private-i01b` are placeholders, not usable secrets.
+UAT restart remains blocked until the separate signed identity-rotation
+evidence is accepted.
+
+## Required host bootstrap ceremony
+
+Only after restart is independently authorized may an operator run the host
+ceremony. All six values are mandatory; there are no API or identity defaults:
+
+```powershell
+node .\scripts\i01b-private-uat-bootstrap.mjs `
+  --router-1-api http://127.0.0.1:29311 --router-1-id <node-1-router-id> `
+  --router-2-api http://127.0.0.1:29312 --router-2-id <node-2-router-id> `
+  --router-3-api http://127.0.0.1:29313 --router-3-id <node-3-router-id>
+```
+
+The script performs this exact sequence:
+
+1. Require HTTP 503 from all three readiness endpoints.
+2. Fetch exactly three `/api/network/contact` documents.
+3. Locally verify every Ed25519 signature, canonical identity, exact RPC/IP
+   tuple, capability form, and freshness/expiry window.
+4. Submit every full signed contact to every router through signed
+   `store_rc` RPC: exactly nine stores.
+5. Require each `/status` to report membership enabled, expected 3,
+   registered 3, ready true, NodeDb registered 3, and `DenyAll`.
+6. Require signed `fetch_rids` to return the exact three identities.
+7. Require readiness HTTP 200 only after the exchange.
+8. Require signed `storage_route` results to contain exactly the three
+   canonical members and their exact private tuples.
+
+The ceremony fails closed on a changed HTTP status, invalid/stale contact,
+response signature mismatch, incomplete membership, duplicate identity, or
+route mismatch.
+
+## Static verification
+
+These checks use only synthetic seeds, keys, contacts, signed RPC responses,
+temporary Git repositories, and `docker compose config`:
+
+```powershell
+node --test `
+  .\scripts\i01b-private-uat-topology.test.mjs `
+  .\scripts\i01b-private-uat-source-preflight.test.mjs `
+  .\scripts\i01b-private-uat-identity-preflight.test.mjs `
+  .\scripts\i01b-private-uat-bootstrap.test.mjs
 node .\scripts\i01b-private-uat-topology.mjs
 ```
 
-The validator supplies synthetic public identities and secret-template paths,
-sets `COMPOSE_DISABLE_ENV_FILE=1`, and invokes only
-`docker compose config --format json`. It does not read `.env` or `.secrets`,
-contact a Docker daemon, build images, create networks, or start containers.
+The mutation suite covers privilege, host pid/ipc, devices, Docker socket,
+arbitrary bind mounts, extra hosts/host-gateway, host build network, unexpected
+service keys/networks, capabilities, security options, listeners, storage RPC,
+VLESS settings, volumes, secrets, source paths, image digests, Xray hash, and
+membership/bootstrap switches.
 
-The gate fails closed on a changed service count, UAT/private switch, any of the
-nine allowlist mappings, advertised-tuple mismatch, retired identity, extra
-network, host mode, `host.docker.internal`, chain service or variable, public
-storage/peer/VLESS port, non-loopback host binding, reused volume/secret, or
-registry bootstrap/heartbeat dependency.
+## Deferred P2
 
-When evidence is explicitly requested, redirect the validator JSON to
-`artifacts/i01b-private-uat/topology-contract.json`. Do not treat that static
-file as runtime, restart, device, security, or production evidence.
-
-## Health and cleanup expectations
-
-The router readiness endpoint is `/health/ready`; each compatibility service
-also uses `/health/ready`. Runtime health has intentionally not been collected
-while `uatRestartAuthorized=false`.
-
-All seven named volumes and all three Compose secret resources use the
-`deep-i01b-private-uat-` prefix. A future authorized teardown must target the
-`deep-i01b-private-uat` project explicitly and remove its named volumes only
-after evidence retention is complete. It must not operate on `deep-uat` or any
-old UAT volume. No cleanup or runtime command is authorized by this document.
+P2 for Wave 3: implement and prove a managed transport/publication path for
+VLESS/REALITY, including its lifecycle, key handling, exposure policy, and
+end-to-end evidence. The current unpublished internal port 443 and static
+configuration do not satisfy that work item.

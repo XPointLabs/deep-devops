@@ -1,131 +1,156 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {
-  loadContractInputs,
-  renderTopology,
-  validateTopology
-} from './i01b-private-uat-topology.mjs';
+import { loadContractInputs, renderTopology, validateTopology } from './i01b-private-uat-topology.mjs';
 
-const topology = renderTopology();
-const inputs = await loadContractInputs();
+const rendered = renderTopology();
+const topology = rendered.topology;
+const inputs = await loadContractInputs(rendered);
+const clone = value => structuredClone(value);
 
-function clone(value) {
-  return structuredClone(value);
+test('compose config satisfies the complete static private topology contract', () => {
+  const result = validateTopology(topology, inputs);
+  assert.deepEqual({
+    services: result.serviceCount,
+    routers: result.routerCount,
+    mappings: result.allowlistMappingCount,
+    readiness: result.readinessBeforeBootstrap,
+    vlessPublished: result.vless443Published,
+    restart: result.uatRestartAuthorized,
+    production: result.productionReady
+  }, {
+    services: 7,
+    routers: 3,
+    mappings: 9,
+    readiness: 503,
+    vlessPublished: false,
+    restart: false,
+    production: false
+  });
+});
+
+const mutations = [
+  ['privileged', value => { value.services.calls.privileged = true; }, /privileged is forbidden/],
+  ['host pid', value => { value.services.push.pid = 'host'; }, /pid namespace is forbidden/],
+  ['host ipc', value => { value.services.file.ipc = 'host'; }, /ipc namespace is forbidden/],
+  ['device', value => { value.services.storage.devices = ['/dev/kvm:/dev/kvm']; }, /devices are forbidden/],
+  ['docker socket', value => {
+    value.services.calls.volumes = [{
+      type: 'bind', source: '/var/run/docker.sock', target: '/var/run/docker.sock'
+    }];
+  }, /docker\.sock is forbidden/],
+  ['arbitrary bind', value => {
+    value.services.push.volumes = [{ type: 'bind', source: '/tmp', target: '/host' }];
+  }, /bind mounts are forbidden/],
+  ['extra_hosts', value => { value.services.file.extra_hosts = ['example:127.0.0.1']; }, /extra_hosts/],
+  ['host-gateway', value => {
+    value.services.storage.extra_hosts = ['host.docker.internal:host-gateway'];
+  }, /extra_hosts/],
+  ['host network mode', value => { value.services.calls.network_mode = 'host'; }, /network_mode is forbidden/],
+  ['host build network', value => { value.services.calls.build.network = 'host'; }, /build network host/],
+  ['unexpected service key', value => { value.services.calls.user = 'root'; }, /service must have exact keys/],
+  ['extra network', value => { value.networks.default = { name: 'unexpected' }; }, /compose networks/],
+  ['extra service network', value => { value.services.calls.networks.default = null; }, /calls networks/],
+  ['router cap add', value => { value.services['xnode-1'].cap_add = ['NET_ADMIN']; }, /cap_add/],
+  ['ancillary cap add', value => { value.services.calls.cap_add = ['NET_BIND_SERVICE']; }, /service must have exact keys/],
+  ['cap drop', value => { value.services.push.cap_drop = []; }, /cap_drop/],
+  ['security option', value => { value.services.file.security_opt = []; }, /security_opt/],
+  ['API listener', value => {
+    value.services['xnode-1'].environment.Node__ApiListenUrl = 'http://0.0.0.0:9999';
+  }, /Node__ApiListenUrl/],
+  ['ASP.NET listeners', value => {
+    value.services['xnode-1'].environment.ASPNETCORE_URLS = 'http://0.0.0.0:8080';
+  }, /ASPNETCORE_URLS/],
+  ['peer listener', value => {
+    value.services['xnode-2'].environment.Node__PeerRpcListenUrl = 'http://0.0.0.0:443';
+  }, /Node__PeerRpcListenUrl/],
+  ['storage RPC URL', value => {
+    value.services['xnode-1'].environment.StorageRpc__BaseUrl = 'http://host.docker.internal:8080';
+  }, /StorageRpc__BaseUrl/],
+  ['VLESS argument', value => {
+    value.services['xnode-3'].environment.Vless__TransportMode = 'Reality';
+  }, /Vless__TransportMode/],
+  ['membership flag', value => {
+    value.services['xnode-1'].environment.Runtime__EnablePrivateAllowlistMembership = 'false';
+  }, /EnablePrivateAllowlistMembership/],
+  ['storage bootstrap', value => {
+    value.services['xnode-1'].environment.Runtime__BootstrapFromStorage = 'true';
+  }, /BootstrapFromStorage/],
+  ['public peer authorization', value => {
+    value.services['xnode-2'].environment.Runtime__AllowPublicPeerEndpoints = 'true';
+  }, /AllowPublicPeerEndpoints/],
+  ['allowlist tuple', value => {
+    value.services['xnode-3'].environment.Runtime__PrivatePeerEndpointAllowlist__1__Port = '8082';
+  }, /allowlist/],
+  ['volume source', value => {
+    value.services.calls.volumes[0].source = 'foreign-volume';
+  }, /calls volume/],
+  ['volume target', value => {
+    value.services.file.volumes[0].target = '/tmp/file';
+  }, /file volume/],
+  ['secret source', value => {
+    value.services['xnode-1'].secrets[0].source = 'i01b-private-uat-node-2-ed25519';
+  }, /secret mount/],
+  ['secret mode', value => {
+    value.services['xnode-2'].secrets[0].mode = '0444';
+  }, /secret mount/],
+  ['build context', value => {
+    value.services['xnode-1'].build.context = 'C:\\ambient';
+  }, /build context/],
+  ['Dockerfile path', value => {
+    value.services['xnode-2'].build.dockerfile = 'Dockerfile';
+  }, /Dockerfile mismatch/],
+  ['SDK digest removal', value => {
+    value.services['xnode-3'].build.args.SDK_IMAGE = 'mcr.microsoft.com/dotnet/sdk:10.0';
+  }, /build args/],
+  ['Xray hash removal', value => {
+    value.services['xnode-1'].build.args.XRAY_SHA256 = '';
+  }, /build args/],
+  ['Xray version change', value => {
+    value.services['xnode-1'].build.args.XRAY_VERSION = 'latest';
+  }, /build args/],
+  ['public VLESS port', value => {
+    value.services['xnode-1'].ports.push({
+      mode: 'ingress', host_ip: '0.0.0.0', target: 443, published: '443', protocol: 'tcp'
+    });
+  }, /API publication/],
+  ['public storage port', value => {
+    value.services.storage.ports = [{
+      mode: 'ingress', host_ip: '127.0.0.1', target: 8080, published: '38100', protocol: 'tcp'
+    }];
+  }, /service must have exact keys/]
+];
+
+for (const [name, mutate, pattern] of mutations) {
+  test(`fails closed on ${name}`, () => {
+    const value = clone(topology);
+    mutate(value);
+    assert.throws(() => validateTopology(value, inputs), pattern);
+  });
 }
 
-test('compose config renders and satisfies the complete I01B private UAT contract', () => {
-  const result = validateTopology(topology, inputs);
-  assert.deepEqual(
-    {
-      services: result.serviceCount,
-      routers: result.routerCount,
-      mappings: result.allowlistMappingCount,
-      networks: result.networkCount,
-      publicAuthorization: result.publicPeerAuthorizationExpected,
-      restart: result.uatRestartAuthorized,
-      production: result.productionReady
-    },
-    {
-      services: 7,
-      routers: 3,
-      mappings: 9,
-      networks: 1,
-      publicAuthorization: 'DenyAll',
-      restart: false,
-      production: false
-    }
-  );
+test('fails closed on a retired router identity', () => {
+  const value = clone(topology);
+  const retired = inputs.retired.retiredRouterPublicIds[0];
+  value.services['xnode-1'].environment.Node__RouterId = retired;
+  assert.throws(() => validateTopology(value, inputs), /RouterId mismatch/);
 });
 
-test('fails closed if any UAT/private environment switch changes', () => {
-  const mutated = clone(topology);
-  mutated.services['xnode-1'].environment.ASPNETCORE_ENVIRONMENT = 'Production';
-  assert.throws(() => validateTopology(mutated, inputs), /ASPNETCORE_ENVIRONMENT=UAT/);
-});
+test('fails closed if the reviewed Dockerfile restores image defaults or optional Xray verification', () => {
+  const imageDefault = {
+    ...inputs,
+    reviewedDockerfile: inputs.reviewedDockerfile.replace(
+      'ARG SDK_IMAGE',
+      'ARG SDK_IMAGE=mcr.microsoft.com/dotnet/sdk:10.0'
+    )
+  };
+  assert.throws(() => validateTopology(topology, imageDefault), /SDK image must have no default/);
 
-test('fails closed if public peer authorization is enabled', () => {
-  const mutated = clone(topology);
-  mutated.services['xnode-1'].environment.Runtime__AllowPublicPeerEndpoints = 'true';
-  assert.throws(() => validateTopology(mutated, inputs), /AllowPublicPeerEndpoints=false/);
-});
-
-test('fails closed if one of the nine allowlist mappings is missing', () => {
-  const mutated = clone(topology);
-  delete mutated.services['xnode-2'].environment
-    .Runtime__PrivatePeerEndpointAllowlist__2__Path;
-  assert.throws(() => validateTopology(mutated, inputs), /exactly three complete allowlist tuples/);
-});
-
-test('fails closed if an advertised peer endpoint differs from its exact tuple', () => {
-  const mutated = clone(topology);
-  mutated.services['xnode-3'].environment.Node__PublicPeerRpcEndpoint =
-    'http://172.30.81.12:8081/api/peer/onion';
-  assert.throws(() => validateTopology(mutated, inputs), /PublicPeerRpcEndpoint/);
-});
-
-test('fails closed if storage, peer RPC, or VLESS becomes published', () => {
-  const mutated = clone(topology);
-  mutated.services.storage.ports = [{
-    mode: 'ingress',
-    host_ip: '0.0.0.0',
-    target: 8080,
-    published: '38100',
-    protocol: 'tcp'
-  }];
-  assert.throws(() => validateTopology(mutated, inputs), /storage must remain internal/);
-});
-
-test('fails closed if an ancillary E2E endpoint is not an exact loopback binding', () => {
-  const mutated = clone(topology);
-  mutated.services.push.ports[0].host_ip = '0.0.0.0';
-  assert.throws(() => validateTopology(mutated, inputs), /push E2E endpoint must bind loopback/);
-});
-
-test('fails closed on an extra network or host network mode', () => {
-  const extraNetwork = clone(topology);
-  extraNetwork.networks.default = { name: 'unexpected' };
-  assert.throws(() => validateTopology(extraNetwork, inputs), /compose networks must have exact keys/);
-
-  const hostMode = clone(topology);
-  hostMode.services.calls.network_mode = 'host';
-  assert.throws(() => validateTopology(hostMode, inputs), /must not use host network mode/);
-});
-
-test('fails closed on host.docker.internal', () => {
-  const mutated = clone(topology);
-  mutated.services.push.extra_hosts = ['host.docker.internal:host-gateway'];
-  assert.throws(() => validateTopology(mutated, inputs), /must not use host\.docker\.internal/);
-});
-
-test('fails closed on any chain service or chain RPC variable', () => {
-  const chainService = clone(topology);
-  chainService.services['staking-indexer'] = clone(chainService.services.calls);
-  assert.throws(() => validateTopology(chainService, inputs), /service set must be exact/);
-
-  const chainVariable = clone(topology);
-  chainVariable.services['xnode-1'].environment.Contracts__EthereumRpcUrl =
-    'https://example.invalid/rpc';
-  assert.throws(() => validateTopology(chainVariable, inputs), /chain\/RPC variable/);
-});
-
-test('fails closed on a retired public identity', () => {
-  const mutated = clone(topology);
-  const retiredId = inputs.retired.retiredRouterPublicIds[0];
-  mutated.services['xnode-1'].environment.Node__RouterId = retiredId;
-  for (const router of ['xnode-1', 'xnode-2', 'xnode-3']) {
-    mutated.services[router].environment
-      .Runtime__PrivatePeerEndpointAllowlist__0__RouterId = retiredId;
-  }
-  assert.throws(() => validateTopology(mutated, inputs), /retired public router identity is forbidden/);
-});
-
-test('fails closed if registry bootstrap or heartbeat is enabled', () => {
-  const bootstrap = clone(topology);
-  bootstrap.services['xnode-1'].environment.RegistryBootstrap__BaseUrl =
-    'http://registry:8080';
-  assert.throws(() => validateTopology(bootstrap, inputs), /RegistryBootstrap__BaseUrl=/);
-
-  const heartbeat = clone(topology);
-  heartbeat.services['xnode-1'].environment.RegistryHeartbeat__Enabled = 'true';
-  assert.throws(() => validateTopology(heartbeat, inputs), /RegistryHeartbeat__Enabled=false/);
+  const optionalHash = {
+    ...inputs,
+    reviewedDockerfile: inputs.reviewedDockerfile.replace(
+      'echo "$XRAY_SHA256  /tmp/xray-download/xray.zip" | sha256sum -c -',
+      'if [ -n "${XRAY_SHA256:-}" ]; then echo "$XRAY_SHA256  /tmp/xray-download/xray.zip" | sha256sum -c -; fi'
+    )
+  };
+  assert.throws(() => validateTopology(topology, optionalHash), /optional Xray archive verification/);
 });

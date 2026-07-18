@@ -1,14 +1,15 @@
 name: deep-i01b-private-uat
 
 x-router-build: &router-build
-  context: ${I01B_PRIVATE_UAT_XNODE_DIR:-../xnode}
-  dockerfile: ${I01B_PRIVATE_UAT_XNODE_DOCKERFILE:-../deep-devops/docker/xnode-xray.Dockerfile}
+  context: ${I01B_PRIVATE_UAT_XNODE_DIR:?REQUIRED canonical clean XNode source directory}
+  dockerfile: ${I01B_PRIVATE_UAT_XNODE_DOCKERFILE:?REQUIRED canonical reviewed xnode-xray Dockerfile path}
   args:
-    SDK_IMAGE: mcr.microsoft.com/dotnet/sdk:10.0
-    RUNTIME_IMAGE: mcr.microsoft.com/dotnet/aspnet:10.0
+    SDK_IMAGE: mcr.microsoft.com/dotnet/sdk:10.0@${I01B_PRIVATE_UAT_DOTNET_SDK_DIGEST:?REQUIRED reviewed .NET SDK image digest}
+    RUNTIME_IMAGE: mcr.microsoft.com/dotnet/aspnet:10.0@${I01B_PRIVATE_UAT_DOTNET_RUNTIME_DIGEST:?REQUIRED reviewed .NET runtime image digest}
     PROJECT: src/XNode/XNode.csproj
     APP_DLL: XNode.dll
-    XRAY_VERSION: ${I01B_PRIVATE_UAT_XRAY_VERSION:-v26.3.27}
+    XRAY_VERSION: ${I01B_PRIVATE_UAT_XRAY_VERSION:?REQUIRED reviewed exact Xray version}
+    XRAY_SHA256: ${I01B_PRIVATE_UAT_XRAY_SHA256:?REQUIRED reviewed Xray archive SHA256}
 
 x-router-environment: &router-environment
   DOTNET_ENVIRONMENT: UAT
@@ -25,6 +26,7 @@ x-router-environment: &router-environment
   Runtime__EnablePrivatePeerEndpoints: "true"
   Runtime__PrivatePeerNetworkIdentity: uat
   Runtime__AllowPublicPeerEndpoints: "false"
+  Runtime__EnablePrivateAllowlistMembership: "true"
   Runtime__PrivatePeerEndpointAllowlist__0__RouterId: ${I01B_PRIVATE_UAT_NODE_1_ROUTER_ID:?REQUIRED fresh I01B private UAT node 1 router identity}
   Runtime__PrivatePeerEndpointAllowlist__0__IpAddress: 172.30.81.11
   Runtime__PrivatePeerEndpointAllowlist__0__Port: "8081"
@@ -85,6 +87,16 @@ services:
     healthcheck: *router-healthcheck
     labels:
       io.deep.i01b.public-peer-authorization: DenyAll
+      io.deep.i01b.readiness-before-bootstrap: "503"
+      io.deep.i01b.supply-chain-preflight-required: "true"
+      io.deep.i01b.xnode-source-commit: ${I01B_PRIVATE_UAT_EXPECTED_XNODE_COMMIT:?REQUIRED exact clean XNode commit}
+      io.deep.i01b.xnode-dockerfile-sha256: ${I01B_PRIVATE_UAT_EXPECTED_XNODE_DOCKERFILE_SHA256:?REQUIRED reviewed xnode-xray Dockerfile SHA256}
+    cap_add:
+      - NET_BIND_SERVICE
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
 
   xnode-2:
     build: *router-build
@@ -113,6 +125,16 @@ services:
     healthcheck: *router-healthcheck
     labels:
       io.deep.i01b.public-peer-authorization: DenyAll
+      io.deep.i01b.readiness-before-bootstrap: "503"
+      io.deep.i01b.supply-chain-preflight-required: "true"
+      io.deep.i01b.xnode-source-commit: ${I01B_PRIVATE_UAT_EXPECTED_XNODE_COMMIT:?REQUIRED exact clean XNode commit}
+      io.deep.i01b.xnode-dockerfile-sha256: ${I01B_PRIVATE_UAT_EXPECTED_XNODE_DOCKERFILE_SHA256:?REQUIRED reviewed xnode-xray Dockerfile SHA256}
+    cap_add:
+      - NET_BIND_SERVICE
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
 
   xnode-3:
     build: *router-build
@@ -141,6 +163,16 @@ services:
     healthcheck: *router-healthcheck
     labels:
       io.deep.i01b.public-peer-authorization: DenyAll
+      io.deep.i01b.readiness-before-bootstrap: "503"
+      io.deep.i01b.supply-chain-preflight-required: "true"
+      io.deep.i01b.xnode-source-commit: ${I01B_PRIVATE_UAT_EXPECTED_XNODE_COMMIT:?REQUIRED exact clean XNode commit}
+      io.deep.i01b.xnode-dockerfile-sha256: ${I01B_PRIVATE_UAT_EXPECTED_XNODE_DOCKERFILE_SHA256:?REQUIRED reviewed xnode-xray Dockerfile SHA256}
+    cap_add:
+      - NET_BIND_SERVICE
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
 
   storage:
     build:
@@ -155,6 +187,10 @@ services:
       - i01b-private-uat-storage-state:/var/lib/deep/i01b-private-uat/storage
     networks:
       - i01b-private-uat
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval: 3s
@@ -175,6 +211,10 @@ services:
       - "127.0.0.1:29101:8080"
     networks:
       - i01b-private-uat
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval: 3s
@@ -195,6 +235,10 @@ services:
       - "127.0.0.1:29102:8080"
     networks:
       - i01b-private-uat
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval: 3s
@@ -215,6 +259,10 @@ services:
       - "127.0.0.1:29103:8080"
     networks:
       - i01b-private-uat
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval: 3s

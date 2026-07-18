@@ -1,5 +1,5 @@
-ARG SDK_IMAGE=mcr.microsoft.com/dotnet/sdk:10.0
-ARG RUNTIME_IMAGE=mcr.microsoft.com/dotnet/aspnet:10.0
+ARG SDK_IMAGE
+ARG RUNTIME_IMAGE
 
 FROM --platform=$BUILDPLATFORM ${SDK_IMAGE} AS build
 ARG PROJECT
@@ -22,8 +22,7 @@ RUN case "$TARGETARCH" in \
 FROM ${RUNTIME_IMAGE} AS runtime
 ARG APP_DLL
 ARG TARGETARCH
-ARG XRAY_VERSION=v26.3.27
-ARG XRAY_DOWNLOAD_URL
+ARG XRAY_VERSION
 ARG XRAY_SHA256
 ENV APP_DLL=${APP_DLL}
 WORKDIR /app
@@ -42,16 +41,17 @@ RUN set -eux; \
       curl ca-certificates unzip \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /tmp/xray-download \
-    && if [ -z "${XRAY_DOWNLOAD_URL:-}" ]; then \
-        case "${TARGETARCH:-amd64}" in \
-          amd64) XRAY_ASSET="Xray-linux-64.zip" ;; \
-          arm64) XRAY_ASSET="Xray-linux-arm64-v8a.zip" ;; \
-          *) echo "Unsupported TARGETARCH for Xray download: ${TARGETARCH:-}" >&2; exit 1 ;; \
-        esac; \
-        XRAY_DOWNLOAD_URL="https://github.com/XTLS/Xray-core/releases/download/$XRAY_VERSION/$XRAY_ASSET"; \
-    fi \
+    && test -n "$XRAY_VERSION" \
+    && test "${#XRAY_SHA256}" -eq 64 \
+    && case "$XRAY_SHA256" in *[!0-9a-f]*) echo "XRAY_SHA256 must be 64 lowercase hexadecimal characters" >&2; exit 1 ;; esac \
+    && case "${TARGETARCH:-amd64}" in \
+      amd64) XRAY_ASSET="Xray-linux-64.zip" ;; \
+      arm64) XRAY_ASSET="Xray-linux-arm64-v8a.zip" ;; \
+      *) echo "Unsupported TARGETARCH for Xray download: ${TARGETARCH:-}" >&2; exit 1 ;; \
+    esac \
+    && XRAY_DOWNLOAD_URL="https://github.com/XTLS/Xray-core/releases/download/$XRAY_VERSION/$XRAY_ASSET" \
     && curl -fsSL "$XRAY_DOWNLOAD_URL" -o /tmp/xray-download/xray.zip \
-    && if [ -n "${XRAY_SHA256:-}" ]; then echo "$XRAY_SHA256  /tmp/xray-download/xray.zip" | sha256sum -c -; fi \
+    && echo "$XRAY_SHA256  /tmp/xray-download/xray.zip" | sha256sum -c - \
     && unzip -q /tmp/xray-download/xray.zip -d /tmp/xray-download \
     && install -m 0755 /tmp/xray-download/xray /usr/local/bin/xray \
     && rm -rf /tmp/xray-download \
