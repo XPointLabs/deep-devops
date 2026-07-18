@@ -27,6 +27,8 @@ const scriptNames = [
   'artifact-upload-manifest.mjs',
   'artifact-upload-gate.mjs',
   'workflow-upload-contracts.mjs',
+  'update-trust.mjs',
+  'update-trust-contracts.mjs',
   'uat-rotation-preflight.mjs',
   'release-ci-lanes.mjs',
   'release-evidence-guards.mjs',
@@ -175,6 +177,24 @@ if (commandResults.every(result => result.passed)) {
   runNode(
     ['--test', 'scripts/uat-rotation-preflight.test.mjs'],
     'uat-rotation-preflight:tests'
+  );
+}
+
+if (commandResults.every(result => result.passed)) {
+  runNode(
+    ['--test', 'scripts/update-trust.test.mjs'],
+    'update-trust:tests'
+  );
+}
+
+if (commandResults.every(result => result.passed)) {
+  runNode(
+    [
+      'scripts/update-trust-contracts.mjs',
+      '--artifact-dir',
+      path.join(artifactRoot, 'survival', 'P02')
+    ],
+    'update-trust:public-fixture-evidence'
   );
 }
 
