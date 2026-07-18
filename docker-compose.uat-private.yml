@@ -59,6 +59,14 @@ x-router-healthcheck: &router-healthcheck
   retries: 30
   start_period: 20s
 
+x-ancillary-build-args: &ancillary-build-args
+  NODE_IMAGE: node:24-bookworm-slim@${I01B_PRIVATE_UAT_NODE_IMAGE_DIGEST:?REQUIRED reviewed Node image digest}
+
+x-ancillary-labels: &ancillary-labels
+  io.deep.i01b.supply-chain-preflight-required: "true"
+  io.deep.i01b.devops-source-commit: ${I01B_PRIVATE_UAT_EXPECTED_DEVOPS_COMMIT:?REQUIRED exact clean DevOps commit}
+  io.deep.i01b.compat-content-sha256: ${I01B_PRIVATE_UAT_EXPECTED_COMPAT_CONTENT_SHA256:?REQUIRED exact reviewed compat build content SHA256}
+
 services:
   xnode-1:
     build: *router-build
@@ -178,6 +186,7 @@ services:
     build:
       context: .
       dockerfile: docker/storage-service.Dockerfile
+      args: *ancillary-build-args
     environment:
       PORT: "8080"
       SERVICE_NAME: deep-i01b-private-uat-storage
@@ -187,6 +196,7 @@ services:
       - i01b-private-uat-storage-state:/var/lib/deep/i01b-private-uat/storage
     networks:
       - i01b-private-uat
+    labels: *ancillary-labels
     cap_drop:
       - ALL
     security_opt:
@@ -201,6 +211,7 @@ services:
     build:
       context: .
       dockerfile: docker/file-service.Dockerfile
+      args: *ancillary-build-args
     environment:
       PORT: "8080"
       SERVICE_NAME: deep-i01b-private-uat-file
@@ -211,6 +222,7 @@ services:
       - "127.0.0.1:29101:8080"
     networks:
       - i01b-private-uat
+    labels: *ancillary-labels
     cap_drop:
       - ALL
     security_opt:
@@ -225,6 +237,7 @@ services:
     build:
       context: .
       dockerfile: docker/push-service.Dockerfile
+      args: *ancillary-build-args
     environment:
       PORT: "8080"
       SERVICE_NAME: deep-i01b-private-uat-push
@@ -235,6 +248,7 @@ services:
       - "127.0.0.1:29102:8080"
     networks:
       - i01b-private-uat
+    labels: *ancillary-labels
     cap_drop:
       - ALL
     security_opt:
@@ -249,6 +263,7 @@ services:
     build:
       context: .
       dockerfile: docker/calls-service.Dockerfile
+      args: *ancillary-build-args
     environment:
       PORT: "8080"
       SERVICE_NAME: deep-i01b-private-uat-calls
@@ -259,6 +274,7 @@ services:
       - "127.0.0.1:29103:8080"
     networks:
       - i01b-private-uat
+    labels: *ancillary-labels
     cap_drop:
       - ALL
     security_opt:

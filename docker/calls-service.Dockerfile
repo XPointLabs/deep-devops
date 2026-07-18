@@ -1,4 +1,5 @@
-FROM node:24-bookworm-slim
+ARG NODE_IMAGE
+FROM ${NODE_IMAGE}
 
 WORKDIR /service
 

@@ -102,6 +102,12 @@ const mutations = [
   ['SDK digest removal', value => {
     value.services['xnode-3'].build.args.SDK_IMAGE = 'mcr.microsoft.com/dotnet/sdk:10.0';
   }, /build args/],
+  ['Node digest removal', value => {
+    value.services.calls.build.args.NODE_IMAGE = 'node:24-bookworm-slim';
+  }, /build args/],
+  ['compat content hash mutation', value => {
+    value.services.storage.labels['io.deep.i01b.compat-content-sha256'] = '00'.repeat(32);
+  }, /storage labels/],
   ['Xray hash removal', value => {
     value.services['xnode-1'].build.args.XRAY_SHA256 = '';
   }, /build args/],
@@ -153,4 +159,16 @@ test('fails closed if the reviewed Dockerfile restores image defaults or optiona
     )
   };
   assert.throws(() => validateTopology(topology, optionalHash), /optional Xray archive verification/);
+
+  const ancillaryDefault = {
+    ...inputs,
+    reviewedAncillaryDockerfiles: {
+      ...inputs.reviewedAncillaryDockerfiles,
+      calls: inputs.reviewedAncillaryDockerfiles.calls.replace(
+        'ARG NODE_IMAGE',
+        'ARG NODE_IMAGE=node:24-bookworm-slim'
+      )
+    }
+  };
+  assert.throws(() => validateTopology(topology, ancillaryDefault), /Node image must have no default/);
 });

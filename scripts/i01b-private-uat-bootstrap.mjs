@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createHash, createPublicKey, verify } from 'node:crypto';
+import { createHash, createPublicKey, randomBytes, verify } from 'node:crypto';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -64,11 +64,48 @@ function assertLowerHex(value, bytes, label) {
   assert.match(value, new RegExp(`^[0-9a-f]{${bytes * 2}}$`), `${label} must be canonical lowercase hex`);
 }
 
+function dateTimeOffsetUnixMs(value, label) {
+  assert.equal(typeof value, 'string', `${label} must be a string`);
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,7}))?(Z|[+-]\d{2}:\d{2})$/.exec(value);
+  assert.ok(match, `${label} must be a System.Text.Json DateTimeOffset round-trip value`);
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText, , offset] = match;
+  const [year, month, day, hour, minute, second] =
+    [yearText, monthText, dayText, hourText, minuteText, secondText].map(Number);
+  assert.ok(year >= 1, `${label} has an invalid year`);
+  assert.ok(month >= 1 && month <= 12, `${label} has an invalid month`);
+  assert.ok(hour <= 23 && minute <= 59 && second <= 59, `${label} has an invalid time`);
+  const calendar = new Date(0);
+  calendar.setUTCFullYear(year, month - 1, day);
+  calendar.setUTCHours(hour, minute, second, 0);
+  assert.deepEqual(
+    [
+      calendar.getUTCFullYear(),
+      calendar.getUTCMonth() + 1,
+      calendar.getUTCDate(),
+      calendar.getUTCHours(),
+      calendar.getUTCMinutes(),
+      calendar.getUTCSeconds()
+    ],
+    [year, month, day, hour, minute, second],
+    `${label} has an invalid calendar date`
+  );
+  if (offset !== 'Z') {
+    const offsetHour = Number(offset.slice(1, 3));
+    const offsetMinute = Number(offset.slice(4, 6));
+    assert.ok(
+      offsetHour < 14 || (offsetHour === 14 && offsetMinute === 0),
+      `${label} has an invalid UTC offset`
+    );
+    assert.ok(offsetMinute <= 59, `${label} has an invalid UTC offset`);
+  }
+  const unixMs = Date.parse(value);
+  assert.ok(Number.isSafeInteger(unixMs), `${label} must resolve to an exact Unix millisecond`);
+  return unixMs;
+}
+
 function relayContactSigningBytes(contact) {
-  const signedAtUnixMs = Date.parse(contact.signedAt);
-  const expiresAtUnixMs = Date.parse(contact.expiresAt);
-  assert.ok(Number.isSafeInteger(signedAtUnixMs), 'contact signedAt must be an exact timestamp');
-  assert.ok(Number.isSafeInteger(expiresAtUnixMs), 'contact expiresAt must be an exact timestamp');
+  const signedAtUnixMs = dateTimeOffsetUnixMs(contact.signedAt, 'contact signedAt');
+  const expiresAtUnixMs = dateTimeOffsetUnixMs(contact.expiresAt, 'contact expiresAt');
   const payload = {
     version: 'deep-relay-contact-v1',
     routerId: contact.routerId,
@@ -113,13 +150,9 @@ export function verifyRelayContact(contact, expected, now = new Date()) {
   );
 
   const nowMs = now.getTime();
-  const signedAtMs = Date.parse(contact.signedAt);
-  const expiresAtMs = Date.parse(contact.expiresAt);
+  const signedAtMs = dateTimeOffsetUnixMs(contact.signedAt, 'contact signedAt');
+  const expiresAtMs = dateTimeOffsetUnixMs(contact.expiresAt, 'contact expiresAt');
   assert.ok(Number.isSafeInteger(nowMs), 'bootstrap clock must be a valid timestamp');
-  assert.ok(Number.isSafeInteger(signedAtMs), 'contact signedAt must be valid');
-  assert.ok(Number.isSafeInteger(expiresAtMs), 'contact expiresAt must be valid');
-  assert.equal(new Date(signedAtMs).toISOString(), contact.signedAt, 'contact signedAt must be canonical UTC');
-  assert.equal(new Date(expiresAtMs).toISOString(), contact.expiresAt, 'contact expiresAt must be canonical UTC');
   assert.ok(signedAtMs <= nowMs + 5 * 60_000, 'contact signedAt exceeds allowed future skew');
   assert.ok(nowMs - signedAtMs < 12 * 60 * 60_000, 'contact is outdated');
   assert.ok(expiresAtMs > signedAtMs && expiresAtMs > nowMs, 'contact is expired or has invalid lifetime');
@@ -259,9 +292,14 @@ function assertExactMembershipStatus(status, router) {
   assert.equal(status.publicPeerAuthorizationMode, 'DenyAll', `${router.name} public peer mode mismatch`);
 }
 
-function assertExactRoute(routeResult, routers, router, now) {
+function assertExactRoute(routeResult, routers, router, now, expectedRouteNonce) {
   exactKeys(routeResult, ['route', 'routeNonce'], `${router.name} route result`);
-  assert.equal(typeof routeResult.routeNonce, 'string', `${router.name} route nonce missing`);
+  assertLowerHex(routeResult.routeNonce, 32, `${router.name} route nonce`);
+  assert.equal(
+    routeResult.routeNonce,
+    expectedRouteNonce,
+    `${router.name} route nonce is not bound to the exact storage_route request`
+  );
   assert.ok(Array.isArray(routeResult.route), `${router.name} route must be an array`);
   assert.equal(routeResult.route.length, 3, `${router.name} route must contain exactly three hops`);
   const expectedById = new Map(routers.map(item => [item.routerId, item]));
@@ -300,7 +338,9 @@ export async function bootstrapPrivateUat(options) {
   const routers = options.routers;
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
   const now = options.now ?? new Date();
+  const routeNonceFactory = options.routeNonceFactory ?? (() => randomBytes(32).toString('hex'));
   assert.equal(typeof fetchImpl, 'function', 'fetch implementation is required');
+  assert.equal(typeof routeNonceFactory, 'function', 'route nonce factory must be a function');
   assertExactRouterConfiguration(routers);
 
   for (const router of routers) {
@@ -374,13 +414,15 @@ export async function bootstrapPrivateUat(options) {
       `${router.name} post-exchange readiness`
     );
 
+    const routeNonce = routeNonceFactory(router);
+    assertLowerHex(routeNonce, 32, `${router.name} generated storage_route nonce`);
     const routeRequest = rpcRequest(
       `i01b-route-${router.name}`,
       'storage_route',
-      { routeNonce: `i01b-private-uat-${router.name}` }
+      { routeNonce }
     );
     const route = await postRpc(fetchImpl, router, routeRequest, now);
-    assertExactRoute(route, routers, router, now);
+    assertExactRoute(route, routers, router, now, routeNonce);
   }
 
   return {

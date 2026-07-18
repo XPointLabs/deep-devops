@@ -29,7 +29,7 @@ const routerServiceKeys = Object.freeze([
 ]);
 const ancillaryServiceKeys = Object.freeze([
   'build', 'cap_drop', 'command', 'entrypoint', 'environment', 'healthcheck', 'networks',
-  'security_opt', 'volumes'
+  'labels', 'security_opt', 'volumes'
 ]);
 
 function exactKeys(value, expected, label) {
@@ -181,12 +181,25 @@ function validateRouter(topology, name, index, inputs) {
   }], `${name} volume`);
 }
 
-function validateAncillary(service, name) {
+function validateAncillary(service, name, inputs) {
   const expectedKeys = name === 'storage' ? ancillaryServiceKeys : [...ancillaryServiceKeys, 'ports'];
   exactKeys(service, expectedKeys, `${name} service`);
-  exactKeys(service.build, ['context', 'dockerfile'], `${name} build`);
+  exactKeys(service.build, ['args', 'context', 'dockerfile'], `${name} build`);
   assert.equal(service.build.context, repositoryRoot, `${name} build context mismatch`);
   assert.equal(service.build.dockerfile, `docker/${name}-service.Dockerfile`, `${name} Dockerfile mismatch`);
+  exactValue(service.build.args, {
+    NODE_IMAGE: `node:24-bookworm-slim@${inputs.syntheticNodeDigest}`
+  }, `${name} build args`);
+  assert.match(
+    service.build.args.NODE_IMAGE,
+    /^node:24-bookworm-slim@sha256:[0-9a-f]{64}$/,
+    `${name} Node image must be digest pinned`
+  );
+  exactValue(service.labels, {
+    'io.deep.i01b.compat-content-sha256': inputs.syntheticCompatContentSha256,
+    'io.deep.i01b.devops-source-commit': inputs.syntheticDevopsCommit,
+    'io.deep.i01b.supply-chain-preflight-required': 'true'
+  }, `${name} labels`);
   exactValue(service.cap_drop, ['ALL'], `${name} cap_drop`);
   assert.equal(service.cap_add, undefined, `${name} cap_add is forbidden`);
   exactValue(service.security_opt, ['no-new-privileges:true'], `${name} security_opt`);
@@ -219,6 +232,9 @@ function validateSourcePlaceholders(inputs) {
     'I01B_PRIVATE_UAT_DOTNET_RUNTIME_DIGEST',
     'I01B_PRIVATE_UAT_XRAY_VERSION',
     'I01B_PRIVATE_UAT_XRAY_SHA256',
+    'I01B_PRIVATE_UAT_NODE_IMAGE_DIGEST',
+    'I01B_PRIVATE_UAT_EXPECTED_DEVOPS_COMMIT',
+    'I01B_PRIVATE_UAT_EXPECTED_COMPAT_CONTENT_SHA256',
     ...[1, 2, 3].map(index => `I01B_PRIVATE_UAT_NODE_${index}_ROUTER_ID`)
   ];
   for (const variable of [
@@ -277,6 +293,11 @@ function validateSourcePlaceholders(inputs) {
     /if \[ -n "\$\{XRAY_SHA256/,
     'optional Xray archive verification is forbidden'
   );
+  for (const [name, dockerfile] of Object.entries(inputs.reviewedAncillaryDockerfiles)) {
+    assert.match(dockerfile, /^ARG NODE_IMAGE\s*$/m, `${name} Node image must have no default`);
+    assert.match(dockerfile, /^FROM \$\{NODE_IMAGE\}\s*$/m, `${name} must consume only the required Node image`);
+    assert.doesNotMatch(dockerfile, /^FROM\s+node:/m, `${name} unpinned Node base is forbidden`);
+  }
 }
 
 export function validateTopology(topology, inputs) {
@@ -305,7 +326,8 @@ export function validateTopology(topology, inputs) {
 
   validateGlobalEscapeHatches(topology);
   routers.forEach((name, index) => validateRouter(topology, name, index, inputs));
-  ['storage', 'file', 'push', 'calls'].forEach(name => validateAncillary(topology.services[name], name));
+  ['storage', 'file', 'push', 'calls'].forEach(name =>
+    validateAncillary(topology.services[name], name, inputs));
   validateSourcePlaceholders(inputs);
 
   return {
@@ -335,6 +357,9 @@ export function renderTopology() {
   const syntheticRuntimeDigest = `sha256:${'22'.repeat(32)}`;
   const syntheticXrayVersion = 'v0.0.0-synthetic';
   const syntheticXraySha256 = '33'.repeat(32);
+  const syntheticNodeDigest = `sha256:${'44'.repeat(32)}`;
+  const syntheticDevopsCommit = 'f6'.repeat(20);
+  const syntheticCompatContentSha256 = '55'.repeat(32);
   const environment = {
     ...process.env,
     COMPOSE_DISABLE_ENV_FILE: '1',
@@ -346,6 +371,9 @@ export function renderTopology() {
     I01B_PRIVATE_UAT_DOTNET_RUNTIME_DIGEST: syntheticRuntimeDigest,
     I01B_PRIVATE_UAT_XRAY_VERSION: syntheticXrayVersion,
     I01B_PRIVATE_UAT_XRAY_SHA256: syntheticXraySha256,
+    I01B_PRIVATE_UAT_NODE_IMAGE_DIGEST: syntheticNodeDigest,
+    I01B_PRIVATE_UAT_EXPECTED_DEVOPS_COMMIT: syntheticDevopsCommit,
+    I01B_PRIVATE_UAT_EXPECTED_COMPAT_CONTENT_SHA256: syntheticCompatContentSha256,
     ...Object.fromEntries([1, 2, 3].flatMap(index => [
       [`I01B_PRIVATE_UAT_NODE_${index}_ROUTER_ID`, syntheticRouterIds[index - 1]],
       [`I01B_PRIVATE_UAT_NODE_${index}_ED25519_SECRET_FILE`,
@@ -368,22 +396,41 @@ export function renderTopology() {
     syntheticSdkDigest,
     syntheticRuntimeDigest,
     syntheticXrayVersion,
-    syntheticXraySha256
+    syntheticXraySha256,
+    syntheticNodeDigest,
+    syntheticDevopsCommit,
+    syntheticCompatContentSha256
   };
 }
 
 export async function loadContractInputs(rendered = renderTopology()) {
-  const [source, example, reviewedDockerfile, retired, ...secretTemplates] = await Promise.all([
+  const [source, example, reviewedDockerfile, retired, ...remaining] = await Promise.all([
     readFile(composePath, 'utf8'),
     readFile(path.join(repositoryRoot, '.env.uat-private.example'), 'utf8'),
     readFile(path.join(repositoryRoot, 'docker', 'xnode-xray.Dockerfile'), 'utf8'),
     readFile(path.join(repositoryRoot, 'config', 'retired-uat-public-identities.json'), 'utf8').then(JSON.parse),
+    ...['storage', 'file', 'push', 'calls'].map(name => readFile(
+      path.join(repositoryRoot, 'docker', `${name}-service.Dockerfile`),
+      'utf8'
+    )),
     ...[1, 2, 3].map(index => readFile(
       path.join(repositoryRoot, 'secret-templates', 'uat-private-i01b', `node-${index}-ed25519.seed.example`),
       'utf8'
     ))
   ]);
-  return { ...rendered, source, example, reviewedDockerfile, retired, secretTemplates };
+  const reviewedAncillaryDockerfiles = Object.fromEntries(
+    ['storage', 'file', 'push', 'calls'].map((name, index) => [name, remaining[index]])
+  );
+  const secretTemplates = remaining.slice(4);
+  return {
+    ...rendered,
+    source,
+    example,
+    reviewedDockerfile,
+    reviewedAncillaryDockerfiles,
+    retired,
+    secretTemplates
+  };
 }
 
 export async function main() {
