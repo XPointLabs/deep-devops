@@ -30,6 +30,8 @@ const scriptNames = [
   'workflow-upload-contracts.mjs',
   'update-trust.mjs',
   'update-trust-contracts.mjs',
+  'update-ceremony.mjs',
+  'update-ceremony-contracts.mjs',
   'uat-rotation-preflight.mjs',
   'release-ci-lanes.mjs',
   'release-evidence-guards.mjs',
@@ -197,12 +199,30 @@ if (commandResults.every(result => result.passed)) {
 
 if (commandResults.every(result => result.passed)) {
   runNode(
+    ['--test', 'scripts/update-ceremony.test.mjs'],
+    'update-ceremony:tests'
+  );
+}
+
+if (commandResults.every(result => result.passed)) {
+  runNode(
     [
       'scripts/update-trust-contracts.mjs',
       '--artifact-dir',
       path.join(artifactRoot, 'survival', 'P02')
     ],
     'update-trust:public-fixture-evidence'
+  );
+}
+
+if (commandResults.every(result => result.passed)) {
+  runNode(
+    [
+      'scripts/update-ceremony-contracts.mjs',
+      '--artifact-dir',
+      path.join(artifactRoot, 'survival', 'P02C')
+    ],
+    'update-ceremony:test-only-dry-run-evidence'
   );
 }
 

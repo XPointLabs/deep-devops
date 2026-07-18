@@ -1,0 +1,41 @@
+{
+  "workPackage": "P02C",
+  "title": "Production-like update key ceremony and release pipeline",
+  "role": "release security and ceremony engineer",
+  "accountableHuman": "Mr. X",
+  "baseSha": "1586619b9b9ac9bbb957b6fcfa432f64c32cfeab",
+  "branch": "survival/w00-p02c-update-ceremony",
+  "testOnly": true,
+  "ephemeralTestKeys": true,
+  "testKeyMaterialCommitted": false,
+  "p02bCompatibility": "PASSED",
+  "focusedTests": {
+    "passed": 4,
+    "failed": 0,
+    "skipped": 0
+  },
+  "localMirrorCount": 2,
+  "offlineBundleGenerated": true,
+  "focusedEvidenceSecretScan": {
+    "files": 35,
+    "findings": 0
+  },
+  "fullReleaseGate": {
+    "commands": 53,
+    "failed": 0,
+    "secretScanFiles": 273,
+    "secretScanFindings": 0,
+    "productionReadinessChecks": 191
+  },
+  "activationStatus": "BLOCKED",
+  "activationRun": "NOT-RUN",
+  "productionPublication": "NOT-RUN",
+  "productionHsmVerified": false,
+  "independentCustodyVerified": false,
+  "reproducibleBuildVerified": false,
+  "networkCallsPerformed": false,
+  "dockerUpPerformed": false,
+  "blockchainActionsPerformed": false,
+  "pushPerformed": false,
+  "independentReviewRequired": true
+}

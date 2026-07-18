@@ -1,0 +1,36 @@
+{
+  "schema": "deep.update-ceremony.contract.v1",
+  "accountableHuman": "Mr. X",
+  "implementation": "scripts/update-ceremony.mjs",
+  "contractRunner": "scripts/update-ceremony-contracts.mjs",
+  "test": "scripts/update-ceremony.test.mjs",
+  "p02bVerifier": "scripts/update-trust.mjs",
+  "testKeys": {
+    "ephemeral": true,
+    "memoryOnly": true,
+    "committed": false,
+    "productionAuthority": false
+  },
+  "rootThreshold": {
+    "required": 2,
+    "publicKeyCount": 3
+  },
+  "delegatedTargetsThreshold": {
+    "required": 2,
+    "publicKeyCount": 3
+  },
+  "minimumMirrors": 2,
+  "offlineBundleRequired": true,
+  "activationStatus": "BLOCKED",
+  "activationRun": "NOT-RUN",
+  "productionPublication": "NOT-RUN",
+  "productionHsmVerified": false,
+  "independentCustodyVerified": false,
+  "reproducibleBuildVerified": false,
+  "requiredBlockers": [
+    "named-independent-custodians-missing",
+    "production-hsm-attestation-missing",
+    "production-publication-authorization-missing",
+    "reproducible-build-evidence-not-verified"
+  ]
+}

@@ -119,3 +119,9 @@ Expected public outputs:
 
 The synthetic APK payload exists only in a temporary test directory and is
 deleted. It is never published or copied into the evidence directory.
+
+The production-like, still TEST-only multiperson ceremony design and delegated
+release-request boundary are specified in `docs/UPDATE_KEY_CEREMONY.md`.
+Production activation remains blocked until every external custody, HSM,
+publication, reproducibility and independent-review prerequisite in that
+runbook is independently evidenced.
