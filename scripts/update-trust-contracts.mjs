@@ -1,5 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import {
+  chmodSync,
+  copyFileSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -548,8 +550,24 @@ export function runUpdateTrustContracts({ artifactDir = DEFAULT_ARTIFACT_DIR } =
     writeFileSync(apkFile, fixture.apkBytes);
     const verificationTempRoot = path.join(sandbox, 'private-temp');
     mkdirSync(verificationTempRoot, { mode: 0o700 });
-    const verifierRuntimePath = process.execPath;
+    const verifierRuntimeRootPath = path.join(sandbox, 'fixture-runtime');
+    mkdirSync(verifierRuntimeRootPath, { mode: 0o700 });
+    const runtimeName = process.platform === 'win32' ? 'node.exe' : 'node';
+    const verifierRuntimePath = path.join(verifierRuntimeRootPath, runtimeName);
+    copyFileSync(process.execPath, verifierRuntimePath);
+    if (process.platform !== 'win32') chmodSync(verifierRuntimePath, 0o700);
     const verifierRuntimeSha256 = sha256(readFileSync(verifierRuntimePath));
+    const verifierRuntimeManifestPath = path.join(sandbox, 'fixture-runtime-manifest.json');
+    const verifierRuntimeManifestBytes = Buffer.from(`${JSON.stringify({
+      schema: 'deep.apk-verifier-runtime-tree.v1',
+      entrypoint: runtimeName,
+      files: [{
+        path: runtimeName,
+        length: readFileSync(verifierRuntimePath).length,
+        sha256: verifierRuntimeSha256
+      }]
+    })}\n`, 'utf8');
+    writeFileSync(verifierRuntimeManifestPath, verifierRuntimeManifestBytes);
     const verifierArtifactPath = path.join(sandbox, 'fixture-verifier.mjs');
     const verifierArtifactBytes = fixtureVerifierArtifactBytes(
       fixture.packageSignerSha256,
@@ -566,6 +584,9 @@ export function runUpdateTrustContracts({ artifactDir = DEFAULT_ARTIFACT_DIR } =
       },
       verifierRuntimePath,
       verifierRuntimeSha256,
+      verifierRuntimeRootPath,
+      verifierRuntimeManifestPath,
+      verifierRuntimeManifestSha256: sha256(verifierRuntimeManifestBytes),
       verifierArtifactPath,
       verifierArtifactSha256: sha256(verifierArtifactBytes),
       verificationTempRoot,
@@ -588,6 +609,9 @@ export function runUpdateTrustContracts({ artifactDir = DEFAULT_ARTIFACT_DIR } =
         },
         verifierRuntimePath,
         verifierRuntimeSha256,
+        verifierRuntimeRootPath,
+        verifierRuntimeManifestPath,
+        verifierRuntimeManifestSha256: sha256(verifierRuntimeManifestBytes),
         verifierArtifactPath,
         verifierArtifactSha256: sha256(wrongVerifierArtifactBytes),
         verificationTempRoot,
@@ -647,9 +671,9 @@ export function runUpdateTrustContracts({ artifactDir = DEFAULT_ARTIFACT_DIR } =
       schema: 'deep.update-trust.offline-android-verification.v1',
       fixtureOnly: true,
       packageSignerExecution:
-        'pinned-node-runtime-and-pinned-fixture-artifact-enforcing-fixed-snapshot-argv',
+        'exact-manifested-node-runtime-tree-and-pinned-fixture-artifact-enforcing-fixed-snapshot-argv',
       productionContract:
-        'pinned-java-runtime -cp pinned-apksigner.jar com.android.apksigner.ApkSignerTool verify --verbose --print-certs protected-snapshot',
+        'exact-manifested-java-runtime-tree -cp pinned-apksigner.jar com.android.apksigner.ApkSignerTool verify --verbose --print-certs protected-snapshot',
       ...androidResult
     });
     writeJson(path.join(artifactDir, 'negative-scenarios.json'), {
@@ -684,7 +708,7 @@ export function runUpdateTrustContracts({ artifactDir = DEFAULT_ARTIFACT_DIR } =
         lostOnlineKey: 'passed',
         sbomAndReproducibility: 'passed',
         offlineAndroidMetadataAndPackageSigner: 'passed',
-        apkVerifierPinnedRuntimeAndArtifact: 'passed',
+        apkVerifierExactRuntimeTreeAndPinnedArtifact: 'passed',
         apkSignerFixedArgvAndProtectedSnapshot: 'passed'
       },
       status: 'passed'

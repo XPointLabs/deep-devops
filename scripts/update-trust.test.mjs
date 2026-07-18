@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {
+  chmod,
   copyFile,
   mkdir,
   mkdtemp,
@@ -18,7 +19,6 @@ import {
   parseApkSignerDigests,
   parseMetadataDocument,
   parseStrictJson,
-  runTrustedApkSigner,
   sha256,
   signMetadata,
   verifyOfflineAndroidArtifact,
@@ -89,11 +89,34 @@ async function writePinnedFixtureVerifier(sandbox, name, options) {
   const artifactPath = path.join(sandbox, `${name}.mjs`);
   const artifactBytes = fakeVerifierArtifactBytes(options);
   await writeFile(artifactPath, artifactBytes);
-  const runtimePath = await realpath(process.execPath);
+  const runtimeRootPath = path.join(sandbox, '.fixture-runtime');
+  await mkdir(runtimeRootPath, { recursive: true, mode: 0o700 });
+  const runtimeName = process.platform === 'win32' ? 'node.exe' : 'node';
+  const runtimePath = path.join(runtimeRootPath, runtimeName);
+  try {
+    await readFile(runtimePath);
+  } catch {
+    await copyFile(process.execPath, runtimePath);
+    if (process.platform !== 'win32') await chmod(runtimePath, 0o700);
+  }
   const runtimeBytes = await readFile(runtimePath);
+  const runtimeManifestPath = path.join(sandbox, '.fixture-runtime-manifest.json');
+  const runtimeManifestBytes = Buffer.from(`${JSON.stringify({
+    schema: 'deep.apk-verifier-runtime-tree.v1',
+    entrypoint: runtimeName,
+    files: [{
+      path: runtimeName,
+      length: runtimeBytes.length,
+      sha256: sha256(runtimeBytes)
+    }]
+  })}\n`, 'utf8');
+  await writeFile(runtimeManifestPath, runtimeManifestBytes);
   return {
-    verifierRuntimePath: runtimePath,
+    verifierRuntimePath: await realpath(runtimePath),
     verifierRuntimeSha256: sha256(runtimeBytes),
+    verifierRuntimeRootPath: await realpath(runtimeRootPath),
+    verifierRuntimeManifestPath: await realpath(runtimeManifestPath),
+    verifierRuntimeManifestSha256: sha256(runtimeManifestBytes),
     verifierArtifactPath: await realpath(artifactPath),
     verifierArtifactSha256: sha256(artifactBytes),
     verifierProfile: 'node-test-fixture-v1'
@@ -433,6 +456,15 @@ test('offline verifier resists ambient launch, source ABA, closure and temp atta
       ...base,
       ...verifierOptions(normal, tempRoot)
     }).status, 'passed');
+
+    const rogueRuntimeDirectory = path.join(normal.verifierRuntimeRootPath, 'lib');
+    await mkdir(rogueRuntimeDirectory);
+    await writeFile(path.join(rogueRuntimeDirectory, 'unmeasured-runtime-module.bin'), 'rogue');
+    assert.throws(() => verifyOfflineAndroidArtifact({
+      ...base,
+      ...verifierOptions(normal, tempRoot)
+    }), /runtime tree does not match trusted manifest/);
+    await rm(rogueRuntimeDirectory, { recursive: true, force: true });
 
     const aba = await writePinnedFixtureVerifier(sandbox, 'source-aba-verifier', {
       signerDigest: fixture.packageSignerSha256,

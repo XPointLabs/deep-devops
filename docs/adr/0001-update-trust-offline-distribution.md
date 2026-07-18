@@ -145,9 +145,12 @@ and invokes a directly addressed Java runtime as:
 `java -cp <apksigner.jar> com.android.apksigner.ApkSignerTool verify --verbose
 --print-certs <private-snapshot.apk>`.
 
-The runtime executable and `apksigner.jar` canonical paths and SHA-256 values
-come from a protected offline tool policy. Both are checked before and after
-the process. The snapshot is also checked after the process. Neither
+The canonical runtime root has a protected exact-tree manifest containing its
+entrypoint and every regular file's canonical relative path, byte length, and
+SHA-256. The manifest itself, the Java entrypoint, and `apksigner.jar` have
+protected policy SHA-256 values. Before and after the process the verifier
+rejects any missing, additional, linked, relocated, or changed runtime-tree
+entry and rechecks the manifest, Java entrypoint, JAR, and snapshot. Neither
 `ComSpec`, `PATH`, a batch/shell launcher, nor caller-supplied arguments are
 used; the class and complete argument vector are built inside the verifier.
 The child receives a minimal environment whose temporary-directory variables
@@ -162,6 +165,9 @@ locally administered protected volume. The prototype rejects link paths and
 uses exclusive create plus restrictive POSIX modes, but it does not claim that
 these operations alone establish a reviewed Windows ACL/reparse-point boundary.
 Production Windows packaging must provision and verify that boundary.
+The host kernel, process loader, and operating-system libraries remain the
+trusted computing base; the JRE manifest closes the application runtime tree,
+not a compromised host OS.
 
 The package hash authenticates the exact manifest/package/version bytes; the
 package-signing check independently proves the Android signing identity. The
@@ -181,6 +187,9 @@ node .\scripts\update-trust.mjs verify-android `
   --target android/network.xpoint.deep-2.0.1.apk `
   --java-runtime D:\trusted-tools\jre\bin\java.exe `
   --java-runtime-sha256 <JAVA-EXE-SHA-256-from-protected-offline-tool-policy> `
+  --java-runtime-root D:\trusted-tools\jre `
+  --java-runtime-manifest D:\trusted-policy\java-runtime-tree.json `
+  --java-runtime-manifest-sha256 <MANIFEST-SHA-256-from-protected-offline-tool-policy> `
   --apk-signer-jar D:\trusted-tools\android\apksigner.jar `
   --apk-signer-jar-sha256 <JAR-SHA-256-from-protected-offline-tool-policy> `
   --verification-temp-root D:\trusted-temp `
@@ -258,9 +267,9 @@ production remains blocked until:
 3. clients persist the trusted-root raw hash/version and every metadata version
    with a reviewed same-directory atomic state implementation (including
    platform-specific power-loss durability);
-4. the complete production Java runtime installation and `apksigner.jar`
-   policy, real release APK, SBOM, provenance, and two-builder evidence are
-   exercised together;
+4. the production Java runtime exact-tree manifest and `apksigner.jar` policy,
+   real release APK, SBOM, provenance, and two-builder evidence are exercised
+   together;
 5. trusted-clock behavior and recovery media are tested on target devices;
 6. platform specialists review the private snapshot directory's Windows
    ACL/reparse protections and Unix ownership/mode assumptions;

@@ -16,6 +16,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  readdirSync,
   readSync,
   renameSync,
   realpathSync,
@@ -689,6 +690,102 @@ function canonicalPinnedFile(filePath, expectedSha256, label) {
   return canonical;
 }
 
+function canonicalTreeRelativePath(value, label) {
+  assert(typeof value === 'string' && value.length > 0 && !value.includes('\\'),
+    `${label} path must use canonical forward slashes`);
+  const parts = value.split('/');
+  assert(parts.every(part => part && part !== '.' && part !== '..'),
+    `${label} path is not canonical`);
+  return parts;
+}
+
+function enumeratePinnedTree(root, relative = '') {
+  const records = [];
+  const directory = relative
+    ? path.join(root, ...relative.split('/'))
+    : root;
+  for (const entry of readdirSync(directory, { withFileTypes: true })
+    .sort((left, right) => left.name.localeCompare(right.name))) {
+    const childRelative = relative ? `${relative}/${entry.name}` : entry.name;
+    canonicalTreeRelativePath(childRelative, 'runtime tree');
+    const child = path.join(directory, entry.name);
+    const info = lstatSync(child);
+    assert(!info.isSymbolicLink(), 'runtime tree contains a link or reparse entry');
+    const canonicalChild = realpathSync(child);
+    assert(canonicalChild.startsWith(`${root}${path.sep}`),
+      'runtime tree entry escapes its canonical root');
+    if (info.isDirectory()) {
+      records.push(...enumeratePinnedTree(root, childRelative));
+    } else {
+      assert(info.isFile(), 'runtime tree contains a non-file entry');
+      records.push({
+        path: childRelative.replaceAll('\\', '/'),
+        length: info.size,
+        sha256: sha256(readFileSync(canonicalChild))
+      });
+    }
+  }
+  return records;
+}
+
+function validatePinnedRuntimeTree({
+  runtimeRootPath,
+  runtimeManifestPath,
+  runtimeManifestSha256,
+  runtimePath,
+  runtimeSha256
+}) {
+  const resolvedRoot = path.resolve(runtimeRootPath);
+  const rootInfo = lstatSync(resolvedRoot);
+  assert(rootInfo.isDirectory() && !rootInfo.isSymbolicLink(),
+    'APK verifier runtime root must be a regular non-symlink directory');
+  const canonicalRoot = realpathSync(resolvedRoot);
+  assert(path.normalize(canonicalRoot) === path.normalize(resolvedRoot),
+    'APK verifier runtime root must be canonical and contain no links');
+  const canonicalManifest = canonicalPinnedFile(
+    runtimeManifestPath, runtimeManifestSha256, 'APK verifier runtime manifest'
+  );
+  const manifest = parseStrictJson(
+    readFileSync(canonicalManifest, 'utf8'), 'APK verifier runtime manifest'
+  );
+  assert(manifest?.schema === 'deep.apk-verifier-runtime-tree.v1' &&
+    typeof manifest.entrypoint === 'string' &&
+    Array.isArray(manifest.files) && manifest.files.length > 0,
+  'APK verifier runtime manifest is invalid');
+  const entrypointParts = canonicalTreeRelativePath(
+    manifest.entrypoint, 'runtime entrypoint'
+  );
+  const expectedFiles = manifest.files.map((file, index) => {
+    canonicalTreeRelativePath(file?.path, `runtime manifest file ${index}`);
+    assert(Number.isSafeInteger(file.length) && file.length >= 0 &&
+      HEX_64.test(file.sha256 ?? ''),
+    `runtime manifest file ${index} is invalid`);
+    return {
+      path: file.path,
+      length: file.length,
+      sha256: file.sha256
+    };
+  });
+  assert(new Set(expectedFiles.map(file => file.path)).size === expectedFiles.length,
+    'APK verifier runtime manifest contains duplicate paths');
+  const sortedExpected = [...expectedFiles].sort((left, right) =>
+    left.path.localeCompare(right.path));
+  const actualFiles = enumeratePinnedTree(canonicalRoot).sort((left, right) =>
+    left.path.localeCompare(right.path));
+  assert(JSON.stringify(actualFiles) === JSON.stringify(sortedExpected),
+    'APK verifier runtime tree does not match trusted manifest');
+  const manifestEntrypoint = path.join(canonicalRoot, ...entrypointParts);
+  const canonicalRuntime = canonicalPinnedFile(
+    runtimePath, runtimeSha256, 'APK verifier runtime'
+  );
+  assert(path.normalize(canonicalRuntime) === path.normalize(manifestEntrypoint),
+    'APK verifier runtime entrypoint does not match trusted manifest');
+  const entrypoint = sortedExpected.find(file => file.path === manifest.entrypoint);
+  assert(entrypoint?.sha256 === runtimeSha256,
+    'APK verifier runtime hash is not bound by the trusted manifest');
+  return { canonicalRuntime, canonicalRoot, canonicalManifest };
+}
+
 function fixedVerifierInvocation(profile, runtimeArtifact, apkSnapshot) {
   const common = [
     '-cp',
@@ -708,15 +805,23 @@ function fixedVerifierInvocation(profile, runtimeArtifact, apkSnapshot) {
 export function runTrustedApkSigner({
   runtimePath,
   runtimeSha256,
+  runtimeRootPath,
+  runtimeManifestPath,
+  runtimeManifestSha256,
   runtimeArtifactPath,
   runtimeArtifactSha256,
   apkSnapshotPath,
   apkSnapshotSha256,
   profile = JAVA_APK_SIGNER_PROFILE
 }) {
-  const canonicalRuntime = canonicalPinnedFile(
-    runtimePath, runtimeSha256, 'APK verifier runtime'
-  );
+  const runtimePolicy = {
+    runtimeRootPath,
+    runtimeManifestPath,
+    runtimeManifestSha256,
+    runtimePath,
+    runtimeSha256
+  };
+  const { canonicalRuntime } = validatePinnedRuntimeTree(runtimePolicy);
   const canonicalArtifact = canonicalPinnedFile(
     runtimeArtifactPath, runtimeArtifactSha256, 'APK verifier artifact'
   );
@@ -743,6 +848,7 @@ export function runTrustedApkSigner({
   });
   assert(sha256(readFileSync(canonicalRuntime)) === runtimeBefore,
     'APK verifier runtime changed during package verification');
+  validatePinnedRuntimeTree(runtimePolicy);
   assert(sha256(readFileSync(canonicalArtifact)) === artifactBefore,
     'APK verifier artifact changed during package verification');
   assert(sha256(readFileSync(canonicalSnapshot)) === snapshotBefore,
@@ -815,6 +921,9 @@ export function verifyOfflineAndroidArtifact({
   artifactFiles,
   verifierRuntimePath,
   verifierRuntimeSha256,
+  verifierRuntimeRootPath,
+  verifierRuntimeManifestPath,
+  verifierRuntimeManifestSha256,
   verifierArtifactPath,
   verifierArtifactSha256,
   verificationTempRoot,
@@ -840,6 +949,9 @@ export function verifyOfflineAndroidArtifact({
     const signerOutput = runTrustedApkSigner({
       runtimePath: verifierRuntimePath,
       runtimeSha256: verifierRuntimeSha256,
+      runtimeRootPath: verifierRuntimeRootPath,
+      runtimeManifestPath: verifierRuntimeManifestPath,
+      runtimeManifestSha256: verifierRuntimeManifestSha256,
       runtimeArtifactPath: verifierArtifactPath,
       runtimeArtifactSha256: verifierArtifactSha256,
       apkSnapshotPath: snapshot,
@@ -859,6 +971,7 @@ export function verifyOfflineAndroidArtifact({
       packageSignerSha256: observedSigner,
       verifierProfile,
       verifierRuntimeSha256,
+      verifierRuntimeManifestSha256,
       verifierArtifactSha256,
       sbomSha256: evidence.apk.custom.sbom.sha256,
       independentBuilderCount: evidence.provenance.builders.length
@@ -942,7 +1055,8 @@ function safeArtifactPath(root, relativePath) {
 function runVerifyAndroid(options) {
   const required = [
     'trustedRoot', 'metadataDir', 'artifactRoot', 'target', 'javaRuntime',
-    'javaRuntimeSha256', 'apkSignerJar', 'apkSignerJarSha256',
+    'javaRuntimeSha256', 'javaRuntimeRoot', 'javaRuntimeManifest',
+    'javaRuntimeManifestSha256', 'apkSignerJar', 'apkSignerJarSha256',
     'verificationTempRoot', 'state', 'now', 'summary'
   ];
   for (const name of required) assert(options[name], `--${name} is required`);
@@ -977,6 +1091,9 @@ function runVerifyAndroid(options) {
     artifactFiles,
     verifierRuntimePath: options.javaRuntime,
     verifierRuntimeSha256: options.javaRuntimeSha256.toLowerCase(),
+    verifierRuntimeRootPath: options.javaRuntimeRoot,
+    verifierRuntimeManifestPath: options.javaRuntimeManifest,
+    verifierRuntimeManifestSha256: options.javaRuntimeManifestSha256.toLowerCase(),
     verifierArtifactPath: options.apkSignerJar,
     verifierArtifactSha256: options.apkSignerJarSha256.toLowerCase(),
     verificationTempRoot: options.verificationTempRoot,
