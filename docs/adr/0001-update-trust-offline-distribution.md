@@ -153,6 +153,9 @@ rejects any missing, additional, linked, relocated, or changed runtime-tree
 entry and rechecks the manifest, Java entrypoint, JAR, and snapshot. Neither
 `ComSpec`, `PATH`, a batch/shell launcher, nor caller-supplied arguments are
 used; the class and complete argument vector are built inside the verifier.
+The JAR path is rejected if it contains the platform classpath delimiter or
+Java wildcard syntax, so one pinned pathname cannot expand into other
+classpath entries.
 The child receives a minimal environment whose temporary-directory variables
 point at the private snapshot directory. It must report exactly one unique
 signer certificate digest, which is compared with signed target metadata.

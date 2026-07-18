@@ -466,6 +466,19 @@ test('offline verifier resists ambient launch, source ABA, closure and temp atta
     }), /runtime tree does not match trusted manifest/);
     await rm(rogueRuntimeDirectory, { recursive: true, force: true });
 
+    const delimiterVerifier = await writePinnedFixtureVerifier(
+      sandbox,
+      `classpath${path.delimiter}injection`,
+      {
+        signerDigest: fixture.packageSignerSha256,
+        apkSha256: sha256(fixture.apkBytes)
+      }
+    );
+    assert.throws(() => verifyOfflineAndroidArtifact({
+      ...base,
+      ...verifierOptions(delimiterVerifier, tempRoot)
+    }), /artifact path contains Java classpath syntax/);
+
     const aba = await writePinnedFixtureVerifier(sandbox, 'source-aba-verifier', {
       signerDigest: fixture.packageSignerSha256,
       apkSha256: sha256(fixture.apkBytes),

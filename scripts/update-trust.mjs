@@ -787,6 +787,8 @@ function validatePinnedRuntimeTree({
 }
 
 function fixedVerifierInvocation(profile, runtimeArtifact, apkSnapshot) {
+  assert(!runtimeArtifact.includes(path.delimiter) && !runtimeArtifact.includes('*'),
+    'APK verifier artifact path contains Java classpath syntax');
   const common = [
     '-cp',
     runtimeArtifact,
