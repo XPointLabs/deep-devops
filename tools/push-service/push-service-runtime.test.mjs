@@ -1,14 +1,27 @@
 ﻿import assert from 'node:assert/strict';
+import { createHash, createPrivateKey, createPublicKey, sign as cryptoSign } from 'node:crypto';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { spawn } from 'node:child_process';
 import http from 'node:http';
-import { createTestStorageSigningIdentity } from '../compat-services/storage-signatures.mjs';
+import {
+  createPushSubscribeSignatureMessageV2,
+  createPushUnsubscribeSignatureMessageV2,
+  createTestStorageSigningIdentity,
+  verifySessionSignature
+} from '../compat-services/storage-signatures.mjs';
 import { fileURLToPath } from 'node:url';
 
 const scriptPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'push-service.mjs');
+const pushV2FixturePath = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '..',
+  'fixtures',
+  'push-signature-v2.golden.json'
+);
+const pushV2FixtureSha256 = '4bca6bffffa751d124a322a51af878476522faa9ded8a56bd2c89f93ac1e576a';
 const validEncKey = 'abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd';
 const pushSigningIdentity = createTestStorageSigningIdentity();
 
@@ -174,6 +187,113 @@ function createSignedPushUnsubscribePayload(identity, overrides = {}) {
     ...rest
   };
 }
+
+function createSignedPushSubscribePayloadV2(identity, overrides = {}) {
+  const pubkey = String(overrides.pubkey ?? identity.sessionPubkey);
+  const serviceInfo = overrides.service_info ?? { token: 'signed-v2-token-1' };
+  const request = {
+    pubkey,
+    session_ed25519: overrides.session_ed25519 ?? identity.pubkeyEd25519,
+    data: true,
+    sig_ts: currentSigTs(),
+    service: 'apns',
+    service_info: serviceInfo,
+    enc_key: validEncKey,
+    namespaces: [0, 11],
+    app_id: 'network.deep.app',
+    app_version: '1.0.0',
+    sig_v: 2,
+    ...overrides,
+    service_info: serviceInfo
+  };
+  request.signature = Object.hasOwn(overrides, 'signature')
+    ? overrides.signature
+    : identity.signPushSubscribeV2({
+        pubkey: request.pubkey,
+        timestamp: request.sig_ts,
+        wantData: request.data,
+        namespaces: request.namespaces,
+        service: request.service,
+        deviceToken: request.service_info.token,
+        encryptionKey: request.enc_key,
+        appId: request.app_id,
+        appVersion: request.app_version
+      });
+  return request;
+}
+
+function createSignedPushUnsubscribePayloadV2(identity, overrides = {}) {
+  const pubkey = String(overrides.pubkey ?? identity.sessionPubkey);
+  const serviceInfo = overrides.service_info ?? { token: 'signed-v2-token-1' };
+  const request = {
+    pubkey,
+    session_ed25519: overrides.session_ed25519 ?? identity.pubkeyEd25519,
+    sig_ts: currentSigTs(),
+    service: 'apns',
+    service_info: serviceInfo,
+    sig_v: 2,
+    ...overrides,
+    service_info: serviceInfo
+  };
+  request.signature = Object.hasOwn(overrides, 'signature')
+    ? overrides.signature
+    : identity.signPushUnsubscribeV2({
+        pubkey: request.pubkey,
+        timestamp: request.sig_ts,
+        service: request.service,
+        deviceToken: request.service_info.token
+      });
+  return request;
+}
+
+test('push signature v2 golden fixture pins UTF-8 canonical bytes and Ed25519 signatures', async () => {
+  const fixtureBytes = await readFile(pushV2FixturePath);
+  assert.equal(createHash('sha256').update(fixtureBytes).digest('hex'), pushV2FixtureSha256);
+  const fixture = JSON.parse(fixtureBytes.toString('utf8'));
+  assert.equal(fixture.signature_version, 2);
+  const seed = Buffer.from(fixture.key.private_seed_hex, 'hex');
+  const privateKey = createPrivateKey({
+    key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), seed]),
+    format: 'der',
+    type: 'pkcs8'
+  });
+  const publicKeyDer = createPublicKey(privateKey).export({ format: 'der', type: 'spki' });
+  assert.equal(Buffer.from(publicKeyDer.subarray(-32)).toString('hex'), fixture.key.ed25519_public_key_hex);
+
+  for (const goldenCase of fixture.cases) {
+    const request = goldenCase.request;
+    const message = goldenCase.operation === 'subscribe'
+      ? createPushSubscribeSignatureMessageV2({
+          pubkey: request.pubkey,
+          timestamp: request.sig_ts,
+          wantData: request.data,
+          namespaces: goldenCase.unsorted_namespaces_for_canonicalizer,
+          service: request.service,
+          deviceToken: request.service_info.token,
+          encryptionKey: request.enc_key,
+          appId: request.app_id,
+          appVersion: request.app_version
+        })
+      : createPushUnsubscribeSignatureMessageV2({
+          pubkey: request.pubkey,
+          timestamp: request.sig_ts,
+          service: request.service,
+          deviceToken: request.service_info.token
+        });
+
+    assert.equal(message.toString('utf8'), goldenCase.canonical, goldenCase.id);
+    assert.equal(message.toString('hex'), goldenCase.canonical_hex, goldenCase.id);
+    assert.equal(message.length, goldenCase.canonical_utf8_length, goldenCase.id);
+    assert.equal(message.includes(13), false, goldenCase.id);
+    assert.equal(cryptoSign(null, message, privateKey).toString('base64'), request.signature, goldenCase.id);
+    assert.equal(verifySessionSignature({
+      pubkey: request.pubkey,
+      pubkeyEd25519: request.session_ed25519,
+      signature: request.signature,
+      message
+    }), true, goldenCase.id);
+  }
+});
 
 test('health and stats endpoints honor SERVICE_NAME override', async () => {
   const stateDir = await mkdtemp(path.join(tmpdir(), 'push-service-runtime-'));
@@ -965,6 +1085,112 @@ test('internal push notify records configured provider failures without dropping
   } finally {
     await service.stop();
     await provider.stop();
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test('push v2 dispatch binds every field, preserves state on tamper, and isolates legacy compatibility', async () => {
+  const stateDir = await mkdtemp(path.join(tmpdir(), 'push-service-runtime-v2-'));
+  const service = await startPushService({ port: randomPort(), stateDir });
+  const post = (route, payload) => fetch(`${service.baseUrl}/${route}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const list = async () => {
+    const response = await fetch(
+      `${service.baseUrl}/subscriptions/${encodeURIComponent(pushSigningIdentity.sessionPubkey)}`
+    );
+    assert.equal(response.status, 200);
+    return response.json();
+  };
+
+  try {
+    const valid = createSignedPushSubscribePayloadV2(pushSigningIdentity, {
+      service_info: { token: 'v2-dedicated-token' }
+    });
+    assert.equal((await post('subscribe', valid)).status, 200);
+
+    const legacyAbsent = createSignedPushSubscribePayload(pushSigningIdentity, {
+      service_info: { token: 'legacy-absent-dedicated' }
+    });
+    const legacyV1 = createSignedPushSubscribePayload(pushSigningIdentity, {
+      service_info: { token: 'legacy-v1-dedicated' },
+      sig_v: 1
+    });
+    assert.equal((await post('subscribe', legacyAbsent)).status, 200);
+    assert.equal((await post('subscribe', legacyV1)).status, 200);
+
+    const persistedBeforeSubscribeTamper = await readFile(path.join(stateDir, 'push.json'), 'utf8');
+    const flipLastHex = value => value.slice(0, -1) + (value.endsWith('0') ? '1' : '0');
+    const subscribeTamper = [
+      { ...valid, pubkey: flipLastHex(valid.pubkey) },
+      { ...valid, session_ed25519: flipLastHex(valid.session_ed25519) },
+      { ...valid, sig_ts: valid.sig_ts + 1 },
+      { ...valid, service: 'firebase' },
+      { ...valid, service_info: { token: `${valid.service_info.token}-tampered` } },
+      { ...valid, enc_key: flipLastHex(valid.enc_key) },
+      { ...valid, data: !valid.data },
+      { ...valid, namespaces: [0, 12] },
+      { ...valid, app_id: `${valid.app_id}.tampered` },
+      { ...valid, app_version: `${valid.app_version}.tampered` },
+      { ...valid, signature: invalidateSignature(valid.signature) },
+      { ...valid, sig_v: 3 },
+      createSignedPushSubscribePayload(pushSigningIdentity, {
+        service_info: { token: 'no-v2-to-legacy-fallback-dedicated' },
+        app_id: valid.app_id,
+        app_version: valid.app_version,
+        sig_v: 2
+      })
+    ];
+    for (const payload of subscribeTamper) {
+      const response = await post('subscribe', payload);
+      assert.equal(response.status, 400);
+    }
+    assert.equal(await readFile(path.join(stateDir, 'push.json'), 'utf8'), persistedBeforeSubscribeTamper);
+
+    const afterSubscribeTamper = await list();
+    assert.deepEqual(
+      afterSubscribeTamper.subscriptions.map(record => record.service_info.token).sort(),
+      ['legacy-absent-dedicated', 'legacy-v1-dedicated', 'v2-dedicated-token']
+    );
+
+    const validUnsubscribe = createSignedPushUnsubscribePayloadV2(pushSigningIdentity, {
+      service_info: { token: valid.service_info.token }
+    });
+    const persistedBeforeUnsubscribeTamper = await readFile(path.join(stateDir, 'push.json'), 'utf8');
+    const unsubscribeTamper = [
+      { ...validUnsubscribe, pubkey: flipLastHex(validUnsubscribe.pubkey) },
+      { ...validUnsubscribe, session_ed25519: flipLastHex(validUnsubscribe.session_ed25519) },
+      { ...validUnsubscribe, sig_ts: validUnsubscribe.sig_ts + 1 },
+      { ...validUnsubscribe, service: 'firebase' },
+      {
+        ...validUnsubscribe,
+        service_info: { token: `${validUnsubscribe.service_info.token}-tampered` }
+      },
+      { ...validUnsubscribe, signature: invalidateSignature(validUnsubscribe.signature) },
+      { ...validUnsubscribe, sig_v: 0 },
+      createSignedPushUnsubscribePayload(pushSigningIdentity, {
+        service_info: { token: valid.service_info.token },
+        sig_v: 2
+      })
+    ];
+    for (const payload of unsubscribeTamper) {
+      const response = await post('unsubscribe', payload);
+      assert.equal(response.status, 400);
+    }
+    assert.equal(await readFile(path.join(stateDir, 'push.json'), 'utf8'), persistedBeforeUnsubscribeTamper);
+    assert.equal((await list()).subscriptions.length, 3);
+
+    const unsubscribeResponse = await post('unsubscribe', validUnsubscribe);
+    assert.equal(unsubscribeResponse.status, 200);
+    assert.equal((await unsubscribeResponse.json()).removed, true);
+    assert.deepEqual(
+      (await list()).subscriptions.map(record => record.service_info.token).sort(),
+      ['legacy-absent-dedicated', 'legacy-v1-dedicated']
+    );
+  } finally {
+    await service.stop();
     await rm(stateDir, { recursive: true, force: true });
   }
 });

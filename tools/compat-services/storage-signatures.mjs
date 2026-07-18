@@ -5,6 +5,7 @@ const curve25519Prime = (1n << 255n) - 19n;
 const subaccountTokenLength = 36;
 const subaccountSignatureLength = 64;
 const subaccountPublicKeyOffset = 4;
+export const pushSignatureVersion = 2;
 
 export const storageSubaccountAccess = Object.freeze({
   NONE: 0x00,
@@ -353,6 +354,61 @@ export function createPushUnsubscribeSignatureMessage(pubkey, timestamp) {
   return Buffer.from(`UNSUBSCRIBE${String(pubkey ?? '').toLowerCase()}${Number(timestamp)}`);
 }
 
+function createPushV2CanonicalMessage(operation, fields) {
+  let canonical = `deep.push/${operation}/v${pushSignatureVersion}\n`;
+  for (const [name, rawValue] of fields) {
+    const value = String(rawValue ?? '');
+    if (value.length === 0) {
+      throw new TypeError(`${name} is required for push signature v2`);
+    }
+
+    canonical += `${name}=${Buffer.byteLength(value, 'utf8')}:${value}\n`;
+  }
+
+  return Buffer.from(canonical, 'utf8');
+}
+
+export function createPushSubscribeSignatureMessageV2({
+  pubkey,
+  timestamp,
+  wantData,
+  namespaces,
+  service,
+  deviceToken,
+  encryptionKey,
+  appId,
+  appVersion
+}) {
+  const normalizedNamespaces = Array.isArray(namespaces)
+    ? namespaces.map(value => Number(value)).sort((left, right) => left - right).join(',')
+    : '';
+  return createPushV2CanonicalMessage('subscribe', [
+    ['pubkey', pubkey],
+    ['sig_ts', Number(timestamp)],
+    ['service', service],
+    ['device_token', deviceToken],
+    ['enc_key', encryptionKey],
+    ['want_data', wantData ? '1' : '0'],
+    ['namespaces', normalizedNamespaces],
+    ['app_id', appId],
+    ['app_version', appVersion]
+  ]);
+}
+
+export function createPushUnsubscribeSignatureMessageV2({
+  pubkey,
+  timestamp,
+  service,
+  deviceToken
+}) {
+  return createPushV2CanonicalMessage('unsubscribe', [
+    ['pubkey', pubkey],
+    ['sig_ts', Number(timestamp)],
+    ['service', service],
+    ['device_token', deviceToken]
+  ]);
+}
+
 export function ed25519PublicKeyToX25519(publicKeyBytes) {
   if (!Buffer.isBuffer(publicKeyBytes) || publicKeyBytes.length !== 32) {
     throw new TypeError('ed25519 public key must be a 32-byte Buffer');
@@ -391,7 +447,12 @@ export function verifyStorageSignature({
   expiry,
   mode,
   before,
-  wantData
+  wantData,
+  service,
+  deviceToken,
+  encryptionKey,
+  appId,
+  appVersion
 }) {
   const resolvedKey = resolveStorageVerificationKey(pubkey, pubkeyEd25519);
   if (!resolvedKey.checked) {
@@ -475,6 +536,27 @@ export function verifyStorageSignature({
       break;
     case 'push_unsubscribe':
       message = createPushUnsubscribeSignatureMessage(pubkey, timestamp);
+      break;
+    case 'push_subscribe_v2':
+      message = createPushSubscribeSignatureMessageV2({
+        pubkey,
+        timestamp,
+        wantData,
+        namespaces: messages,
+        service,
+        deviceToken,
+        encryptionKey,
+        appId,
+        appVersion
+      });
+      break;
+    case 'push_unsubscribe_v2':
+      message = createPushUnsubscribeSignatureMessageV2({
+        pubkey,
+        timestamp,
+        service,
+        deviceToken
+      });
       break;
     default:
       return {
@@ -563,6 +645,12 @@ function createStorageSigner(privateKey) {
     },
     signPushUnsubscribe(pubkey, timestamp) {
       return cryptoSign(null, createPushUnsubscribeSignatureMessage(pubkey, timestamp), privateKey).toString('base64');
+    },
+    signPushSubscribeV2(request) {
+      return cryptoSign(null, createPushSubscribeSignatureMessageV2(request), privateKey).toString('base64');
+    },
+    signPushUnsubscribeV2(request) {
+      return cryptoSign(null, createPushUnsubscribeSignatureMessageV2(request), privateKey).toString('base64');
     }
   };
 }

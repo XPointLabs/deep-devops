@@ -2,7 +2,11 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { storageSubaccountAccess, verifyStorageSignature } from '../compat-services/storage-signatures.mjs';
+import {
+  pushSignatureVersion,
+  storageSubaccountAccess,
+  verifyStorageSignature
+} from '../compat-services/storage-signatures.mjs';
 
 const mode = 'push';
 const port = Number(process.env.PORT ?? 8080);
@@ -486,8 +490,24 @@ function validatePushSignatureAge(sigTs, maxPastAgeSeconds, maxFutureAgeSeconds,
 }
 
 function verifyPushRequestSignature(request, operation) {
+  const isV2 = request.sig_v === pushSignatureVersion;
+  const isLegacy = request.sig_v === undefined || request.sig_v === 1;
+  if (!isV2 && !isLegacy) {
+    return invalidPushRequest(`Unsupported push signature version: ${String(request.sig_v)}`);
+  }
+
+  if (isV2 && !Number.isSafeInteger(Number(request.sig_ts))) {
+    return invalidPushRequest('Invalid request: sig_ts must be a safe integer for signature v2');
+  }
+
+  if (isV2 && operation === 'push_subscribe' &&
+      (typeof request.app_id !== 'string' || request.app_id.length === 0 ||
+       typeof request.app_version !== 'string' || request.app_version.length === 0)) {
+    return invalidPushRequest('Invalid request: app_id and app_version are required for signature v2');
+  }
+
   const verification = verifyStorageSignature({
-    operation,
+    operation: isV2 ? `${operation}_v2` : operation,
     pubkey: request.pubkey,
     pubkeyEd25519: request.session_ed25519,
     signature: request.signature,
@@ -496,10 +516,15 @@ function verifyPushRequestSignature(request, operation) {
     requiredSubaccountAccess: storageSubaccountAccess.READ,
     timestamp: request.sig_ts,
     messages: request.namespaces,
-    wantData: request.data
+    wantData: request.data,
+    service: request.service,
+    deviceToken: request.service_info?.token,
+    encryptionKey: request.enc_key,
+    appId: request.app_id,
+    appVersion: request.app_version
   });
 
-  if (!verification.checked || verification.verified) {
+  if (verification.verified && (verification.checked || isLegacy)) {
     return null;
   }
 

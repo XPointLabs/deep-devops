@@ -85,6 +85,10 @@ Push:
 - subscribe/resubscribe/unsubscribe,
 - single and batched payloads,
 - Session-style signature validation,
+- exact `sig_v === 2` dispatch to the LF-terminated, UTF-8 byte-length-prefixed
+  `deep.push/{subscribe|unsubscribe}/v2` payload; absent/`1` is legacy compatibility only,
+  unknown versions fail closed, and failed v2 verification never falls back to legacy,
+- cross-runtime golden vectors in `tools/fixtures/push-signature-v2.golden.json`,
 - provider dispatch success/failure recording,
 - delivery dedupe and persistence,
 - provider canary evidence for staging/prod.
