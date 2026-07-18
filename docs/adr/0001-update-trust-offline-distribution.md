@@ -54,7 +54,12 @@ their private representation is never written to evidence.
 
 The prototype profile has these rules:
 
-- UTF-8 JSON is signed after recursive lexicographic object-key ordering;
+- every metadata file is exactly the UTF-8 canonical encoding: recursive
+  lexicographic object-key ordering, no BOM, no leading/trailing whitespace,
+  and one canonical integer representation;
+- parsing retains both the raw downloaded bytes and the parsed envelope;
+- parent metadata length and SHA-256 fields bind the exact raw child file, not a
+  parsed/re-serialized approximation;
 - only safe integer JSON numbers are accepted by the canonicalizer;
 - Ed25519 public keys and signatures use lowercase hexadecimal encodings;
 - key IDs are SHA-256 of the canonical public-key object;
@@ -69,7 +74,10 @@ The prototype profile has these rules:
 - delegated target paths must match the terminating `android-release`
   delegation;
 - root versions advance exactly by one and each new root meets both the old and
-  new root threshold.
+  new root threshold independently over the same exact candidate document;
+- persisted trust state binds the exact trusted-root version and SHA-256 of its
+  raw canonical bytes, plus the last trusted version of every online/targets
+  role.
 
 Unknown JSON properties are retained by canonicalization. The production
 implementation must either reuse a reviewed TUF implementation with a published
@@ -95,7 +103,16 @@ targets/
 
 Root metadata already trusted by the client or verifier is not replaced merely
 because removable media contains another `root.json`. Every intervening
-numbered root is verified sequentially. Metadata and targets can be copied by
+numbered root is verified sequentially. At startup, the supplied trusted-root
+file must exactly match both the root version and raw-file SHA-256 in persisted
+state. A same-version root with a different keyset is rejected even if it is
+self-consistent.
+
+After a candidate root meets the old and new thresholds, its version/raw
+SHA-256 binding is atomically persisted before online roles are processed. A
+later timestamp failure therefore cannot roll trust back to the earlier root.
+The final role versions are atomically persisted only after the complete update
+cycle succeeds. Metadata and targets can be copied by
 USB, local Wi-Fi, Bluetooth, a P2P transport, or an untrusted public mirror;
 the carrier receives no trust.
 
@@ -124,7 +141,10 @@ SBOM, and provenance bytes. It invokes the existing Android SDK command
 `apksigner verify --verbose --print-certs`, requires exactly one unique signer
 certificate digest, compares it with signed target metadata, and hashes the APK
 again after verification to detect replacement during the check. The
-`apksigner` executable must itself match an exact SHA-256 from a protected
+argument vector is fixed to exactly `verify`, `--verbose`, `--print-certs`, and
+the canonical APK path; missing, reordered, additional, or substituted
+arguments fail. The `apksigner` executable must itself match an exact SHA-256
+from a protected
 offline tool policy (the existing strict MAUI lane uses the same
 path/hash/version trust pattern); a hash copied from distribution media is not
 a trusted tool policy.
@@ -140,6 +160,7 @@ Example for a real, already-built offline bundle:
 ```powershell
 node .\scripts\update-trust.mjs verify-android `
   --trusted-root D:\trusted\root.json `
+  --state D:\trusted\update-trust-state.json `
   --candidate-root D:\bundle\metadata\2.root.json `
   --metadata-dir D:\bundle\metadata `
   --artifact-root D:\bundle\targets `
@@ -150,7 +171,9 @@ node .\scripts\update-trust.mjs verify-android `
   --summary .\artifacts\survival\P02\offline-android-real-summary.json
 ```
 
-`--now` is supplied explicitly so evidence records the fixed update-start time;
+The state file must already contain the provisioned trusted root's exact
+version/raw SHA-256 binding. `--now` is supplied explicitly so evidence records
+the fixed update-start time;
 production wrappers must obtain it from a trusted system clock, not from the
 bundle.
 
@@ -215,7 +238,9 @@ production remains blocked until:
 1. an independently reviewed TUF implementation/POUF is selected;
 2. Mr. X provisions production hardware keys outside CI and records public key
    ceremonies;
-3. clients persist trusted metadata versions and root state safely;
+3. clients persist the trusted-root raw hash/version and every metadata version
+   with a reviewed same-directory atomic state implementation (including
+   platform-specific power-loss durability);
 4. real Android `apksigner`, SBOM, provenance, and two-builder evidence are
    exercised on a release APK;
 5. trusted-clock behavior and recovery media are tested on target devices;

@@ -7,10 +7,15 @@ import {
 } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import {
+  closeSync,
+  fsyncSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
+  renameSync,
   realpathSync,
+  unlinkSync,
   writeFileSync
 } from 'node:fs';
 import path from 'node:path';
@@ -68,6 +73,29 @@ export function metadataBytes(envelope) {
   const bytes = Buffer.from(canonicalJson(envelope), 'utf8');
   assert(bytes.length <= MAX_METADATA_BYTES, 'metadata exceeds the 1 MiB prototype limit');
   return bytes;
+}
+
+export function metadataDocumentFromEnvelope(envelope) {
+  const rawBytes = metadataBytes(envelope);
+  return { envelope, rawBytes };
+}
+
+export function parseMetadataDocument(rawValue, label = 'metadata') {
+  const rawBytes = Buffer.from(rawValue);
+  assert(rawBytes.length <= MAX_METADATA_BYTES,
+    `${label} exceeds the 1 MiB prototype limit`);
+  const envelope = parseStrictJson(rawBytes.toString('utf8'), label);
+  const canonicalBytes = metadataBytes(envelope);
+  assert(rawBytes.equals(canonicalBytes),
+    `${label} raw bytes are not the exact canonical POUF encoding`);
+  return { envelope, rawBytes };
+}
+
+function assertMetadataDocument(document, label) {
+  assert(isObject(document) && isObject(document.envelope) &&
+    Buffer.isBuffer(document.rawBytes), `${label} metadata document is invalid`);
+  assert(document.rawBytes.equals(metadataBytes(document.envelope)),
+    `${label} raw bytes are not the exact canonical POUF encoding`);
 }
 
 export function parseStrictJson(text, label = 'JSON') {
@@ -241,9 +269,10 @@ export function signMetadata(signed, signers) {
   return { signatures, signed };
 }
 
-function validateCommonSigned(envelope, expectedType) {
+function validateCommonSigned(document, expectedType) {
+  assertMetadataDocument(document, expectedType);
+  const envelope = document.envelope;
   assert(isObject(envelope) && isObject(envelope.signed), `${expectedType} envelope is invalid`);
-  metadataBytes(envelope);
   assert(envelope.signed._type === expectedType, `expected ${expectedType} metadata`);
   assert(envelope.signed.spec_version === SPEC_VERSION, `${expectedType} spec version is unsupported`);
   assert(Number.isSafeInteger(envelope.signed.version) && envelope.signed.version >= 1,
@@ -270,9 +299,9 @@ function validateRoleDefinition(role, keys, label) {
   }
 }
 
-function validateRoot(root) {
-  validateCommonSigned(root, 'root');
-  const signed = root.signed;
+function validateRoot(rootDocument) {
+  validateCommonSigned(rootDocument, 'root');
+  const signed = rootDocument.envelope.signed;
   assert(signed.consistent_snapshot === true, 'consistent snapshots must be enabled');
   assert(isObject(signed.keys) && isObject(signed.roles), 'root keys/roles are invalid');
   for (const [keyid, key] of Object.entries(signed.keys)) {
@@ -286,7 +315,8 @@ function validateRoot(root) {
   }
 }
 
-function verifyRoleThreshold(envelope, role, keys, label, allowedSignatureIds = role.keyids) {
+function verifyRoleThreshold(document, role, keys, label, allowedSignatureIds = role.keyids) {
+  const envelope = document.envelope;
   const allowed = new Set(allowedSignatureIds);
   const roleIds = new Set(role.keyids);
   const payload = Buffer.from(canonicalJson(envelope.signed), 'utf8');
@@ -303,40 +333,107 @@ function verifyRoleThreshold(envelope, role, keys, label, allowedSignatureIds = 
   assert(valid >= role.threshold, `${label} signature threshold is not met`);
 }
 
-function assertNotExpired(envelope, updateStart, label) {
-  assert(Date.parse(envelope.signed.expires) > updateStart.getTime(),
+function assertNotExpired(document, updateStart, label) {
+  assert(Date.parse(document.envelope.signed.expires) > updateStart.getTime(),
     `${label} metadata is expired (possible freeze attack)`);
 }
 
-function updateTrustedRoot(initialRoot, candidateRoots, updateStart) {
+function trustedRootBinding(rootDocument) {
+  return {
+    version: rootDocument.envelope.signed.version,
+    sha256: sha256(rootDocument.rawBytes)
+  };
+}
+
+export function createTrustedState(rootDocument, versions = {}) {
+  validateRoot(rootDocument);
+  return {
+    schema: 'deep.update-trust.client-state.v1',
+    trustedRoot: trustedRootBinding(rootDocument),
+    versions: {
+      timestamp: versions.timestamp ?? 0,
+      snapshot: versions.snapshot ?? 0,
+      targets: versions.targets ?? 0,
+      androidRelease: versions.androidRelease ?? 0
+    }
+  };
+}
+
+function validateTrustedState(state) {
+  assert(state?.schema === 'deep.update-trust.client-state.v1' &&
+    Number.isSafeInteger(state?.trustedRoot?.version) &&
+    state.trustedRoot.version >= 1 &&
+    HEX_64.test(state?.trustedRoot?.sha256 ?? '') &&
+    isObject(state.versions),
+  'persisted update-trust state is invalid');
+  for (const name of ['timestamp', 'snapshot', 'targets', 'androidRelease']) {
+    assert(Number.isSafeInteger(state.versions[name]) && state.versions[name] >= 0,
+      `persisted ${name} version is invalid`);
+  }
+}
+
+function updateTrustedRoot(
+  initialRoot,
+  candidateRoots,
+  updateStart,
+  persistedState,
+  persistTrustedRoot
+) {
   validateRoot(initialRoot);
+  validateTrustedState(persistedState);
+  const initialBinding = trustedRootBinding(initialRoot);
+  assert(
+    persistedState.trustedRoot.version === initialBinding.version &&
+    persistedState.trustedRoot.sha256 === initialBinding.sha256,
+    'startup trusted root does not exactly match persisted version and raw SHA-256'
+  );
   let trusted = initialRoot;
   for (const candidate of candidateRoots) {
     validateRoot(candidate);
-    assert(candidate.signed.version === trusted.signed.version + 1,
+    assert(candidate.envelope.signed.version === trusted.envelope.signed.version + 1,
       'root version must advance by exactly one');
-    const oldRole = trusted.signed.roles.root;
-    const newRole = candidate.signed.roles.root;
+    const oldRole = trusted.envelope.signed.roles.root;
+    const newRole = candidate.envelope.signed.roles.root;
     const union = [...new Set([...oldRole.keyids, ...newRole.keyids])];
-    const unionKeys = { ...trusted.signed.keys, ...candidate.signed.keys };
-    verifyRoleThreshold(candidate, oldRole, unionKeys, 'new root under old root', union);
-    verifyRoleThreshold(candidate, newRole, unionKeys, 'new root under new root', union);
+    const unionKeys = {
+      ...trusted.envelope.signed.keys,
+      ...candidate.envelope.signed.keys
+    };
+    verifyRoleThreshold(
+      candidate,
+      oldRole,
+      unionKeys,
+      'new root old-root threshold',
+      union
+    );
+    verifyRoleThreshold(
+      candidate,
+      newRole,
+      unionKeys,
+      'new root new-root threshold',
+      union
+    );
     trusted = candidate;
+    persistTrustedRoot?.({
+      ...persistedState,
+      trustedRoot: trustedRootBinding(trusted)
+    });
   }
   assertNotExpired(trusted, updateStart, 'root');
   return trusted;
 }
 
-function verifyTopLevel(envelope, type, root, updateStart) {
-  validateCommonSigned(envelope, type);
-  const role = root.signed.roles[type];
-  verifyRoleThreshold(envelope, role, root.signed.keys, type);
-  assertNotExpired(envelope, updateStart, type);
+function verifyTopLevel(document, type, root, updateStart) {
+  validateCommonSigned(document, type);
+  const role = root.envelope.signed.roles[type];
+  verifyRoleThreshold(document, role, root.envelope.signed.keys, type);
+  assertNotExpired(document, updateStart, type);
 }
 
-function verifyMetaBinding(envelope, expected, label) {
-  const bytes = metadataBytes(envelope);
-  assert(Number.isSafeInteger(expected?.version) && expected.version === envelope.signed.version,
+function verifyMetaBinding(document, expected, label) {
+  const bytes = document.rawBytes;
+  assert(Number.isSafeInteger(expected?.version) &&
+    expected.version === document.envelope.signed.version,
     `${label} version does not match its parent metadata (possible mix-and-match attack)`);
   assert(Number.isSafeInteger(expected?.length) && expected.length === bytes.length,
     `${label} length does not match its parent metadata (possible mix-and-match attack)`);
@@ -359,12 +456,21 @@ function pathMatches(pattern, targetPath) {
   return targetPath.startsWith(pattern.slice(0, -1));
 }
 
-function verifyDelegatedTargets(envelope, targetsEnvelope, snapshotEnvelope, updateStart, trustedVersion) {
-  validateCommonSigned(envelope, 'targets');
-  verifyMetaBinding(envelope, snapshotEnvelope.signed.meta['android-release.json'],
+function verifyDelegatedTargets(
+  document,
+  targetsDocument,
+  snapshotDocument,
+  updateStart,
+  trustedVersion
+) {
+  validateCommonSigned(document, 'targets');
+  const envelope = document.envelope;
+  const targetsEnvelope = targetsDocument.envelope;
+  const snapshotEnvelope = snapshotDocument.envelope;
+  verifyMetaBinding(document, snapshotEnvelope.signed.meta['android-release.json'],
     'android-release targets');
   assertNoRollback(envelope.signed.version, trustedVersion, 'android-release targets');
-  assertNotExpired(envelope, updateStart, 'android-release targets');
+  assertNotExpired(document, updateStart, 'android-release targets');
   const delegations = targetsEnvelope.signed.delegations;
   assert(isObject(delegations) && isObject(delegations.keys) && Array.isArray(delegations.roles),
     'targets delegations are invalid');
@@ -381,7 +487,7 @@ function verifyDelegatedTargets(envelope, targetsEnvelope, snapshotEnvelope, upd
   assert(role && Array.isArray(role.paths) && role.terminating === true,
     'android-release delegation is missing or non-terminating');
   validateRoleDefinition(role, delegations.keys, 'android-release');
-  verifyRoleThreshold(envelope, role, delegations.keys, 'android-release targets');
+  verifyRoleThreshold(document, role, delegations.keys, 'android-release targets');
   for (const targetPath of Object.keys(envelope.signed.targets ?? {})) {
     assert(targetPath.split('/').every(part => part && part !== '.' && part !== '..'),
       `delegated target path is non-canonical: ${targetPath}`);
@@ -397,60 +503,78 @@ export function verifyUpdateBundle({
   snapshot,
   targets,
   delegatedTargets,
-  trustedVersions = {},
-  updateStart
+  trustedState,
+  updateStart,
+  persistTrustedRoot
 }) {
   const fixedStart = parseExactUtc(updateStart, 'fixed update start time');
-  if (trustedVersions.root !== undefined) {
-    assert(trustedVersions.root === trustedRoot.signed?.version,
-      'trusted root file does not match persisted root state');
-  }
-  const root = updateTrustedRoot(trustedRoot, candidateRoots, fixedStart);
+  validateTrustedState(trustedState);
+  const root = updateTrustedRoot(
+    trustedRoot,
+    candidateRoots,
+    fixedStart,
+    trustedState,
+    persistTrustedRoot
+  );
+  const trustedVersions = trustedState.versions;
 
   verifyTopLevel(timestamp, 'timestamp', root, fixedStart);
-  assertNoRollback(timestamp.signed.version, trustedVersions.timestamp ?? 0, 'timestamp', true);
-  const snapshotBinding = timestamp.signed.meta?.['snapshot.json'];
-  assert(Object.keys(timestamp.signed.meta ?? {}).length === 1 && snapshotBinding,
+  assertNoRollback(
+    timestamp.envelope.signed.version,
+    trustedVersions.timestamp,
+    'timestamp',
+    true
+  );
+  const snapshotBinding = timestamp.envelope.signed.meta?.['snapshot.json'];
+  assert(Object.keys(timestamp.envelope.signed.meta ?? {}).length === 1 && snapshotBinding,
     'timestamp must describe only snapshot.json');
-  assertNoRollback(snapshotBinding.version, trustedVersions.snapshot ?? 0,
+  assertNoRollback(snapshotBinding.version, trustedVersions.snapshot,
     'timestamp snapshot reference');
 
   verifyTopLevel(snapshot, 'snapshot', root, fixedStart);
   verifyMetaBinding(snapshot, snapshotBinding, 'snapshot');
-  assertNoRollback(snapshot.signed.version, trustedVersions.snapshot ?? 0, 'snapshot');
+  assertNoRollback(snapshot.envelope.signed.version, trustedVersions.snapshot, 'snapshot');
   assert(
-    Object.keys(snapshot.signed.meta ?? {}).sort().join(',') ===
+    Object.keys(snapshot.envelope.signed.meta ?? {}).sort().join(',') ===
       'android-release.json,targets.json',
     'snapshot must describe exactly targets.json and android-release.json'
   );
 
   verifyTopLevel(targets, 'targets', root, fixedStart);
-  verifyMetaBinding(targets, snapshot.signed.meta?.['targets.json'], 'targets');
-  assertNoRollback(targets.signed.version, trustedVersions.targets ?? 0, 'targets');
+  verifyMetaBinding(
+    targets,
+    snapshot.envelope.signed.meta?.['targets.json'],
+    'targets'
+  );
+  assertNoRollback(targets.envelope.signed.version, trustedVersions.targets, 'targets');
 
   verifyDelegatedTargets(
     delegatedTargets,
     targets,
     snapshot,
     fixedStart,
-    trustedVersions.androidRelease ?? 0
+    trustedVersions.androidRelease
   );
 
+  const state = {
+    schema: 'deep.update-trust.client-state.v1',
+    trustedRoot: trustedRootBinding(root),
+    versions: {
+      timestamp: timestamp.envelope.signed.version,
+      snapshot: snapshot.envelope.signed.version,
+      targets: targets.envelope.signed.version,
+      androidRelease: delegatedTargets.envelope.signed.version
+    }
+  };
   return {
     root,
-    state: {
-      root: root.signed.version,
-      timestamp: timestamp.signed.version,
-      snapshot: snapshot.signed.version,
-      targets: targets.signed.version,
-      androidRelease: delegatedTargets.signed.version
-    },
+    state,
     delegatedTargets
   };
 }
 
-function verifyTargetBytes(targetsEnvelope, targetPath, bytes) {
-  const description = targetsEnvelope.signed.targets?.[targetPath];
+function verifyTargetBytes(targetsDocument, targetPath, bytes) {
+  const description = targetsDocument.envelope.signed.targets?.[targetPath];
   assert(isObject(description), `target is not signed: ${targetPath}`);
   assert(Number.isSafeInteger(description.length) && description.length === bytes.length,
     `${targetPath} length mismatch`);
@@ -542,7 +666,12 @@ export function parseApkSignerDigests(output) {
   return unique;
 }
 
-function defaultRunApkSigner(apkSignerPath, apkPath, expectedSha256) {
+export function runTrustedApkSigner(
+  apkSignerPath,
+  apkPath,
+  expectedSha256,
+  invocationArgs = ['verify', '--verbose', '--print-certs', apkPath]
+) {
   const info = lstatSync(apkSignerPath);
   assert(info.isFile() && !info.isSymbolicLink(),
     'apksigner must be a regular non-symlink file');
@@ -551,7 +680,7 @@ function defaultRunApkSigner(apkSignerPath, apkPath, expectedSha256) {
   const before = readFileSync(canonicalSigner);
   assert(sha256(before) === expectedSha256, 'apksigner does not match trusted tool policy');
   let executable = canonicalSigner;
-  let args = ['verify', '--verbose', '--print-certs', apkPath];
+  let args = [...invocationArgs];
   if (process.platform === 'win32' && /\.bat$/i.test(canonicalSigner)) {
     assert(!/[&|<>()^%!"\r\n]/.test(`${canonicalSigner}${apkPath}`),
       'Windows apksigner/APK path contains unsafe command characters');
@@ -562,10 +691,7 @@ function defaultRunApkSigner(apkSignerPath, apkPath, expectedSha256) {
       '/c',
       'call',
       canonicalSigner,
-      'verify',
-      '--verbose',
-      '--print-certs',
-      apkPath
+      ...invocationArgs
     ];
   }
   const result = spawnSync(executable, args, {
@@ -580,14 +706,17 @@ function defaultRunApkSigner(apkSignerPath, apkPath, expectedSha256) {
   return `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
 }
 
+function defaultRunApkSigner(apkSignerPath, apkPath, expectedSha256) {
+  return runTrustedApkSigner(apkSignerPath, apkPath, expectedSha256);
+}
+
 export function verifyOfflineAndroidArtifact({
   verifiedBundle,
   apkPath,
   apkFile,
   artifactFiles,
   apkSignerPath,
-  apkSignerSha256,
-  runApkSigner = defaultRunApkSigner
+  apkSignerSha256
 }) {
   const info = lstatSync(apkFile);
   assert(info.isFile() && !info.isSymbolicLink(), 'APK must be a regular non-symlink file');
@@ -599,7 +728,11 @@ export function verifyOfflineAndroidArtifact({
     apkBytes: before,
     files: artifactFiles
   });
-  const signerOutput = runApkSigner(apkSignerPath, canonicalApk, apkSignerSha256);
+  const signerOutput = defaultRunApkSigner(
+    apkSignerPath,
+    canonicalApk,
+    apkSignerSha256
+  );
   const [observedSigner] = parseApkSignerDigests(signerOutput);
   assert(observedSigner === evidence.apk.custom.packageSignerSha256,
     'APK package signer does not match signed update metadata');
@@ -613,7 +746,7 @@ export function verifyOfflineAndroidArtifact({
     versionCode: evidence.apk.custom.versionCode,
     versionName: evidence.apk.custom.versionName,
     packageSignerSha256: observedSigner,
-    apkSignerToolSha256: apkSignerSha256 ?? 'synthetic-contract-injection',
+    apkSignerToolSha256: apkSignerSha256,
     sbomSha256: evidence.apk.custom.sbom.sha256,
     independentBuilderCount: evidence.provenance.builders.length
   };
@@ -637,6 +770,45 @@ function readJson(filePath) {
   return parseStrictJson(readFileSync(filePath, 'utf8'), filePath);
 }
 
+function readMetadataDocument(filePath) {
+  return parseMetadataDocument(readFileSync(filePath), filePath);
+}
+
+export function writeTrustedStateAtomic(filePath, state) {
+  validateTrustedState(state);
+  const target = path.resolve(filePath);
+  mkdirSync(path.dirname(target), { recursive: true });
+  const temporary = `${target}.${process.pid}.${Date.now()}.tmp`;
+  const bytes = Buffer.from(`${JSON.stringify(state, null, 2)}\n`, 'utf8');
+  let descriptor;
+  try {
+    descriptor = openSync(temporary, 'wx', 0o600);
+    writeFileSync(descriptor, bytes);
+    fsyncSync(descriptor);
+    closeSync(descriptor);
+    descriptor = undefined;
+    renameSync(temporary, target);
+    try {
+      const directory = openSync(path.dirname(target), 'r');
+      try {
+        fsyncSync(directory);
+      } finally {
+        closeSync(directory);
+      }
+    } catch {
+      // Windows does not expose fsync for directory handles. renameSync still
+      // provides the same-directory atomic replacement boundary.
+    }
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+    try {
+      unlinkSync(temporary);
+    } catch {
+      // The successful rename removes the temporary path.
+    }
+  }
+}
+
 function safeArtifactPath(root, relativePath) {
   assert(relativePath.split('/').every(part => part && part !== '.' && part !== '..'),
     'target path is not canonical');
@@ -654,22 +826,26 @@ function safeArtifactPath(root, relativePath) {
 function runVerifyAndroid(options) {
   const required = [
     'trustedRoot', 'metadataDir', 'artifactRoot', 'target', 'apkSigner',
-    'apkSignerSha256', 'now', 'summary'
+    'apkSignerSha256', 'state', 'now', 'summary'
   ];
   for (const name of required) assert(options[name], `--${name} is required`);
   const metadataDir = path.resolve(options.metadataDir);
-  const delegatedTargets = readJson(path.join(metadataDir, 'android-release.json'));
+  const delegatedTargets = readMetadataDocument(
+    path.join(metadataDir, 'android-release.json')
+  );
+  const trustedState = readJson(options.state);
   const verifiedBundle = verifyUpdateBundle({
-    trustedRoot: readJson(options.trustedRoot),
-    candidateRoots: options.candidateRoot.map(readJson),
-    timestamp: readJson(path.join(metadataDir, 'timestamp.json')),
-    snapshot: readJson(path.join(metadataDir, 'snapshot.json')),
-    targets: readJson(path.join(metadataDir, 'targets.json')),
+    trustedRoot: readMetadataDocument(options.trustedRoot),
+    candidateRoots: options.candidateRoot.map(readMetadataDocument),
+    timestamp: readMetadataDocument(path.join(metadataDir, 'timestamp.json')),
+    snapshot: readMetadataDocument(path.join(metadataDir, 'snapshot.json')),
+    targets: readMetadataDocument(path.join(metadataDir, 'targets.json')),
     delegatedTargets,
-    trustedVersions: options.state ? readJson(options.state) : {},
-    updateStart: options.now
+    trustedState,
+    updateStart: options.now,
+    persistTrustedRoot: state => writeTrustedStateAtomic(options.state, state)
   });
-  const apkDescription = delegatedTargets.signed.targets?.[options.target];
+  const apkDescription = delegatedTargets.envelope.signed.targets?.[options.target];
   assert(apkDescription, 'requested Android target is not signed');
   const sbomPath = apkDescription.custom?.sbom?.path;
   const provenancePath = apkDescription.custom?.reproducibleBuild?.provenancePath;
@@ -685,6 +861,7 @@ function runVerifyAndroid(options) {
     apkSignerPath: options.apkSigner,
     apkSignerSha256: options.apkSignerSha256.toLowerCase()
   });
+  writeTrustedStateAtomic(options.state, verifiedBundle.state);
   mkdirSync(path.dirname(path.resolve(options.summary)), { recursive: true });
   writeFileSync(options.summary, `${JSON.stringify({
     schema: 'deep.update-trust.offline-android-verification.v1',

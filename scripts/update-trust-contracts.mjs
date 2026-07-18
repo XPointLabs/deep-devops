@@ -1,8 +1,10 @@
 import { spawnSync } from 'node:child_process';
 import {
+  chmodSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync
 } from 'node:fs';
@@ -10,13 +12,15 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  canonicalJson,
+  createTrustedState,
   insecureDeterministicTestKey,
-  metadataBytes,
+  metadataDocumentFromEnvelope,
+  parseMetadataDocument,
   sha256,
   signMetadata,
   verifyOfflineAndroidArtifact,
-  verifyUpdateBundle
+  verifyUpdateBundle,
+  writeTrustedStateAtomic
 } from './update-trust.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -53,12 +57,16 @@ function role(keys, labels, threshold) {
 }
 
 function metadataDescription(envelope) {
-  const bytes = metadataBytes(envelope);
+  const bytes = envelope.rawBytes;
   return {
-    version: envelope.signed.version,
+    version: envelope.envelope.signed.version,
     length: bytes.length,
     hashes: { sha256: sha256(bytes) }
   };
+}
+
+function signedDocument(signed, signers) {
+  return metadataDocumentFromEnvelope(signMetadata(signed, signers));
 }
 
 function targetDescription(bytes, custom) {
@@ -76,7 +84,7 @@ function jsonBytes(value) {
 
 export function createUpdateTrustFixture() {
   const labels = [
-    'root-a', 'root-b', 'root-c', 'root-d',
+    'root-a', 'root-b', 'root-c', 'root-d', 'root-e', 'root-f',
     'targets-a', 'targets-b', 'targets-c',
     'snapshot-old', 'snapshot-new',
     'timestamp-old', 'timestamp-new', 'unknown',
@@ -89,7 +97,7 @@ export function createUpdateTrustFixture() {
     'snapshot-old', 'timestamp-old'
   ];
   const rootTwoLabels = [
-    'root-b', 'root-c', 'root-d',
+    'root-d', 'root-e', 'root-f',
     'targets-a', 'targets-b', 'targets-c',
     'snapshot-new', 'timestamp-new'
   ];
@@ -112,15 +120,19 @@ export function createUpdateTrustFixture() {
     version: 2,
     keys: publicKeys(keys, rootTwoLabels),
     roles: {
-      root: role(keys, ['root-b', 'root-c', 'root-d'], 2),
+      root: role(keys, ['root-d', 'root-e', 'root-f'], 2),
       targets: role(keys, ['targets-a', 'targets-b', 'targets-c'], 2),
       snapshot: role(keys, ['snapshot-new'], 1),
       timestamp: role(keys, ['timestamp-new'], 1)
     }
   };
-  const rootOne = signMetadata(rootOneSigned, [keys['root-a'], keys['root-b']]);
-  // root-b/root-c jointly satisfy both the old and the new 2-of-3 root roles.
-  const rootTwo = signMetadata(rootTwoSigned, [keys['root-b'], keys['root-c']]);
+  const rootOne = signedDocument(rootOneSigned, [keys['root-a'], keys['root-b']]);
+  // The disjoint old/new signatures prove that each threshold is checked
+  // independently over the same exact canonical root v2 bytes.
+  const rootTwo = signedDocument(
+    rootTwoSigned,
+    [keys['root-a'], keys['root-b'], keys['root-d'], keys['root-e']]
+  );
 
   const apkPath = 'android/network.xpoint.deep-2.0.1-i01b.apk';
   const sbomPath = 'sbom/network.xpoint.deep-2.0.1-i01b.cdx.json';
@@ -200,7 +212,7 @@ export function createUpdateTrustFixture() {
       })
     }
   };
-  const delegatedTargets = signMetadata(
+  const delegatedTargets = signedDocument(
     delegatedSigned,
     [keys['android-a'], keys['android-b']]
   );
@@ -221,7 +233,7 @@ export function createUpdateTrustFixture() {
       }]
     }
   };
-  const targets = signMetadata(targetsSigned, [keys['targets-a'], keys['targets-b']]);
+  const targets = signedDocument(targetsSigned, [keys['targets-a'], keys['targets-b']]);
 
   function createBundle({
     rotatedRoot = false,
@@ -230,7 +242,10 @@ export function createUpdateTrustFixture() {
     timestampExpiry = GOOD_EXPIRY,
     timestampSigner = rotatedRoot ? 'timestamp-new' : 'timestamp-old',
     snapshotSigner = rotatedRoot ? 'snapshot-new' : 'snapshot-old',
-    snapshotOverrides = {}
+    snapshotOverrides = {},
+    timestampSnapshotOverride,
+    targetsDocument = targets,
+    delegatedDocument = delegatedTargets
   } = {}) {
     const snapshotSigned = {
       _type: 'snapshot',
@@ -238,30 +253,30 @@ export function createUpdateTrustFixture() {
       version: snapshotVersion,
       expires: GOOD_EXPIRY,
       meta: {
-        'targets.json': metadataDescription(targets),
-        'android-release.json': metadataDescription(delegatedTargets),
+        'targets.json': metadataDescription(targetsDocument),
+        'android-release.json': metadataDescription(delegatedDocument),
         ...snapshotOverrides
       }
     };
-    const snapshot = signMetadata(snapshotSigned, [keys[snapshotSigner]]);
+    const snapshot = signedDocument(snapshotSigned, [keys[snapshotSigner]]);
     const timestampSigned = {
       _type: 'timestamp',
       spec_version: '1.0.35',
       version: timestampVersion,
       expires: timestampExpiry,
       meta: {
-        'snapshot.json': metadataDescription(snapshot)
+        'snapshot.json': timestampSnapshotOverride ?? metadataDescription(snapshot)
       }
     };
-    const timestamp = signMetadata(timestampSigned, [keys[timestampSigner]]);
+    const timestamp = signedDocument(timestampSigned, [keys[timestampSigner]]);
     return {
       trustedRoot: rootOne,
       candidateRoots: rotatedRoot ? [rootTwo] : [],
       timestamp,
       snapshot,
-      targets,
-      delegatedTargets,
-      trustedVersions: {},
+      targets: targetsDocument,
+      delegatedTargets: delegatedDocument,
+      trustedState: createTrustedState(rootOne),
       updateStart: FIXED_UPDATE_START
     };
   }
@@ -313,6 +328,11 @@ function writeJson(filePath, value) {
   writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
 }
 
+function writeMetadata(filePath, document) {
+  mkdirSync(path.dirname(filePath), { recursive: true });
+  writeFileSync(filePath, document.rawBytes);
+}
+
 function parseOptions(argv) {
   const options = { artifactDir: DEFAULT_ARTIFACT_DIR };
   for (let index = 0; index < argv.length; index += 2) {
@@ -337,33 +357,154 @@ export function runUpdateTrustContracts({ artifactDir = DEFAULT_ARTIFACT_DIR } =
   const happyBundle = fixture.createBundle();
   const happy = verifyUpdateBundle(happyBundle);
 
-  const rollbackBundle = fixture.createBundle();
-  rollbackBundle.trustedVersions = { timestamp: 2 };
+  const negativeCases = [];
   const freezeBundle = fixture.createBundle({
     timestampExpiry: '2029-12-31T23:59:59Z'
   });
-  const mixSnapshot = fixture.createBundle({
-    snapshotOverrides: {
-      'android-release.json': {
-        ...metadataDescription(fixture.delegatedTargets),
-        hashes: { sha256: '0'.repeat(64) }
-      }
+  negativeCases.push(
+    expectRejected('freeze', () => verifyUpdateBundle(freezeBundle), /freeze|expired/i)
+  );
+  for (const roleName of ['timestamp', 'snapshot', 'targets', 'androidRelease']) {
+    const rollback = fixture.createBundle();
+    rollback.trustedState.versions[roleName] = 2;
+    negativeCases.push(expectRejected(
+      `rollback-${roleName}`,
+      () => verifyUpdateBundle(rollback),
+      /rollback/i
+    ));
+  }
+  negativeCases.push(expectRejected(
+    'unknown-timestamp-signer',
+    () => verifyUpdateBundle(fixture.createBundle({ timestampSigner: 'unknown' })),
+    /unknown signer/i
+  ));
+
+  const rootTwoSignatures = fixture.rootTwo.envelope.signatures;
+  for (const [name, signatures, expected] of [
+    ['root-old-only-threshold', rootTwoSignatures.slice(0, 2), /new-root threshold/],
+    ['root-new-only-threshold', rootTwoSignatures.slice(2), /old-root threshold/]
+  ]) {
+    const bundle = fixture.createBundle({ rotatedRoot: true });
+    bundle.candidateRoots = [metadataDocumentFromEnvelope({
+      ...fixture.rootTwo.envelope,
+      signatures
+    })];
+    negativeCases.push(expectRejected(
+      name,
+      () => verifyUpdateBundle(bundle),
+      expected
+    ));
+  }
+
+  const originalRoot = fixture.rootOne.envelope.signed;
+  const removedRootKey = fixture.keys['root-c'].keyid;
+  const alternateRoot = signedDocument({
+    ...originalRoot,
+    keys: Object.fromEntries(
+      Object.entries(originalRoot.keys)
+        .filter(([keyid]) => keyid !== removedRootKey)
+    ),
+    roles: {
+      ...originalRoot.roles,
+      root: role(fixture.keys, ['root-a', 'root-b'], 2)
     }
-  });
-  // Keep a timestamp from the coherent repository, then offer a different validly
-  // signed snapshot to exercise the timestamp -> snapshot hash binding.
-  mixSnapshot.timestamp = happyBundle.timestamp;
-  const unknownSigner = fixture.createBundle({ timestampSigner: 'unknown' });
-  const negativeCases = [
-    expectRejected('rollback', () => verifyUpdateBundle(rollbackBundle), /rollback/i),
-    expectRejected('freeze', () => verifyUpdateBundle(freezeBundle), /freeze|expired/i),
-    expectRejected('mix-and-match', () => verifyUpdateBundle(mixSnapshot), /mix-and-match|hash/i),
-    expectRejected('unknown-signer', () => verifyUpdateBundle(unknownSigner), /unknown signer/i)
-  ];
+  }, [fixture.keys['root-a'], fixture.keys['root-b']]);
+  const alternateRootBundle = fixture.createBundle();
+  alternateRootBundle.trustedRoot = alternateRoot;
+  negativeCases.push(expectRejected(
+    'same-version-different-root-keyset',
+    () => verifyUpdateBundle(alternateRootBundle),
+    /persisted version and raw SHA-256/
+  ));
+
+  for (const [name, raw] of [
+    ['raw-bom', Buffer.concat([
+      Buffer.from([0xEF, 0xBB, 0xBF]),
+      fixture.rootOne.rawBytes
+    ])],
+    ['raw-whitespace', Buffer.concat([
+      fixture.rootOne.rawBytes,
+      Buffer.from('\n')
+    ])],
+    ['raw-key-order', Buffer.from(JSON.stringify({
+      signed: fixture.rootOne.envelope.signed,
+      signatures: fixture.rootOne.envelope.signatures
+    }))],
+    ['raw-number-representation', Buffer.from(
+      fixture.rootOne.rawBytes.toString('utf8')
+        .replace('"version":1', '"version":1e0')
+    )]
+  ]) {
+    negativeCases.push(expectRejected(
+      name,
+      () => parseMetadataDocument(raw, name),
+      /exact canonical POUF encoding/
+    ));
+  }
+
+  for (const field of ['hash', 'length']) {
+    const wrong = (document) => {
+      const description = metadataDescription(document);
+      if (field === 'length') description.length += 1;
+      else description.hashes.sha256 = '0'.repeat(64);
+      return description;
+    };
+    negativeCases.push(expectRejected(
+      `timestamp-snapshot-${field}`,
+      () => verifyUpdateBundle(fixture.createBundle({
+        timestampSnapshotOverride: wrong(fixture.createBundle().snapshot)
+      })),
+      /mix-and-match/
+    ));
+    negativeCases.push(expectRejected(
+      `snapshot-targets-${field}`,
+      () => verifyUpdateBundle(fixture.createBundle({
+        snapshotOverrides: { 'targets.json': wrong(fixture.targets) }
+      })),
+      /mix-and-match/
+    ));
+    negativeCases.push(expectRejected(
+      `snapshot-delegated-${field}`,
+      () => verifyUpdateBundle(fixture.createBundle({
+        snapshotOverrides: {
+          'android-release.json': wrong(fixture.delegatedTargets)
+        }
+      })),
+      /mix-and-match/
+    ));
+  }
+
+  const delegatedSigned = fixture.delegatedTargets.envelope.signed;
+  const unauthorizedDelegation = signedDocument({
+    ...delegatedSigned,
+    targets: {
+      ...delegatedSigned.targets,
+      'windows/unauthorized.msix': delegatedSigned.targets[fixture.apkPath]
+    }
+  }, [fixture.keys['android-a'], fixture.keys['android-b']]);
+  negativeCases.push(expectRejected(
+    'unauthorized-delegated-path',
+    () => verifyUpdateBundle(fixture.createBundle({
+      delegatedDocument: unauthorizedDelegation
+    })),
+    /unauthorized/
+  ));
+  const unknownDelegatedSigner = signedDocument(
+    delegatedSigned,
+    [fixture.keys.unknown]
+  );
+  negativeCases.push(expectRejected(
+    'unknown-delegated-signer',
+    () => verifyUpdateBundle(fixture.createBundle({
+      delegatedDocument: unknownDelegatedSigner
+    })),
+    /unknown signer/
+  ));
 
   const rotatedBundle = fixture.createBundle({ rotatedRoot: true });
   const rotated = verifyUpdateBundle(rotatedBundle);
-  assert(rotated.state.root === 2, 'root rotation did not advance trust to root v2');
+  assert(rotated.state.trustedRoot.version === 2,
+    'root rotation did not advance trust to root v2');
   const oldTimestampAfterRotation = fixture.createBundle({
     rotatedRoot: true,
     timestampSigner: 'timestamp-old'
@@ -376,8 +517,51 @@ export function runUpdateTrustContracts({ artifactDir = DEFAULT_ARTIFACT_DIR } =
 
   const sandbox = mkdtempSync(path.join(tmpdir(), 'deep-p02-'));
   try {
+    const statePath = path.join(sandbox, 'trusted-state.json');
+    writeTrustedStateAtomic(statePath, rotatedBundle.trustedState);
+    verifyUpdateBundle({
+      ...rotatedBundle,
+      persistTrustedRoot: state => writeTrustedStateAtomic(statePath, state)
+    });
+    const atomicallyPersistedState = JSON.parse(readFileSync(statePath, 'utf8'));
+    assert(
+      atomicallyPersistedState.trustedRoot.version === 2 &&
+      atomicallyPersistedState.trustedRoot.sha256 === sha256(fixture.rootTwo.rawBytes),
+      'root version/raw SHA-256 was not atomically persisted'
+    );
     const apkFile = path.join(sandbox, 'fixture.apk');
     writeFileSync(apkFile, fixture.apkBytes);
+    const canonicalApk = realpathSync(apkFile);
+    const apkSignerPath = path.join(
+      sandbox,
+      process.platform === 'win32' ? 'fixture-apksigner.bat' : 'fixture-apksigner'
+    );
+    const apkSignerBytes = Buffer.from(
+      process.platform === 'win32'
+        ? [
+            '@echo off',
+            'if not "%~1"=="verify" exit /b 41',
+            'if not "%~2"=="--verbose" exit /b 42',
+            'if not "%~3"=="--print-certs" exit /b 43',
+            `if not "%~4"=="${canonicalApk}" exit /b 44`,
+            'if not "%~5"=="" exit /b 45',
+            `echo Signer #1 certificate SHA-256 digest: ${fixture.packageSignerSha256}`,
+            ''
+          ].join('\r\n')
+        : [
+            '#!/bin/sh',
+            '[ "$#" -eq 4 ] || exit 40',
+            '[ "$1" = "verify" ] || exit 41',
+            '[ "$2" = "--verbose" ] || exit 42',
+            '[ "$3" = "--print-certs" ] || exit 43',
+            `[ "$4" = '${canonicalApk}' ] || exit 44`,
+            `printf '%s\\n' 'Signer #1 certificate SHA-256 digest: ${fixture.packageSignerSha256}'`,
+            ''
+          ].join('\n'),
+      'utf8'
+    );
+    writeFileSync(apkSignerPath, apkSignerBytes);
+    if (process.platform !== 'win32') chmodSync(apkSignerPath, 0o755);
     const androidResult = verifyOfflineAndroidArtifact({
       verifiedBundle: happy,
       apkPath: fixture.apkPath,
@@ -386,10 +570,15 @@ export function runUpdateTrustContracts({ artifactDir = DEFAULT_ARTIFACT_DIR } =
         [fixture.sbomPath]: fixture.sbomBytes,
         [fixture.provenancePath]: fixture.provenanceBytes
       },
-      apkSignerPath: 'synthetic-test-only',
-      runApkSigner: () =>
-        `Signer #1 certificate SHA-256 digest: ${fixture.packageSignerSha256.toUpperCase()}`
+      apkSignerPath,
+      apkSignerSha256: sha256(apkSignerBytes)
     });
+    const wrongApkSignerBytes = Buffer.from(
+      apkSignerBytes.toString('utf8')
+        .replace(fixture.packageSignerSha256, 'f'.repeat(64)),
+      'utf8'
+    );
+    writeFileSync(apkSignerPath, wrongApkSignerBytes);
     const signerMismatch = expectRejected(
       'apk-package-signer-mismatch',
       () => verifyOfflineAndroidArtifact({
@@ -400,8 +589,8 @@ export function runUpdateTrustContracts({ artifactDir = DEFAULT_ARTIFACT_DIR } =
           [fixture.sbomPath]: fixture.sbomBytes,
           [fixture.provenancePath]: fixture.provenanceBytes
         },
-        apkSignerPath: 'synthetic-test-only',
-        runApkSigner: () => `Signer #1 certificate SHA-256 digest: ${'f'.repeat(64)}`
+        apkSignerPath,
+        apkSignerSha256: sha256(wrongApkSignerBytes)
       }),
       /package signer/
     );
@@ -411,12 +600,15 @@ export function runUpdateTrustContracts({ artifactDir = DEFAULT_ARTIFACT_DIR } =
     const generatedAtUtc = new Date(gitValue(['show', '-s', '--format=%cI', 'HEAD']))
       .toISOString();
     const publicMetadataDir = path.join(artifactDir, 'public-test-metadata');
-    writeJson(path.join(publicMetadataDir, '1.root.json'), fixture.rootOne);
-    writeJson(path.join(publicMetadataDir, '2.root.json'), fixture.rootTwo);
-    writeJson(path.join(publicMetadataDir, 'timestamp.json'), rotatedBundle.timestamp);
-    writeJson(path.join(publicMetadataDir, 'snapshot.json'), rotatedBundle.snapshot);
-    writeJson(path.join(publicMetadataDir, 'targets.json'), fixture.targets);
-    writeJson(path.join(publicMetadataDir, 'android-release.json'), fixture.delegatedTargets);
+    writeMetadata(path.join(publicMetadataDir, '1.root.json'), fixture.rootOne);
+    writeMetadata(path.join(publicMetadataDir, '2.root.json'), fixture.rootTwo);
+    writeMetadata(path.join(publicMetadataDir, 'timestamp.json'), rotatedBundle.timestamp);
+    writeMetadata(path.join(publicMetadataDir, 'snapshot.json'), rotatedBundle.snapshot);
+    writeMetadata(path.join(publicMetadataDir, 'targets.json'), fixture.targets);
+    writeMetadata(
+      path.join(publicMetadataDir, 'android-release.json'),
+      fixture.delegatedTargets
+    );
     writeJson(path.join(artifactDir, 'sbom-reproducibility-contract.json'), {
       schema: 'deep.update-trust.sbom-reproducibility.v1',
       fixtureOnly: true,
@@ -433,9 +625,13 @@ export function runUpdateTrustContracts({ artifactDir = DEFAULT_ARTIFACT_DIR } =
       schema: 'deep.update-trust.root-rotation-drill.v1',
       fixtureOnly: true,
       initialRootVersion: 1,
-      finalRootVersion: rotated.state.root,
+      finalRootVersion: rotated.state.trustedRoot.version,
+      initialRootRawSha256: sha256(fixture.rootOne.rawBytes),
+      finalRootRawSha256: sha256(fixture.rootTwo.rawBytes),
       oldThreshold: 2,
       newThreshold: 2,
+      thresholdsVerifiedIndependently: true,
+      atomicPersistedBinding: 'version-and-raw-sha256',
       result: 'passed'
     });
     writeJson(path.join(artifactDir, 'lost-online-key-drill.json'), {
@@ -449,7 +645,7 @@ export function runUpdateTrustContracts({ artifactDir = DEFAULT_ARTIFACT_DIR } =
     writeJson(path.join(artifactDir, 'offline-android-verification.json'), {
       schema: 'deep.update-trust.offline-android-verification.v1',
       fixtureOnly: true,
-      packageSignerExecution: 'synthetic-output-injected-for-contract-test',
+      packageSignerExecution: 'synthetic-executable-enforcing-exact-argv-and-apk-path',
       productionContract: 'Android SDK apksigner verify --verbose --print-certs',
       ...androidResult
     });
@@ -469,16 +665,23 @@ export function runUpdateTrustContracts({ artifactDir = DEFAULT_ARTIFACT_DIR } =
       fixtureOnly: true,
       productionKeysPresent: false,
       privateTestKeyMaterialArchived: false,
+      negativeCaseCount: negativeCases.length,
       checks: {
         coherentMetadata: 'passed',
         rollback: 'rejected',
         freeze: 'rejected',
         mixAndMatch: 'rejected',
         unknownSigner: 'rejected',
+        rawCanonicalMetadata: 'passed',
+        persistedRootVersionAndRawSha256: 'passed',
+        parentRawHashAndLengthMatrix: 'passed',
+        allRoleRollbackMatrix: 'passed',
+        delegatedPathAndSignerMatrix: 'passed',
         rootRotation: 'passed',
         lostOnlineKey: 'passed',
         sbomAndReproducibility: 'passed',
-        offlineAndroidMetadataAndPackageSigner: 'passed'
+        offlineAndroidMetadataAndPackageSigner: 'passed',
+        apkSignerExactArgvAndCanonicalPath: 'passed'
       },
       status: 'passed'
     };

@@ -13,7 +13,9 @@ production key import into CI. Mr. X performs every human step.
 4. Generate CycloneDX SBOM and reproducibility provenance, then bind all three
    target hashes in delegated `android-release` metadata.
 5. Meet the delegated targets threshold on isolated signing devices.
-6. Generate snapshot metadata over exact canonical metadata bytes.
+6. Emit every metadata file as its exact canonical POUF bytes. Reject BOM,
+   whitespace, alternate key ordering, and alternate numeric representations.
+   Generate snapshot descriptions over the exact raw target-metadata files.
 7. Generate a fresh timestamp. Never extend an expiry merely to pass a gate.
 8. On an offline verification station, start from a previously trusted root and
    run the verifier with the Android SDK `apksigner` whose exact executable hash
@@ -22,9 +24,13 @@ production key import into CI. Mr. X performs every human step.
    to distribution media.
 10. Run the secret scan over the exact media manifest before handoff.
 
-The verifier state (`root`, `timestamp`, `snapshot`, `targets`, and delegated
-role versions) must be persisted on the receiving device. Deleting state to
-make an older bundle acceptable is rollback.
+The verifier state must contain the trusted-root version and SHA-256 of the
+exact raw trusted-root file plus the `timestamp`, `snapshot`, `targets`, and
+delegated-role versions. The CLI refuses to start when the supplied trusted
+root does not exactly match that binding. Each accepted root rotation is
+atomically persisted before timestamp processing; final role versions are
+atomically replaced after the complete cycle. Deleting or editing state to make
+an older/different bundle acceptable is rollback.
 
 ## Suspected CI compromise
 
@@ -56,9 +62,11 @@ The checked-in drill models a lost timestamp key:
 
 1. Disable the signing endpoint and preserve its public key ID.
 2. Prepare root version `N+1` removing that key and adding the replacement.
-3. Meet the old root threshold over `N+1`.
-4. Meet the new root threshold over the same canonical `N+1` bytes.
-5. Verify every root version from the last trusted root through `N+1`.
+3. Meet the old root threshold over the exact canonical `N+1` document.
+4. Independently meet the new root threshold over that same document. Test
+   old-only and new-only signature sets; both must fail.
+5. Verify every root version from the last trusted root through `N+1`, then
+   atomically persist `N+1` and its exact raw-file SHA-256.
 6. Delete cached timestamp/snapshot state when those role keys change.
 7. Sign a fresh snapshot/timestamp with the replacement key.
 8. Prove that replacement metadata is accepted and metadata signed only by the
