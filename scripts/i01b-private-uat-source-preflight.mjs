@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { lstat, readFile, realpath } from 'node:fs/promises';
+import { lstat, readFile, readdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -8,6 +8,17 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 export const repositoryRoot = path.resolve(scriptDirectory, '..');
 export const canonicalDockerfilePath = path.join(repositoryRoot, 'docker', 'xnode-xray.Dockerfile');
+const compatBuildRoots = Object.freeze([
+  'docker/calls-service.Dockerfile',
+  'docker/file-service.Dockerfile',
+  'docker/push-service.Dockerfile',
+  'docker/storage-service.Dockerfile',
+  'tools/calls-service',
+  'tools/compat-services',
+  'tools/file-service',
+  'tools/push-service',
+  'tools/storage-service'
+]);
 
 function samePath(left, right) {
   return process.platform === 'win32'
@@ -41,14 +52,55 @@ async function requireCanonicalPath(input, kind) {
   return { info, actual };
 }
 
+async function collectRegularFiles(root, relativeInput) {
+  const absolute = path.join(root, ...relativeInput.split('/'));
+  const info = await lstat(absolute);
+  assert.equal(info.isSymbolicLink(), false, `compat build input ${relativeInput} must not be a symlink/reparse point`);
+  if (info.isFile()) return [relativeInput];
+  assert.equal(info.isDirectory(), true, `compat build input ${relativeInput} must be a regular file or directory`);
+  const entries = await readdir(absolute, { withFileTypes: true });
+  const files = [];
+  for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+    assert.equal(
+      entry.isSymbolicLink(),
+      false,
+      `compat build input ${relativeInput}/${entry.name} must not be a symlink/reparse point`
+    );
+    files.push(...await collectRegularFiles(root, `${relativeInput}/${entry.name}`));
+  }
+  return files;
+}
+
+export async function compatBuildContentSha256(devopsRoot) {
+  const files = (await Promise.all(
+    compatBuildRoots.map(relative => collectRegularFiles(devopsRoot, relative))
+  )).flat().sort();
+  const hash = createHash('sha256');
+  for (const relative of files) {
+    const bytes = await readFile(path.join(devopsRoot, ...relative.split('/')));
+    hash.update(Buffer.from(`${relative}\0${bytes.length}\0`, 'utf8'));
+    hash.update(bytes);
+    hash.update(Buffer.from('\0', 'utf8'));
+  }
+  return hash.digest('hex');
+}
+
 export async function preflightSource(options) {
   const expectedCommit = String(options.expectedCommit ?? '');
   const expectedDockerfileSha256 = String(options.expectedDockerfileSha256 ?? '');
+  const expectedDevopsCommit = String(options.expectedDevopsCommit ?? '');
+  const expectedCompatContentSha256 = String(options.expectedCompatContentSha256 ?? '');
   assert.match(expectedCommit, /^[0-9a-f]{40}$/, 'expected XNode commit must be exact lowercase SHA1');
+  assert.match(expectedDevopsCommit, /^[0-9a-f]{40}$/, 'expected DevOps commit must be exact lowercase SHA1');
   assert.match(
     expectedDockerfileSha256,
     /^[0-9a-f]{64}$/,
     'expected Dockerfile SHA256 must be exact lowercase hexadecimal'
+  );
+  assert.match(
+    expectedCompatContentSha256,
+    /^[0-9a-f]{64}$/,
+    'expected compat build content SHA256 must be exact lowercase hexadecimal'
   );
 
   const contextCheck = await requireCanonicalPath(options.xnodeContext, 'XNode context');
@@ -62,6 +114,13 @@ export async function preflightSource(options) {
   assert.ok(
     samePath(dockerfileCheck.actual, requiredCanonicalDockerfile),
     'Dockerfile path is not the canonical reviewed DevOps Dockerfile'
+  );
+  const devopsCheck = await requireCanonicalPath(options.devopsContext, 'DevOps context');
+  assert.equal(devopsCheck.info.isDirectory(), true, 'DevOps context must be a directory');
+  const requiredCanonicalDevopsRoot = path.resolve(options.canonicalDevopsRoot ?? repositoryRoot);
+  assert.ok(
+    samePath(devopsCheck.actual, requiredCanonicalDevopsRoot),
+    'DevOps context is not the canonical reviewed repository root'
   );
 
   const gitRoot = path.resolve(runGit(contextCheck.actual, ['rev-parse', '--show-toplevel']));
@@ -78,6 +137,24 @@ export async function preflightSource(options) {
   ]);
   assert.equal(dirty, '', 'XNode worktree must be exactly clean');
 
+  const devopsGitRoot = path.resolve(runGit(devopsCheck.actual, ['rev-parse', '--show-toplevel']));
+  assert.ok(
+    samePath(devopsGitRoot, devopsCheck.actual),
+    'DevOps build context must be the exact Git worktree root'
+  );
+  const actualDevopsCommit = runGit(devopsCheck.actual, ['rev-parse', 'HEAD']).toLowerCase();
+  assert.equal(
+    actualDevopsCommit,
+    expectedDevopsCommit,
+    'DevOps worktree commit does not match the required commit'
+  );
+  const devopsDirty = runGit(devopsCheck.actual, [
+    'status',
+    '--porcelain=v1',
+    '--untracked-files=all'
+  ]);
+  assert.equal(devopsDirty, '', 'DevOps worktree must be exactly clean');
+
   const dockerfileBytes = await readFile(dockerfileCheck.actual);
   const actualDockerfileSha256 = createHash('sha256').update(dockerfileBytes).digest('hex');
   assert.equal(
@@ -85,12 +162,20 @@ export async function preflightSource(options) {
     expectedDockerfileSha256,
     'Dockerfile content does not match the required SHA256'
   );
+  const actualCompatContentSha256 = await compatBuildContentSha256(devopsCheck.actual);
+  assert.equal(
+    actualCompatContentSha256,
+    expectedCompatContentSha256,
+    'compat build content does not match the required SHA256'
+  );
 
   return {
     schemaVersion: '1.0.0',
     status: 'accepted-clean-pinned-source',
     xnodeCommit: actualCommit,
     dockerfileSha256: actualDockerfileSha256,
+    devopsCommit: actualDevopsCommit,
+    compatContentSha256: actualCompatContentSha256,
     clean: true,
     productionReady: false,
     uatRestartAuthorized: false
@@ -103,7 +188,10 @@ function parse(argv) {
     '--xnode-context': 'xnodeContext',
     '--expected-xnode-commit': 'expectedCommit',
     '--dockerfile': 'dockerfile',
-    '--expected-dockerfile-sha256': 'expectedDockerfileSha256'
+    '--expected-dockerfile-sha256': 'expectedDockerfileSha256',
+    '--devops-context': 'devopsContext',
+    '--expected-devops-commit': 'expectedDevopsCommit',
+    '--expected-compat-content-sha256': 'expectedCompatContentSha256'
   };
   for (let index = 0; index < argv.length; index += 2) {
     const key = mapping[argv[index]];

@@ -72,7 +72,11 @@ The operator-controlled environment must provide:
 - the exact expected XNode commit;
 - the exact reviewed Dockerfile SHA-256;
 - .NET SDK and ASP.NET runtime image digests;
-- the exact Xray version and its archive SHA-256.
+- the Node 24 Bookworm Slim image digest used by all four ancillary services;
+- the exact Xray version and its archive SHA-256;
+- the canonical clean DevOps Git worktree root, its exact commit, and the
+  reviewed aggregate SHA-256 of every Dockerfile and source file copied into
+  the storage, file, push, and calls images.
 
 There are no defaults. The Dockerfile path cannot be substituted, and ambient
 or dirty source cannot be used. The .NET image references include required
@@ -86,14 +90,20 @@ node .\scripts\i01b-private-uat-source-preflight.mjs `
   --xnode-context <canonical-absolute-clean-xnode-root> `
   --expected-xnode-commit <exact-lowercase-40-hex-commit> `
   --dockerfile <canonical-absolute-reviewed-xnode-xray-dockerfile> `
-  --expected-dockerfile-sha256 <exact-lowercase-64-hex-sha256>
+  --expected-dockerfile-sha256 <exact-lowercase-64-hex-sha256> `
+  --devops-context <canonical-absolute-clean-deep-devops-root> `
+  --expected-devops-commit <exact-lowercase-40-hex-commit> `
+  --expected-compat-content-sha256 <exact-lowercase-64-hex-sha256>
 ```
 
 It rejects a noncanonical path, symlink/reparse point, wrong Git root, wrong
 commit, any tracked or untracked change, alternate Dockerfile, or hash
-mismatch. The required image digests and Xray hash are additionally enforced
-by Compose interpolation and the topology validator. No real digest is
-invented in this repository.
+mismatch. The compat hash is deterministic over relative path, byte length,
+and exact bytes for all four ancillary Dockerfiles and all files under the
+five copied `tools/*` directories. The required .NET and Node image digests
+and Xray hash are additionally enforced by Compose interpolation and the
+topology validator. No real digest is invented in this repository; the
+operator must supply reviewed values and the stack fails closed without them.
 
 ## Required identity preflight
 
@@ -139,11 +149,19 @@ The script performs this exact sequence:
 6. Require signed `fetch_rids` to return the exact three identities.
 7. Require readiness HTTP 200 only after the exchange.
 8. Require signed `storage_route` results to contain exactly the three
-   canonical members and their exact private tuples.
+   canonical members and their exact private tuples. Every request uses a
+   fresh 32-byte cryptographically random nonce encoded as exactly 64
+   lowercase hexadecimal characters; the signed result must echo that exact
+   nonce.
 
 The ceremony fails closed on a changed HTTP status, invalid/stale contact,
-response signature mismatch, incomplete membership, duplicate identity, or
-route mismatch.
+response signature mismatch, incomplete membership, duplicate identity,
+invalid/mutated route nonce, or route mismatch. Contact time fields accept the
+actual `System.Text.Json` `DateTimeOffset` round-trip forms (`Z`, `+00:00`, and
+up to seven fractional digits) by their semantic Unix-millisecond instant.
+The original document fields remain untouched, freshness and expiry are still
+enforced, and the Ed25519 signature remains bound to the runtime's exact
+Unix-millisecond signing contract.
 
 ## Static verification
 
@@ -163,7 +181,9 @@ The mutation suite covers privilege, host pid/ipc, devices, Docker socket,
 arbitrary bind mounts, extra hosts/host-gateway, host build network, unexpected
 service keys/networks, capabilities, security options, listeners, storage RPC,
 VLESS settings, volumes, secrets, source paths, image digests, Xray hash, and
-membership/bootstrap switches.
+membership/bootstrap switches. The synthetic signed-RPC suite also covers
+nonce shape/binding mutations, all supported DateTimeOffset renderings,
+calendar errors, signature/time mismatches, stale contacts, and expiry.
 
 ## Deferred P2
 
