@@ -1,0 +1,62 @@
+name: deep-i01b-private-uat
+
+x-metadata-safe-logging: &metadata-safe-logging
+  driver: local
+  options:
+    max-size: "1m"
+    max-file: "2"
+    compress: "true"
+
+x-metadata-safe-environment: &metadata-safe-environment
+  DEEP_INFRA_PRIVACY_PROFILE: ${DEEP_INFRA_PRIVACY_PROFILE:?REQUIRED exact metadata-safe-v1 profile}
+
+x-metadata-safe-router-environment: &metadata-safe-router-environment
+  <<: *metadata-safe-environment
+  Logging__LogLevel__Default: Warning
+  Logging__LogLevel__Microsoft.AspNetCore: Warning
+  Logging__LogLevel__Microsoft.AspNetCore.Hosting.Diagnostics: Warning
+  Logging__LogLevel__Microsoft.AspNetCore.Server.Kestrel: Warning
+  Logging__LogLevel__System.Net.Http.HttpClient: Warning
+
+services:
+  xnode-1:
+    environment: *metadata-safe-router-environment
+    logging: *metadata-safe-logging
+    labels:
+      io.deep.infrastructure-privacy-profile: metadata-safe-v1
+
+  xnode-2:
+    environment: *metadata-safe-router-environment
+    logging: *metadata-safe-logging
+    labels:
+      io.deep.infrastructure-privacy-profile: metadata-safe-v1
+
+  xnode-3:
+    environment: *metadata-safe-router-environment
+    logging: *metadata-safe-logging
+    labels:
+      io.deep.infrastructure-privacy-profile: metadata-safe-v1
+
+  storage:
+    environment: *metadata-safe-environment
+    logging: *metadata-safe-logging
+    labels:
+      io.deep.infrastructure-privacy-profile: metadata-safe-v1
+
+  file:
+    environment: *metadata-safe-environment
+    logging: *metadata-safe-logging
+    labels:
+      io.deep.infrastructure-privacy-profile: metadata-safe-v1
+
+  push:
+    environment: *metadata-safe-environment
+    logging: *metadata-safe-logging
+    labels:
+      io.deep.infrastructure-privacy-profile: metadata-safe-v1
+
+  calls:
+    environment: *metadata-safe-environment
+    logging: *metadata-safe-logging
+    labels:
+      io.deep.infrastructure-privacy-profile: metadata-safe-v1

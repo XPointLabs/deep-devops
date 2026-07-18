@@ -1,0 +1,16 @@
+{
+  "schema": "deep-infrastructure-metadata-privacy-gate.v1",
+  "profile": "metadata-safe-v1",
+  "status": "ok",
+  "productionReady": false,
+  "providerDeletionGuaranteed": false,
+  "p01Commit": "fb310d05a4b8bd5450695ab00569deb62aba1ff1",
+  "p01ExpectationsSha256": "59e854b60901ddcbf2243235bfad5aab23bb6a2bd4e7a545b0c8a02a5ac0e73e",
+  "xnodeCommit": "8b19577ef00f2169116cc08da51e9592089289a9",
+  "topologyServices": 7,
+  "scannedArtifactFiles": 1,
+  "scannedMetricFiles": 1,
+  "breakGlassVerified": false,
+  "findingCount": 0,
+  "findings": []
+}

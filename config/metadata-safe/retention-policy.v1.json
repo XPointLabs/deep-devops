@@ -1,0 +1,77 @@
+{
+  "schema": "deep-infrastructure-metadata-privacy-policy.v1",
+  "profile": "metadata-safe-v1",
+  "featureFlag": "DEEP_INFRA_PRIVACY_PROFILE",
+  "humanOwner": "Mr. X",
+  "clientP01": {
+    "commit": "fb310d05a4b8bd5450695ab00569deb62aba1ff1",
+    "expectationsSha256": "59e854b60901ddcbf2243235bfad5aab23bb6a2bd4e7a545b0c8a02a5ac0e73e"
+  },
+  "components": [
+    {
+      "component": "xray-access",
+      "data": "disabled; no access sink",
+      "retentionHours": 0,
+      "deletionVerification": "generated Xray config has no access property"
+    },
+    {
+      "component": "xray-error",
+      "data": "warning and error class without client identifiers",
+      "retentionHours": 24,
+      "deletionVerification": "bounded local log segments removed by the container runtime"
+    },
+    {
+      "component": "xnode-operational",
+      "data": "warning/error category and aggregate health only",
+      "retentionHours": 24,
+      "deletionVerification": "bounded local log segments and break-glass receipt"
+    },
+    {
+      "component": "compat-services",
+      "data": "startup, health and operational failures; no request body or request path",
+      "retentionHours": 24,
+      "deletionVerification": "bounded local log segments and break-glass receipt"
+    },
+    {
+      "component": "metrics",
+      "data": "aggregate service, status code, error class and bounded route index labels",
+      "retentionHours": 168,
+      "deletionVerification": "time-series expiry plus metric-label lint"
+    },
+    {
+      "component": "sanitized-evidence",
+      "data": "rule IDs, counts, relative paths and policy state only",
+      "retentionHours": 720,
+      "deletionVerification": "evidence scanner and archive lifecycle"
+    },
+    {
+      "component": "provider-push",
+      "data": "provider-controlled delivery metadata outside Deep retention control",
+      "retentionHours": null,
+      "deletionVerification": "provider contract and Mr. X deletion request evidence; no local guarantee"
+    }
+  ],
+  "metricAllowedLabels": [
+    "service",
+    "operation",
+    "status_code",
+    "error_class",
+    "route_index",
+    "transport",
+    "result"
+  ],
+  "breakGlass": {
+    "humanOwner": "Mr. X",
+    "maximumMinutes": 60,
+    "receiptSchema": "deep-metadata-break-glass-receipt.v1",
+    "requireClosedStatus": true,
+    "requireAccessRevoked": true,
+    "requireRawExportDeleted": true,
+    "requireDeletionVerified": true
+  },
+  "keySeparation": {
+    "operationalLogKeyRef": "secretref:deep-ops-log-envelope-key",
+    "evidenceKeyRef": "secretref:deep-sanitized-evidence-envelope-key",
+    "mustDiffer": true
+  }
+}

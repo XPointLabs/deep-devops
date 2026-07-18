@@ -1,0 +1,18 @@
+{
+  "schema": "deep-metadata-break-glass-receipt.v1",
+  "humanOwner": "Mr. X",
+  "status": "closed",
+  "reasonCode": "incident-response",
+  "openedAt": "2030-01-01T00:00:00.000Z",
+  "closedAt": "2030-01-01T00:15:00.000Z",
+  "accessRevoked": true,
+  "rawExportDeleted": true,
+  "deletionVerified": true,
+  "operationalLogKeyRef": "secretref:deep-ops-log-envelope-key",
+  "evidenceKeyRef": "secretref:deep-sanitized-evidence-envelope-key",
+  "containsRawIdentifiers": false,
+  "evidence": {
+    "ticketId": "synthetic-ticket-reference",
+    "deletionCheckId": "synthetic-deletion-check-reference"
+  }
+}

@@ -23,6 +23,7 @@ const summaryPath = path.join(releaseDir, 'release-gate-contract-summary.json');
 
 const scriptNames = [
   'pinned-integration-manifest.mjs',
+  'metadata-privacy-gate.mjs',
   'secret-scan.mjs',
   'artifact-upload-manifest.mjs',
   'artifact-upload-gate.mjs',
@@ -156,6 +157,13 @@ if (commandResults.every(result => result.passed)) {
   runNode(
     ['--test', 'scripts/pinned-integration-manifest.test.mjs'],
     'pinned-integration-manifest:tests'
+  );
+}
+
+if (commandResults.every(result => result.passed)) {
+  runNode(
+    ['--test', 'scripts/metadata-privacy-gate.test.mjs'],
+    'metadata-privacy-gate:tests'
   );
 }
 

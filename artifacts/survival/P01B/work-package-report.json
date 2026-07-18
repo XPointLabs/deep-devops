@@ -1,0 +1,42 @@
+{
+  "workPackage": "P01B",
+  "title": "Infrastructure log/data privacy remediation",
+  "role": "infrastructure privacy/security engineer",
+  "humanOwner": "Mr. X",
+  "baseSha": "3d2e163e354858937c4b6a8bd530e71b1b929dd9",
+  "branch": "survival/w00-p01b-log-privacy",
+  "profile": "metadata-safe-v1",
+  "featureFlag": "DEEP_INFRA_PRIVACY_PROFILE",
+  "baseManifestSha256": "6527338b3e5b888a22fb2cc55323259306e9f41bff69e9554706701a86dc7824",
+  "p01Commit": "fb310d05a4b8bd5450695ab00569deb62aba1ff1",
+  "p01ExpectationsSha256": "59e854b60901ddcbf2243235bfad5aab23bb6a2bd4e7a545b0c8a02a5ac0e73e",
+  "defaultProfileChanged": false,
+  "metadataSafeProfileFailClosed": true,
+  "providerDeletionGuaranteed": false,
+  "focusedTests": {
+    "passed": 11,
+    "failed": 0,
+    "skipped": 0
+  },
+  "strictGate": {
+    "status": "ok",
+    "scannedArtifactFiles": 1,
+    "scannedMetricFiles": 1,
+    "findingCount": 0
+  },
+  "focusedSecretScan": {
+    "scannedEntries": 258,
+    "findingCount": 0
+  },
+  "fullReleaseGate": {
+    "status": "passed",
+    "commands": 49,
+    "secretScanFiles": 236,
+    "productionReadinessChecks": 191
+  },
+  "dockerUpPerformed": false,
+  "networkCallsPerformed": false,
+  "productionReady": false,
+  "independentReviewRequired": true,
+  "pushPerformed": false
+}
