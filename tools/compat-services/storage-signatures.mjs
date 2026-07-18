@@ -354,14 +354,174 @@ export function createPushUnsubscribeSignatureMessage(pubkey, timestamp) {
   return Buffer.from(`UNSUBSCRIBE${String(pubkey ?? '').toLowerCase()}${Number(timestamp)}`);
 }
 
-function createPushV2CanonicalMessage(operation, fields) {
-  let canonical = `deep.push/${operation}/v${pushSignatureVersion}\n`;
-  for (const [name, rawValue] of fields) {
-    const value = String(rawValue ?? '');
-    if (value.length === 0) {
-      throw new TypeError(`${name} is required for push signature v2`);
+function isCanonicalPushV2Pubkey(value) {
+  return typeof value === 'string' && /^05[0-9a-f]{64}$/.test(value);
+}
+
+function isCanonicalPushV2Ed25519(value) {
+  return typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
+}
+
+function isPushV2SafePositiveInteger(value) {
+  return typeof value === 'number' &&
+    Number.isSafeInteger(value) &&
+    value > 0 &&
+    !Object.is(value, -0);
+}
+
+function pushV2NonEmptyStringError(value, name) {
+  return typeof value === 'string' && value.length > 0
+    ? null
+    : `Invalid request: ${name} must be a non-empty string for signature v2`;
+}
+
+function pushV2NamespacesError(namespaces) {
+  if (!Array.isArray(namespaces)) {
+    return 'Invalid request: namespaces must be an array of Int32 JSON numbers for signature v2';
+  }
+
+  if (namespaces.length === 0) {
+    return 'Subscription: namespaces missing or empty';
+  }
+
+  for (let index = 0; index < namespaces.length; index += 1) {
+    const value = namespaces[index];
+    if (typeof value !== 'number' ||
+        !Number.isSafeInteger(value) ||
+        value < -2_147_483_648 ||
+        value > 2_147_483_647 ||
+        Object.is(value, -0)) {
+      return 'Invalid request: namespaces must contain only Int32 JSON numbers for signature v2';
     }
 
+    if (index > 0 && namespaces[index - 1] >= value) {
+      return namespaces[index - 1] === value
+        ? 'Subscription: namespaces contains duplicates'
+        : 'Invalid request: namespaces must be sorted numerically for signature v2';
+    }
+  }
+
+  return null;
+}
+
+export function validatePushRequestV2Wire(request, operation) {
+  if (!request || typeof request !== 'object' || Array.isArray(request)) {
+    return 'Invalid request: expected object';
+  }
+
+  if (request.sig_v !== pushSignatureVersion) {
+    return `Unsupported push signature version: ${String(request.sig_v)}`;
+  }
+
+  if (!isCanonicalPushV2Pubkey(request.pubkey)) {
+    return 'Invalid request: pubkey must be a canonical lowercase 05 session id for signature v2';
+  }
+
+  if (!isCanonicalPushV2Ed25519(request.session_ed25519)) {
+    return 'Invalid request: session_ed25519 must be exactly 64 lowercase hexadecimal characters for signature v2';
+  }
+
+  if (!isPushV2SafePositiveInteger(request.sig_ts)) {
+    return 'Invalid request: sig_ts must be a safe positive integer JSON number for signature v2';
+  }
+
+  for (const [value, name] of [
+    [request.service, 'service'],
+    [request.service_info?.token, 'service_info.token']
+  ]) {
+    const error = pushV2NonEmptyStringError(value, name);
+    if (error) {
+      return error;
+    }
+  }
+
+  if (!request.service_info ||
+      typeof request.service_info !== 'object' ||
+      Array.isArray(request.service_info)) {
+    return 'Invalid request: service_info must be an object for signature v2';
+  }
+
+  if (typeof request.signature !== 'string' ||
+      !decodeHexOrBase64Bytes(request.signature, 64)) {
+    return 'Invalid request: signature must be a 64-byte string encoding for signature v2';
+  }
+
+  const hasSubaccount = Object.hasOwn(request, 'subaccount');
+  const hasSubaccountSignature = Object.hasOwn(request, 'subaccount_sig');
+  if (hasSubaccount !== hasSubaccountSignature) {
+    return 'Invalid request: subaccount and subaccount_sig must be provided together for signature v2';
+  }
+
+  if (hasSubaccount &&
+      (typeof request.subaccount !== 'string' ||
+       !decodeHexOrBase64Bytes(request.subaccount, 36) ||
+       typeof request.subaccount_sig !== 'string' ||
+       !decodeHexOrBase64Bytes(request.subaccount_sig, 64))) {
+    return 'Invalid request: subaccount fields must use exact string encodings for signature v2';
+  }
+
+  if (operation === 'push_subscribe') {
+    if (typeof request.data !== 'boolean') {
+      return 'Invalid request: data must be a boolean for signature v2';
+    }
+
+    if (typeof request.enc_key !== 'string' ||
+        !decodeHexOrBase64Bytes(request.enc_key, 32)) {
+      return 'Invalid request: enc_key must be a 32-byte string encoding for signature v2';
+    }
+
+    for (const [value, name] of [
+      [request.app_id, 'app_id'],
+      [request.app_version, 'app_version']
+    ]) {
+      const error = pushV2NonEmptyStringError(value, name);
+      if (error) {
+        return error;
+      }
+    }
+
+    return pushV2NamespacesError(request.namespaces);
+  }
+
+  if (operation !== 'push_unsubscribe') {
+    return `Unsupported push signature v2 operation: ${String(operation)}`;
+  }
+
+  return null;
+}
+
+function requirePushV2NonEmptyString(value, name) {
+  const error = pushV2NonEmptyStringError(value, name);
+  if (error) {
+    throw new TypeError(error);
+  }
+
+  return value;
+}
+
+function requirePushV2SafePositiveInteger(value, name) {
+  if (!isPushV2SafePositiveInteger(value)) {
+    throw new TypeError(
+      `${name} must be a safe positive integer number for push signature v2`
+    );
+  }
+
+  return value;
+}
+
+function requirePushV2Namespaces(namespaces) {
+  const error = pushV2NamespacesError(namespaces);
+  if (error) {
+    throw new TypeError(error);
+  }
+
+  return namespaces;
+}
+
+function createPushV2CanonicalMessage(operation, fields) {
+  let canonical = `deep.push/${operation}/v${pushSignatureVersion}\n`;
+  for (const [name, value] of fields) {
+    requirePushV2NonEmptyString(value, name);
     canonical += `${name}=${Buffer.byteLength(value, 'utf8')}:${value}\n`;
   }
 
@@ -379,17 +539,29 @@ export function createPushSubscribeSignatureMessageV2({
   appId,
   appVersion
 }) {
-  const normalizedNamespaces = Array.isArray(namespaces)
-    ? namespaces.map(value => Number(value)).sort((left, right) => left - right).join(',')
-    : '';
+  if (!isCanonicalPushV2Pubkey(pubkey)) {
+    throw new TypeError(
+      'pubkey must be a canonical lowercase 05 session id for push signature v2'
+    );
+  }
+  requirePushV2SafePositiveInteger(timestamp, 'sig_ts');
+  if (typeof wantData !== 'boolean') {
+    throw new TypeError('want_data must be a boolean for push signature v2');
+  }
+  requirePushV2Namespaces(namespaces);
+  if (typeof encryptionKey !== 'string' ||
+      !decodeHexOrBase64Bytes(encryptionKey, 32)) {
+    throw new TypeError('enc_key must be a 32-byte string encoding for push signature v2');
+  }
+
   return createPushV2CanonicalMessage('subscribe', [
     ['pubkey', pubkey],
-    ['sig_ts', Number(timestamp)],
+    ['sig_ts', `${timestamp}`],
     ['service', service],
     ['device_token', deviceToken],
     ['enc_key', encryptionKey],
     ['want_data', wantData ? '1' : '0'],
-    ['namespaces', normalizedNamespaces],
+    ['namespaces', namespaces.join(',')],
     ['app_id', appId],
     ['app_version', appVersion]
   ]);
@@ -401,9 +573,16 @@ export function createPushUnsubscribeSignatureMessageV2({
   service,
   deviceToken
 }) {
+  if (!isCanonicalPushV2Pubkey(pubkey)) {
+    throw new TypeError(
+      'pubkey must be a canonical lowercase 05 session id for push signature v2'
+    );
+  }
+  requirePushV2SafePositiveInteger(timestamp, 'sig_ts');
+
   return createPushV2CanonicalMessage('unsubscribe', [
     ['pubkey', pubkey],
-    ['sig_ts', Number(timestamp)],
+    ['sig_ts', `${timestamp}`],
     ['service', service],
     ['device_token', deviceToken]
   ]);

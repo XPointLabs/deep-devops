@@ -8,6 +8,7 @@ import {
   decodeHexOrBase64Bytes,
   pushSignatureVersion,
   storageSubaccountAccess,
+  validatePushRequestV2Wire,
   verifyStorageSignature
 } from './storage-signatures.mjs';
 
@@ -980,21 +981,28 @@ function validatePushRequestBase(request) {
     return invalidPushRequest('Invalid request: expected object');
   }
 
-  const pubkey = String(request.pubkey ?? '');
-  const service = String(request.service ?? '');
+  const isV2 = request.sig_v === pushSignatureVersion;
+  const pubkey = isV2 ? request.pubkey : String(request.pubkey ?? '');
+  const service = isV2 ? request.service : String(request.service ?? '');
   if (!pubkey || !service) {
     return invalidPushRequest('Invalid request: pubkey and service are required');
   }
 
   if (pubkey.startsWith('05')) {
-    const sessionEd25519 = String(request.session_ed25519 ?? '');
+    const sessionEd25519 = isV2
+      ? request.session_ed25519
+      : String(request.session_ed25519 ?? '');
     if (!sessionEd25519 || !isHexOrBase64Bytes(sessionEd25519, 32)) {
       return invalidPushRequest();
     }
   }
 
-  const subaccount = String(request.subaccount ?? '');
-  const subaccountSig = String(request.subaccount_sig ?? '');
+  const subaccount = isV2
+    ? (Object.hasOwn(request, 'subaccount') ? request.subaccount : '')
+    : String(request.subaccount ?? '');
+  const subaccountSig = isV2
+    ? (Object.hasOwn(request, 'subaccount_sig') ? request.subaccount_sig : '')
+    : String(request.subaccount_sig ?? '');
   const hasSubaccount = subaccount.length > 0;
   const hasSubaccountSig = subaccountSig.length > 0;
   if (hasSubaccount !== hasSubaccountSig) {
@@ -1009,12 +1017,12 @@ function validatePushRequestBase(request) {
     return invalidPushRequest();
   }
 
-  const sigTs = Number(request.sig_ts);
+  const sigTs = isV2 ? request.sig_ts : Number(request.sig_ts);
   if (!Number.isFinite(sigTs) || sigTs <= 0) {
     return invalidPushRequest();
   }
 
-  const signature = String(request.signature ?? '');
+  const signature = isV2 ? request.signature : String(request.signature ?? '');
   if (!signature || !isHexOrBase64Bytes(signature, 64)) {
     return invalidPushRequest();
   }
@@ -1023,7 +1031,7 @@ function validatePushRequestBase(request) {
     return invalidPushRequest();
   }
 
-  const token = String(request.service_info.token ?? '');
+  const token = isV2 ? request.service_info.token : String(request.service_info.token ?? '');
   if (!token) {
     return invalidPushRequest();
   }
@@ -1055,6 +1063,21 @@ function validatePushSignatureAge(sigTs, maxPastAgeSeconds, maxFutureAgeSeconds,
   return null;
 }
 
+function validatePushRequestVersionAndWire(request, operation) {
+  const isV2 = request?.sig_v === pushSignatureVersion;
+  const isLegacy = request?.sig_v === undefined || request?.sig_v === 1;
+  if (!isV2 && !isLegacy) {
+    return invalidPushRequest(`Unsupported push signature version: ${String(request?.sig_v)}`);
+  }
+
+  if (!isV2) {
+    return null;
+  }
+
+  const error = validatePushRequestV2Wire(request, operation);
+  return error ? invalidPushRequest(error) : null;
+}
+
 function verifyPushRequestSignature(request, operation) {
   const isV2 = request.sig_v === pushSignatureVersion;
   const isLegacy = request.sig_v === undefined || request.sig_v === 1;
@@ -1062,8 +1085,11 @@ function verifyPushRequestSignature(request, operation) {
     return invalidPushRequest(`Unsupported push signature version: ${String(request.sig_v)}`);
   }
 
-  if (isV2 && !Number.isSafeInteger(Number(request.sig_ts))) {
-    return invalidPushRequest('Invalid request: sig_ts must be a safe integer for signature v2');
+  if (isV2 &&
+      (typeof request.sig_ts !== 'number' ||
+       !Number.isSafeInteger(request.sig_ts) ||
+       request.sig_ts <= 0)) {
+    return invalidPushRequest('Invalid request: sig_ts must be a safe positive integer number for signature v2');
   }
 
   if (isV2 && operation === 'push_subscribe' &&
@@ -1098,6 +1124,11 @@ function verifyPushRequestSignature(request, operation) {
 }
 
 function processPushSubscribeRequest(request) {
+  const wireError = validatePushRequestVersionAndWire(request, 'push_subscribe');
+  if (wireError) {
+    return wireError;
+  }
+
   const base = validatePushRequestBase(request);
   if (!base.ok) {
     return base;
@@ -1118,7 +1149,9 @@ function processPushSubscribeRequest(request) {
     return invalidPushRequest();
   }
 
-  const encKey = String(request.enc_key ?? '');
+  const encKey = request.sig_v === pushSignatureVersion
+    ? request.enc_key
+    : String(request.enc_key ?? '');
   if (!encKey || !isHexOrBase64Bytes(encKey, 32)) {
     return invalidPushRequest();
   }
@@ -1189,6 +1222,11 @@ function processPushSubscribeRequest(request) {
 }
 
 function processPushUnsubscribeRequest(request) {
+  const wireError = validatePushRequestVersionAndWire(request, 'push_unsubscribe');
+  if (wireError) {
+    return wireError;
+  }
+
   const base = validatePushRequestBase(request);
   if (!base.ok) {
     return base;

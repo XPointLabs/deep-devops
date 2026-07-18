@@ -246,6 +246,41 @@ function createSignedPushUnsubscribePayloadV2(identity, overrides = {}) {
   return request;
 }
 
+function createOldCoercivePushV2Message(operation, fields) {
+  let canonical = `deep.push/${operation}/v2\n`;
+  for (const [name, rawValue] of fields) {
+    const value = String(rawValue ?? '');
+    canonical += `${name}=${Buffer.byteLength(value, 'utf8')}:${value}\n`;
+  }
+  return Buffer.from(canonical, 'utf8');
+}
+
+function signOldCoerciveSubscribeV2(identity, request) {
+  const namespaces = Array.isArray(request.namespaces)
+    ? request.namespaces.map(value => Number(value)).sort((left, right) => left - right).join(',')
+    : '';
+  return identity.signMessage(createOldCoercivePushV2Message('subscribe', [
+    ['pubkey', request.pubkey],
+    ['sig_ts', Number(request.sig_ts)],
+    ['service', request.service],
+    ['device_token', request.service_info?.token],
+    ['enc_key', request.enc_key],
+    ['want_data', request.data ? '1' : '0'],
+    ['namespaces', namespaces],
+    ['app_id', request.app_id],
+    ['app_version', request.app_version]
+  ]));
+}
+
+function signOldCoerciveUnsubscribeV2(identity, request) {
+  return identity.signMessage(createOldCoercivePushV2Message('unsubscribe', [
+    ['pubkey', request.pubkey],
+    ['sig_ts', Number(request.sig_ts)],
+    ['service', request.service],
+    ['device_token', request.service_info?.token]
+  ]));
+}
+
 test('push signature v2 golden fixture pins UTF-8 canonical bytes and Ed25519 signatures', async () => {
   const fixtureBytes = await readFile(pushV2FixturePath);
   assert.equal(createHash('sha256').update(fixtureBytes).digest('hex'), pushV2FixtureSha256);
@@ -267,7 +302,7 @@ test('push signature v2 golden fixture pins UTF-8 canonical bytes and Ed25519 si
           pubkey: request.pubkey,
           timestamp: request.sig_ts,
           wantData: request.data,
-          namespaces: goldenCase.unsorted_namespaces_for_canonicalizer,
+          namespaces: request.namespaces,
           service: request.service,
           deviceToken: request.service_info.token,
           encryptionKey: request.enc_key,
@@ -281,6 +316,24 @@ test('push signature v2 golden fixture pins UTF-8 canonical bytes and Ed25519 si
           deviceToken: request.service_info.token
         });
 
+    if (goldenCase.operation === 'subscribe') {
+      assert.throws(
+        () => createPushSubscribeSignatureMessageV2({
+          pubkey: request.pubkey,
+          timestamp: request.sig_ts,
+          wantData: request.data,
+          namespaces: goldenCase.unsorted_namespaces_for_canonicalizer,
+          service: request.service,
+          deviceToken: request.service_info.token,
+          encryptionKey: request.enc_key,
+          appId: request.app_id,
+          appVersion: request.app_version
+        }),
+        /sorted numerically/,
+        `${goldenCase.id} must reject noncanonical namespace order`
+      );
+    }
+
     assert.equal(message.toString('utf8'), goldenCase.canonical, goldenCase.id);
     assert.equal(message.toString('hex'), goldenCase.canonical_hex, goldenCase.id);
     assert.equal(message.length, goldenCase.canonical_utf8_length, goldenCase.id);
@@ -292,6 +345,61 @@ test('push signature v2 golden fixture pins UTF-8 canonical bytes and Ed25519 si
       signature: request.signature,
       message
     }), true, goldenCase.id);
+  }
+});
+
+test('push v2 canonicalizer rejects coercive and noncanonical inputs', () => {
+  const validSubscribe = {
+    pubkey: pushSigningIdentity.sessionPubkey,
+    timestamp: currentSigTs(),
+    wantData: true,
+    namespaces: [0, 10],
+    service: 'apns',
+    deviceToken: 'canonicalizer-token',
+    encryptionKey: validEncKey,
+    appId: 'network.deep.app',
+    appVersion: '1.0.0'
+  };
+  const invalidSubscribe = [
+    { ...validSubscribe, timestamp: String(validSubscribe.timestamp) },
+    { ...validSubscribe, pubkey: validSubscribe.pubkey.toUpperCase() },
+    { ...validSubscribe, wantData: 1 },
+    { ...validSubscribe, namespaces: ['0', 10] },
+    { ...validSubscribe, namespaces: [null, 10] },
+    { ...validSubscribe, namespaces: [0, '0'] },
+    { ...validSubscribe, namespaces: [0, 10.5] },
+    { ...validSubscribe, namespaces: [0, Number.MAX_SAFE_INTEGER + 1] },
+    { ...validSubscribe, namespaces: [-2_147_483_649, 0] },
+    { ...validSubscribe, namespaces: [0, 2_147_483_648] },
+    { ...validSubscribe, namespaces: [10, 0] },
+    { ...validSubscribe, namespaces: [0, 0] },
+    { ...validSubscribe, service: 1 },
+    { ...validSubscribe, deviceToken: 12345 },
+    { ...validSubscribe, encryptionKey: 12345 },
+    { ...validSubscribe, appId: 1 },
+    { ...validSubscribe, appVersion: 1 }
+  ];
+  for (const input of invalidSubscribe) {
+    assert.throws(() => createPushSubscribeSignatureMessageV2(input), TypeError);
+  }
+  assert.ok(Buffer.isBuffer(createPushSubscribeSignatureMessageV2({
+    ...validSubscribe,
+    namespaces: [-2_147_483_648, 0, 2_147_483_647]
+  })));
+
+  const validUnsubscribe = {
+    pubkey: pushSigningIdentity.sessionPubkey,
+    timestamp: currentSigTs(),
+    service: 'apns',
+    deviceToken: 'canonicalizer-token'
+  };
+  for (const input of [
+    { ...validUnsubscribe, timestamp: String(validUnsubscribe.timestamp) },
+    { ...validUnsubscribe, pubkey: validUnsubscribe.pubkey.toUpperCase() },
+    { ...validUnsubscribe, service: 1 },
+    { ...validUnsubscribe, deviceToken: 12345 }
+  ]) {
+    assert.throws(() => createPushUnsubscribeSignatureMessageV2(input), TypeError);
   }
 });
 
@@ -1123,6 +1231,11 @@ test('push v2 dispatch binds every field, preserves state on tamper, and isolate
 
     const persistedBeforeSubscribeTamper = await readFile(path.join(stateDir, 'push.json'), 'utf8');
     const flipLastHex = value => value.slice(0, -1) + (value.endsWith('0') ? '1' : '0');
+    const oldSignedSubscribe = overrides => {
+      const payload = { ...valid, ...overrides };
+      payload.signature = signOldCoerciveSubscribeV2(pushSigningIdentity, payload);
+      return payload;
+    };
     const subscribeTamper = [
       { ...valid, pubkey: flipLastHex(valid.pubkey) },
       { ...valid, session_ed25519: flipLastHex(valid.session_ed25519) },
@@ -1136,6 +1249,20 @@ test('push v2 dispatch binds every field, preserves state on tamper, and isolate
       { ...valid, app_version: `${valid.app_version}.tampered` },
       { ...valid, signature: invalidateSignature(valid.signature) },
       { ...valid, sig_v: 3 },
+      { ...valid, sig_v: '2' },
+      { ...valid, sig_v: 1 },
+      oldSignedSubscribe({ sig_ts: String(valid.sig_ts) }),
+      oldSignedSubscribe({ namespaces: ['0', 10] }),
+      oldSignedSubscribe({ namespaces: [null, 10] }),
+      oldSignedSubscribe({ namespaces: [0, '0'] }),
+      oldSignedSubscribe({ namespaces: [0, 10.5] }),
+      oldSignedSubscribe({ namespaces: [0, Number.MAX_SAFE_INTEGER + 1] }),
+      oldSignedSubscribe({ namespaces: [-2_147_483_649, 0] }),
+      oldSignedSubscribe({ namespaces: [0, 2_147_483_648] }),
+      oldSignedSubscribe({ service_info: { token: 12345 } }),
+      oldSignedSubscribe({ pubkey: valid.pubkey.toUpperCase() }),
+      oldSignedSubscribe({ session_ed25519: valid.session_ed25519.toUpperCase() }),
+      oldSignedSubscribe({ data: 1 }),
       createSignedPushSubscribePayload(pushSigningIdentity, {
         service_info: { token: 'no-v2-to-legacy-fallback-dedicated' },
         app_id: valid.app_id,
@@ -1143,11 +1270,15 @@ test('push v2 dispatch binds every field, preserves state on tamper, and isolate
         sig_v: 2
       })
     ];
-    for (const payload of subscribeTamper) {
+    for (const [index, payload] of subscribeTamper.entries()) {
       const response = await post('subscribe', payload);
       assert.equal(response.status, 400);
+      assert.equal(
+        await readFile(path.join(stateDir, 'push.json'), 'utf8'),
+        persistedBeforeSubscribeTamper,
+        `subscribe adversarial vector ${index} must not mutate persisted state`
+      );
     }
-    assert.equal(await readFile(path.join(stateDir, 'push.json'), 'utf8'), persistedBeforeSubscribeTamper);
 
     const afterSubscribeTamper = await list();
     assert.deepEqual(
@@ -1159,6 +1290,11 @@ test('push v2 dispatch binds every field, preserves state on tamper, and isolate
       service_info: { token: valid.service_info.token }
     });
     const persistedBeforeUnsubscribeTamper = await readFile(path.join(stateDir, 'push.json'), 'utf8');
+    const oldSignedUnsubscribe = overrides => {
+      const payload = { ...validUnsubscribe, ...overrides };
+      payload.signature = signOldCoerciveUnsubscribeV2(pushSigningIdentity, payload);
+      return payload;
+    };
     const unsubscribeTamper = [
       { ...validUnsubscribe, pubkey: flipLastHex(validUnsubscribe.pubkey) },
       { ...validUnsubscribe, session_ed25519: flipLastHex(validUnsubscribe.session_ed25519) },
@@ -1170,16 +1306,28 @@ test('push v2 dispatch binds every field, preserves state on tamper, and isolate
       },
       { ...validUnsubscribe, signature: invalidateSignature(validUnsubscribe.signature) },
       { ...validUnsubscribe, sig_v: 0 },
+      { ...validUnsubscribe, sig_v: '2' },
+      { ...validUnsubscribe, sig_v: 1 },
+      oldSignedUnsubscribe({ sig_ts: String(validUnsubscribe.sig_ts) }),
+      oldSignedUnsubscribe({ service_info: { token: 12345 } }),
+      oldSignedUnsubscribe({ pubkey: validUnsubscribe.pubkey.toUpperCase() }),
+      oldSignedUnsubscribe({
+        session_ed25519: validUnsubscribe.session_ed25519.toUpperCase()
+      }),
       createSignedPushUnsubscribePayload(pushSigningIdentity, {
         service_info: { token: valid.service_info.token },
         sig_v: 2
       })
     ];
-    for (const payload of unsubscribeTamper) {
+    for (const [index, payload] of unsubscribeTamper.entries()) {
       const response = await post('unsubscribe', payload);
       assert.equal(response.status, 400);
+      assert.equal(
+        await readFile(path.join(stateDir, 'push.json'), 'utf8'),
+        persistedBeforeUnsubscribeTamper,
+        `unsubscribe adversarial vector ${index} must not mutate persisted state`
+      );
     }
-    assert.equal(await readFile(path.join(stateDir, 'push.json'), 'utf8'), persistedBeforeUnsubscribeTamper);
     assert.equal((await list()).subscriptions.length, 3);
 
     const unsubscribeResponse = await post('unsubscribe', validUnsubscribe);

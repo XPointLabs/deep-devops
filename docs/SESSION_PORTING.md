@@ -88,6 +88,12 @@ Push:
 - exact `sig_v === 2` dispatch to the LF-terminated, UTF-8 byte-length-prefixed
   `deep.push/{subscribe|unsubscribe}/v2` payload; absent/`1` is legacy compatibility only,
   unknown versions fail closed, and failed v2 verification never falls back to legacy,
+- signature-v2 wire fields are validated before canonicalization: timestamps are safe positive
+  integer JSON numbers, Session identities are canonical lowercase hex, signed strings retain
+  their exact JSON string type, `data` is boolean, and subscribe namespaces are sorted unique
+  Int32 JSON numbers (`-2147483648` through `2147483647`),
+- the signature-v2 canonicalizer independently rejects coercive, unsorted, duplicate, or
+  out-of-domain inputs instead of normalizing them,
 - cross-runtime golden vectors in `tools/fixtures/push-signature-v2.golden.json`,
 - provider dispatch success/failure recording,
 - delivery dedupe and persistence,
