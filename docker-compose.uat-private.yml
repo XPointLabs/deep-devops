@@ -1,0 +1,258 @@
+name: deep-i01b-private-uat
+
+x-router-build: &router-build
+  context: ${I01B_PRIVATE_UAT_XNODE_DIR:-../xnode}
+  dockerfile: ${I01B_PRIVATE_UAT_XNODE_DOCKERFILE:-../deep-devops/docker/xnode-xray.Dockerfile}
+  args:
+    SDK_IMAGE: mcr.microsoft.com/dotnet/sdk:10.0
+    RUNTIME_IMAGE: mcr.microsoft.com/dotnet/aspnet:10.0
+    PROJECT: src/XNode/XNode.csproj
+    APP_DLL: XNode.dll
+    XRAY_VERSION: ${I01B_PRIVATE_UAT_XRAY_VERSION:-v26.3.27}
+
+x-router-environment: &router-environment
+  DOTNET_ENVIRONMENT: UAT
+  ASPNETCORE_ENVIRONMENT: UAT
+  ASPNETCORE_URLS: http://0.0.0.0:8080;http://0.0.0.0:8081
+  Node__ApiListenUrl: http://0.0.0.0:8080
+  Node__PeerRpcListenUrl: http://0.0.0.0:8081
+  Node__Ed25519PrivateKeyPath: /run/secrets/i01b-private-uat-node-ed25519
+  Node__Network: uat
+  Node__PublicPort: "443"
+  Node__PublicPeerRpcPort: "8081"
+  Runtime__BootstrapFromStorage: "false"
+  Runtime__RequireSignedRelayContacts: "true"
+  Runtime__EnablePrivatePeerEndpoints: "true"
+  Runtime__PrivatePeerNetworkIdentity: uat
+  Runtime__AllowPublicPeerEndpoints: "false"
+  Runtime__PrivatePeerEndpointAllowlist__0__RouterId: ${I01B_PRIVATE_UAT_NODE_1_ROUTER_ID:?REQUIRED fresh I01B private UAT node 1 router identity}
+  Runtime__PrivatePeerEndpointAllowlist__0__IpAddress: 172.30.81.11
+  Runtime__PrivatePeerEndpointAllowlist__0__Port: "8081"
+  Runtime__PrivatePeerEndpointAllowlist__0__Path: /api/peer/onion
+  Runtime__PrivatePeerEndpointAllowlist__1__RouterId: ${I01B_PRIVATE_UAT_NODE_2_ROUTER_ID:?REQUIRED fresh I01B private UAT node 2 router identity}
+  Runtime__PrivatePeerEndpointAllowlist__1__IpAddress: 172.30.81.12
+  Runtime__PrivatePeerEndpointAllowlist__1__Port: "8081"
+  Runtime__PrivatePeerEndpointAllowlist__1__Path: /api/peer/onion
+  Runtime__PrivatePeerEndpointAllowlist__2__RouterId: ${I01B_PRIVATE_UAT_NODE_3_ROUTER_ID:?REQUIRED fresh I01B private UAT node 3 router identity}
+  Runtime__PrivatePeerEndpointAllowlist__2__IpAddress: 172.30.81.13
+  Runtime__PrivatePeerEndpointAllowlist__2__Port: "8081"
+  Runtime__PrivatePeerEndpointAllowlist__2__Path: /api/peer/onion
+  RegistryBootstrap__BaseUrl: ""
+  RegistryHeartbeat__Enabled: "false"
+  StorageRpc__BaseUrl: http://storage:8080
+  Vless__Enabled: "true"
+  Vless__MockProcess: "false"
+  Vless__XrayExecutablePath: /usr/local/bin/xray
+  Vless__GeneratedConfigPath: /tmp/deep/xray.generated.json
+  Vless__WorkingDirectory: /tmp/deep/xray
+  Vless__InboundListenHost: 0.0.0.0
+  Vless__InboundListenPort: "443"
+  Vless__PublicPort: "443"
+  Vless__TransportMode: Tcp
+
+x-router-healthcheck: &router-healthcheck
+  test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health/ready >/dev/null"]
+  interval: 5s
+  timeout: 3s
+  retries: 30
+  start_period: 20s
+
+services:
+  xnode-1:
+    build: *router-build
+    environment:
+      <<: *router-environment
+      Node__DataDirectory: /var/lib/deep/i01b-private-uat/xnode-1
+      Node__RouterId: ${I01B_PRIVATE_UAT_NODE_1_ROUTER_ID:?REQUIRED fresh I01B private UAT node 1 router identity}
+      Node__PublicHost: 172.30.81.11
+      Node__PublicIp: 172.30.81.11
+      Node__PublicPeerRpcEndpoint: http://172.30.81.11:8081/api/peer/onion
+      Vless__PublicHost: 172.30.81.11
+    secrets:
+      - source: i01b-private-uat-node-1-ed25519
+        target: i01b-private-uat-node-ed25519
+        mode: 0400
+    volumes:
+      - i01b-private-uat-xnode-1-state:/var/lib/deep/i01b-private-uat/xnode-1
+    ports:
+      - "127.0.0.1:29311:8080"
+    networks:
+      i01b-private-uat:
+        ipv4_address: 172.30.81.11
+    depends_on:
+      storage:
+        condition: service_healthy
+    healthcheck: *router-healthcheck
+    labels:
+      io.deep.i01b.public-peer-authorization: DenyAll
+
+  xnode-2:
+    build: *router-build
+    environment:
+      <<: *router-environment
+      Node__DataDirectory: /var/lib/deep/i01b-private-uat/xnode-2
+      Node__RouterId: ${I01B_PRIVATE_UAT_NODE_2_ROUTER_ID:?REQUIRED fresh I01B private UAT node 2 router identity}
+      Node__PublicHost: 172.30.81.12
+      Node__PublicIp: 172.30.81.12
+      Node__PublicPeerRpcEndpoint: http://172.30.81.12:8081/api/peer/onion
+      Vless__PublicHost: 172.30.81.12
+    secrets:
+      - source: i01b-private-uat-node-2-ed25519
+        target: i01b-private-uat-node-ed25519
+        mode: 0400
+    volumes:
+      - i01b-private-uat-xnode-2-state:/var/lib/deep/i01b-private-uat/xnode-2
+    ports:
+      - "127.0.0.1:29312:8080"
+    networks:
+      i01b-private-uat:
+        ipv4_address: 172.30.81.12
+    depends_on:
+      storage:
+        condition: service_healthy
+    healthcheck: *router-healthcheck
+    labels:
+      io.deep.i01b.public-peer-authorization: DenyAll
+
+  xnode-3:
+    build: *router-build
+    environment:
+      <<: *router-environment
+      Node__DataDirectory: /var/lib/deep/i01b-private-uat/xnode-3
+      Node__RouterId: ${I01B_PRIVATE_UAT_NODE_3_ROUTER_ID:?REQUIRED fresh I01B private UAT node 3 router identity}
+      Node__PublicHost: 172.30.81.13
+      Node__PublicIp: 172.30.81.13
+      Node__PublicPeerRpcEndpoint: http://172.30.81.13:8081/api/peer/onion
+      Vless__PublicHost: 172.30.81.13
+    secrets:
+      - source: i01b-private-uat-node-3-ed25519
+        target: i01b-private-uat-node-ed25519
+        mode: 0400
+    volumes:
+      - i01b-private-uat-xnode-3-state:/var/lib/deep/i01b-private-uat/xnode-3
+    ports:
+      - "127.0.0.1:29313:8080"
+    networks:
+      i01b-private-uat:
+        ipv4_address: 172.30.81.13
+    depends_on:
+      storage:
+        condition: service_healthy
+    healthcheck: *router-healthcheck
+    labels:
+      io.deep.i01b.public-peer-authorization: DenyAll
+
+  storage:
+    build:
+      context: .
+      dockerfile: docker/storage-service.Dockerfile
+    environment:
+      PORT: "8080"
+      SERVICE_NAME: deep-i01b-private-uat-storage
+      COMPAT_STATE_DIR: /var/lib/deep/i01b-private-uat/storage
+      PUSH_COMPAT_NOTIFY_URL: http://push:8080
+    volumes:
+      - i01b-private-uat-storage-state:/var/lib/deep/i01b-private-uat/storage
+    networks:
+      - i01b-private-uat
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  file:
+    build:
+      context: .
+      dockerfile: docker/file-service.Dockerfile
+    environment:
+      PORT: "8080"
+      SERVICE_NAME: deep-i01b-private-uat-file
+      COMPAT_STATE_DIR: /var/lib/deep/i01b-private-uat/file
+    volumes:
+      - i01b-private-uat-file-state:/var/lib/deep/i01b-private-uat/file
+    ports:
+      - "127.0.0.1:29101:8080"
+    networks:
+      - i01b-private-uat
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  push:
+    build:
+      context: .
+      dockerfile: docker/push-service.Dockerfile
+    environment:
+      PORT: "8080"
+      SERVICE_NAME: deep-i01b-private-uat-push
+      COMPAT_STATE_DIR: /var/lib/deep/i01b-private-uat/push
+    volumes:
+      - i01b-private-uat-push-state:/var/lib/deep/i01b-private-uat/push
+    ports:
+      - "127.0.0.1:29102:8080"
+    networks:
+      - i01b-private-uat
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  calls:
+    build:
+      context: .
+      dockerfile: docker/calls-service.Dockerfile
+    environment:
+      PORT: "8080"
+      SERVICE_NAME: deep-i01b-private-uat-calls
+      CALLS_STATE_DIR: /var/lib/deep/i01b-private-uat/calls
+    volumes:
+      - i01b-private-uat-calls-state:/var/lib/deep/i01b-private-uat/calls
+    ports:
+      - "127.0.0.1:29103:8080"
+    networks:
+      - i01b-private-uat
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+networks:
+  i01b-private-uat:
+    name: deep-i01b-private-uat-isolated
+    internal: true
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.81.0/24
+
+volumes:
+  i01b-private-uat-xnode-1-state:
+    name: deep-i01b-private-uat-xnode-1-state
+  i01b-private-uat-xnode-2-state:
+    name: deep-i01b-private-uat-xnode-2-state
+  i01b-private-uat-xnode-3-state:
+    name: deep-i01b-private-uat-xnode-3-state
+  i01b-private-uat-storage-state:
+    name: deep-i01b-private-uat-storage-state
+  i01b-private-uat-file-state:
+    name: deep-i01b-private-uat-file-state
+  i01b-private-uat-push-state:
+    name: deep-i01b-private-uat-push-state
+  i01b-private-uat-calls-state:
+    name: deep-i01b-private-uat-calls-state
+
+secrets:
+  i01b-private-uat-node-1-ed25519:
+    name: deep-i01b-private-uat-node-1-ed25519
+    file: ${I01B_PRIVATE_UAT_NODE_1_ED25519_SECRET_FILE:?REQUIRED fresh I01B private UAT node 1 Ed25519 secret file}
+  i01b-private-uat-node-2-ed25519:
+    name: deep-i01b-private-uat-node-2-ed25519
+    file: ${I01B_PRIVATE_UAT_NODE_2_ED25519_SECRET_FILE:?REQUIRED fresh I01B private UAT node 2 Ed25519 secret file}
+  i01b-private-uat-node-3-ed25519:
+    name: deep-i01b-private-uat-node-3-ed25519
+    file: ${I01B_PRIVATE_UAT_NODE_3_ED25519_SECRET_FILE:?REQUIRED fresh I01B private UAT node 3 Ed25519 secret file}
