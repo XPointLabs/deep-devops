@@ -448,6 +448,48 @@ test('canonical producer Git inspection rejects replace refs and grafts', async 
   );
 });
 
+test('canonical Git subprocesses strip ambient case-insensitive GIT_TRACE writes', async t => {
+  const fixture = await createFixture(t);
+  const repository = path.join(fixture.sourceRoot, 'deep-protocol');
+  const tracePath = path.join(fixture.root, 'forbidden-ambient-trace.json');
+  const modulePath = path.join(
+    path.dirname(fileURLToPath(import.meta.url)),
+    'pinned-integration-manifest.mjs'
+  );
+  const environment = {
+    ...process.env,
+    gIt_TrAcE2_EvEnT: tracePath,
+    GIT_TRACE: tracePath,
+    GIT_DIR: path.join(fixture.root, 'wrong-git-dir'),
+    GIT_WORK_TREE: fixture.root,
+    GIT_OBJECT_DIRECTORY: path.join(fixture.root, 'wrong-object-directory'),
+    GIT_ALTERNATE_OBJECT_DIRECTORIES: path.join(fixture.root, 'wrong-alternates'),
+    GIT_REPLACE_REF_BASE: 'refs/heads/',
+    GIT_CONFIG_PARAMETERS: "'core.fsmonitor=true'",
+    GIT_CONFIG_COUNT: '1',
+    GIT_CONFIG_KEY_0: 'core.hooksPath',
+    GIT_CONFIG_VALUE_0: fixture.root
+  };
+  const result = spawnSync(
+    process.execPath,
+    [
+      '--input-type=module',
+      '--eval',
+      'const m=await import(process.argv[1]);m.assertCanonicalGitRepository(process.argv[2]);',
+      pathToFileURL(modulePath).href,
+      repository
+    ],
+    {
+      cwd: fixture.root,
+      env: environment,
+      encoding: 'utf8',
+      windowsHide: true
+    }
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(existsSync(tracePath), false);
+});
+
 test('dedicated W1/W2 closure gate fails closed when the producer source map is absent', () => {
   const environment = { ...process.env };
   delete environment.DEEP_W1W2_PRODUCER_SOURCE_MAP;

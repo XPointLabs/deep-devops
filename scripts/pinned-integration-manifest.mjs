@@ -87,24 +87,8 @@ function normalizeRemote(value) {
 
 function canonicalGitEnvironment() {
   const environment = { ...process.env };
-  const forbidden = new Set([
-    'GIT_DIR',
-    'GIT_WORK_TREE',
-    'GIT_INDEX_FILE',
-    'GIT_OBJECT_DIRECTORY',
-    'GIT_ALTERNATE_OBJECT_DIRECTORIES',
-    'GIT_REPLACE_REF_BASE',
-    'GIT_COMMON_DIR',
-    'GIT_NAMESPACE',
-    'GIT_CONFIG',
-    'GIT_CONFIG_COUNT',
-    'GIT_CONFIG_GLOBAL',
-    'GIT_CONFIG_SYSTEM'
-  ]);
   for (const key of Object.keys(environment)) {
-    if (forbidden.has(key)
-        || key.startsWith('GIT_CONFIG_KEY_')
-        || key.startsWith('GIT_CONFIG_VALUE_')) {
+    if (key.toUpperCase().startsWith('GIT_')) {
       delete environment[key];
     }
   }
@@ -830,7 +814,7 @@ export function validateDependencyClosureEvidence(value, validated) {
       || value.verification.strictProducerGitArtifacts.verified !== 17
       || value.verification.strictProducerGitArtifacts.failed !== 0
       || value.verification.strictProducerGitArtifacts.sourceMapCommitted !== false
-      || value.verification.focusedManifestTests.passed !== 20
+      || value.verification.focusedManifestTests.passed !== 21
       || value.verification.focusedManifestTests.failed !== 0
       || value.verification.focusedManifestTests.skipped !== 0
       || value.verification.metadataPrivacyGateTests.passed !== 16
