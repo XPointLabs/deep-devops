@@ -1,0 +1,225 @@
+{
+  "schemaVersion": "1.0.0",
+  "artifactName": "deep-survival-compatibility",
+  "version": "2.1.0-w1w2-gate",
+  "programRevision": {
+    "commit": "096b776b0946b8ce8d661312eeb231432e2c80e6",
+    "sha256": "ca5ad9f0c9d4dfb509dedcbf8133524c15867fce5534816da21ff86a07057383"
+  },
+  "requiredRepositories": [
+    {
+      "name": "deep-client-maui",
+      "sha": "c16dd8ecea4d45a994567d1ff655e8ab82a3e36e"
+    },
+    {
+      "name": "deep-client-shared",
+      "sha": "fb310d05a4b8bd5450695ab00569deb62aba1ff1"
+    },
+    {
+      "name": "deep-devops",
+      "sha": "1eb9a2a40ce01ce0f8c924e9dafaf3752b197d31"
+    },
+    {
+      "name": "deep-protocol",
+      "sha": "db58937d4070eb057642c00d10a64d2f738f6e41"
+    },
+    {
+      "name": "deep-push-notification-server",
+      "sha": "dee31250b6438b9565a70f193235a28ce95f7370"
+    },
+    {
+      "name": "deep-registry-api",
+      "sha": "fb7ebac6404e7a53241af08bb2f80d8a81022be8"
+    },
+    {
+      "name": "deep-tests-e2e",
+      "sha": "da24f530f187dbd81258905bc28feedce0eb23eb"
+    },
+    {
+      "name": "xnode",
+      "sha": "b986fe3bbbe3b47b3a13aac1e9da64e9969cb02c"
+    },
+    {
+      "name": "xpoint-docs",
+      "sha": "7e31f46fb21ebc0df4841caacc80bad7e6891d6e"
+    },
+    {
+      "name": "xpoint-node-installer",
+      "sha": "22de44432024c4de10cabd815541a815cddbce80"
+    },
+    {
+      "name": "xpoint-staking-backend",
+      "sha": "c4638486d1f658f3cda2b5060eb3709e255d7288"
+    },
+    {
+      "name": "xpoint-staking-contracts",
+      "sha": "d5063212b491b4c7bd649a3ab367491dfed9909f"
+    },
+    {
+      "name": "xpoint-staking-portal",
+      "sha": "1a9fa42c4f22ddebb35e299bec8856f0c151bfda"
+    }
+  ],
+  "compatibility": {
+    "protocolContract": "deep-protocol@db58937d4070eb057642c00d10a64d2f738f6e41",
+    "protocolSourceCommit": "b887fa088f486390be182cac4cbcb59b60ce8931",
+    "minimumNodeCount": 3,
+    "clientPlatforms": [
+      "android",
+      "windows"
+    ],
+    "releaseEvidenceFormat": "deep-pinned-integration-evidence/1.0.0",
+    "handoffFormat": "deep-agent-handoff/1.0.0"
+  },
+  "dependencyClosure": {
+    "schema": "deep-survival-dependency-closure.v1",
+    "status": "w1-contract-closed-w2-dependency-gated-blocked",
+    "accountableHuman": "Mr. X",
+    "execution": {
+      "offlineLocalOnly": true,
+      "networkUsed": false,
+      "dockerUsed": false,
+      "pushPerformed": false,
+      "packagePublished": false,
+      "deployPerformed": false
+    },
+    "waves": {
+      "W1": "contract-closed-runtime-blocked",
+      "W2": "dependency-gated-blocked"
+    },
+    "blockedWorkPackages": [
+      "P08",
+      "P09A",
+      "P09B",
+      "P09C"
+    ],
+    "workPackages": {
+      "P04": {
+        "id": "P04",
+        "repository": "deep-protocol",
+        "sourceCommit": "b887fa088f486390be182cac4cbcb59b60ce8931",
+        "reviewedEvidenceCommit": "68da52aaf6768ee2cb41f88ae42db102eeaf1ad6",
+        "finalEvidenceCommit": "db58937d4070eb057642c00d10a64d2f738f6e41",
+        "status": "contract-go-runtime-blocked",
+        "runtimeAuthorized": false,
+        "packageVersion": "0.3.0-p04.b887fa0",
+        "artifacts": [
+          {
+            "path": "artifacts/survival/P04/package-manifest.json",
+            "sha256": "fd3ef27bf0b9272570d6c6e680a3c99e581f6220799d13ee3afbd86ea0e99298",
+            "bytes": 868,
+            "kind": "package-manifest"
+          },
+          {
+            "path": "artifacts/survival/P04/work-package-report.json",
+            "sha256": "fd9f78f88070a94450c2b07d14486a34508d852a6f66fa6b8368e7a59dfee04c",
+            "bytes": 3257,
+            "kind": "work-package-report"
+          },
+          {
+            "path": "artifacts/survival/P04/independent-review.md",
+            "sha256": "98b41d5b7bec3c37d74aaafe0a25df7e6ad85d53461673d10b417d3136d90267",
+            "bytes": 2806,
+            "kind": "independent-review"
+          },
+          {
+            "path": "artifacts/survival/P04/packages/Deep.Protocol.0.3.0-p04.b887fa0.nupkg",
+            "sha256": "8ef4e70ad0b6c1cc0087f25c0313d6ab6a5387d16246679e4c10a3c00898a442",
+            "bytes": 91148,
+            "kind": "local-nuget-package"
+          },
+          {
+            "path": "artifacts/survival/P04/packages/Deep.Protocol.Abstractions.0.3.0-p04.b887fa0.nupkg",
+            "sha256": "fc1212a6765f5778188fcb3866ef923023c2253c3ead299a542271f4cc4f844f",
+            "bytes": 25670,
+            "kind": "local-nuget-package"
+          },
+          {
+            "path": "artifacts/survival/P04/packages/Deep.Protocol.Protobuf.0.3.0-p04.b887fa0.nupkg",
+            "sha256": "755a027c58be670151456cc0bca4764731f7c493932d9eedd00c02e704baf818",
+            "bytes": 51180,
+            "kind": "local-nuget-package"
+          }
+        ]
+      },
+      "P05": {
+        "id": "P05",
+        "repository": "xnode",
+        "sourceCommit": "86a4fd4fc9fe81d227c47b5266fd62628c7ac416",
+        "reviewedEvidenceCommit": "3f967230a0411ff9d4ef475e9db847bcf01d4b66",
+        "finalEvidenceCommit": "b986fe3bbbe3b47b3a13aac1e9da64e9969cb02c",
+        "status": "design-review-go-proposed-not-approved",
+        "runtimeAuthorized": false,
+        "packageVersion": null,
+        "artifacts": [
+          {
+            "path": "artifacts/survival/P05/handoff.md",
+            "sha256": "6a6103cb4374886d038642424d2720c9bfb6f8dceb7765713def439eb85e5179",
+            "bytes": 3056,
+            "kind": "handoff"
+          },
+          {
+            "path": "artifacts/survival/P05/simulation-results.json",
+            "sha256": "0ef1530b2f417f34374521135cfb78143a29fc50c256a3e632af2fd5bcff2d73",
+            "bytes": 3043,
+            "kind": "simulation-results"
+          },
+          {
+            "path": "artifacts/survival/P05/test-results.md",
+            "sha256": "0ba3cc709dd292d1a41c7a4fbd0a3ab23b49c16679aaf4b4dc705d9a96dd4316",
+            "bytes": 1687,
+            "kind": "test-results"
+          },
+          {
+            "path": "artifacts/survival/P05/work-package-report.json",
+            "sha256": "2f8a69c74bc88e12eb8a0a4ee5635dda7b6cd86f4a8ff5cb0db5d29f4359a2c9",
+            "bytes": 5688,
+            "kind": "work-package-report"
+          },
+          {
+            "path": "docs/adr/0005-storage-ownership-and-replication-proposed.md",
+            "sha256": "b5596de00fd9fd9da68f5f321fcc60667e16601f29e00bb45ff78aa8d8a6b914",
+            "bytes": 21252,
+            "kind": "proposed-adr"
+          },
+          {
+            "path": "docs/design/p05-p08-p09-estimate-and-file-locks.md",
+            "sha256": "647532611c80c5aad4d5ce8d7cfb3a33445923b07eb9ba5df89a94f2fc1a6e3d",
+            "bytes": 6079,
+            "kind": "estimate-and-file-locks"
+          },
+          {
+            "path": "docs/design/p05-storage-api-dto-proposal.md",
+            "sha256": "db76a5f319b81714de75095fb952facacd973e36f6e00b5152fda9e0c9283f7e",
+            "bytes": 11095,
+            "kind": "api-proposal"
+          },
+          {
+            "path": "docs/design/p05a-storage-replication-binding-work-package.md",
+            "sha256": "e9ea59f521198a4af5e7863bdab7c363e6763b5c56a17be0c22f408e24f694a2",
+            "bytes": 5357,
+            "kind": "blocked-predecessor-spec"
+          },
+          {
+            "path": "eng/verify-p05-simulator.ps1",
+            "sha256": "9a9a7da3dd883da17a567a7613af556ae307666f457fba2154807e77129c88f3",
+            "bytes": 1440,
+            "kind": "focused-gate"
+          },
+          {
+            "path": "tests/XNode.Tests/Design/StorageReplication/CanonicalStorageReplicationSimulator.cs",
+            "sha256": "68c730de54397739d1b844ec21f62df452119d66bbe19874f379f0a97f8b1a83",
+            "bytes": 36558,
+            "kind": "design-simulator"
+          },
+          {
+            "path": "tests/XNode.Tests/Design/StorageReplication/StorageReplicationProtocolCorrectiveTests.cs",
+            "sha256": "078f940c7a54fc30b4310960567b65e63c5786c4f0ad7974b9a3384a6c9e0782",
+            "bytes": 19512,
+            "kind": "design-tests"
+          }
+        ]
+      }
+    }
+  }
+}
