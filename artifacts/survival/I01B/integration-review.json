@@ -1,0 +1,216 @@
+{
+  "schemaVersion": "1.0.0",
+  "workPackage": "I01B",
+  "status": "local-reviewed-unpublished",
+  "accountableHuman": "Mr. X",
+  "manifest": "release/manifests/survival-v2.0.1-i01b.local.json",
+  "compatibilityContract": {
+    "path": "release/contracts/survival-compatibility-v2.0.1-i01b.json",
+    "sha256": "e4fb927115f5f10a1a37e9458126b77c054db3566e775cc2e3b0e7860af0bcb7"
+  },
+  "publication": {
+    "githubPushPerformed": false,
+    "remoteBranchPublicationClaimed": false,
+    "packagePublicationPerformed": false
+  },
+  "reviews": [
+    {
+      "component": "deep-client-shared and dedicated/compat push runtimes",
+      "verdict": "GO",
+      "priorities": {
+        "p0": 0,
+        "p1": 0
+      },
+      "verification": [
+        {
+          "lane": "deep-client-shared full",
+          "passed": 296,
+          "failed": 0
+        },
+        {
+          "lane": "deep-client-shared focused DTO/golden",
+          "passed": 9,
+          "failed": 0
+        },
+        {
+          "lane": "dedicated push full",
+          "passed": 15,
+          "failed": 0
+        },
+        {
+          "lane": "dedicated push focused adversarial",
+          "passed": 3,
+          "failed": 0
+        },
+        {
+          "lane": "compat push focused adversarial",
+          "passed": 3,
+          "failed": 0
+        },
+        {
+          "lane": "compat full",
+          "passed": 81,
+          "failed": 1,
+          "status": "known-red-baseline",
+          "note": "The only red test is the proven pre-existing salted-BLAKE file fixture mismatch; it is not counted as a pass."
+        }
+      ]
+    },
+    {
+      "component": "deep-client-maui routed Release composition",
+      "verdict": "GO",
+      "priorities": {
+        "p0": 0,
+        "p1": 0,
+        "p2Residual": [
+          "guard robustness",
+          "Android runtime-manifest evidence"
+        ]
+      },
+      "verification": [
+        {
+          "lane": "Release composition guard",
+          "passed": 1,
+          "failed": 0
+        },
+        {
+          "lane": "final DI fingerprint",
+          "passed": 65,
+          "failed": 0
+        },
+        {
+          "lane": "factory and outage",
+          "passed": 2,
+          "failed": 0
+        },
+        {
+          "lane": "focused routed",
+          "passed": 34,
+          "failed": 0
+        },
+        {
+          "lane": "Release Smoke",
+          "passed": 118,
+          "failed": 0
+        },
+        {
+          "lane": "ViewModels",
+          "passed": 163,
+          "failed": 0,
+          "notRun": 2,
+          "note": "The two external scenarios remain explicitly not run."
+        },
+        {
+          "lane": "Windows Debug and Release builds",
+          "warnings": 0,
+          "errors": 0
+        },
+        {
+          "lane": "post-review Windows Release x64 executable",
+          "status": "passed",
+          "path": "src/Deep.Client.Maui/bin/Release/net10.0-windows10.0.19041.0/win-x64/Deep.Client.Maui.exe",
+          "bytes": 303616,
+          "sha256": "b703216a42785ef93dd4c40646440aaac06dd4e1dd08767e6e4fdffd9f092150",
+          "note": "Local artifact in the pinned deep-client-maui worktree; rendered and authenticated Windows E2E remain not run."
+        },
+        {
+          "lane": "Windows/Android Debug multi-target build",
+          "warnings": 0,
+          "errors": 0
+        },
+        {
+          "lane": "Android Release managed assembly",
+          "status": "passed"
+        },
+        {
+          "lane": "Android Release package",
+          "status": "not-run",
+          "note": "The independent review timed out before a complete package; no APK claim is attached to this evidence."
+        },
+        {
+          "lane": "post-review Android Debug signed test package",
+          "status": "passed",
+          "path": "src/Deep.Client.Maui/bin/Debug/net10.0-android/network.xpoint.deep-Signed.apk",
+          "bytes": 155019371,
+          "sha256": "a3bf4f804b91ef96abde8792dff505ea55460b05972ca9a9f1529bc7c5f5e702",
+          "warnings": 0,
+          "errors": 0,
+          "duration": "00:04:21.28",
+          "note": "Local artifact in the pinned deep-client-maui worktree; physical installation and mobile E2E remain not run."
+        }
+      ]
+    },
+    {
+      "component": "xnode private relay membership",
+      "verdict": "GO",
+      "priorities": {
+        "p0": 0,
+        "p1": 0,
+        "p2": 0
+      },
+      "verification": [
+        {
+          "lane": "Release unit",
+          "passed": 84,
+          "failed": 0
+        },
+        {
+          "lane": "Release integration",
+          "passed": 30,
+          "failed": 0
+        },
+        {
+          "lane": "independent rereview focused",
+          "passed": 19,
+          "failed": 0
+        }
+      ]
+    },
+    {
+      "component": "private-only UAT topology",
+      "sourceCommit": "529974e",
+      "integratedDevOpsCommit": "454da5445fcb4e348d44c37417886e6ca18d09ba",
+      "verdict": "GO",
+      "priorities": {
+        "p0": 0,
+        "p1": 0,
+        "p2": 0
+      },
+      "verification": [
+        {
+          "lane": "independent synthetic topology suite",
+          "passed": 60,
+          "failed": 0
+        },
+        {
+          "lane": "topology validator",
+          "status": "passed"
+        },
+        {
+          "lane": "secret scan",
+          "files": 196,
+          "findings": 0
+        },
+        {
+          "lane": "post-integration synthetic topology suite",
+          "passed": 60,
+          "failed": 0
+        },
+        {
+          "lane": "post-integration dedicated push",
+          "passed": 15,
+          "failed": 0
+        }
+      ]
+    }
+  ],
+  "externalNotRun": [
+    "fresh UAT identity generation, retirement, and independently verified rotation",
+    "live Docker private topology startup",
+    "live VLESS/REALITY end-to-end path",
+    "physical signed Android device end-to-end acceptance",
+    "rendered Windows application end-to-end acceptance"
+  ],
+  "productionReady": false,
+  "uatRestartAuthorized": false
+}

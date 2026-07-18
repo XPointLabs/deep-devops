@@ -134,7 +134,19 @@ for (const scriptName of scriptNames) {
 if (commandResults.every(result => result.passed)) {
   runNode(
     ['scripts/pinned-integration-manifest.mjs', '--validate-only'],
-    'pinned-integration-manifest:validate'
+    'pinned-integration-manifest:validate-v2.0.0'
+  );
+}
+
+if (commandResults.every(result => result.passed)) {
+  runNode(
+    [
+      'scripts/pinned-integration-manifest.mjs',
+      '--manifest',
+      'release/manifests/survival-v2.0.1-i01b.local.json',
+      '--validate-only'
+    ],
+    'pinned-integration-manifest:validate-v2.0.1-i01b-local'
   );
 }
 

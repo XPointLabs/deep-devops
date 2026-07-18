@@ -31,6 +31,10 @@ jobs:
         shell: pwsh
         run: node .\scripts\pinned-integration-manifest.mjs --validate-only
 
+      - name: Validate local-only I01B contract
+        shell: pwsh
+        run: node .\scripts\pinned-integration-manifest.mjs --manifest .\release\manifests\survival-v2.0.1-i01b.local.json --validate-only
+
       - name: Exercise fail-closed isolated checkout
         shell: pwsh
         run: node --test .\scripts\pinned-integration-manifest.test.mjs

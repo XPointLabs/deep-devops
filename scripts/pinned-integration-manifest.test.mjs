@@ -5,6 +5,7 @@ import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/pro
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import {
   checkoutPinnedRepositories,
   validateEvidence,
@@ -144,6 +145,21 @@ test('validates an exact-SHA manifest and immutable compatibility artifact', asy
   });
   assert.equal(validated.manifest.repositories.length, 2);
   assert.equal(validated.verifiedArtifacts[0].actualSha256, validated.verifiedArtifacts[0].expectedSha256);
+});
+
+test('validates the immutable local-only I01B repository matrix', async () => {
+  const validated = await validateManifest({
+    manifestPath: path.join(
+      path.dirname(fileURLToPath(import.meta.url)),
+      '..',
+      'release',
+      'manifests',
+      'survival-v2.0.1-i01b.local.json'
+    )
+  });
+  assert.equal(validated.manifest.releaseId, 'deep-survival-v2.0.1-i01b-local');
+  assert.equal(validated.manifest.repositories.length, 13);
+  assert.equal(validated.verifiedArtifacts[0].version, '2.0.1-i01b');
 });
 
 test('rejects a branch-only repository ref', async t => {

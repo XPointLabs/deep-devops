@@ -16,6 +16,13 @@ agents may prepare evidence but cannot silently move any pinned value.
 - `release/contracts/survival-compatibility-v2.0.0.json` is the immutable
   compatibility contract referenced by name, version, and SHA256 from every
   repository entry.
+- `release/manifests/survival-v2.0.1-i01b.local.json` is the immutable,
+  local-only I01B integration matrix. Its changed branch names describe local
+  branches and do not assert that those branches or commits were pushed.
+- `release/contracts/survival-compatibility-v2.0.1-i01b.json` is the immutable
+  I01B compatibility contract. The manifest records its exact SHA256.
+- `artifacts/survival/I01B/integration-review.json` records the accepted local
+  review results and the external scenarios that remain not run.
 - `release/pinned-program-revision.json` is the accepted P00A program revision.
 - `release/local-feed-policy.json` forbids network restore and external package
   publication. The local feed is `artifacts/packages/survival-v2.0.0`.
@@ -27,6 +34,9 @@ Validation has no package dependencies and performs no network access:
 
 ```powershell
 node .\scripts\pinned-integration-manifest.mjs --validate-only
+node .\scripts\pinned-integration-manifest.mjs `
+  --manifest .\release\manifests\survival-v2.0.1-i01b.local.json `
+  --validate-only
 node --test .\scripts\pinned-integration-manifest.test.mjs
 ```
 
@@ -74,3 +84,9 @@ root. Never delete or reset the source worktrees.
 Changing any pinned SHA requires a new compatibility artifact, its new SHA256,
 an updated manifest, a new accepted program revision when product scope
 changes, and Mr. X review.
+
+The I01B matrix remains `local-reviewed/unpublished`. The manifest schema only
+allows `pinned` or `verified` per repository, so publication state is recorded
+in the I01B review artifact rather than overloaded into `evidenceStatus`.
+Neither a valid local manifest nor a green synthetic gate authorizes UAT
+restart or establishes production readiness.
