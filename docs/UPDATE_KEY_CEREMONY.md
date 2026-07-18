@@ -22,6 +22,12 @@ Production activation requires all of the following external facts:
 4. Retained independently controlled build attestations proving reproducibility.
 5. Independent security review of the implementation and ceremony evidence.
 
+The TEST-only evaluator always returns `BLOCKED/NOT-RUN`, even if a caller
+passes names, booleans and plausible-looking hashes. Production readiness
+requires a separately implemented verifier for a signed
+`deep.external-security-review-attestation.v1`; this dry-run deliberately
+cannot produce `READY-FOR-INDEPENDENT-AUTHORIZATION`.
+
 Those facts do not currently exist. The machine summary must therefore retain:
 
 ```text
@@ -53,9 +59,13 @@ The planned root ceremony is 2-of-3:
   room.
 
 Targets and `android-release` use separate 2-of-3 signer sets. Snapshot and
-timestamp use distinct online 1-of-2 interfaces with sealed offline recovery
-devices. Lowering a threshold because a key or person is unavailable is not a
-recovery procedure.
+timestamp each use a distinct 1-of-2 role: one online primary plus one sealed
+offline recovery signer. The recovery drill signs fresh metadata with the
+recovery signer, rotates the root to install a new primary while retaining the
+recovery signer, accepts the replacement primary, then rejects both revoked
+old primaries. A same-root 1-of-1 replacement is not accepted as recovery.
+Lowering a threshold because a key or person is unavailable is not a recovery
+procedure.
 
 The current dry-run simulates these threshold shapes with ephemeral Ed25519
 TEST keys in one process. It does not simulate independent people, separate
@@ -111,7 +121,11 @@ Two local mirror trees and one offline bundle are generated from the same byte
 map. Metadata paths contain the SHA-256 of the exact raw metadata bytes.
 Target paths contain the target SHA-256. `release-index.json` maps signed role
 and target names to addressed paths. The verifier compares the complete sorted
-path/length/hash inventory and checks that every content-address matches.
+path/length/hash inventory and checks that every content-address matches. It
+then reloads the exact bytes independently from mirror A, mirror B and the
+offline bundle, follows each index, parses the canonical raw metadata again,
+and feeds each reconstructed bundle through the P02B metadata plus
+SBOM/provenance verifier.
 
 The TEST Android payload is a text descriptor, not an APK and never an install
 candidate. The two TEST builder labels satisfy the P02B contract fixture but
@@ -122,9 +136,10 @@ remains unverified.
 
 Every dry-run must prove:
 
-- root v2 is accepted only with old and new 2-of-3 thresholds;
-- fresh metadata signed by the replacement online key is accepted and the
-  revoked timestamp key is rejected;
+- root v2 is accepted with both old and new 2-of-3 thresholds, while executed
+  old-only, new-only and one-old/one-new insufficient variants are rejected;
+- recovery-signed snapshot and timestamp metadata is accepted, root v3 installs
+  replacement primaries, and both revoked old primaries are rejected;
 - a changed mirror byte causes complete-tree comparison to fail;
 - trusted-version rollback is rejected;
 - expired timestamp/freeze metadata is rejected;
@@ -149,14 +164,20 @@ Repository contract evidence:
 
 ```powershell
 node .\scripts\update-ceremony-contracts.mjs `
-  --artifact-dir .\artifacts\survival\P02C
+  --artifact-dir .\artifacts\generated\P02C
 node .\scripts\secret-scan.mjs `
-  --artifacts .\artifacts\survival\P02C `
-  --summary .\artifacts\survival\P02C-secret-scan.json
+  --artifacts .\artifacts\generated\P02C `
+  --summary .\artifacts\generated\P02C-secret-scan.json
 ```
 
 No command contacts a mirror, blockchain, signing service or HSM. All mirrors
 are local directories. Do not publish the generated TEST metadata.
+
+`artifacts/survival/P02C` is a tracked handoff/report directory and is never a
+runner output. The contract runner accepts only a path below `artifacts` that
+contains a distinct `generated` segment, checks that boundary before cleanup,
+and only replaces that narrow ignored directory. Tests prove that the tracked
+handoff sentinel remains byte-identical.
 
 ## Cleanup
 

@@ -1,15 +1,19 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdtemp, mkdir, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {
   createDelegatedReleaseRequest,
   evaluateProductionActivation,
+  expectAsyncRejected,
+  repositoryRoot,
   runUpdateCeremonyDryRun,
   validateDelegatedReleaseRequest,
   verifyByteIdenticalTrees
 } from './update-ceremony.mjs';
+import { runUpdateCeremonyContracts } from './update-ceremony-contracts.mjs';
 
 async function sandbox() {
   return mkdtemp(path.join(tmpdir(), 'deep-p02c-ceremony-'));
@@ -41,11 +45,30 @@ test('production activation remains blocked without named independent custodians
   assert.ok(status.blockers.length >= 4);
 });
 
+test('caller claims cannot turn a TEST dry-run into production authorization', () => {
+  const status = evaluateProductionActivation({
+    accountableHuman: 'Mr. X',
+    namedIndependentCustodians: ['Alice', 'Bob', 'Carol'],
+    productionHsmEvidence: { verified: true, attestationSha256: 'ab'.repeat(32) },
+    publicationAuthorization: { approved: true },
+    reproducibleBuildEvidence: { verified: true },
+    independentSecurityReview: {
+      schema: 'deep.external-security-review-attestation.v1',
+      verified: true,
+      signatureVerified: true,
+      attestationSha256: 'cd'.repeat(32)
+    }
+  });
+  assert.equal(status.activationStatus, 'BLOCKED');
+  assert.equal(status.activationRun, 'NOT-RUN');
+  assert.equal(status.publicationAuthorized, false);
+});
+
 test('delegated online release request is canonical public data and rejects key material or extra authority', () => {
   const request = createDelegatedReleaseRequest({
     requestId: 'test-release-request-0001',
-    sourceCommit: '11'.repeat(20),
-    programRevisionSha256: '22'.repeat(32),
+    sourceCommit: createHash('sha1').update('test-source-commit').digest('hex'),
+    programRevisionSha256: createHash('sha256').update('test-program').digest('hex'),
     artifactPath: 'android/network.xpoint.deep-test.apk',
     artifactBytes: Buffer.from('test-only APK descriptor\n'),
     sbomPath: 'sbom/network.xpoint.deep-test.cdx.json',
@@ -63,6 +86,8 @@ test('delegated online release request is canonical public data and rejects key 
     value => { value.seedPhrase = 'forbidden'; },
     value => { value.productionAuthorized = true; },
     value => { value.targets[0].sha256 = '00'.repeat(32); },
+    value => { value.sourceCommit = '11'.repeat(20); },
+    value => { value.programRevisionSha256 = '22'.repeat(32); },
     value => { value.unreviewedAuthority = true; }
   ]) {
     const candidate = structuredClone(request);
@@ -84,6 +109,8 @@ test('dry-run emits byte-identical content-addressed mirrors and offline bundle 
     assert.equal(result.summary.independentCustodyVerified, false);
     assert.equal(result.summary.reproducibleBuildVerified, false);
     assert.equal(result.summary.p02bCompatibility, 'PASSED');
+    assert.match(result.summary.sourceCommitSha, /^[0-9a-f]{40}$/);
+    assert.match(result.summary.programRevisionSha256, /^[0-9a-f]{64}$/);
 
     const mirrorResult = await verifyByteIdenticalTrees(
       path.join(root, 'mirror-a'),
@@ -118,14 +145,58 @@ test('dry-run records required rotation, loss, compromise, rollback and freeze d
   try {
     const { summary, drills } = await runUpdateCeremonyDryRun({ outputRoot: root });
     assert.equal(summary.dryRunStatus, 'PASSED');
-    assert.deepEqual(drills, {
-      rootRotation: 'PASSED',
-      lostOnlineKey: 'PASSED',
-      mirrorCompromise: 'REJECTED-AS-REQUIRED',
-      rollback: 'REJECTED-AS-REQUIRED',
-      freeze: 'REJECTED-AS-REQUIRED'
+    assert.deepEqual(drills.rootRotation, {
+      crossSigned: 'PASSED',
+      oldOnly: 'REJECTED-AS-REQUIRED',
+      newOnly: 'REJECTED-AS-REQUIRED',
+      insufficient: 'REJECTED-AS-REQUIRED'
     });
+    assert.deepEqual(drills.onlineRecovery, {
+      policy: '1-of-2-primary-plus-sealed-recovery',
+      recoveryAccepted: 'PASSED',
+      replacementAccepted: 'PASSED',
+      oldSnapshotPrimaryRevoked: 'REJECTED-AS-REQUIRED',
+      oldTimestampPrimaryRevoked: 'REJECTED-AS-REQUIRED'
+    });
+    assert.equal(drills.mirrorCompromise, 'REJECTED-AS-REQUIRED');
+    assert.equal(drills.rollback, 'REJECTED-AS-REQUIRED');
+    assert.equal(drills.freeze, 'REJECTED-AS-REQUIRED');
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('negative async drill helper rejects an accepted mutation path', async () => {
+  await assert.rejects(
+    () => expectAsyncRejected(async () => undefined),
+    /negative asynchronous drill was accepted/
+  );
+  assert.equal(
+    await expectAsyncRejected(async () => { throw new Error('mutation rejected'); }),
+    'REJECTED-AS-REQUIRED'
+  );
+});
+
+test('contract runner preserves tracked P02C handoff and only replaces generated output', async () => {
+  const trackedHandoff = path.join(repositoryRoot, 'artifacts', 'survival', 'P02C', 'handoff.md');
+  const before = await readFile(trackedHandoff);
+  await assert.rejects(
+    () => runUpdateCeremonyContracts({
+      artifactDir: path.join(repositoryRoot, 'artifacts', 'survival', 'P02C')
+    }),
+    /generated subdirectory|immutable/
+  );
+  const generated = path.join(
+    repositoryRoot,
+    'artifacts',
+    'generated',
+    `P02C-test-${process.pid}`
+  );
+  try {
+    await mkdir(generated, { recursive: true });
+    await runUpdateCeremonyContracts({ artifactDir: generated });
+    assert.deepEqual(await readFile(trackedHandoff), before);
+  } finally {
+    await rm(generated, { recursive: true, force: true });
   }
 });

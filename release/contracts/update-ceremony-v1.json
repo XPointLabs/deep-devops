@@ -19,6 +19,20 @@
     "required": 2,
     "publicKeyCount": 3
   },
+  "onlineRecoveryRoles": {
+    "snapshot": {
+      "threshold": 1,
+      "publicKeyCount": 2,
+      "shape": "online-primary-plus-sealed-recovery"
+    },
+    "timestamp": {
+      "threshold": 1,
+      "publicKeyCount": 2,
+      "shape": "online-primary-plus-sealed-recovery"
+    },
+    "lostPrimaryRequiresRootRotation": true,
+    "revokedPrimaryRejectionRequired": true
+  },
   "minimumMirrors": 2,
   "offlineBundleRequired": true,
   "activationStatus": "BLOCKED",
@@ -31,6 +45,7 @@
     "named-independent-custodians-missing",
     "production-hsm-attestation-missing",
     "production-publication-authorization-missing",
-    "reproducible-build-evidence-not-verified"
+    "reproducible-build-evidence-not-verified",
+    "independent-security-review-pending"
   ]
 }

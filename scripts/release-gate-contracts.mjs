@@ -220,7 +220,7 @@ if (commandResults.every(result => result.passed)) {
     [
       'scripts/update-ceremony-contracts.mjs',
       '--artifact-dir',
-      path.join(artifactRoot, 'survival', 'P02C')
+      path.join(artifactRoot, 'generated', 'P02C')
     ],
     'update-ceremony:test-only-dry-run-evidence'
   );

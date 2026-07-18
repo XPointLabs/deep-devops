@@ -16,6 +16,7 @@ import {
   canonicalJson,
   createTrustedState,
   metadataDocumentFromEnvelope,
+  parseMetadataDocument,
   sha256,
   verifySbomAndReproducibility,
   verifyUpdateBundle
@@ -27,8 +28,6 @@ const fixedUpdateStart = '2030-01-01T00:00:00Z';
 const onlineExpiry = '2030-01-03T00:00:00Z';
 const rootExpiry = '2035-01-01T00:00:00Z';
 const hex64 = /^[0-9a-f]{64}$/;
-const sourceCommit = '11'.repeat(20);
-const programRevisionSha256 = '22'.repeat(32);
 
 function exactKeys(value, expected) {
   return JSON.stringify(Object.keys(value ?? {}).sort()) === JSON.stringify([...expected].sort());
@@ -40,6 +39,10 @@ function fail(message) {
 
 function contract(condition, message) {
   if (!condition) fail(message);
+}
+
+function looksLikePlaceholderHex(value) {
+  return /^(?:([0-9a-f])\1+|([0-9a-f]{2})\2+)$/i.test(value ?? '');
 }
 
 function jsonBytes(value) {
@@ -169,6 +172,8 @@ export function validateDelegatedReleaseRequest(request) {
   contract(/^[a-z0-9-]{8,64}$/.test(request.requestId ?? ''), 'delegated release request ID is invalid');
   contract(/^[0-9a-f]{40}$/.test(request.sourceCommit ?? ''), 'delegated release source commit is invalid');
   contract(hex64.test(request.programRevisionSha256 ?? ''), 'delegated release program revision is invalid');
+  contract(!looksLikePlaceholderHex(request.sourceCommit), 'delegated release source commit cannot be a placeholder');
+  contract(!looksLikePlaceholderHex(request.programRevisionSha256), 'delegated release program revision cannot be a placeholder');
   contract(Array.isArray(request.targets) && request.targets.length === 3, 'delegated release request must bind three targets');
   const paths = [];
   for (const target of request.targets) {
@@ -199,22 +204,33 @@ export function evaluateProductionActivation(facts) {
     && typeof facts.productionHsmEvidence?.attestationSha256 === 'string'
     && hex64.test(facts.productionHsmEvidence.attestationSha256)
   );
-  const publicationAuthorized = facts.publicationAuthorization?.approved === true;
+  const publicationAuthorized = false;
   const reproducibleBuildVerified = facts.reproducibleBuildEvidence?.verified === true;
+  const independentSecurityReviewVerified = (
+    facts.independentSecurityReview?.verified === true
+    && facts.independentSecurityReview?.schema === 'deep.external-security-review-attestation.v1'
+    && hex64.test(facts.independentSecurityReview?.attestationSha256 ?? '')
+    && facts.independentSecurityReview?.signatureVerified === true
+  );
   const blockers = [
     ...(!independentCustodyVerified ? ['named-independent-custodians-missing'] : []),
     ...(!productionHsmVerified ? ['production-hsm-attestation-missing'] : []),
-    ...(!publicationAuthorized ? ['production-publication-authorization-missing'] : []),
-    ...(!reproducibleBuildVerified ? ['reproducible-build-evidence-not-verified'] : [])
+    ...['production-publication-authorization-missing'],
+    ...(!reproducibleBuildVerified ? ['reproducible-build-evidence-not-verified'] : []),
+    ...(!independentSecurityReviewVerified ? ['independent-security-review-pending'] : [])
   ];
   return {
     accountableHuman: 'Mr. X',
-    activationStatus: blockers.length === 0 ? 'READY-FOR-INDEPENDENT-AUTHORIZATION' : 'BLOCKED',
+    // A TEST-only dry-run is not allowed to mint production authorization.
+    // A separate production command must verify the external review signature
+    // and all custody/publication evidence before this can ever become READY.
+    activationStatus: 'BLOCKED',
     activationRun: 'NOT-RUN',
     independentCustodyVerified,
     productionHsmVerified,
     publicationAuthorized,
     reproducibleBuildVerified,
+    independentSecurityReviewVerified,
     blockers
   };
 }
@@ -262,22 +278,45 @@ async function writeTree(root, entries) {
 }
 
 function expectRejected(action) {
+  let accepted = false;
   try {
     action();
+    accepted = true;
   } catch {
-    return 'REJECTED-AS-REQUIRED';
+    // Expected rejection. The explicit flag prevents this helper from
+    // swallowing its own "accepted" assertion.
   }
-  fail('negative drill was accepted');
+  contract(!accepted, 'negative drill was accepted');
+  return 'REJECTED-AS-REQUIRED';
 }
 
-function gitHead() {
+export async function expectAsyncRejected(action) {
+  let accepted = false;
+  try {
+    await action();
+    accepted = true;
+  } catch {
+    // Expected rejection; assert outside the catch.
+  }
+  contract(!accepted, 'negative asynchronous drill was accepted');
+  return 'REJECTED-AS-REQUIRED';
+}
+
+async function executionProvenance() {
   const result = spawnSync('git', ['rev-parse', 'HEAD'], {
     cwd: repositoryRoot,
     encoding: 'utf8',
     windowsHide: true
   });
   contract(result.status === 0, 'cannot bind ceremony dry-run to source commit');
-  return result.stdout.trim();
+  const sourceCommit = result.stdout.trim();
+  contract(/^[0-9a-f]{40}$/.test(sourceCommit) && !looksLikePlaceholderHex(sourceCommit),
+    'ceremony git HEAD is invalid or placeholder-like');
+  const programBytes = await readFile(fileURLToPath(import.meta.url));
+  const programRevisionSha256 = sha256(programBytes);
+  contract(hex64.test(programRevisionSha256) && !looksLikePlaceholderHex(programRevisionSha256),
+    'ceremony program revision is invalid or placeholder-like');
+  return { sourceCommit, programRevisionSha256 };
 }
 
 function createCeremonyMaterial(adapter) {
@@ -287,8 +326,8 @@ function createCeremonyMaterial(adapter) {
     'root-new-a', 'root-new-b', 'root-new-c',
     'targets-a', 'targets-b', 'targets-c',
     'android-a', 'android-b', 'android-c',
-    'snapshot-old', 'snapshot-new',
-    'timestamp-old', 'timestamp-new'
+    'snapshot-primary-old', 'snapshot-primary-new', 'snapshot-primary-replacement', 'snapshot-recovery',
+    'timestamp-primary-old', 'timestamp-primary-new', 'timestamp-primary-replacement', 'timestamp-recovery'
   ].map(label => [label, signer(label)]));
   const pick = labels => labels.map(label => keys[label]);
 
@@ -296,10 +335,14 @@ function createCeremonyMaterial(adapter) {
   const rootNew = pick(['root-new-a', 'root-new-b', 'root-new-c']);
   const targetsKeys = pick(['targets-a', 'targets-b', 'targets-c']);
   const androidKeys = pick(['android-a', 'android-b', 'android-c']);
-  const snapshotOld = pick(['snapshot-old']);
-  const snapshotNew = pick(['snapshot-new']);
-  const timestampOld = pick(['timestamp-old']);
-  const timestampNew = pick(['timestamp-new']);
+  const snapshotOld = pick(['snapshot-primary-old']);
+  const snapshotNew = pick(['snapshot-primary-new']);
+  const snapshotReplacement = pick(['snapshot-primary-replacement']);
+  const snapshotRecovery = pick(['snapshot-recovery']);
+  const timestampOld = pick(['timestamp-primary-old']);
+  const timestampNew = pick(['timestamp-primary-new']);
+  const timestampReplacement = pick(['timestamp-primary-replacement']);
+  const timestampRecovery = pick(['timestamp-recovery']);
 
   const rootOneSigned = {
     _type: 'root',
@@ -307,23 +350,31 @@ function createCeremonyMaterial(adapter) {
     consistent_snapshot: true,
     version: 1,
     expires: rootExpiry,
-    keys: publicKeys([...rootOld, ...targetsKeys, ...snapshotOld, ...timestampOld]),
+    keys: publicKeys([
+      ...rootOld, ...targetsKeys,
+      ...snapshotOld, ...snapshotRecovery,
+      ...timestampOld, ...timestampRecovery
+    ]),
     roles: {
       root: role(rootOld, 2),
       targets: role(targetsKeys, 2),
-      snapshot: role(snapshotOld, 1),
-      timestamp: role(timestampOld, 1)
+      snapshot: role([...snapshotOld, ...snapshotRecovery], 1),
+      timestamp: role([...timestampOld, ...timestampRecovery], 1)
     }
   };
   const rootTwoSigned = {
     ...rootOneSigned,
     version: 2,
-    keys: publicKeys([...rootNew, ...targetsKeys, ...snapshotNew, ...timestampNew]),
+    keys: publicKeys([
+      ...rootNew, ...targetsKeys,
+      ...snapshotNew, ...snapshotRecovery,
+      ...timestampNew, ...timestampRecovery
+    ]),
     roles: {
       root: role(rootNew, 2),
       targets: role(targetsKeys, 2),
-      snapshot: role(snapshotNew, 1),
-      timestamp: role(timestampNew, 1)
+      snapshot: role([...snapshotNew, ...snapshotRecovery], 1),
+      timestamp: role([...timestampNew, ...timestampRecovery], 1)
     }
   };
   const rootOne = signCanonicalWithAdapter(rootOneSigned, rootOld.slice(0, 2), adapter);
@@ -332,16 +383,46 @@ function createCeremonyMaterial(adapter) {
     [...rootOld.slice(0, 2), ...rootNew.slice(0, 2)],
     adapter
   );
+  const rootThreeSigned = {
+    ...rootTwoSigned,
+    version: 3,
+    keys: publicKeys([
+      ...rootNew, ...targetsKeys,
+      ...snapshotReplacement, ...snapshotRecovery,
+      ...timestampReplacement, ...timestampRecovery
+    ]),
+    roles: {
+      ...rootTwoSigned.roles,
+      snapshot: role([...snapshotReplacement, ...snapshotRecovery], 1),
+      timestamp: role([...timestampReplacement, ...timestampRecovery], 1)
+    }
+  };
+  const rootThree = signCanonicalWithAdapter(rootThreeSigned, rootNew.slice(0, 2), adapter);
+  const rootTwoOldOnly = signCanonicalWithAdapter(rootTwoSigned, rootOld.slice(0, 2), adapter);
+  const rootTwoNewOnly = signCanonicalWithAdapter(rootTwoSigned, rootNew.slice(0, 2), adapter);
+  const rootTwoInsufficient = signCanonicalWithAdapter(
+    rootTwoSigned,
+    [rootOld[0], rootNew[0]],
+    adapter
+  );
   return {
     keys,
     rootOne,
     rootTwo,
+    rootThree,
+    rootTwoOldOnly,
+    rootTwoNewOnly,
+    rootTwoInsufficient,
     targetsKeys,
     androidKeys,
     snapshotOld,
     snapshotNew,
+    snapshotRecovery,
+    snapshotReplacement,
     timestampOld,
-    timestampNew
+    timestampNew,
+    timestampRecovery,
+    timestampReplacement
   };
 }
 
@@ -445,7 +526,7 @@ function createReleaseDocuments(material, adapter, request, artifacts) {
   };
 }
 
-function createFixtureArtifacts() {
+function createFixtureArtifacts(provenanceBinding) {
   const artifactBytes = Buffer.from('P02C ceremony TEST APK descriptor; never install or publish.\n', 'utf8');
   const sbomBytes = jsonBytes({
     bomFormat: 'CycloneDX',
@@ -469,8 +550,8 @@ function createFixtureArtifacts() {
     schema: 'deep.reproducible-build.v1',
     testOnly: true,
     independenceVerified: false,
-    sourceCommit,
-    programRevisionSha256,
+    sourceCommit: provenanceBinding.sourceCommit,
+    programRevisionSha256: provenanceBinding.programRevisionSha256,
     sourceDateEpoch: 1784332800,
     buildDefinitionSha256,
     sbomSha256: sha256(sbomBytes),
@@ -480,6 +561,25 @@ function createFixtureArtifacts() {
     ]
   });
   return { artifactBytes, sbomBytes, provenanceBytes };
+}
+
+function resignOnlineRelease(release, adapter, {
+  snapshotSigner,
+  timestampSigner,
+  timestampVersion = 1
+}) {
+  const snapshot = signCanonicalWithAdapter(
+    release.snapshot.envelope.signed,
+    snapshotSigner,
+    adapter
+  );
+  const timestampSigned = {
+    ...release.timestampSigned,
+    version: timestampVersion,
+    meta: { 'snapshot.json': metadataDescription(snapshot) }
+  };
+  const timestamp = signCanonicalWithAdapter(timestampSigned, timestampSigner, adapter);
+  return { snapshot, timestamp };
 }
 
 async function buildMirrorEntries(documents, artifacts, request) {
@@ -517,6 +617,83 @@ async function buildMirrorEntries(documents, artifacts, request) {
   return entries.sort(([left], [right]) => left.localeCompare(right));
 }
 
+async function readIndexedBytes(treeRoot, entry, label) {
+  contract(exactKeys(entry, ['path', 'sha256', 'length']), `${label} index keys must be exact`);
+  contract(typeof entry.path === 'string' && !entry.path.includes('\\') &&
+    entry.path.split('/').every(part => part && part !== '.' && part !== '..'),
+  `${label} index path is invalid`);
+  const bytes = await readFile(path.join(treeRoot, ...entry.path.split('/')));
+  contract(bytes.length === entry.length, `${label} indexed length mismatch`);
+  contract(sha256(bytes) === entry.sha256, `${label} indexed SHA-256 mismatch`);
+  return bytes;
+}
+
+export async function loadAndVerifyPublishedTree(treeRoot, expectedProvenance) {
+  const root = await realpath(treeRoot);
+  const indexBytes = await readFile(path.join(root, 'release-index.json'));
+  const index = JSON.parse(indexBytes.toString('utf8'));
+  contract(exactKeys(index, [
+    'schema', 'testOnly', 'productionAuthorized', 'metadata', 'targets'
+  ]), 'release index keys must be exact');
+  contract(index.schema === 'deep.update-ceremony.release-index.v1' &&
+    index.testOnly === true && index.productionAuthorized === false,
+  'release index authority flags are invalid');
+  const requiredMetadata = [
+    'root1', 'root2', 'root3', 'timestamp', 'snapshot', 'targets', 'androidRelease'
+  ];
+  contract(JSON.stringify(Object.keys(index.metadata).sort()) ===
+    JSON.stringify([...requiredMetadata].sort()), 'release index metadata inventory mismatch');
+  const loaded = {};
+  for (const name of requiredMetadata) {
+    loaded[name] = parseMetadataDocument(
+      await readIndexedBytes(root, index.metadata[name], `${name} metadata`),
+      `${name} published metadata`
+    );
+  }
+  const requestTargetNames = Object.keys(index.targets).sort();
+  contract(requestTargetNames.length === 3, 'release index target inventory mismatch');
+  const files = {};
+  for (const name of requestTargetNames) {
+    files[name] = await readIndexedBytes(root, index.targets[name], `${name} target`);
+  }
+  const verified = verifyUpdateBundle({
+    trustedRoot: loaded.root1,
+    candidateRoots: [loaded.root2, loaded.root3],
+    timestamp: loaded.timestamp,
+    snapshot: loaded.snapshot,
+    targets: loaded.targets,
+    delegatedTargets: loaded.androidRelease,
+    trustedState: createTrustedState(loaded.root1),
+    updateStart: fixedUpdateStart
+  });
+  const apkPath = requestTargetNames.find(name => name.startsWith('android/'));
+  const sbomPath = requestTargetNames.find(name => name.startsWith('sbom/'));
+  const provenancePath = requestTargetNames.find(name => name.startsWith('provenance/'));
+  const artifactEvidence = verifySbomAndReproducibility({
+    delegatedTargets: loaded.androidRelease,
+    apkPath,
+    apkBytes: files[apkPath],
+    files: {
+      [sbomPath]: files[sbomPath],
+      [provenancePath]: files[provenancePath]
+    }
+  });
+  contract(
+    artifactEvidence.provenance.sourceCommit === expectedProvenance.sourceCommit &&
+    artifactEvidence.provenance.programRevisionSha256 === expectedProvenance.programRevisionSha256,
+    'published provenance does not match the executed git/program binding'
+  );
+  const inventory = await enumerateTree(root);
+  return {
+    status: 'PASSED',
+    treeSha256: sha256(canonicalBytes(inventory)),
+    fileCount: inventory.length,
+    sourceCommit: artifactEvidence.provenance.sourceCommit,
+    programRevisionSha256: artifactEvidence.provenance.programRevisionSha256,
+    trustedRootVersion: verified.state.trustedRoot.version
+  };
+}
+
 export async function runUpdateCeremonyDryRun({ outputRoot }) {
   const root = path.resolve(outputRoot);
   const rootInfo = await lstat(root);
@@ -524,11 +701,12 @@ export async function runUpdateCeremonyDryRun({ outputRoot }) {
   contract((await readdir(root)).length === 0, 'dry-run output root must start empty');
   const adapter = new EphemeralTestHsmAdapter();
   try {
-    const artifacts = createFixtureArtifacts();
+    const provenanceBinding = await executionProvenance();
+    const artifacts = createFixtureArtifacts(provenanceBinding);
     const request = createDelegatedReleaseRequest({
       requestId: 'p02c-test-release-request',
-      sourceCommit,
-      programRevisionSha256,
+      sourceCommit: provenanceBinding.sourceCommit,
+      programRevisionSha256: provenanceBinding.programRevisionSha256,
       artifactPath: 'android/network.xpoint.deep-2.0.2-p02c-test.apk',
       artifactBytes: artifacts.artifactBytes,
       sbomPath: 'sbom/network.xpoint.deep-2.0.2-p02c-test.cdx.json',
@@ -538,7 +716,7 @@ export async function runUpdateCeremonyDryRun({ outputRoot }) {
     });
     const material = createCeremonyMaterial(adapter);
     const release = createReleaseDocuments(material, adapter, request, artifacts);
-    const bundle = {
+    const rootTwoBundle = {
       trustedRoot: material.rootOne,
       candidateRoots: [material.rootTwo],
       timestamp: release.timestamp,
@@ -548,8 +726,24 @@ export async function runUpdateCeremonyDryRun({ outputRoot }) {
       trustedState: createTrustedState(material.rootOne),
       updateStart: fixedUpdateStart
     };
-    const verified = verifyUpdateBundle(bundle);
-    contract(verified.state.trustedRoot.version === 2, 'P02B root rotation compatibility failed');
+    const verified = verifyUpdateBundle(rootTwoBundle);
+    const crossSignedAccepted = verified.state.trustedRoot.version === 2;
+    contract(crossSignedAccepted, 'P02B root rotation compatibility failed');
+    const rootRotationDrills = {
+      crossSigned: crossSignedAccepted ? 'PASSED' : 'FAILED',
+      oldOnly: expectRejected(() => verifyUpdateBundle({
+        ...rootTwoBundle,
+        candidateRoots: [material.rootTwoOldOnly]
+      })),
+      newOnly: expectRejected(() => verifyUpdateBundle({
+        ...rootTwoBundle,
+        candidateRoots: [material.rootTwoNewOnly]
+      })),
+      insufficient: expectRejected(() => verifyUpdateBundle({
+        ...rootTwoBundle,
+        candidateRoots: [material.rootTwoInsufficient]
+      }))
+    };
     const apkPath = request.targets.find(item => item.path.startsWith('android/')).path;
     const sbomPath = request.targets.find(item => item.path.startsWith('sbom/')).path;
     const provenancePath = request.targets.find(item => item.path.startsWith('provenance/')).path;
@@ -563,20 +757,71 @@ export async function runUpdateCeremonyDryRun({ outputRoot }) {
       }
     });
 
-    const revokedTimestamp = signCanonicalWithAdapter(
-      release.timestampSigned,
-      material.timestampOld,
-      adapter
+    const recoveryOnline = resignOnlineRelease(release, adapter, {
+      snapshotSigner: material.snapshotRecovery,
+      timestampSigner: material.timestampRecovery,
+      timestampVersion: 2
+    });
+    const recoveryVerified = verifyUpdateBundle({
+      ...rootTwoBundle,
+      trustedRoot: material.rootTwo,
+      candidateRoots: [],
+      trustedState: verified.state,
+      snapshot: recoveryOnline.snapshot,
+      timestamp: recoveryOnline.timestamp
+    });
+    const recoveryAccepted = (
+      recoveryVerified.state.versions.timestamp === 2 &&
+      recoveryVerified.state.trustedRoot.version === 2
     );
-    const revokedOnlineKey = expectRejected(() => verifyUpdateBundle({
-      ...bundle,
-      timestamp: revokedTimestamp
+    contract(recoveryAccepted, 'sealed recovery online metadata was not accepted');
+    const replacementOnline = resignOnlineRelease(release, adapter, {
+      snapshotSigner: material.snapshotReplacement,
+      timestampSigner: material.timestampReplacement,
+      timestampVersion: 3
+    });
+    const replacementBundle = {
+      ...rootTwoBundle,
+      trustedRoot: material.rootTwo,
+      candidateRoots: [material.rootThree],
+      trustedState: verified.state,
+      snapshot: replacementOnline.snapshot,
+      timestamp: replacementOnline.timestamp
+    };
+    const replacementVerified = verifyUpdateBundle(replacementBundle);
+    const replacementAccepted = replacementVerified.state.trustedRoot.version === 3;
+    contract(replacementAccepted,
+      'replacement online role root rotation failed');
+    const revokedSnapshot = resignOnlineRelease(release, adapter, {
+      snapshotSigner: material.snapshotNew,
+      timestampSigner: material.timestampReplacement,
+      timestampVersion: 3
+    });
+    const revokedTimestamp = resignOnlineRelease(release, adapter, {
+      snapshotSigner: material.snapshotReplacement,
+      timestampSigner: material.timestampNew,
+      timestampVersion: 3
+    });
+    const revokedSnapshotPrimary = expectRejected(() => verifyUpdateBundle({
+      ...replacementBundle,
+      snapshot: revokedSnapshot.snapshot,
+      timestamp: revokedSnapshot.timestamp
     }));
-    contract(revokedOnlineKey === 'REJECTED-AS-REQUIRED', 'revoked online key drill did not reject');
-    const lostOnlineKey = 'PASSED';
+    const revokedTimestampPrimary = expectRejected(() => verifyUpdateBundle({
+      ...replacementBundle,
+      snapshot: revokedTimestamp.snapshot,
+      timestamp: revokedTimestamp.timestamp
+    }));
+    const onlineRecovery = {
+      policy: '1-of-2-primary-plus-sealed-recovery',
+      recoveryAccepted: recoveryAccepted ? 'PASSED' : 'FAILED',
+      replacementAccepted: replacementAccepted ? 'PASSED' : 'FAILED',
+      oldSnapshotPrimaryRevoked: revokedSnapshotPrimary,
+      oldTimestampPrimaryRevoked: revokedTimestampPrimary
+    };
     const rollbackBundle = {
-      ...bundle,
-      trustedState: structuredClone(bundle.trustedState)
+      ...rootTwoBundle,
+      trustedState: structuredClone(rootTwoBundle.trustedState)
     };
     rollbackBundle.trustedState.versions.timestamp = 2;
     const rollback = expectRejected(() => verifyUpdateBundle(rollbackBundle));
@@ -585,13 +830,14 @@ export async function runUpdateCeremonyDryRun({ outputRoot }) {
       expires: '2029-12-31T23:59:59Z'
     };
     const frozen = signCanonicalWithAdapter(frozenSigned, material.timestampNew, adapter);
-    const freeze = expectRejected(() => verifyUpdateBundle({ ...bundle, timestamp: frozen }));
+    const freeze = expectRejected(() => verifyUpdateBundle({ ...rootTwoBundle, timestamp: frozen }));
 
     const documents = {
       root1: material.rootOne,
       root2: material.rootTwo,
-      timestamp: release.timestamp,
-      snapshot: release.snapshot,
+      root3: material.rootThree,
+      timestamp: replacementOnline.timestamp,
+      snapshot: replacementOnline.snapshot,
       targets: release.targets,
       androidRelease: release.delegatedTargets
     };
@@ -604,22 +850,35 @@ export async function runUpdateCeremonyDryRun({ outputRoot }) {
       writeTree(mirrorB, entries),
       writeTree(offlineBundle, entries)
     ]);
-    await verifyByteIdenticalTrees(mirrorA, mirrorB);
-    await verifyByteIdenticalTrees(mirrorA, offlineBundle);
+    const mirrorEquality = await verifyByteIdenticalTrees(mirrorA, mirrorB);
+    const offlineEquality = await verifyByteIdenticalTrees(mirrorA, offlineBundle);
 
     const addressedFile = entries.find(([relative]) => relative.startsWith('metadata/sha256/'));
     const compromisedPath = path.join(mirrorB, ...addressedFile[0].split('/'));
     const originalBytes = await readFile(compromisedPath);
     await writeFile(compromisedPath, Buffer.concat([originalBytes, Buffer.from([0])]));
-    let mirrorCompromise;
-    try {
-      await verifyByteIdenticalTrees(mirrorA, mirrorB);
-      fail('compromised mirror was accepted');
-    } catch {
-      mirrorCompromise = 'REJECTED-AS-REQUIRED';
-    }
+    const mirrorCompromise = await expectAsyncRejected(
+      () => verifyByteIdenticalTrees(mirrorA, mirrorB)
+    );
     await writeFile(compromisedPath, originalBytes);
     await verifyByteIdenticalTrees(mirrorA, mirrorB);
+    const publicationVerification = {
+      mirrorA: await loadAndVerifyPublishedTree(mirrorA, provenanceBinding),
+      mirrorB: await loadAndVerifyPublishedTree(mirrorB, provenanceBinding),
+      offlineBundle: await loadAndVerifyPublishedTree(offlineBundle, provenanceBinding),
+      byteIdentity: {
+        mirrorTreesSha256Equal:
+          mirrorEquality.files.length === offlineEquality.files.length &&
+          mirrorEquality.files.every((file, index) =>
+            file.sha256 === offlineEquality.files[index].sha256),
+        exactTrees: 'PASSED'
+      }
+    };
+    contract(new Set([
+      publicationVerification.mirrorA.treeSha256,
+      publicationVerification.mirrorB.treeSha256,
+      publicationVerification.offlineBundle.treeSha256
+    ]).size === 1, 'reloaded publication trees are not byte-identical');
 
     const activation = evaluateProductionActivation({
       accountableHuman: 'Mr. X',
@@ -629,8 +888,8 @@ export async function runUpdateCeremonyDryRun({ outputRoot }) {
       reproducibleBuildEvidence: null
     });
     const drills = {
-      rootRotation: 'PASSED',
-      lostOnlineKey,
+      rootRotation: rootRotationDrills,
+      onlineRecovery,
       mirrorCompromise,
       rollback,
       freeze
@@ -647,15 +906,47 @@ export async function runUpdateCeremonyDryRun({ outputRoot }) {
       schema: 'deep.update-ceremony.threshold-evidence.v1',
       testOnly: true,
       accountableHuman: 'Mr. X',
-      rootThreshold: { required: 2, publicKeyCount: 3, signaturesObserved: 2 },
-      rootRotationCrossSigned: true,
-      oldRootThresholdObserved: 2,
-      newRootThresholdObserved: 2,
-      targetsThreshold: { required: 2, publicKeyCount: 3, signaturesObserved: 2 },
-      delegatedThreshold: { required: 2, publicKeyCount: 3, signaturesObserved: 2 },
+      rootThreshold: {
+        required: material.rootOne.envelope.signed.roles.root.threshold,
+        publicKeyCount: material.rootOne.envelope.signed.roles.root.keyids.length,
+        signaturesObserved: material.rootOne.envelope.signatures.length
+      },
+      rootRotationCrossSigned: rootRotationDrills.crossSigned === 'PASSED',
+      oldRootThresholdObserved: material.rootTwo.envelope.signatures.filter(signature =>
+        material.rootOne.envelope.signed.roles.root.keyids.includes(signature.keyid)).length,
+      newRootThresholdObserved: material.rootTwo.envelope.signatures.filter(signature =>
+        material.rootTwo.envelope.signed.roles.root.keyids.includes(signature.keyid)).length,
+      rootRotationNegativeDrills: rootRotationDrills,
+      targetsThreshold: {
+        required: material.rootTwo.envelope.signed.roles.targets.threshold,
+        publicKeyCount: material.rootTwo.envelope.signed.roles.targets.keyids.length,
+        signaturesObserved: release.targets.envelope.signatures.length
+      },
+      delegatedThreshold: {
+        required: release.targets.envelope.signed.delegations.roles[0].threshold,
+        publicKeyCount: release.targets.envelope.signed.delegations.roles[0].keyids.length,
+        signaturesObserved: release.delegatedTargets.envelope.signatures.length
+      },
+      onlineRoles: {
+        policy: onlineRecovery.policy,
+        snapshot: {
+          required: material.rootThree.envelope.signed.roles.snapshot.threshold,
+          publicKeyCount: material.rootThree.envelope.signed.roles.snapshot.keyids.length
+        },
+        timestamp: {
+          required: material.rootThree.envelope.signed.roles.timestamp.threshold,
+          publicKeyCount: material.rootThree.envelope.signed.roles.timestamp.keyids.length
+        },
+        drills: onlineRecovery
+      },
       testKeyMaterialArchived: false,
       productionHsmVerified: false,
       namedIndependentCustodians: []
+    }));
+    await writeFile(path.join(evidenceDir, 'publication-verification.json'), jsonBytes({
+      schema: 'deep.update-ceremony.publication-verification.v1',
+      testOnly: true,
+      ...publicationVerification
     }));
     await writeFile(path.join(evidenceDir, 'artifact-evidence.json'), jsonBytes({
       schema: 'deep.update-ceremony.artifact-evidence.v1',
@@ -664,11 +955,14 @@ export async function runUpdateCeremonyDryRun({ outputRoot }) {
       sbomSha256: sha256(artifacts.sbomBytes),
       provenanceSha256: sha256(artifacts.provenanceBytes),
       reproducibleBuildVerified: false,
+      sourceCommit: provenanceBinding.sourceCommit,
+      programRevisionSha256: provenanceBinding.programRevisionSha256,
       reason: 'two TEST builder labels are contract fixtures, not independent retained attestations'
     }));
     const summary = {
       schema: 'deep.update-ceremony.dry-run.v1',
-      sourceCommitSha: gitHead(),
+      sourceCommitSha: provenanceBinding.sourceCommit,
+      programRevisionSha256: provenanceBinding.programRevisionSha256,
       testOnly: true,
       dryRunStatus: 'PASSED',
       p02bCompatibility: 'PASSED',
