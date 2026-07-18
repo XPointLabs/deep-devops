@@ -7,344 +7,388 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 export const repositoryRoot = path.resolve(scriptDirectory, '..');
 export const composePath = path.join(repositoryRoot, 'docker-compose.uat-private.yml');
+export const syntheticRouterIds = Object.freeze(['a1'.repeat(32), 'b2'.repeat(32), 'c3'.repeat(32)]);
 
-export const syntheticRouterIds = Object.freeze([
-  'a1'.repeat(32),
-  'b2'.repeat(32),
-  'c3'.repeat(32)
-]);
-
-const expectedServices = Object.freeze([
-  'calls',
-  'file',
-  'push',
-  'storage',
-  'xnode-1',
-  'xnode-2',
-  'xnode-3'
-]);
-const expectedRouters = Object.freeze(['xnode-1', 'xnode-2', 'xnode-3']);
-const expectedIps = Object.freeze(['172.30.81.11', '172.30.81.12', '172.30.81.13']);
-const ancillaryLoopbackPorts = Object.freeze({
-  file: '29101',
-  push: '29102',
-  calls: '29103'
-});
+const routers = Object.freeze(['xnode-1', 'xnode-2', 'xnode-3']);
+const services = Object.freeze(['calls', 'file', 'push', 'storage', ...routers]);
+const ips = Object.freeze(['172.30.81.11', '172.30.81.12', '172.30.81.13']);
 const networkName = 'i01b-private-uat';
-const resourcePrefix = 'deep-i01b-private-uat-';
+const ancillaryPorts = Object.freeze({ file: '29101', push: '29102', calls: '29103' });
+const stateTargets = Object.freeze({
+  calls: '/var/lib/deep/i01b-private-uat/calls',
+  file: '/var/lib/deep/i01b-private-uat/file',
+  push: '/var/lib/deep/i01b-private-uat/push',
+  storage: '/var/lib/deep/i01b-private-uat/storage',
+  'xnode-1': '/var/lib/deep/i01b-private-uat/xnode-1',
+  'xnode-2': '/var/lib/deep/i01b-private-uat/xnode-2',
+  'xnode-3': '/var/lib/deep/i01b-private-uat/xnode-3'
+});
+const routerServiceKeys = Object.freeze([
+  'build', 'cap_add', 'cap_drop', 'command', 'depends_on', 'entrypoint', 'environment',
+  'healthcheck', 'labels', 'networks', 'ports', 'secrets', 'security_opt', 'volumes'
+]);
+const ancillaryServiceKeys = Object.freeze([
+  'build', 'cap_drop', 'command', 'entrypoint', 'environment', 'healthcheck', 'networks',
+  'security_opt', 'volumes'
+]);
 
-function exactKeys(actual, expected, label) {
-  assert.deepEqual(Object.keys(actual ?? {}).sort(), [...expected].sort(), `${label} must have exact keys`);
+function exactKeys(value, expected, label) {
+  assert.deepEqual(Object.keys(value ?? {}).sort(), [...expected].sort(), `${label} must have exact keys`);
 }
 
-function assertExactString(environment, key, expected, routerName) {
-  assert.equal(environment[key], expected, `${routerName} must set ${key}=${expected}`);
+function exactValue(actual, expected, label) {
+  assert.deepEqual(actual, expected, `${label} must be exact`);
 }
 
-function getAllowlist(environment, routerName) {
+function validateGlobalEscapeHatches(topology) {
+  for (const [name, service] of Object.entries(topology.services)) {
+    assert.ok(service.privileged === undefined || service.privileged === false, `${name} privileged is forbidden`);
+    assert.equal(service.pid, undefined, `${name} pid namespace is forbidden`);
+    assert.equal(service.ipc, undefined, `${name} ipc namespace is forbidden`);
+    assert.equal(service.devices, undefined, `${name} devices are forbidden`);
+    assert.equal(service.network_mode, undefined, `${name} network_mode is forbidden`);
+    assert.equal(service.extra_hosts, undefined, `${name} extra_hosts and host-gateway are forbidden`);
+    assert.notEqual(service.build?.network, 'host', `${name} build network host is forbidden`);
+    assert.ok(
+      !JSON.stringify(service).toLowerCase().includes('docker.sock'),
+      `${name} docker.sock is forbidden`
+    );
+    for (const mount of service.volumes ?? []) {
+      assert.equal(mount.type, 'volume', `${name} bind mounts are forbidden`);
+    }
+  }
+}
+
+function validateBuild(service, name, inputs) {
+  exactKeys(service.build, ['args', 'context', 'dockerfile'], `${name} build`);
+  assert.equal(service.build.context, inputs.syntheticXnodeContext, `${name} build context mismatch`);
+  assert.equal(service.build.dockerfile, inputs.syntheticXnodeDockerfile, `${name} Dockerfile mismatch`);
+  exactValue(service.build.args, {
+    APP_DLL: 'XNode.dll',
+    PROJECT: 'src/XNode/XNode.csproj',
+    RUNTIME_IMAGE: `mcr.microsoft.com/dotnet/aspnet:10.0@${inputs.syntheticRuntimeDigest}`,
+    SDK_IMAGE: `mcr.microsoft.com/dotnet/sdk:10.0@${inputs.syntheticSdkDigest}`,
+    XRAY_SHA256: inputs.syntheticXraySha256,
+    XRAY_VERSION: inputs.syntheticXrayVersion
+  }, `${name} build args`);
+  assert.match(service.build.args.SDK_IMAGE, /@sha256:[0-9a-f]{64}$/, `${name} SDK image must be digest pinned`);
+  assert.match(service.build.args.RUNTIME_IMAGE, /@sha256:[0-9a-f]{64}$/, `${name} runtime image must be digest pinned`);
+  assert.match(service.build.args.XRAY_SHA256, /^[0-9a-f]{64}$/, `${name} Xray SHA256 must be exact`);
+}
+
+function getAllowlist(environment, name) {
   const prefix = 'Runtime__PrivatePeerEndpointAllowlist__';
-  const allowlistKeys = Object.keys(environment).filter(key => key.startsWith(prefix));
-  assert.equal(allowlistKeys.length, 12, `${routerName} must render exactly three complete allowlist tuples`);
-
-  return [0, 1, 2].map(index => {
-    const item = {};
-    for (const field of ['RouterId', 'IpAddress', 'Port', 'Path']) {
+  const keys = Object.keys(environment).filter(key => key.startsWith(prefix));
+  assert.equal(keys.length, 12, `${name} must render exactly three complete allowlist tuples`);
+  return [0, 1, 2].map(index => Object.fromEntries(
+    ['RouterId', 'IpAddress', 'Port', 'Path'].map(field => {
       const key = `${prefix}${index}__${field}`;
-      assert.ok(Object.hasOwn(environment, key), `${routerName} is missing ${key}`);
-      item[field] = environment[key];
-    }
-    return item;
-  });
+      assert.ok(Object.hasOwn(environment, key), `${name} is missing ${key}`);
+      return [field, environment[key]];
+    })
+  ));
 }
 
-function validateNoChainConfiguration(topology) {
-  const forbiddenKey = /(^Contracts__|^RegistryRegistration__|Ethereum|Arbitrum|ChainId|RpcUrl|FallbackRpc)/i;
-  const forbiddenValue = /(arbitrum|sepolia|ethereum|eth_chainId|:8545\b|\/rpc\b)/i;
-  for (const [serviceName, service] of Object.entries(topology.services)) {
-    for (const [key, value] of Object.entries(service.environment ?? {})) {
-      assert.doesNotMatch(key, forbiddenKey, `${serviceName} contains chain/RPC variable ${key}`);
-      assert.doesNotMatch(String(value), forbiddenValue, `${serviceName}.${key} contains a chain/RPC value`);
-    }
+function validateRouter(topology, name, index, inputs) {
+  const service = topology.services[name];
+  exactKeys(service, routerServiceKeys, `${name} service`);
+  validateBuild(service, name, inputs);
+  exactValue(service.cap_add, ['NET_BIND_SERVICE'], `${name} cap_add`);
+  exactValue(service.cap_drop, ['ALL'], `${name} cap_drop`);
+  exactValue(service.security_opt, ['no-new-privileges:true'], `${name} security_opt`);
+  assert.equal(service.command, null, `${name} command override is forbidden`);
+  assert.equal(service.entrypoint, null, `${name} entrypoint override is forbidden`);
+  exactValue(service.depends_on, { storage: { condition: 'service_healthy', required: true } }, `${name} depends_on`);
+  exactKeys(service.networks, [networkName], `${name} networks`);
+  assert.equal(service.networks[networkName].ipv4_address, ips[index], `${name} private IP mismatch`);
+
+  const environment = service.environment;
+  const expectedExact = {
+    ASPNETCORE_ENVIRONMENT: 'UAT',
+    ASPNETCORE_URLS: 'http://0.0.0.0:8080;http://0.0.0.0:8081',
+    DOTNET_ENVIRONMENT: 'UAT',
+    Node__ApiListenUrl: 'http://0.0.0.0:8080',
+    Node__DataDirectory: stateTargets[name],
+    Node__Ed25519PrivateKeyPath: '/run/secrets/i01b-private-uat-node-ed25519',
+    Node__Network: 'uat',
+    Node__PeerRpcListenUrl: 'http://0.0.0.0:8081',
+    Node__PublicHost: ips[index],
+    Node__PublicIp: ips[index],
+    Node__PublicPeerRpcEndpoint: `http://${ips[index]}:8081/api/peer/onion`,
+    Node__PublicPeerRpcPort: '8081',
+    Node__PublicPort: '443',
+    RegistryBootstrap__BaseUrl: '',
+    RegistryHeartbeat__Enabled: 'false',
+    Runtime__AllowPublicPeerEndpoints: 'false',
+    Runtime__BootstrapFromStorage: 'false',
+    Runtime__EnablePrivateAllowlistMembership: 'true',
+    Runtime__EnablePrivatePeerEndpoints: 'true',
+    Runtime__PrivatePeerNetworkIdentity: 'uat',
+    Runtime__RequireSignedRelayContacts: 'true',
+    StorageRpc__BaseUrl: 'http://storage:8080',
+    Vless__Enabled: 'true',
+    Vless__GeneratedConfigPath: '/tmp/deep/xray.generated.json',
+    Vless__InboundListenHost: '0.0.0.0',
+    Vless__InboundListenPort: '443',
+    Vless__MockProcess: 'false',
+    Vless__PublicHost: ips[index],
+    Vless__PublicPort: '443',
+    Vless__TransportMode: 'Tcp',
+    Vless__WorkingDirectory: '/tmp/deep/xray',
+    Vless__XrayExecutablePath: '/usr/local/bin/xray'
+  };
+  for (const [key, expected] of Object.entries(expectedExact)) {
+    assert.equal(environment[key], expected, `${name} ${key} must be exact`);
+  }
+  assert.equal(environment.Node__RouterId, syntheticRouterIds[index], `${name} RouterId mismatch`);
+  assert.equal(
+    Object.keys(environment).length,
+    Object.keys(expectedExact).length + 1 + 12,
+    `${name} environment has unexpected keys`
+  );
+  exactValue(
+    getAllowlist(environment, name),
+    ips.map((ip, peerIndex) => ({
+      RouterId: syntheticRouterIds[peerIndex],
+      IpAddress: ip,
+      Port: '8081',
+      Path: '/api/peer/onion'
+    })),
+    `${name} allowlist`
+  );
+
+  exactValue(service.labels, {
+    'io.deep.i01b.public-peer-authorization': 'DenyAll',
+    'io.deep.i01b.readiness-before-bootstrap': '503',
+    'io.deep.i01b.supply-chain-preflight-required': 'true',
+    'io.deep.i01b.xnode-dockerfile-sha256': inputs.syntheticDockerfileSha256,
+    'io.deep.i01b.xnode-source-commit': inputs.syntheticXnodeCommit
+  }, `${name} labels`);
+  exactValue(service.ports, [{
+    mode: 'ingress', host_ip: '127.0.0.1', target: 8080,
+    published: String(29311 + index), protocol: 'tcp'
+  }], `${name} API publication`);
+  exactValue(service.secrets, [{
+    source: `i01b-private-uat-node-${index + 1}-ed25519`,
+    target: 'i01b-private-uat-node-ed25519',
+    mode: '0400'
+  }], `${name} secret mount`);
+  exactValue(service.volumes, [{
+    type: 'volume',
+    source: `i01b-private-uat-${name}-state`,
+    target: stateTargets[name],
+    volume: {}
+  }], `${name} volume`);
+}
+
+function validateAncillary(service, name) {
+  const expectedKeys = name === 'storage' ? ancillaryServiceKeys : [...ancillaryServiceKeys, 'ports'];
+  exactKeys(service, expectedKeys, `${name} service`);
+  exactKeys(service.build, ['context', 'dockerfile'], `${name} build`);
+  assert.equal(service.build.context, repositoryRoot, `${name} build context mismatch`);
+  assert.equal(service.build.dockerfile, `docker/${name}-service.Dockerfile`, `${name} Dockerfile mismatch`);
+  exactValue(service.cap_drop, ['ALL'], `${name} cap_drop`);
+  assert.equal(service.cap_add, undefined, `${name} cap_add is forbidden`);
+  exactValue(service.security_opt, ['no-new-privileges:true'], `${name} security_opt`);
+  assert.equal(service.command, null, `${name} command override is forbidden`);
+  assert.equal(service.entrypoint, null, `${name} entrypoint override is forbidden`);
+  exactValue(service.networks, { [networkName]: null }, `${name} networks`);
+  exactValue(service.volumes, [{
+    type: 'volume',
+    source: `i01b-private-uat-${name}-state`,
+    target: stateTargets[name],
+    volume: {}
+  }], `${name} volume`);
+  if (name === 'storage') {
+    assert.equal(service.ports, undefined, 'storage must remain unpublished');
+  } else {
+    exactValue(service.ports, [{
+      mode: 'ingress', host_ip: '127.0.0.1', target: 8080,
+      published: ancillaryPorts[name], protocol: 'tcp'
+    }], `${name} loopback publication`);
   }
 }
 
-function validateFreshIdentityContract(topology, retired) {
-  const retiredRouterIds = new Set(
-    (retired.retiredRouterPublicIds ?? []).map(value => String(value).toLowerCase())
-  );
-  const renderedRouterIds = expectedRouters.map(name =>
-    String(topology.services[name].environment.Node__RouterId).toLowerCase()
-  );
-  assert.equal(new Set(renderedRouterIds).size, 3, 'router identities must be unique');
-  for (const routerId of renderedRouterIds) {
-    assert.match(routerId, /^[0-9a-f]{64}$/, 'router identity must be exactly 64 hexadecimal characters');
-    assert.ok(!retiredRouterIds.has(routerId), 'retired public router identity is forbidden');
-  }
-}
-
-function validatePlaceholderContract(source, example, secretTemplates, retired) {
-  assert.doesNotMatch(source, /(?:^|[/\\])\.?env\.uat(?:$|[/\\\s])/im, 'old .env.uat path is forbidden');
-  assert.doesNotMatch(source, /secret-templates[/\\]uat[/\\]/i, 'old UAT secret template path is forbidden');
+function validateSourcePlaceholders(inputs) {
+  const requiredExampleVariables = [
+    'I01B_PRIVATE_UAT_XNODE_DIR',
+    'I01B_PRIVATE_UAT_XNODE_DOCKERFILE',
+    'I01B_PRIVATE_UAT_EXPECTED_XNODE_COMMIT',
+    'I01B_PRIVATE_UAT_EXPECTED_XNODE_DOCKERFILE_SHA256',
+    'I01B_PRIVATE_UAT_DOTNET_SDK_DIGEST',
+    'I01B_PRIVATE_UAT_DOTNET_RUNTIME_DIGEST',
+    'I01B_PRIVATE_UAT_XRAY_VERSION',
+    'I01B_PRIVATE_UAT_XRAY_SHA256',
+    ...[1, 2, 3].map(index => `I01B_PRIVATE_UAT_NODE_${index}_ROUTER_ID`)
+  ];
   for (const variable of [
-    'I01B_PRIVATE_UAT_NODE_1_ROUTER_ID',
-    'I01B_PRIVATE_UAT_NODE_2_ROUTER_ID',
-    'I01B_PRIVATE_UAT_NODE_3_ROUTER_ID',
-    'I01B_PRIVATE_UAT_NODE_1_ED25519_SECRET_FILE',
-    'I01B_PRIVATE_UAT_NODE_2_ED25519_SECRET_FILE',
-    'I01B_PRIVATE_UAT_NODE_3_ED25519_SECRET_FILE'
+    ...requiredExampleVariables,
+    ...[1, 2, 3].map(index => `I01B_PRIVATE_UAT_NODE_${index}_ED25519_SECRET_FILE`)
   ]) {
+    assert.match(inputs.source, new RegExp(`\\$\\{${variable}:\\?REQUIRED`), `${variable} must be REQUIRED`);
+  }
+  for (const variable of requiredExampleVariables) {
     assert.match(
-      source,
-      new RegExp(`\\$\\{${variable}:\\?REQUIRED`),
-      `${variable} must be a REQUIRED compose placeholder`
+      inputs.example,
+      new RegExp(`^${variable}=(?:sha256:)?__REQUIRED`, 'm'),
+      `${variable} example must be REQUIRED`
     );
   }
   for (const index of [1, 2, 3]) {
     assert.match(
-      example,
-      new RegExp(`I01B_PRIVATE_UAT_NODE_${index}_ROUTER_ID=__REQUIRED_FRESH_`),
-      `node ${index} public identity example must remain a fresh placeholder`
+      inputs.example,
+      new RegExp(`^I01B_PRIVATE_UAT_NODE_${index}_ED25519_SECRET_FILE=\\./secret-templates/uat-private-i01b/node-${index}-ed25519\\.seed\\.example$`, 'm'),
+      `node ${index} example secret path must point only at its placeholder template`
     );
+  }
+  for (const [index, template] of inputs.secretTemplates.entries()) {
     assert.match(
-      secretTemplates[index - 1],
-      new RegExp(`^__REQUIRED_FRESH_I01B_PRIVATE_UAT_NODE_${index}_ED25519_SEED_NOT_COMMITTED__\\s*$`),
-      `node ${index} secret template must contain only its required placeholder`
+      template,
+      new RegExp(`^__REQUIRED_FRESH_I01B_PRIVATE_UAT_NODE_${index + 1}_ED25519_SEED_NOT_COMMITTED__\\s*$`),
+      `node ${index + 1} secret template must remain a placeholder`
     );
   }
-
-  const retiredStrings = [
-    ...(retired.retiredOperatorAddresses ?? []),
-    ...(retired.retiredRouterPublicIds ?? [])
-  ];
-  const newConfigurationText = [source, example, ...secretTemplates].join('\n').toLowerCase();
-  for (const retiredValue of retiredStrings) {
-    assert.ok(
-      !newConfigurationText.includes(String(retiredValue).toLowerCase()),
-      `retired identity ${retiredValue} must not appear in the private UAT configuration`
-    );
+  const newText = [inputs.source, inputs.example, ...inputs.secretTemplates].join('\n').toLowerCase();
+  for (const retired of [
+    ...(inputs.retired.retiredRouterPublicIds ?? []),
+    ...(inputs.retired.retiredOperatorAddresses ?? [])
+  ]) {
+    assert.ok(!newText.includes(String(retired).toLowerCase()), `retired identity ${retired} is forbidden`);
   }
+  assert.doesNotMatch(newText, /host\.docker\.internal|host-gateway|docker\.sock/i, 'host escape hatch is forbidden');
+  assert.doesNotMatch(newText, /contractnodeid|contract_node_id/i, 'chain node IDs are forbidden');
+  assert.match(inputs.reviewedDockerfile, /^ARG SDK_IMAGE\s*$/m, 'Dockerfile SDK image must have no default');
+  assert.match(inputs.reviewedDockerfile, /^ARG RUNTIME_IMAGE\s*$/m, 'Dockerfile runtime image must have no default');
+  assert.match(inputs.reviewedDockerfile, /^ARG XRAY_VERSION\s*$/m, 'Dockerfile Xray version must have no default');
+  assert.match(inputs.reviewedDockerfile, /^ARG XRAY_SHA256\s*$/m, 'Dockerfile Xray SHA256 must be required');
+  assert.doesNotMatch(inputs.reviewedDockerfile, /^ARG XRAY_DOWNLOAD_URL/m, 'ambient Xray URL override is forbidden');
+  assert.match(
+    inputs.reviewedDockerfile,
+    /test "\$\{#XRAY_SHA256\}" -eq 64/,
+    'Dockerfile must require an exact-length Xray SHA256'
+  );
+  assert.match(
+    inputs.reviewedDockerfile,
+    /sha256sum -c -/,
+    'Dockerfile must verify the Xray archive unconditionally'
+  );
   assert.doesNotMatch(
-    newConfigurationText,
-    /contractnodeid|contract_node_id/,
-    'chain contract node IDs are forbidden in the chain-free private topology'
+    inputs.reviewedDockerfile,
+    /if \[ -n "\$\{XRAY_SHA256/,
+    'optional Xray archive verification is forbidden'
   );
 }
 
 export function validateTopology(topology, inputs) {
-  assert.equal(topology.name, 'deep-i01b-private-uat', 'compose project name must be standalone');
-  assert.deepEqual(Object.keys(topology.services).sort(), [...expectedServices], 'service set must be exact');
-
+  assert.equal(topology.name, 'deep-i01b-private-uat', 'compose project name mismatch');
+  exactKeys(topology.services, services, 'service set');
   exactKeys(topology.networks, [networkName], 'compose networks');
-  const network = topology.networks[networkName];
-  assert.equal(network.name, 'deep-i01b-private-uat-isolated', 'network resource name must be standalone');
-  assert.equal(network.internal, true, 'private UAT network must be internal');
-  assert.equal(network.driver, 'bridge', 'private UAT network must use the bridge driver');
-  assert.deepEqual(
-    network.ipam?.config?.map(item => item.subnet),
-    ['172.30.81.0/24'],
-    'private UAT network must have one exact subnet'
-  );
-
-  exactKeys(topology.secrets, [
-    'i01b-private-uat-node-1-ed25519',
-    'i01b-private-uat-node-2-ed25519',
-    'i01b-private-uat-node-3-ed25519'
-  ], 'compose secrets');
-  exactKeys(topology.volumes, [
-    'i01b-private-uat-calls-state',
-    'i01b-private-uat-file-state',
-    'i01b-private-uat-push-state',
-    'i01b-private-uat-storage-state',
-    'i01b-private-uat-xnode-1-state',
-    'i01b-private-uat-xnode-2-state',
-    'i01b-private-uat-xnode-3-state'
-  ], 'compose volumes');
-  for (const resource of [...Object.values(topology.secrets), ...Object.values(topology.volumes)]) {
-    assert.ok(resource.name.startsWith(resourcePrefix), 'secret/volume resource name must be I01B-private');
+  exactValue(topology.networks[networkName], {
+    name: 'deep-i01b-private-uat-isolated',
+    driver: 'bridge',
+    ipam: { config: [{ subnet: '172.30.81.0/24' }] },
+    internal: true
+  }, 'private network');
+  const expectedVolumeNames = services.map(name => `i01b-private-uat-${name}-state`).sort();
+  exactKeys(topology.volumes, expectedVolumeNames, 'compose volumes');
+  for (const name of expectedVolumeNames) {
+    exactValue(topology.volumes[name], { name: `deep-${name}` }, `${name} resource`);
+  }
+  const secretNames = [1, 2, 3].map(index => `i01b-private-uat-node-${index}-ed25519`);
+  exactKeys(topology.secrets, secretNames, 'compose secrets');
+  for (const [index, name] of secretNames.entries()) {
+    exactValue(topology.secrets[name], {
+      name: `deep-${name}`,
+      file: path.resolve(repositoryRoot, `secret-templates/uat-private-i01b/node-${index + 1}-ed25519.seed.example`)
+    }, `${name} resource`);
   }
 
-  let allowlistMappingCount = 0;
-  let publishedPortCount = 0;
-  for (const [serviceName, service] of Object.entries(topology.services)) {
-    assert.ok(!service.network_mode, `${serviceName} must not use host network mode`);
-    exactKeys(service.networks, [networkName], `${serviceName} networks`);
-    assert.ok(
-      !(service.extra_hosts ?? []).some(value => JSON.stringify(value).includes('host.docker.internal')),
-      `${serviceName} must not use host.docker.internal`
-    );
-
-    const ports = service.ports ?? [];
-    publishedPortCount += ports.length;
-    if (!expectedRouters.includes(serviceName)) {
-      if (serviceName === 'storage') {
-        assert.equal(ports.length, 0, 'storage must remain internal and publish no ports');
-      } else {
-        assert.equal(ports.length, 1, `${serviceName} must publish one exact loopback E2E endpoint`);
-        assert.equal(ports[0].host_ip, '127.0.0.1', `${serviceName} E2E endpoint must bind loopback`);
-        assert.equal(ports[0].target, 8080, `${serviceName} E2E endpoint must target port 8080`);
-        assert.equal(
-          ports[0].published,
-          ancillaryLoopbackPorts[serviceName],
-          `${serviceName} E2E endpoint uses the wrong fixed host port`
-        );
-      }
-      assert.equal(service.secrets?.length ?? 0, 0, `${serviceName} must not consume router secrets`);
-      continue;
-    }
-
-    const routerIndex = expectedRouters.indexOf(serviceName);
-    const expectedIp = expectedIps[routerIndex];
-    const environment = service.environment ?? {};
-    assert.equal(service.networks[networkName]?.ipv4_address, expectedIp, `${serviceName} static IP mismatch`);
-    assertExactString(environment, 'DOTNET_ENVIRONMENT', 'UAT', serviceName);
-    assertExactString(environment, 'ASPNETCORE_ENVIRONMENT', 'UAT', serviceName);
-    assertExactString(environment, 'Node__Network', 'uat', serviceName);
-    assertExactString(environment, 'Runtime__EnablePrivatePeerEndpoints', 'true', serviceName);
-    assertExactString(environment, 'Runtime__PrivatePeerNetworkIdentity', 'uat', serviceName);
-    assertExactString(environment, 'Runtime__AllowPublicPeerEndpoints', 'false', serviceName);
-    assertExactString(environment, 'Runtime__RequireSignedRelayContacts', 'true', serviceName);
-    assertExactString(environment, 'Runtime__BootstrapFromStorage', 'false', serviceName);
-    assertExactString(environment, 'RegistryHeartbeat__Enabled', 'false', serviceName);
-    assertExactString(environment, 'RegistryBootstrap__BaseUrl', '', serviceName);
-    assertExactString(
-      environment,
-      'Node__PublicPeerRpcEndpoint',
-      `http://${expectedIp}:8081/api/peer/onion`,
-      serviceName
-    );
-    assertExactString(environment, 'Node__PublicPeerRpcPort', '8081', serviceName);
-    assert.equal(
-      service.labels?.['io.deep.i01b.public-peer-authorization'],
-      'DenyAll',
-      `${serviceName} must declare the fail-closed DenyAll expectation`
-    );
-
-    assert.equal(ports.length, 1, `${serviceName} may publish only its router API`);
-    assert.equal(ports[0].host_ip, '127.0.0.1', `${serviceName} API must bind only to loopback`);
-    assert.equal(ports[0].target, 8080, `${serviceName} may publish only target 8080`);
-    assert.notEqual(ports[0].target, 8081, `${serviceName} peer RPC must not be published`);
-    assert.notEqual(ports[0].target, 443, `${serviceName} VLESS must not be published`);
-
-    assert.equal(service.secrets?.length, 1, `${serviceName} must consume one Ed25519 seed secret`);
-    assert.equal(
-      service.secrets[0].source,
-      `i01b-private-uat-node-${routerIndex + 1}-ed25519`,
-      `${serviceName} must consume only its own fresh identity secret`
-    );
-    assert.equal(
-      environment.Node__Ed25519PrivateKeyPath,
-      '/run/secrets/i01b-private-uat-node-ed25519',
-      `${serviceName} must sign relay contacts from its mounted secret`
-    );
-    exactKeys(service.depends_on, ['storage'], `${serviceName} dependencies`);
-
-    const allowlist = getAllowlist(environment, serviceName);
-    allowlistMappingCount += allowlist.length;
-    assert.deepEqual(
-      allowlist,
-      expectedIps.map((ipAddress, index) => ({
-        RouterId: topology.services[expectedRouters[index]].environment.Node__RouterId,
-        IpAddress: ipAddress,
-        Port: '8081',
-        Path: '/api/peer/onion'
-      })),
-      `${serviceName} allowlist must equal all three advertised tuples, including self`
-    );
-    assert.deepEqual(
-      allowlist[routerIndex],
-      {
-        RouterId: environment.Node__RouterId,
-        IpAddress: expectedIp,
-        Port: '8081',
-        Path: '/api/peer/onion'
-      },
-      `${serviceName} self tuple must equal its signed advertised identity`
-    );
-  }
-
-  assert.equal(allowlistMappingCount, 9, 'topology must render exactly nine allowlist mappings');
-  assert.equal(
-    publishedPortCount,
-    6,
-    'topology must publish exactly three router APIs and three ancillary E2E endpoints'
-  );
-  assert.doesNotMatch(inputs.source, /host\.docker\.internal/i, 'host.docker.internal is forbidden');
-  assert.doesNotMatch(inputs.source, /\bnetwork_mode\s*:\s*host\b/i, 'host network mode is forbidden');
-  validateNoChainConfiguration(topology);
-  validateFreshIdentityContract(topology, inputs.retired);
-  validatePlaceholderContract(
-    inputs.source,
-    inputs.example,
-    inputs.secretTemplates,
-    inputs.retired
-  );
+  validateGlobalEscapeHatches(topology);
+  routers.forEach((name, index) => validateRouter(topology, name, index, inputs));
+  ['storage', 'file', 'push', 'calls'].forEach(name => validateAncillary(topology.services[name], name));
+  validateSourcePlaceholders(inputs);
 
   return {
-    schemaVersion: '1.0.0',
+    schemaVersion: '2.0.0',
     status: 'static-private-topology-contract-accepted',
-    composeProject: topology.name,
-    serviceCount: Object.keys(topology.services).length,
-    routerCount: expectedRouters.length,
-    compatibilityServiceCount: 4,
-    allowlistMappingCount,
-    publishedLoopbackRouterApiCount: expectedRouters.length,
-    publishedLoopbackAncillaryCount: Object.keys(ancillaryLoopbackPorts).length,
-    networkCount: Object.keys(topology.networks).length,
-    volumeCount: Object.keys(topology.volumes).length,
-    secretCount: Object.keys(topology.secrets).length,
+    serviceCount: 7,
+    routerCount: 3,
+    allowlistMappingCount: 9,
+    readinessBeforeBootstrap: 503,
+    sourcePreflightRequired: true,
+    identityPreflightRequired: true,
+    bootstrapCeremonyRequired: true,
     publicPeerAuthorizationExpected: 'DenyAll',
+    vless443Published: false,
+    realityVlessEndToEndProven: false,
     uatRestartAuthorized: false,
     productionReady: false
   };
 }
 
 export function renderTopology() {
+  const syntheticXnodeContext = path.resolve(repositoryRoot, '..', 'synthetic-reviewed-xnode');
+  const syntheticXnodeDockerfile = path.resolve(repositoryRoot, 'docker', 'xnode-xray.Dockerfile');
+  const syntheticXnodeCommit = 'd4'.repeat(20);
+  const syntheticDockerfileSha256 = 'e5'.repeat(32);
+  const syntheticSdkDigest = `sha256:${'11'.repeat(32)}`;
+  const syntheticRuntimeDigest = `sha256:${'22'.repeat(32)}`;
+  const syntheticXrayVersion = 'v0.0.0-synthetic';
+  const syntheticXraySha256 = '33'.repeat(32);
   const environment = {
     ...process.env,
     COMPOSE_DISABLE_ENV_FILE: '1',
-    I01B_PRIVATE_UAT_NODE_1_ROUTER_ID: syntheticRouterIds[0],
-    I01B_PRIVATE_UAT_NODE_2_ROUTER_ID: syntheticRouterIds[1],
-    I01B_PRIVATE_UAT_NODE_3_ROUTER_ID: syntheticRouterIds[2],
-    I01B_PRIVATE_UAT_NODE_1_ED25519_SECRET_FILE:
-      './secret-templates/uat-private-i01b/node-1-ed25519.seed.example',
-    I01B_PRIVATE_UAT_NODE_2_ED25519_SECRET_FILE:
-      './secret-templates/uat-private-i01b/node-2-ed25519.seed.example',
-    I01B_PRIVATE_UAT_NODE_3_ED25519_SECRET_FILE:
-      './secret-templates/uat-private-i01b/node-3-ed25519.seed.example'
+    I01B_PRIVATE_UAT_XNODE_DIR: syntheticXnodeContext,
+    I01B_PRIVATE_UAT_XNODE_DOCKERFILE: syntheticXnodeDockerfile,
+    I01B_PRIVATE_UAT_EXPECTED_XNODE_COMMIT: syntheticXnodeCommit,
+    I01B_PRIVATE_UAT_EXPECTED_XNODE_DOCKERFILE_SHA256: syntheticDockerfileSha256,
+    I01B_PRIVATE_UAT_DOTNET_SDK_DIGEST: syntheticSdkDigest,
+    I01B_PRIVATE_UAT_DOTNET_RUNTIME_DIGEST: syntheticRuntimeDigest,
+    I01B_PRIVATE_UAT_XRAY_VERSION: syntheticXrayVersion,
+    I01B_PRIVATE_UAT_XRAY_SHA256: syntheticXraySha256,
+    ...Object.fromEntries([1, 2, 3].flatMap(index => [
+      [`I01B_PRIVATE_UAT_NODE_${index}_ROUTER_ID`, syntheticRouterIds[index - 1]],
+      [`I01B_PRIVATE_UAT_NODE_${index}_ED25519_SECRET_FILE`,
+        `./secret-templates/uat-private-i01b/node-${index}-ed25519.seed.example`]
+    ]))
   };
   const result = spawnSync(
     'docker',
     ['compose', '-f', path.basename(composePath), 'config', '--format', 'json'],
-    {
-      cwd: repositoryRoot,
-      env: environment,
-      encoding: 'utf8',
-      windowsHide: true
-    }
+    { cwd: repositoryRoot, env: environment, encoding: 'utf8', windowsHide: true }
   );
   if (result.error) throw new Error(`docker compose config could not run: ${result.error.message}`);
-  if (result.status !== 0) {
-    throw new Error(`docker compose config failed closed: ${result.stderr.trim()}`);
-  }
-  return JSON.parse(result.stdout);
+  if (result.status !== 0) throw new Error(`docker compose config failed closed: ${result.stderr.trim()}`);
+  return {
+    topology: JSON.parse(result.stdout),
+    syntheticXnodeContext,
+    syntheticXnodeDockerfile,
+    syntheticXnodeCommit,
+    syntheticDockerfileSha256,
+    syntheticSdkDigest,
+    syntheticRuntimeDigest,
+    syntheticXrayVersion,
+    syntheticXraySha256
+  };
 }
 
-export async function loadContractInputs() {
-  const secretTemplateDirectory = path.join(repositoryRoot, 'secret-templates', 'uat-private-i01b');
-  const [source, example, retired, ...secretTemplates] = await Promise.all([
+export async function loadContractInputs(rendered = renderTopology()) {
+  const [source, example, reviewedDockerfile, retired, ...secretTemplates] = await Promise.all([
     readFile(composePath, 'utf8'),
     readFile(path.join(repositoryRoot, '.env.uat-private.example'), 'utf8'),
-    readFile(path.join(repositoryRoot, 'config', 'retired-uat-public-identities.json'), 'utf8')
-      .then(JSON.parse),
-    ...[1, 2, 3].map(index =>
-      readFile(path.join(secretTemplateDirectory, `node-${index}-ed25519.seed.example`), 'utf8')
-    )
+    readFile(path.join(repositoryRoot, 'docker', 'xnode-xray.Dockerfile'), 'utf8'),
+    readFile(path.join(repositoryRoot, 'config', 'retired-uat-public-identities.json'), 'utf8').then(JSON.parse),
+    ...[1, 2, 3].map(index => readFile(
+      path.join(repositoryRoot, 'secret-templates', 'uat-private-i01b', `node-${index}-ed25519.seed.example`),
+      'utf8'
+    ))
   ]);
-  return { source, example, retired, secretTemplates };
+  return { ...rendered, source, example, reviewedDockerfile, retired, secretTemplates };
 }
 
 export async function main() {
-  const result = validateTopology(renderTopology(), await loadContractInputs());
+  const rendered = renderTopology();
+  const result = validateTopology(rendered.topology, await loadContractInputs(rendered));
   console.log(JSON.stringify(result, null, 2));
   return result;
 }
