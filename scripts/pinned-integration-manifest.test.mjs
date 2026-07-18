@@ -162,6 +162,70 @@ test('validates the immutable local-only I01B repository matrix', async () => {
   assert.equal(validated.verifiedArtifacts[0].version, '2.0.1-i01b');
 });
 
+test('validates the immutable local-only W0 repository matrix and honest gate status', async () => {
+  const validated = await validateManifest({
+    manifestPath: path.join(
+      path.dirname(fileURLToPath(import.meta.url)),
+      '..',
+      'release',
+      'manifests',
+      'survival-v2.0.2-w0.local.json'
+    )
+  });
+  assert.equal(validated.manifest.releaseId, 'deep-survival-v2.0.2-w0-local');
+  assert.equal(validated.manifest.repositories.length, 13);
+  assert.equal(validated.verifiedArtifacts[0].version, '2.0.2-w0');
+  const pins = Object.fromEntries(
+    validated.manifest.repositories.map(repository => [repository.name, repository.sha])
+  );
+  assert.deepEqual({
+    'deep-client-shared': pins['deep-client-shared'],
+    'deep-client-maui': pins['deep-client-maui'],
+    'deep-devops': pins['deep-devops'],
+    'deep-protocol': pins['deep-protocol'],
+    xnode: pins.xnode
+  }, {
+    'deep-client-shared': 'fb310d05a4b8bd5450695ab00569deb62aba1ff1',
+    'deep-client-maui': '2d1cefd30a1e12b657288bca704aab4b10980dce',
+    'deep-devops': '67cb8113e94708a4597bb98a88e00ad9ba632415',
+    'deep-protocol': '8484b130a274ca7d8de574e563c83198180d7808',
+    xnode: '8b19577ef00f2169116cc08da51e9592089289a9'
+  });
+  const contract = JSON.parse(await readFile(
+    path.join(
+      path.dirname(fileURLToPath(import.meta.url)),
+      '..',
+      'release',
+      'contracts',
+      'survival-compatibility-v2.0.2-w0.json'
+    ),
+    'utf8'
+  ));
+  assert.equal(contract.w0Evidence.metadataProductGate.status, 'EXPECTED-RED');
+  assert.equal(contract.w0Evidence.metadataProductGate.unresolvedChecks, 8);
+  assert.equal(contract.w0Evidence.productionReadinessClaimed, false);
+  assert.equal(contract.w0Evidence.externalPublicationAuthorized, false);
+  assert.ok(contract.w0Evidence.packages.every(item => item.reviewStatus === 'GO'));
+  const evidence = JSON.parse(await readFile(
+    path.join(
+      path.dirname(fileURLToPath(import.meta.url)),
+      '..',
+      'release',
+      'evidence',
+      'w0-final-manifest.json'
+    ),
+    'utf8'
+  ));
+  assert.equal(evidence.manifest.sha256, validated.manifestSha256);
+  assert.equal(
+    evidence.contract.sha256,
+    validated.verifiedArtifacts[0].actualSha256
+  );
+  assert.equal(evidence.metadataProductGate.status, 'EXPECTED-RED');
+  assert.equal(evidence.productionReadinessClaimed, false);
+  assert.deepEqual(Object.values(evidence.workPackages), ['GO', 'GO', 'GO', 'GO', 'GO']);
+});
+
 test('rejects a branch-only repository ref', async t => {
   const fixture = await createFixture(t);
   const manifest = JSON.parse(await readFile(fixture.manifestPath, 'utf8'));
