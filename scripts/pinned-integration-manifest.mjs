@@ -269,7 +269,7 @@ function validateDependencyWorkPackage(item, expectedId) {
   return item;
 }
 
-async function validateDependencyClosure(value, manifest, options) {
+export async function validateDependencyClosure(value, manifest, options = {}) {
   requireExactKeys(
     value,
     [

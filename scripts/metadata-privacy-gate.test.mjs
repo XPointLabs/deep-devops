@@ -40,7 +40,9 @@ async function loadPolicy() {
 
 function pinnedGateInputs() {
   return {
-    xnodeDir: path.resolve(repositoryRoot, '..', 'xnode'),
+    xnodeDir: process.env.DEEP_METADATA_PINNED_XNODE_DIR
+      ? path.resolve(process.env.DEEP_METADATA_PINNED_XNODE_DIR)
+      : path.resolve(repositoryRoot, '..', 'xnode'),
     clientExpectationsPath: path.resolve(
       repositoryRoot,
       '..',

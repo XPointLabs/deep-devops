@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -8,6 +9,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
   checkoutPinnedRepositories,
+  validateDependencyClosure,
   validateEvidence,
   validateHandoff,
   validateManifest
@@ -232,6 +234,114 @@ test('validates detached W0 manifest from exact pinned carrier bytes and honest 
   assert.equal(evidence.selfContainedInCarrierClaimed, false);
   assert.equal(evidence.contract.verification, 'raw-git-blob-from-pinned-carrier');
   assert.deepEqual(Object.values(evidence.workPackages), ['GO', 'GO', 'GO', 'GO', 'GO']);
+});
+
+test('validates the detached W1 contract closure and preserves the W2 dependency block', async () => {
+  const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const validated = await validateManifest({
+    manifestPath: path.join(
+      root,
+      'release',
+      'manifests',
+      'survival-v2.1.0-w1w2-gate.detached.local.json'
+    )
+  });
+  assert.equal(
+    validated.manifest.releaseId,
+    'deep-survival-v2.1.0-w1w2-gate-detached-local'
+  );
+  assert.equal(validated.manifest.repositories.length, 13);
+  assert.equal(validated.verifiedArtifacts[0].version, '2.1.0-w1w2-gate');
+  assert.equal(
+    validated.verifiedArtifacts[0].carrierCommit,
+    '524c5796aa868fa3d057fbf7eaa13cfea2e0d19c'
+  );
+  assert.equal(validated.verifiedProducerArtifacts.length, 0);
+});
+
+test('strictly verifies W1 producer artifacts from immutable Git bytes when sources are assigned', {
+  skip: !process.env.DEEP_W1W2_PRODUCER_SOURCE_MAP
+    || !existsSync(process.env.DEEP_W1W2_PRODUCER_SOURCE_MAP)
+}, async () => {
+  const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const validated = await validateManifest({
+    manifestPath: path.join(
+      root,
+      'release',
+      'manifests',
+      'survival-v2.1.0-w1w2-gate.detached.local.json'
+    ),
+    verifyProducerArtifacts: true,
+    producerSourceMapPath: process.env.DEEP_W1W2_PRODUCER_SOURCE_MAP
+  });
+  assert.equal(validated.verifiedProducerArtifacts.length, 17);
+  assert.deepEqual(
+    [...new Set(validated.verifiedProducerArtifacts.map(artifact => artifact.workPackage))],
+    ['P04', 'P05']
+  );
+});
+
+test('W1/W2 dependency closure rejects authorization inflation and producer tampering', async () => {
+  const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const contract = JSON.parse(await readFile(
+    path.join(
+      root,
+      'release',
+      'contracts',
+      'survival-compatibility-v2.1.0-w1w2-gate.json'
+    ),
+    'utf8'
+  ));
+  const manifest = JSON.parse(await readFile(
+    path.join(
+      root,
+      'release',
+      'manifests',
+      'survival-v2.1.0-w1w2-gate.detached.local.json'
+    ),
+    'utf8'
+  ));
+
+  const runtimeAuthorized = structuredClone(contract.dependencyClosure);
+  runtimeAuthorized.workPackages.P05.runtimeAuthorized = true;
+  await assert.rejects(
+    validateDependencyClosure(runtimeAuthorized, manifest),
+    /must not authorize runtime activation/
+  );
+
+  const falseW2Ready = structuredClone(contract.dependencyClosure);
+  falseW2Ready.waves.W2 = 'ready';
+  await assert.rejects(
+    validateDependencyClosure(falseW2Ready, manifest),
+    /wave status is invalid/
+  );
+
+  const networkClaim = structuredClone(contract.dependencyClosure);
+  networkClaim.execution.networkUsed = true;
+  await assert.rejects(
+    validateDependencyClosure(networkClaim, manifest),
+    /must remain offline\/local-only/
+  );
+
+  const approvedP05 = structuredClone(contract.dependencyClosure);
+  approvedP05.workPackages.P05.status = 'approved';
+  await assert.rejects(
+    validateDependencyClosure(approvedP05, manifest),
+    /proposed\/not-approved/
+  );
+
+  if (process.env.DEEP_W1W2_PRODUCER_SOURCE_MAP
+      && existsSync(process.env.DEEP_W1W2_PRODUCER_SOURCE_MAP)) {
+    const tamperedArtifact = structuredClone(contract.dependencyClosure);
+    tamperedArtifact.workPackages.P04.artifacts[0].sha256 = '00'.repeat(32);
+    await assert.rejects(
+      validateDependencyClosure(tamperedArtifact, manifest, {
+        verifyProducerArtifacts: true,
+        producerSourceMapPath: process.env.DEEP_W1W2_PRODUCER_SOURCE_MAP
+      }),
+      /producer artifact identity mismatch/
+    );
+  }
 });
 
 test('detached W0 manifest rejects a pre-contract carrier pin', async t => {

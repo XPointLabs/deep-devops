@@ -169,6 +169,18 @@ if (commandResults.every(result => result.passed)) {
 
 if (commandResults.every(result => result.passed)) {
   runNode(
+    [
+      'scripts/pinned-integration-manifest.mjs',
+      '--manifest',
+      'release/manifests/survival-v2.1.0-w1w2-gate.detached.local.json',
+      '--validate-only'
+    ],
+    'pinned-integration-manifest:validate-v2.1.0-w1w2-gate-detached-local'
+  );
+}
+
+if (commandResults.every(result => result.passed)) {
+  runNode(
     ['--test', 'scripts/pinned-integration-manifest.test.mjs'],
     'pinned-integration-manifest:tests'
   );
