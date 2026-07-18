@@ -8,4 +8,9 @@ metrics, sanitized evidence and external push providers. Raw ingress IP/path, Se
 identifiers, capabilities and stable cross-domain correlation values are forbidden in retained Deep
 logs, metric labels and evidence.
 
+Sanitized findings retain generic input ordinals, never logical paths, filenames or stable path
+hashes. The
+24-hour local operational-log value is a target backed by an exact wall-clock archive-set
+observation; Docker size rotation alone is not time-based deletion evidence.
+
 External provider retention remains unknown and is not represented as a passing local control.

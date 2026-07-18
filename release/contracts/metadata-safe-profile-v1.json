@@ -16,6 +16,15 @@
   ],
   "policy": "config/metadata-safe/retention-policy.v1.json",
   "gate": "scripts/metadata-privacy-gate.mjs",
+  "selectionContract": {
+    "exactPositiveArtifactFileCountRequired": true,
+    "exactPositiveMetricFileCountRequired": true,
+    "harnessFailureExitCode": 2,
+    "metadataFindingExitCode": 1
+  },
+  "findingPathRepresentation": "generic-input-ordinal",
+  "topologyContract": "exact-merged-compose-v1",
+  "localRetentionReceiptSchema": "deep-local-log-retention-observation.v1",
   "defaultProfileChanged": false,
   "metadataSafeProfileFailClosed": true,
   "providerDeletionGuaranteed": false,

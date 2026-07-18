@@ -15,31 +15,63 @@ docker compose `
 node scripts/metadata-privacy-gate.mjs `
   --artifacts <explicit-sanitized-artifact-path> `
   --metrics <explicit-metrics-export-path> `
+  --expected-artifact-files <exact-positive-count> `
+  --expected-metric-files <exact-positive-count> `
   --xnode-dir <clean-pinned-xnode-checkout> `
   --client-expectations <P01-metadata-expectations.v1.json> `
   --summary <isolated-summary-path>
 ```
 
-The gate accepts explicit text inputs only. Empty selections, wrong profile, symlinks, unexpected
-file formats, oversized inputs, dirty or unpinned XNode source, mismatched P01 fixture, invalid
-Compose configuration, and scanner findings fail closed.
+The gate accepts explicit UTF-8 text inputs only. Each selected root must contain at least one file,
+and the aggregate artifact and metric counts must equal the separately declared positive counts.
+Empty/zero-match selections, unsupported or binary content, malformed selected JSON/JSONL, wrong
+profile, symlinks, oversized inputs, dirty or unpinned XNode source, mismatched P01 fixture, invalid
+Compose configuration, and scanner findings fail closed. A metadata finding exits `1`; an incomplete
+selection, parse error or harness/contract failure exits `2`.
 
 ## Data inventory and retention
 
 | Component | Retained data in metadata-safe profile | Limit | Verification |
 |---|---|---:|---|
 | Xray access | Disabled; generated config has no access sink | 0 hours | Pinned generator-source contract |
-| Xray error | Warning/error class; operational process failures | 24 hours | Bounded Docker local logs |
-| XNode | Warning/error categories and aggregate health | 24 hours | Bounded Docker local logs and scanner |
-| Storage/file/push/calls | Startup, health and operational failures; no request-body/path capture | 24 hours | Bounded Docker local logs and scanner |
+| Xray error | Warning/error class; operational process failures | 24-hour target | Exact local wall-clock archive observation |
+| XNode | Warning/error categories and aggregate health | 24-hour target | Exact local wall-clock archive observation and scanner |
+| Storage/file/push/calls | Startup, health and operational failures; no request-body/path capture | 24-hour target | Exact local wall-clock archive observation and scanner |
 | Metrics | Aggregate service/operation/status/error/route-index labels | 7 days | Allowlist metric-label lint |
-| Sanitized evidence | Rule IDs, counts, relative paths and policy state | 30 days | Metadata and secret scanners |
+| Sanitized evidence | Rule IDs, counts, generic input ordinals and policy state | 30 days | Metadata and secret scanners |
 | Push provider | Provider-controlled delivery/device metadata | Unknown locally | Provider contract and Mr. X deletion request evidence |
 
 The machine-readable source of truth is
 `config/metadata-safe/retention-policy.v1.json`. Docker `local` logging is bounded to two compressed
-1 MiB segments per service. This is a size bound, not proof of a 24-hour deletion SLA; operators
-must run the documented lifecycle and produce a closed break-glass/deletion receipt.
+1 MiB segments per service. This is only a size bound and never proof of a 24-hour deletion SLA.
+The 24-hour value is a target until an operator validates a
+`deep-local-log-retention-observation.v1` receipt against the exact local archive directory. The
+validator binds the complete current archive set by generic ordinals, byte sizes and observed
+filesystem modification times, and rejects any archive older than 24 hours. This proves a
+local point-in-time observation only. Validation requires the observation clock to be within five
+minutes of the verifier and rejects archive mtimes ahead of that clock. It does not prove prior
+deletion, continuous enforcement, remote replicas or provider deletion.
+
+The checked-in local-retention example represents an empty synthetic directory. A real receipt
+must be generated from and immediately revalidated against the deployment host's exact archive
+directory; copying the example is not operational evidence. The repository gate deliberately does
+not expose a free-form `--local-retention-root` option and never sets a local-retention verified
+claim: a deployment-specific trusted inventory must bind the real container/archive root before
+this standalone verifier can be used as operational evidence.
+
+## Exact Compose topology
+
+The gate validates the fully merged Compose render, not just the privacy overlay. It accepts exactly
+seven services, one internal bridge network, seven named state volumes, three node secrets and the
+reviewed loopback-only host ports. It rejects host network/PID/IPC sharing, public or additional
+ports, Docker socket and bind mounts, devices, privileged mode, added capabilities, weakened
+`cap_drop`/`security_opt`, host-gateway mappings, extra services/networks/listeners and unexpected
+service/build keys.
+
+The metadata-safe overlay moves the container-internal VLESS listener from privileged port `443` to
+`8443`, removes `NET_BIND_SERVICE`, and does not publish that listener to the host. This opt-in UAT
+topology is not a policy for a future public relay; such a relay requires a separately versioned and
+reviewed topology contract.
 
 ## Proxy and Xray
 
@@ -58,8 +90,13 @@ class, route index, transport and result. Session IDs, sender/recipient/public k
 push/device tokens, capabilities, source/client IPs, paths, URLs and stable correlation IDs are
 blocked.
 
-Findings contain rule ID, relative path, line and a fingerprint of rule/path/line only. Raw matched
-values are never copied into summaries. Tests use documentation-only synthetic values.
+JSON and JSONL inputs are parsed structurally and inspected recursively; text formats receive the
+same fallback regex scan. IPv4, IPv6, request targets, Session IDs, mailbox/push capabilities and
+stable correlation fields are rejected in nested objects, arrays, quoted fields and free-form text.
+
+Findings contain only rule ID, a generic input ordinal, optional line and a separate finding
+fingerprint. Logical paths, filenames and raw matched values are never copied into
+summaries or console output. Tests use documentation-only synthetic values.
 
 ## Break-glass and key separation
 

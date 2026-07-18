@@ -12,6 +12,9 @@ x-metadata-safe-environment: &metadata-safe-environment
 
 x-metadata-safe-router-environment: &metadata-safe-router-environment
   <<: *metadata-safe-environment
+  Node__PublicPort: "8443"
+  Vless__InboundListenPort: "8443"
+  Vless__PublicPort: "8443"
   Logging__LogLevel__Default: Warning
   Logging__LogLevel__Microsoft.AspNetCore: Warning
   Logging__LogLevel__Microsoft.AspNetCore.Hosting.Diagnostics: Warning
@@ -20,18 +23,21 @@ x-metadata-safe-router-environment: &metadata-safe-router-environment
 
 services:
   xnode-1:
+    cap_add: !reset []
     environment: *metadata-safe-router-environment
     logging: *metadata-safe-logging
     labels:
       io.deep.infrastructure-privacy-profile: metadata-safe-v1
 
   xnode-2:
+    cap_add: !reset []
     environment: *metadata-safe-router-environment
     logging: *metadata-safe-logging
     labels:
       io.deep.infrastructure-privacy-profile: metadata-safe-v1
 
   xnode-3:
+    cap_add: !reset []
     environment: *metadata-safe-router-environment
     logging: *metadata-safe-logging
     labels:

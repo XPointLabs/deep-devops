@@ -1,0 +1,13 @@
+{
+  "schema": "deep-local-log-retention-observation.v1",
+  "profile": "metadata-safe-v1",
+  "humanOwner": "Mr. X",
+  "observedAt": "2030-01-01T00:00:00.000Z",
+  "maximumAgeHours": 24,
+  "exactArchiveSet": true,
+  "inspectedArchiveCount": 0,
+  "archiveSetSha256": "7acb96e3d19225e4ad757291bf137d1e4dab1801a01c67bab02d630100e3c378",
+  "expiredArchiveCount": 0,
+  "oldestObservedMtime": null,
+  "newestObservedMtime": null
+}

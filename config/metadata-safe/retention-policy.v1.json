@@ -18,19 +18,19 @@
       "component": "xray-error",
       "data": "warning and error class without client identifiers",
       "retentionHours": 24,
-      "deletionVerification": "bounded local log segments removed by the container runtime"
+      "deletionVerification": "24-hour target requires an exact local wall-clock archive-set observation; size rotation alone is insufficient"
     },
     {
       "component": "xnode-operational",
       "data": "warning/error category and aggregate health only",
       "retentionHours": 24,
-      "deletionVerification": "bounded local log segments and break-glass receipt"
+      "deletionVerification": "24-hour target requires an exact local wall-clock archive-set observation plus any applicable break-glass receipt"
     },
     {
       "component": "compat-services",
       "data": "startup, health and operational failures; no request body or request path",
       "retentionHours": 24,
-      "deletionVerification": "bounded local log segments and break-glass receipt"
+      "deletionVerification": "24-hour target requires an exact local wall-clock archive-set observation plus any applicable break-glass receipt"
     },
     {
       "component": "metrics",
@@ -40,7 +40,7 @@
     },
     {
       "component": "sanitized-evidence",
-      "data": "rule IDs, counts, relative paths and policy state only",
+      "data": "rule IDs, generic input ordinals and policy state only",
       "retentionHours": 720,
       "deletionVerification": "evidence scanner and archive lifecycle"
     },
@@ -73,5 +73,12 @@
     "operationalLogKeyRef": "secretref:deep-ops-log-envelope-key",
     "evidenceKeyRef": "secretref:deep-sanitized-evidence-envelope-key",
     "mustDiffer": true
+  },
+  "localRetention": {
+    "receiptSchema": "deep-local-log-retention-observation.v1",
+    "maximumAgeHours": 24,
+    "maximumClockSkewMinutes": 5,
+    "requireExactArchiveSet": true,
+    "requireNoExpiredArchives": true
   }
 }
