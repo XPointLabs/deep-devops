@@ -1,10 +1,8 @@
 import { spawnSync } from 'node:child_process';
 import {
-  chmodSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
-  realpathSync,
   rmSync,
   writeFileSync
 } from 'node:fs';
@@ -39,6 +37,23 @@ const MANIFEST_PATH = path.join(
   'manifests',
   'survival-v2.0.1-i01b.local.json'
 );
+
+function fixtureVerifierArtifactBytes(signerDigest, apkSha256) {
+  return Buffer.from([
+    "import { readFileSync } from 'node:fs';",
+    "import { createHash } from 'node:crypto';",
+    "import { fileURLToPath } from 'node:url';",
+    "const artifact = fileURLToPath(import.meta.url);",
+    "const args = process.argv.slice(2);",
+    "const snapshot = args[6];",
+    "const expected = ['-cp', artifact, 'com.android.apksigner.ApkSignerTool',",
+    "  'verify', '--verbose', '--print-certs', snapshot];",
+    "if (args.length !== expected.length || args.some((v, i) => v !== expected[i])) process.exit(41);",
+    `if (createHash('sha256').update(readFileSync(snapshot)).digest('hex') !== '${apkSha256}') process.exit(42);`,
+    `console.log('Signer #1 certificate SHA-256 digest: ${signerDigest}');`,
+    ''
+  ].join('\n'), 'utf8');
+}
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -531,37 +546,16 @@ export function runUpdateTrustContracts({ artifactDir = DEFAULT_ARTIFACT_DIR } =
     );
     const apkFile = path.join(sandbox, 'fixture.apk');
     writeFileSync(apkFile, fixture.apkBytes);
-    const canonicalApk = realpathSync(apkFile);
-    const apkSignerPath = path.join(
-      sandbox,
-      process.platform === 'win32' ? 'fixture-apksigner.bat' : 'fixture-apksigner'
+    const verificationTempRoot = path.join(sandbox, 'private-temp');
+    mkdirSync(verificationTempRoot, { mode: 0o700 });
+    const verifierRuntimePath = process.execPath;
+    const verifierRuntimeSha256 = sha256(readFileSync(verifierRuntimePath));
+    const verifierArtifactPath = path.join(sandbox, 'fixture-verifier.mjs');
+    const verifierArtifactBytes = fixtureVerifierArtifactBytes(
+      fixture.packageSignerSha256,
+      sha256(fixture.apkBytes)
     );
-    const apkSignerBytes = Buffer.from(
-      process.platform === 'win32'
-        ? [
-            '@echo off',
-            'if not "%~1"=="verify" exit /b 41',
-            'if not "%~2"=="--verbose" exit /b 42',
-            'if not "%~3"=="--print-certs" exit /b 43',
-            `if not "%~4"=="${canonicalApk}" exit /b 44`,
-            'if not "%~5"=="" exit /b 45',
-            `echo Signer #1 certificate SHA-256 digest: ${fixture.packageSignerSha256}`,
-            ''
-          ].join('\r\n')
-        : [
-            '#!/bin/sh',
-            '[ "$#" -eq 4 ] || exit 40',
-            '[ "$1" = "verify" ] || exit 41',
-            '[ "$2" = "--verbose" ] || exit 42',
-            '[ "$3" = "--print-certs" ] || exit 43',
-            `[ "$4" = '${canonicalApk}' ] || exit 44`,
-            `printf '%s\\n' 'Signer #1 certificate SHA-256 digest: ${fixture.packageSignerSha256}'`,
-            ''
-          ].join('\n'),
-      'utf8'
-    );
-    writeFileSync(apkSignerPath, apkSignerBytes);
-    if (process.platform !== 'win32') chmodSync(apkSignerPath, 0o755);
+    writeFileSync(verifierArtifactPath, verifierArtifactBytes);
     const androidResult = verifyOfflineAndroidArtifact({
       verifiedBundle: happy,
       apkPath: fixture.apkPath,
@@ -570,15 +564,18 @@ export function runUpdateTrustContracts({ artifactDir = DEFAULT_ARTIFACT_DIR } =
         [fixture.sbomPath]: fixture.sbomBytes,
         [fixture.provenancePath]: fixture.provenanceBytes
       },
-      apkSignerPath,
-      apkSignerSha256: sha256(apkSignerBytes)
+      verifierRuntimePath,
+      verifierRuntimeSha256,
+      verifierArtifactPath,
+      verifierArtifactSha256: sha256(verifierArtifactBytes),
+      verificationTempRoot,
+      verifierProfile: 'node-test-fixture-v1'
     });
-    const wrongApkSignerBytes = Buffer.from(
-      apkSignerBytes.toString('utf8')
-        .replace(fixture.packageSignerSha256, 'f'.repeat(64)),
-      'utf8'
+    const wrongVerifierArtifactBytes = fixtureVerifierArtifactBytes(
+      'f'.repeat(64),
+      sha256(fixture.apkBytes)
     );
-    writeFileSync(apkSignerPath, wrongApkSignerBytes);
+    writeFileSync(verifierArtifactPath, wrongVerifierArtifactBytes);
     const signerMismatch = expectRejected(
       'apk-package-signer-mismatch',
       () => verifyOfflineAndroidArtifact({
@@ -589,8 +586,12 @@ export function runUpdateTrustContracts({ artifactDir = DEFAULT_ARTIFACT_DIR } =
           [fixture.sbomPath]: fixture.sbomBytes,
           [fixture.provenancePath]: fixture.provenanceBytes
         },
-        apkSignerPath,
-        apkSignerSha256: sha256(wrongApkSignerBytes)
+        verifierRuntimePath,
+        verifierRuntimeSha256,
+        verifierArtifactPath,
+        verifierArtifactSha256: sha256(wrongVerifierArtifactBytes),
+        verificationTempRoot,
+        verifierProfile: 'node-test-fixture-v1'
       }),
       /package signer/
     );
@@ -645,8 +646,10 @@ export function runUpdateTrustContracts({ artifactDir = DEFAULT_ARTIFACT_DIR } =
     writeJson(path.join(artifactDir, 'offline-android-verification.json'), {
       schema: 'deep.update-trust.offline-android-verification.v1',
       fixtureOnly: true,
-      packageSignerExecution: 'synthetic-executable-enforcing-exact-argv-and-apk-path',
-      productionContract: 'Android SDK apksigner verify --verbose --print-certs',
+      packageSignerExecution:
+        'pinned-node-runtime-and-pinned-fixture-artifact-enforcing-fixed-snapshot-argv',
+      productionContract:
+        'pinned-java-runtime -cp pinned-apksigner.jar com.android.apksigner.ApkSignerTool verify --verbose --print-certs protected-snapshot',
       ...androidResult
     });
     writeJson(path.join(artifactDir, 'negative-scenarios.json'), {
@@ -681,7 +684,8 @@ export function runUpdateTrustContracts({ artifactDir = DEFAULT_ARTIFACT_DIR } =
         lostOnlineKey: 'passed',
         sbomAndReproducibility: 'passed',
         offlineAndroidMetadataAndPackageSigner: 'passed',
-        apkSignerExactArgvAndCanonicalPath: 'passed'
+        apkVerifierPinnedRuntimeAndArtifact: 'passed',
+        apkSignerFixedArgvAndProtectedSnapshot: 'passed'
       },
       status: 'passed'
     };

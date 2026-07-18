@@ -136,18 +136,32 @@ operational failure is prohibited.
 - at least two distinct builder IDs that independently produced the same APK
   SHA-256.
 
-Offline verification first authenticates the metadata chain, then the APK,
-SBOM, and provenance bytes. It invokes the existing Android SDK command
-`apksigner verify --verbose --print-certs`, requires exactly one unique signer
-certificate digest, compares it with signed target metadata, and hashes the APK
-again after verification to detect replacement during the check. The
-argument vector is fixed to exactly `verify`, `--verbose`, `--print-certs`, and
-the canonical APK path; missing, reordered, additional, or substituted
-arguments fail. The `apksigner` executable must itself match an exact SHA-256
-from a protected
-offline tool policy (the existing strict MAUI lane uses the same
-path/hash/version trust pattern); a hash copied from distribution media is not
+Offline verification first authenticates the metadata chain, then reads the
+source APK once with its signed length as a bound and authenticates that exact
+byte snapshot together with the SBOM and provenance. It writes those bytes with
+exclusive creation into a fresh, canonical, non-link private local directory
+and invokes a directly addressed Java runtime as:
+
+`java -cp <apksigner.jar> com.android.apksigner.ApkSignerTool verify --verbose
+--print-certs <private-snapshot.apk>`.
+
+The runtime executable and `apksigner.jar` canonical paths and SHA-256 values
+come from a protected offline tool policy. Both are checked before and after
+the process. The snapshot is also checked after the process. Neither
+`ComSpec`, `PATH`, a batch/shell launcher, nor caller-supplied arguments are
+used; the class and complete argument vector are built inside the verifier.
+The child receives a minimal environment whose temporary-directory variables
+point at the private snapshot directory. It must report exactly one unique
+signer certificate digest, which is compared with signed target metadata.
+Changing or swapping the carrier's source path after the snapshot is created
+cannot change the verified bytes. A hash copied from distribution media is not
 a trusted tool policy.
+
+The executable/JAR policy location and verification temp root must be on a
+locally administered protected volume. The prototype rejects link paths and
+uses exclusive create plus restrictive POSIX modes, but it does not claim that
+these operations alone establish a reviewed Windows ACL/reparse-point boundary.
+Production Windows packaging must provision and verify that boundary.
 
 The package hash authenticates the exact manifest/package/version bytes; the
 package-signing check independently proves the Android signing identity. The
@@ -165,8 +179,11 @@ node .\scripts\update-trust.mjs verify-android `
   --metadata-dir D:\bundle\metadata `
   --artifact-root D:\bundle\targets `
   --target android/network.xpoint.deep-2.0.1.apk `
-  --apk-signer "$env:ANDROID_SDK_ROOT\build-tools\35.0.0\apksigner.bat" `
-  --apk-signer-sha256 <SHA-256-from-protected-offline-tool-policy> `
+  --java-runtime D:\trusted-tools\jre\bin\java.exe `
+  --java-runtime-sha256 <JAVA-EXE-SHA-256-from-protected-offline-tool-policy> `
+  --apk-signer-jar D:\trusted-tools\android\apksigner.jar `
+  --apk-signer-jar-sha256 <JAR-SHA-256-from-protected-offline-tool-policy> `
+  --verification-temp-root D:\trusted-temp `
   --now 2030-01-01T00:00:00Z `
   --summary .\artifacts\survival\P02\offline-android-real-summary.json
 ```
@@ -241,7 +258,10 @@ production remains blocked until:
 3. clients persist the trusted-root raw hash/version and every metadata version
    with a reviewed same-directory atomic state implementation (including
    platform-specific power-loss durability);
-4. real Android `apksigner`, SBOM, provenance, and two-builder evidence are
-   exercised on a release APK;
+4. the complete production Java runtime installation and `apksigner.jar`
+   policy, real release APK, SBOM, provenance, and two-builder evidence are
+   exercised together;
 5. trusted-clock behavior and recovery media are tested on target devices;
-6. an independent security reviewer approves the design.
+6. platform specialists review the private snapshot directory's Windows
+   ACL/reparse protections and Unix ownership/mode assumptions;
+7. an independent security reviewer approves the design.

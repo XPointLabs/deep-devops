@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import {
-  chmod,
+  copyFile,
+  mkdir,
   mkdtemp,
   readFile,
   realpath,
   rm,
+  symlink,
   writeFile
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -47,43 +49,59 @@ function mutateMeta(document, field) {
   return result;
 }
 
-function fakeApkSignerBytes(canonicalApk, signerDigest) {
-  return Buffer.from(
-    process.platform === 'win32'
+function fakeVerifierArtifactBytes({
+  signerDigest,
+  apkSha256,
+  behavior = 'normal',
+  sourcePath
+}) {
+  return Buffer.from([
+    "import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';",
+    "import { createHash } from 'node:crypto';",
+    "import { fileURLToPath } from 'node:url';",
+    "const artifact = fileURLToPath(import.meta.url);",
+    "const args = process.argv.slice(2);",
+    "const snapshot = args[6];",
+    "const expected = ['-cp', artifact, 'com.android.apksigner.ApkSignerTool',",
+    "  'verify', '--verbose', '--print-certs', snapshot];",
+    "if (args.length !== expected.length || args.some((value, index) => value !== expected[index])) process.exit(41);",
+    "if (!snapshot || !snapshot.endsWith('artifact.apk')) process.exit(42);",
+    `const expectedHash = ${JSON.stringify(apkSha256)};`,
+    "const digest = value => createHash('sha256').update(value).digest('hex');",
+    "if (digest(readFileSync(snapshot)) !== expectedHash) process.exit(43);",
+    behavior === 'snapshot-mutate'
+      ? "appendFileSync(snapshot, Buffer.from('mutated'));"
+      : '',
+    behavior === 'source-aba'
       ? [
-          '@echo off',
-          'if not "%~1"=="verify" exit /b 41',
-          'if not "%~2"=="--verbose" exit /b 42',
-          'if not "%~3"=="--print-certs" exit /b 43',
-          `if not "%~4"=="${canonicalApk}" exit /b 44`,
-          'if not "%~5"=="" exit /b 45',
-          `echo Signer #1 certificate SHA-256 digest: ${signerDigest}`,
-          ''
-        ].join('\r\n')
-      : [
-          '#!/bin/sh',
-          '[ "$#" -eq 4 ] || exit 40',
-          '[ "$1" = "verify" ] || exit 41',
-          '[ "$2" = "--verbose" ] || exit 42',
-          '[ "$3" = "--print-certs" ] || exit 43',
-          `[ "$4" = '${canonicalApk}' ] || exit 44`,
-          `printf '%s\\n' 'Signer #1 certificate SHA-256 digest: ${signerDigest}'`,
-          ''
-        ].join('\n'),
-    'utf8'
-  );
+          `const source = ${JSON.stringify(sourcePath)};`,
+          "const original = readFileSync(source);",
+          "writeFileSync(source, Buffer.from('temporary source swap'));",
+          "writeFileSync(source, original);"
+        ].join('\n')
+      : '',
+    `console.log('Signer #1 certificate SHA-256 digest: ${signerDigest}');`,
+    ''
+  ].join('\n'), 'utf8');
 }
 
-async function writeFakeApkSigner(sandbox, name, canonicalApk, signerDigest) {
-  assert(!canonicalApk.includes("'"), 'test path unexpectedly contains a single quote');
-  const filePath = path.join(
-    sandbox,
-    process.platform === 'win32' ? `${name}.bat` : name
-  );
-  const bytes = fakeApkSignerBytes(canonicalApk, signerDigest);
-  await writeFile(filePath, bytes);
-  if (process.platform !== 'win32') await chmod(filePath, 0o755);
-  return { filePath, sha256: sha256(bytes) };
+async function writePinnedFixtureVerifier(sandbox, name, options) {
+  const artifactPath = path.join(sandbox, `${name}.mjs`);
+  const artifactBytes = fakeVerifierArtifactBytes(options);
+  await writeFile(artifactPath, artifactBytes);
+  const runtimePath = await realpath(process.execPath);
+  const runtimeBytes = await readFile(runtimePath);
+  return {
+    verifierRuntimePath: runtimePath,
+    verifierRuntimeSha256: sha256(runtimeBytes),
+    verifierArtifactPath: await realpath(artifactPath),
+    verifierArtifactSha256: sha256(artifactBytes),
+    verifierProfile: 'node-test-fixture-v1'
+  };
+}
+
+function verifierOptions(tool, verificationTempRoot) {
+  return { ...tool, verificationTempRoot };
 }
 
 test('strict JSON and canonical POUF reject duplicate, ambiguous, or non-canonical bytes', () => {
@@ -326,20 +344,19 @@ test('lost timestamp key drill accepts replacement and rejects revoked signer', 
   );
 });
 
-test('offline Android verification binds bytes, evidence and exact apksigner argv/path', async () => {
+test('offline Android verification pins runtime/artifact and fixed snapshot argv', async () => {
   const fixture = createUpdateTrustFixture();
   const verifiedBundle = verifyUpdateBundle(fixture.createBundle());
   const sandbox = await mkdtemp(path.join(tmpdir(), 'deep-p02-apksigner-'));
   try {
     const apkFile = path.join(sandbox, 'fixture.apk');
     await writeFile(apkFile, fixture.apkBytes);
-    const canonicalApk = await realpath(apkFile);
-    const apkSigner = await writeFakeApkSigner(
-      sandbox,
-      'fixture-apksigner',
-      canonicalApk,
-      fixture.packageSignerSha256
-    );
+    const tempRoot = path.join(sandbox, 'private-temp');
+    await mkdir(tempRoot, { mode: 0o700 });
+    const verifier = await writePinnedFixtureVerifier(sandbox, 'fixture-verifier', {
+      signerDigest: fixture.packageSignerSha256,
+      apkSha256: sha256(fixture.apkBytes)
+    });
     const result = verifyOfflineAndroidArtifact({
       verifiedBundle,
       apkPath: fixture.apkPath,
@@ -348,33 +365,12 @@ test('offline Android verification binds bytes, evidence and exact apksigner arg
         [fixture.sbomPath]: fixture.sbomBytes,
         [fixture.provenancePath]: fixture.provenanceBytes
       },
-      apkSignerPath: apkSigner.filePath,
-      apkSignerSha256: apkSigner.sha256
+      ...verifierOptions(verifier, tempRoot)
     });
     assert.equal(result.status, 'passed');
-    assert.equal(result.apkSignerToolSha256, apkSigner.sha256);
+    assert.equal(result.verifierRuntimeSha256, verifier.verifierRuntimeSha256);
+    assert.equal(result.verifierArtifactSha256, verifier.verifierArtifactSha256);
 
-    assert.throws(
-      () => runTrustedApkSigner(
-        apkSigner.filePath,
-        canonicalApk,
-        apkSigner.sha256,
-        ['verify', '--print-certs', canonicalApk]
-      ),
-      /apksigner rejected/
-    );
-    const wrongApk = path.join(sandbox, 'wrong.apk');
-    await writeFile(wrongApk, fixture.apkBytes);
-    const canonicalWrongApk = await realpath(wrongApk);
-    assert.throws(
-      () => runTrustedApkSigner(
-        apkSigner.filePath,
-        canonicalWrongApk,
-        apkSigner.sha256,
-        ['verify', '--verbose', '--print-certs', canonicalWrongApk]
-      ),
-      /apksigner rejected/
-    );
     assert.throws(() => verifyOfflineAndroidArtifact({
       verifiedBundle,
       apkPath: fixture.apkPath,
@@ -383,10 +379,126 @@ test('offline Android verification binds bytes, evidence and exact apksigner arg
         [fixture.sbomPath]: fixture.sbomBytes,
         [fixture.provenancePath]: fixture.provenanceBytes
       },
-      apkSignerPath: apkSigner.filePath,
-      apkSignerSha256: '0'.repeat(64)
+      ...verifierOptions({
+        ...verifier,
+        verifierRuntimeSha256: '0'.repeat(64)
+      }, tempRoot)
+    }), /trusted tool policy/);
+    assert.throws(() => verifyOfflineAndroidArtifact({
+      verifiedBundle,
+      apkPath: fixture.apkPath,
+      apkFile,
+      artifactFiles: {
+        [fixture.sbomPath]: fixture.sbomBytes,
+        [fixture.provenancePath]: fixture.provenanceBytes
+      },
+      ...verifierOptions({
+        ...verifier,
+        verifierArtifactSha256: '0'.repeat(64)
+      }, tempRoot)
     }), /trusted tool policy/);
   } finally {
+    await rm(sandbox, { recursive: true, force: true });
+  }
+});
+
+test('offline verifier resists ambient launch, source ABA, closure and temp attacks', async t => {
+  const fixture = createUpdateTrustFixture();
+  const verifiedBundle = verifyUpdateBundle(fixture.createBundle());
+  const sandbox = await mkdtemp(path.join(tmpdir(), 'deep-p02-adversarial-'));
+  const originalComSpec = process.env.ComSpec;
+  const originalPath = process.env.PATH;
+  try {
+    const apkFile = path.join(sandbox, 'source & argument-like --print-certs.apk');
+    await writeFile(apkFile, fixture.apkBytes);
+    const tempRoot = path.join(sandbox, 'private-temp');
+    await mkdir(tempRoot, { mode: 0o700 });
+    const base = {
+      verifiedBundle,
+      apkPath: fixture.apkPath,
+      apkFile,
+      artifactFiles: {
+        [fixture.sbomPath]: fixture.sbomBytes,
+        [fixture.provenancePath]: fixture.provenanceBytes
+      }
+    };
+    const normal = await writePinnedFixtureVerifier(sandbox, 'normal-verifier', {
+      signerDigest: fixture.packageSignerSha256,
+      apkSha256: sha256(fixture.apkBytes)
+    });
+
+    process.env.ComSpec = path.join(sandbox, 'malicious-comspec.exe');
+    process.env.PATH = path.join(sandbox, 'malicious-path');
+    assert.equal(verifyOfflineAndroidArtifact({
+      ...base,
+      ...verifierOptions(normal, tempRoot)
+    }).status, 'passed');
+
+    const aba = await writePinnedFixtureVerifier(sandbox, 'source-aba-verifier', {
+      signerDigest: fixture.packageSignerSha256,
+      apkSha256: sha256(fixture.apkBytes),
+      behavior: 'source-aba',
+      sourcePath: apkFile
+    });
+    assert.equal(verifyOfflineAndroidArtifact({
+      ...base,
+      ...verifierOptions(aba, tempRoot)
+    }).status, 'passed');
+    assert.equal(sha256(await readFile(apkFile)), sha256(fixture.apkBytes));
+
+    const snapshotMutator = await writePinnedFixtureVerifier(sandbox, 'snapshot-mutator', {
+      signerDigest: fixture.packageSignerSha256,
+      apkSha256: sha256(fixture.apkBytes),
+      behavior: 'snapshot-mutate'
+    });
+    assert.throws(() => verifyOfflineAndroidArtifact({
+      ...base,
+      ...verifierOptions(snapshotMutator, tempRoot)
+    }), /snapshot changed/);
+
+    await writeFile(normal.verifierArtifactPath, Buffer.from(
+      (await readFile(normal.verifierArtifactPath, 'utf8'))
+        .replace(fixture.packageSignerSha256, 'f'.repeat(64)),
+      'utf8'
+    ));
+    assert.throws(() => verifyOfflineAndroidArtifact({
+      ...base,
+      ...verifierOptions(normal, tempRoot)
+    }), /artifact does not match trusted tool policy/);
+
+    const copiedRuntime = path.join(sandbox, path.basename(process.execPath));
+    await copyFile(process.execPath, copiedRuntime);
+    const copiedRuntimeHash = sha256(await readFile(copiedRuntime));
+    await writeFile(copiedRuntime, Buffer.from('replaced runtime'));
+    const freshArtifact = await writePinnedFixtureVerifier(sandbox, 'fresh-verifier', {
+      signerDigest: fixture.packageSignerSha256,
+      apkSha256: sha256(fixture.apkBytes)
+    });
+    assert.throws(() => verifyOfflineAndroidArtifact({
+      ...base,
+      ...verifierOptions({
+        ...freshArtifact,
+        verifierRuntimePath: copiedRuntime,
+        verifierRuntimeSha256: copiedRuntimeHash
+      }, tempRoot)
+    }), /runtime does not match trusted tool policy/);
+
+    const linkRoot = path.join(sandbox, 'linked-temp');
+    try {
+      await symlink(tempRoot, linkRoot, process.platform === 'win32' ? 'junction' : 'dir');
+      assert.throws(() => verifyOfflineAndroidArtifact({
+        ...base,
+        ...verifierOptions(freshArtifact, linkRoot)
+      }), /temp root.*(?:non-symlink|canonical)/);
+    } catch (error) {
+      if (error?.code === 'EPERM') t.diagnostic('symlink privilege unavailable on this host');
+      else throw error;
+    }
+  } finally {
+    if (originalComSpec === undefined) delete process.env.ComSpec;
+    else process.env.ComSpec = originalComSpec;
+    if (originalPath === undefined) delete process.env.PATH;
+    else process.env.PATH = originalPath;
     await rm(sandbox, { recursive: true, force: true });
   }
 });
@@ -398,19 +510,16 @@ test('SBOM, provenance, APK hash and package signer mutations reject', async () 
   try {
     const apkFile = path.join(sandbox, 'fixture.apk');
     await writeFile(apkFile, fixture.apkBytes);
-    const canonicalApk = await realpath(apkFile);
-    const goodSigner = await writeFakeApkSigner(
-      sandbox,
-      'good-apksigner',
-      canonicalApk,
-      fixture.packageSignerSha256
-    );
-    const wrongSigner = await writeFakeApkSigner(
-      sandbox,
-      'wrong-apksigner',
-      canonicalApk,
-      'f'.repeat(64)
-    );
+    const tempRoot = path.join(sandbox, 'private-temp');
+    await mkdir(tempRoot, { mode: 0o700 });
+    const goodSigner = await writePinnedFixtureVerifier(sandbox, 'good-verifier', {
+      signerDigest: fixture.packageSignerSha256,
+      apkSha256: sha256(fixture.apkBytes)
+    });
+    const wrongSigner = await writePinnedFixtureVerifier(sandbox, 'wrong-verifier', {
+      signerDigest: 'f'.repeat(64),
+      apkSha256: sha256(fixture.apkBytes)
+    });
     const tamperedSbom = Buffer.from(fixture.sbomBytes);
     tamperedSbom[0] ^= 1;
     assert.throws(() => verifyOfflineAndroidArtifact({
@@ -421,8 +530,7 @@ test('SBOM, provenance, APK hash and package signer mutations reject', async () 
         [fixture.sbomPath]: tamperedSbom,
         [fixture.provenancePath]: fixture.provenanceBytes
       },
-      apkSignerPath: goodSigner.filePath,
-      apkSignerSha256: goodSigner.sha256
+      ...verifierOptions(goodSigner, tempRoot)
     }), /SHA-256 mismatch/);
     assert.throws(() => verifyOfflineAndroidArtifact({
       verifiedBundle,
@@ -432,8 +540,7 @@ test('SBOM, provenance, APK hash and package signer mutations reject', async () 
         [fixture.sbomPath]: fixture.sbomBytes,
         [fixture.provenancePath]: fixture.provenanceBytes
       },
-      apkSignerPath: wrongSigner.filePath,
-      apkSignerSha256: wrongSigner.sha256
+      ...verifierOptions(wrongSigner, tempRoot)
     }), /package signer/);
     await writeFile(apkFile, Buffer.concat([fixture.apkBytes, Buffer.from('tampered')]));
     assert.throws(() => verifyOfflineAndroidArtifact({
@@ -444,9 +551,8 @@ test('SBOM, provenance, APK hash and package signer mutations reject', async () 
         [fixture.sbomPath]: fixture.sbomBytes,
         [fixture.provenancePath]: fixture.provenanceBytes
       },
-      apkSignerPath: goodSigner.filePath,
-      apkSignerSha256: goodSigner.sha256
-    }), /length mismatch|SHA-256 mismatch/);
+      ...verifierOptions(goodSigner, tempRoot)
+    }), /length does not match|length mismatch|SHA-256 mismatch/);
   } finally {
     await rm(sandbox, { recursive: true, force: true });
   }

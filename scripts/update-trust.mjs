@@ -7,14 +7,19 @@ import {
 } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import {
+  chmodSync,
   closeSync,
+  fstatSync,
   fsyncSync,
   lstatSync,
+  mkdtempSync,
   mkdirSync,
   openSync,
   readFileSync,
+  readSync,
   renameSync,
   realpathSync,
+  rmSync,
   unlinkSync,
   writeFileSync
 } from 'node:fs';
@@ -23,8 +28,12 @@ import { fileURLToPath } from 'node:url';
 
 const SPEC_VERSION = '1.0.35';
 const MAX_METADATA_BYTES = 1_048_576;
+const MAX_APK_BYTES = 1_073_741_824;
 const HEX_64 = /^[0-9a-f]{64}$/;
 const ISO_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+const APK_SIGNER_CLASS = 'com.android.apksigner.ApkSignerTool';
+const JAVA_APK_SIGNER_PROFILE = 'java-apksigner-v1';
+const NODE_FIXTURE_PROFILE = 'node-test-fixture-v1';
 const ED25519_PKCS8_PREFIX = Buffer.from('302e020100300506032b657004220420', 'hex');
 const ED25519_SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
 
@@ -666,48 +675,137 @@ export function parseApkSignerDigests(output) {
   return unique;
 }
 
-export function runTrustedApkSigner(
-  apkSignerPath,
-  apkPath,
-  expectedSha256,
-  invocationArgs = ['verify', '--verbose', '--print-certs', apkPath]
-) {
-  const info = lstatSync(apkSignerPath);
+function canonicalPinnedFile(filePath, expectedSha256, label) {
+  assert(HEX_64.test(expectedSha256 ?? ''), `${label} SHA-256 is required`);
+  const resolved = path.resolve(filePath);
+  const info = lstatSync(resolved);
   assert(info.isFile() && !info.isSymbolicLink(),
-    'apksigner must be a regular non-symlink file');
-  const canonicalSigner = realpathSync(apkSignerPath);
-  assert(HEX_64.test(expectedSha256 ?? ''), 'trusted apksigner SHA-256 is required');
-  const before = readFileSync(canonicalSigner);
-  assert(sha256(before) === expectedSha256, 'apksigner does not match trusted tool policy');
-  let executable = canonicalSigner;
-  let args = [...invocationArgs];
-  if (process.platform === 'win32' && /\.bat$/i.test(canonicalSigner)) {
-    assert(!/[&|<>()^%!"\r\n]/.test(`${canonicalSigner}${apkPath}`),
-      'Windows apksigner/APK path contains unsafe command characters');
-    executable = process.env.ComSpec ?? 'cmd.exe';
-    args = [
-      '/d',
-      '/s',
-      '/c',
-      'call',
-      canonicalSigner,
-      ...invocationArgs
-    ];
-  }
-  const result = spawnSync(executable, args, {
+    `${label} must be a regular non-symlink file`);
+  const canonical = realpathSync(resolved);
+  assert(path.normalize(canonical) === path.normalize(resolved),
+    `${label} path must already be canonical and contain no links`);
+  assert(sha256(readFileSync(canonical)) === expectedSha256,
+    `${label} does not match trusted tool policy`);
+  return canonical;
+}
+
+function fixedVerifierInvocation(profile, runtimeArtifact, apkSnapshot) {
+  const common = [
+    '-cp',
+    runtimeArtifact,
+    APK_SIGNER_CLASS,
+    'verify',
+    '--verbose',
+    '--print-certs',
+    apkSnapshot
+  ];
+  if (profile === JAVA_APK_SIGNER_PROFILE) return common;
+  // Test-only: Node needs the pinned fixture artifact as its program entry point.
+  if (profile === NODE_FIXTURE_PROFILE) return [runtimeArtifact, ...common];
+  fail('unsupported APK verifier runtime profile');
+}
+
+export function runTrustedApkSigner({
+  runtimePath,
+  runtimeSha256,
+  runtimeArtifactPath,
+  runtimeArtifactSha256,
+  apkSnapshotPath,
+  apkSnapshotSha256,
+  profile = JAVA_APK_SIGNER_PROFILE
+}) {
+  const canonicalRuntime = canonicalPinnedFile(
+    runtimePath, runtimeSha256, 'APK verifier runtime'
+  );
+  const canonicalArtifact = canonicalPinnedFile(
+    runtimeArtifactPath, runtimeArtifactSha256, 'APK verifier artifact'
+  );
+  const canonicalSnapshot = canonicalPinnedFile(
+    apkSnapshotPath, apkSnapshotSha256, 'APK snapshot'
+  );
+  const runtimeBefore = sha256(readFileSync(canonicalRuntime));
+  const artifactBefore = sha256(readFileSync(canonicalArtifact));
+  const snapshotBefore = sha256(readFileSync(canonicalSnapshot));
+  const args = fixedVerifierInvocation(profile, canonicalArtifact, canonicalSnapshot);
+  const privateTemp = path.dirname(canonicalSnapshot);
+  const result = spawnSync(canonicalRuntime, args, {
     encoding: 'utf8',
     windowsHide: true,
     shell: false,
+    env: {
+      LANG: 'C',
+      LC_ALL: 'C',
+      TMPDIR: privateTemp,
+      TMP: privateTemp,
+      TEMP: privateTemp
+    },
     maxBuffer: 2 * 1024 * 1024
   });
+  assert(sha256(readFileSync(canonicalRuntime)) === runtimeBefore,
+    'APK verifier runtime changed during package verification');
+  assert(sha256(readFileSync(canonicalArtifact)) === artifactBefore,
+    'APK verifier artifact changed during package verification');
+  assert(sha256(readFileSync(canonicalSnapshot)) === snapshotBefore,
+    'APK snapshot changed during package signer verification');
   assert(result.status === 0, 'apksigner rejected the APK');
-  assert(sha256(readFileSync(canonicalSigner)) === expectedSha256,
-    'apksigner changed during package verification');
   return `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
 }
 
-function defaultRunApkSigner(apkSignerPath, apkPath, expectedSha256) {
-  return runTrustedApkSigner(apkSignerPath, apkPath, expectedSha256);
+function createPrivateSnapshotRoot(rootPath) {
+  assert(typeof rootPath === 'string' && rootPath.length > 0,
+    'trusted verification temp root is required');
+  const resolvedRoot = path.resolve(rootPath);
+  const rootInfo = lstatSync(resolvedRoot);
+  assert(rootInfo.isDirectory() && !rootInfo.isSymbolicLink(),
+    'verification temp root must be a regular non-symlink directory');
+  const canonicalRoot = realpathSync(resolvedRoot);
+  assert(path.normalize(canonicalRoot) === path.normalize(resolvedRoot),
+    'verification temp root must be canonical and contain no links');
+  const directory = mkdtempSync(path.join(canonicalRoot, 'deep-apk-'));
+  chmodSync(directory, 0o700);
+  const createdInfo = lstatSync(directory);
+  assert(createdInfo.isDirectory() && !createdInfo.isSymbolicLink() &&
+    path.normalize(realpathSync(directory)) === path.normalize(directory),
+  'private verification directory is unsafe');
+  return directory;
+}
+
+function writePrivateSnapshot(directory, bytes) {
+  const snapshot = path.join(directory, 'artifact.apk');
+  let descriptor;
+  try {
+    descriptor = openSync(snapshot, 'wx', 0o600);
+    writeFileSync(descriptor, bytes);
+    fsyncSync(descriptor);
+    closeSync(descriptor);
+    descriptor = undefined;
+    chmodSync(snapshot, 0o600);
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+  return snapshot;
+}
+
+function readApkOnceBounded(filePath, expectedLength) {
+  const descriptor = openSync(filePath, 'r');
+  try {
+    const opened = fstatSync(descriptor);
+    assert(opened.isFile() && opened.size === expectedLength,
+      'APK length does not match signed target metadata');
+    const bytes = Buffer.allocUnsafe(expectedLength);
+    let offset = 0;
+    while (offset < expectedLength) {
+      const count = readSync(descriptor, bytes, offset, expectedLength - offset, null);
+      assert(count > 0, 'APK changed while creating the verification snapshot');
+      offset += count;
+    }
+    const extra = Buffer.allocUnsafe(1);
+    assert(readSync(descriptor, extra, 0, 1, null) === 0,
+      'APK changed while creating the verification snapshot');
+    return bytes;
+  } finally {
+    closeSync(descriptor);
+  }
 }
 
 export function verifyOfflineAndroidArtifact({
@@ -715,41 +813,59 @@ export function verifyOfflineAndroidArtifact({
   apkPath,
   apkFile,
   artifactFiles,
-  apkSignerPath,
-  apkSignerSha256
+  verifierRuntimePath,
+  verifierRuntimeSha256,
+  verifierArtifactPath,
+  verifierArtifactSha256,
+  verificationTempRoot,
+  verifierProfile = JAVA_APK_SIGNER_PROFILE
 }) {
   const info = lstatSync(apkFile);
   assert(info.isFile() && !info.isSymbolicLink(), 'APK must be a regular non-symlink file');
   const canonicalApk = realpathSync(apkFile);
-  const before = readFileSync(canonicalApk);
+  const target = verifiedBundle.delegatedTargets.envelope.signed.targets?.[apkPath];
+  assert(target && Number.isSafeInteger(target.length) &&
+    target.length >= 0 && target.length <= MAX_APK_BYTES,
+  'signed APK length is missing or exceeds the 1 GiB offline verification limit');
+  const before = readApkOnceBounded(canonicalApk, target.length);
   const evidence = verifySbomAndReproducibility({
     delegatedTargets: verifiedBundle.delegatedTargets,
     apkPath,
     apkBytes: before,
     files: artifactFiles
   });
-  const signerOutput = defaultRunApkSigner(
-    apkSignerPath,
-    canonicalApk,
-    apkSignerSha256
-  );
-  const [observedSigner] = parseApkSignerDigests(signerOutput);
-  assert(observedSigner === evidence.apk.custom.packageSignerSha256,
-    'APK package signer does not match signed update metadata');
-  const after = readFileSync(canonicalApk);
-  assert(sha256(before) === sha256(after), 'APK changed during package signer verification');
-  return {
-    status: 'passed',
-    targetPath: apkPath,
-    apkSha256: sha256(before),
-    packageId: evidence.apk.custom.packageId,
-    versionCode: evidence.apk.custom.versionCode,
-    versionName: evidence.apk.custom.versionName,
-    packageSignerSha256: observedSigner,
-    apkSignerToolSha256: apkSignerSha256,
-    sbomSha256: evidence.apk.custom.sbom.sha256,
-    independentBuilderCount: evidence.provenance.builders.length
-  };
+  const privateDirectory = createPrivateSnapshotRoot(verificationTempRoot);
+  try {
+    const snapshot = writePrivateSnapshot(privateDirectory, before);
+    const signerOutput = runTrustedApkSigner({
+      runtimePath: verifierRuntimePath,
+      runtimeSha256: verifierRuntimeSha256,
+      runtimeArtifactPath: verifierArtifactPath,
+      runtimeArtifactSha256: verifierArtifactSha256,
+      apkSnapshotPath: snapshot,
+      apkSnapshotSha256: sha256(before),
+      profile: verifierProfile
+    });
+    const [observedSigner] = parseApkSignerDigests(signerOutput);
+    assert(observedSigner === evidence.apk.custom.packageSignerSha256,
+      'APK package signer does not match signed update metadata');
+    return {
+      status: 'passed',
+      targetPath: apkPath,
+      apkSha256: sha256(before),
+      packageId: evidence.apk.custom.packageId,
+      versionCode: evidence.apk.custom.versionCode,
+      versionName: evidence.apk.custom.versionName,
+      packageSignerSha256: observedSigner,
+      verifierProfile,
+      verifierRuntimeSha256,
+      verifierArtifactSha256,
+      sbomSha256: evidence.apk.custom.sbom.sha256,
+      independentBuilderCount: evidence.provenance.builders.length
+    };
+  } finally {
+    rmSync(privateDirectory, { recursive: true, force: true });
+  }
 }
 
 function parseCli(argv) {
@@ -825,8 +941,9 @@ function safeArtifactPath(root, relativePath) {
 
 function runVerifyAndroid(options) {
   const required = [
-    'trustedRoot', 'metadataDir', 'artifactRoot', 'target', 'apkSigner',
-    'apkSignerSha256', 'state', 'now', 'summary'
+    'trustedRoot', 'metadataDir', 'artifactRoot', 'target', 'javaRuntime',
+    'javaRuntimeSha256', 'apkSignerJar', 'apkSignerJarSha256',
+    'verificationTempRoot', 'state', 'now', 'summary'
   ];
   for (const name of required) assert(options[name], `--${name} is required`);
   const metadataDir = path.resolve(options.metadataDir);
@@ -858,8 +975,12 @@ function runVerifyAndroid(options) {
     apkPath: options.target,
     apkFile: safeArtifactPath(options.artifactRoot, options.target),
     artifactFiles,
-    apkSignerPath: options.apkSigner,
-    apkSignerSha256: options.apkSignerSha256.toLowerCase()
+    verifierRuntimePath: options.javaRuntime,
+    verifierRuntimeSha256: options.javaRuntimeSha256.toLowerCase(),
+    verifierArtifactPath: options.apkSignerJar,
+    verifierArtifactSha256: options.apkSignerJarSha256.toLowerCase(),
+    verificationTempRoot: options.verificationTempRoot,
+    verifierProfile: JAVA_APK_SIGNER_PROFILE
   });
   writeTrustedStateAtomic(options.state, verifiedBundle.state);
   mkdirSync(path.dirname(path.resolve(options.summary)), { recursive: true });
