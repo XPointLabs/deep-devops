@@ -50,7 +50,7 @@
   },
   "verification": {
     "focusedManifestTests": {
-      "passed": 17,
+      "passed": 20,
       "failed": 0,
       "skipped": 0
     },
@@ -66,7 +66,7 @@
       "pinnedXnodeCommit": "8b19577ef00f2169116cc08da51e9592089289a9"
     },
     "releaseGateContractCommands": {
-      "passed": 55,
+      "passed": 56,
       "failed": 0,
       "syntheticPlaceholderEvidenceOnly": true
     },

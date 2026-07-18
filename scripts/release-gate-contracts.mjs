@@ -23,6 +23,7 @@ const summaryPath = path.join(releaseDir, 'release-gate-contract-summary.json');
 
 const scriptNames = [
   'pinned-integration-manifest.mjs',
+  'w1w2-dependency-closure-gate.mjs',
   'metadata-privacy-gate.mjs',
   'secret-scan.mjs',
   'artifact-upload-manifest.mjs',
@@ -169,13 +170,8 @@ if (commandResults.every(result => result.passed)) {
 
 if (commandResults.every(result => result.passed)) {
   runNode(
-    [
-      'scripts/pinned-integration-manifest.mjs',
-      '--manifest',
-      'release/manifests/survival-v2.1.0-w1w2-gate.detached.local.json',
-      '--validate-only'
-    ],
-    'pinned-integration-manifest:validate-v2.1.0-w1w2-gate-detached-local'
+    ['scripts/w1w2-dependency-closure-gate.mjs'],
+    'w1w2-dependency-closure:strict-producer-and-evidence-gate'
   );
 }
 

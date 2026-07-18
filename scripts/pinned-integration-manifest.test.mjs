@@ -1,15 +1,18 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
+  assertCanonicalGitRepository,
   checkoutPinnedRepositories,
+  requireZeroReviewCounts,
   validateDependencyClosure,
+  validateDependencyClosureEvidence,
   validateEvidence,
   validateHandoff,
   validateManifest
@@ -259,11 +262,24 @@ test('validates the detached W1 contract closure and preserves the W2 dependency
   assert.equal(validated.verifiedProducerArtifacts.length, 0);
 });
 
-test('strictly verifies W1 producer artifacts from immutable Git bytes when sources are assigned', {
-  skip: !process.env.DEEP_W1W2_PRODUCER_SOURCE_MAP
-    || !existsSync(process.env.DEEP_W1W2_PRODUCER_SOURCE_MAP)
-}, async () => {
+test('strict W1 producer verification either proves all artifacts or fails closed without its source map', async () => {
   const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+  if (!process.env.DEEP_W1W2_PRODUCER_SOURCE_MAP
+      || !existsSync(process.env.DEEP_W1W2_PRODUCER_SOURCE_MAP)) {
+    await assert.rejects(
+      validateManifest({
+        manifestPath: path.join(
+          root,
+          'release',
+          'manifests',
+          'survival-v2.1.0-w1w2-gate.detached.local.json'
+        ),
+        verifyProducerArtifacts: true
+      }),
+      /producerSourceMapPath/
+    );
+    return;
+  }
   const validated = await validateManifest({
     manifestPath: path.join(
       root,
@@ -278,6 +294,17 @@ test('strictly verifies W1 producer artifacts from immutable Git bytes when sour
   assert.deepEqual(
     [...new Set(validated.verifiedProducerArtifacts.map(artifact => artifact.workPackage))],
     ['P04', 'P05']
+  );
+  const evidence = JSON.parse(await readFile(
+    path.join(root, 'release', 'evidence', 'w1w2-dependency-closure.json'),
+    'utf8'
+  ));
+  assert.equal(validateDependencyClosureEvidence(evidence, validated), evidence);
+  const drifted = structuredClone(evidence);
+  drifted.manifest.sha256 = '00'.repeat(32);
+  assert.throws(
+    () => validateDependencyClosureEvidence(drifted, validated),
+    /manifest identity drifted/
   );
 });
 
@@ -342,6 +369,103 @@ test('W1/W2 dependency closure rejects authorization inflation and producer tamp
       /producer artifact identity mismatch/
     );
   }
+});
+
+test('P05 independent-review counts require the complete exact zero shape', () => {
+  assert.deepEqual(
+    requireZeroReviewCounts({ p0: 0, p1: 0, p2: 0, p3: 0 }, 'P05 counts'),
+    { p0: 0, p1: 0, p2: 0, p3: 0 }
+  );
+  assert.throws(() => requireZeroReviewCounts(undefined, 'P05 counts'), /must be an object/);
+  assert.throws(
+    () => requireZeroReviewCounts({ p0: 0, p1: 0, p2: 0 }, 'P05 counts'),
+    /missing fields/
+  );
+  assert.throws(
+    () => requireZeroReviewCounts({ p0: 0, p1: 0, p2: 0, p3: '0' }, 'P05 counts'),
+    /exact integer zero/
+  );
+});
+
+test('canonical producer Git inspection rejects replace refs and grafts', async t => {
+  const fixture = await createFixture(t);
+  const repository = path.join(fixture.sourceRoot, 'deep-protocol');
+  assert.doesNotThrow(() => assertCanonicalGitRepository(repository, 'fixture producer'));
+
+  await appendFile(path.join(repository, 'README.md'), 'second\n', 'utf8');
+  git(repository, ['add', 'README.md']);
+  git(repository, ['commit', '-m', 'second fixture']);
+  const second = git(repository, ['rev-parse', 'HEAD']);
+  const first = git(repository, ['rev-parse', 'HEAD^']);
+  git(repository, ['replace', first, second]);
+  assert.throws(
+    () => assertCanonicalGitRepository(repository, 'fixture producer'),
+    /forbidden replace refs/
+  );
+  git(repository, ['replace', '-d', first]);
+
+  const rawGraftsPath = git(repository, ['rev-parse', '--git-path', 'info/grafts']);
+  const graftsPath = path.isAbsolute(rawGraftsPath)
+    ? rawGraftsPath
+    : path.resolve(repository, rawGraftsPath);
+  await mkdir(path.dirname(graftsPath), { recursive: true });
+  await writeFile(graftsPath, `${second} ${first}\n`, 'utf8');
+  assert.throws(
+    () => assertCanonicalGitRepository(repository, 'fixture producer'),
+    /forbidden grafts/
+  );
+  await rm(graftsPath, { force: true });
+
+  const rawAlternatesPath = git(repository, [
+    'rev-parse',
+    '--git-path',
+    'objects/info/alternates'
+  ]);
+  const alternatesPath = path.isAbsolute(rawAlternatesPath)
+    ? rawAlternatesPath
+    : path.resolve(repository, rawAlternatesPath);
+  await mkdir(path.dirname(alternatesPath), { recursive: true });
+  await writeFile(
+    alternatesPath,
+    `${path.join(fixture.sourceRoot, 'deep-client-maui', '.git', 'objects')}\n`,
+    'utf8'
+  );
+  assert.throws(
+    () => assertCanonicalGitRepository(repository, 'fixture producer'),
+    /forbidden object alternates/
+  );
+  await rm(alternatesPath, { force: true });
+
+  const shallowRepository = path.join(fixture.root, 'shallow-producer');
+  execFileSync(
+    'git',
+    ['clone', '--depth', '1', pathToFileURL(repository).href, shallowRepository],
+    { windowsHide: true, stdio: 'ignore' }
+  );
+  assert.throws(
+    () => assertCanonicalGitRepository(shallowRepository, 'fixture producer'),
+    /complete non-shallow/
+  );
+});
+
+test('dedicated W1/W2 closure gate fails closed when the producer source map is absent', () => {
+  const environment = { ...process.env };
+  delete environment.DEEP_W1W2_PRODUCER_SOURCE_MAP;
+  const result = spawnSync(
+    process.execPath,
+    ['scripts/w1w2-dependency-closure-gate.mjs'],
+    {
+      cwd: path.join(path.dirname(fileURLToPath(import.meta.url)), '..'),
+      env: environment,
+      encoding: 'utf8',
+      windowsHide: true
+    }
+  );
+  assert.notEqual(result.status, 0);
+  assert.match(
+    `${result.stdout}\n${result.stderr}`,
+    /DEEP_W1W2_PRODUCER_SOURCE_MAP is required/
+  );
 });
 
 test('detached W0 manifest rejects a pre-contract carrier pin', async t => {

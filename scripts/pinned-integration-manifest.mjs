@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
@@ -85,14 +85,57 @@ function normalizeRemote(value) {
   return value.trim().replace(/\\/g, '/').replace(/\/$/, '').replace(/\.git$/, '').toLowerCase();
 }
 
+function canonicalGitEnvironment() {
+  const environment = { ...process.env };
+  const forbidden = new Set([
+    'GIT_DIR',
+    'GIT_WORK_TREE',
+    'GIT_INDEX_FILE',
+    'GIT_OBJECT_DIRECTORY',
+    'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+    'GIT_REPLACE_REF_BASE',
+    'GIT_COMMON_DIR',
+    'GIT_NAMESPACE',
+    'GIT_CONFIG',
+    'GIT_CONFIG_COUNT',
+    'GIT_CONFIG_GLOBAL',
+    'GIT_CONFIG_SYSTEM'
+  ]);
+  for (const key of Object.keys(environment)) {
+    if (forbidden.has(key)
+        || key.startsWith('GIT_CONFIG_KEY_')
+        || key.startsWith('GIT_CONFIG_VALUE_')) {
+      delete environment[key];
+    }
+  }
+  return {
+    ...environment,
+    GIT_TERMINAL_PROMPT: '0',
+    GIT_ASKPASS: 'echo',
+    GIT_NO_REPLACE_OBJECTS: '1',
+    GIT_OPTIONAL_LOCKS: '0',
+    GIT_CONFIG_NOSYSTEM: '1'
+  };
+}
+
+function canonicalGitArguments(repository, args) {
+  return [
+    '-c',
+    'core.fsmonitor=false',
+    '-c',
+    'core.untrackedCache=false',
+    '-c',
+    'core.hooksPath=',
+    '-C',
+    repository,
+    ...args
+  ];
+}
+
 function runGit(repository, args, label) {
-  const result = spawnSync('git', ['-C', repository, ...args], {
+  const result = spawnSync('git', canonicalGitArguments(repository, args), {
     encoding: 'utf8',
-    env: {
-      ...process.env,
-      GIT_TERMINAL_PROMPT: '0',
-      GIT_ASKPASS: 'echo'
-    },
+    env: canonicalGitEnvironment(),
     windowsHide: true
   });
   if (result.status !== 0) {
@@ -107,9 +150,13 @@ function readPinnedGitBlob(repository, commit, relativePath, label) {
   resolveInside(repository, relativePath, `${label} path`);
   const result = spawnSync(
     'git',
-    ['-C', repository, 'show', `${commit}:${relativePath.replace(/\\/g, '/')}`],
+    canonicalGitArguments(
+      repository,
+      ['show', `${commit}:${relativePath.replace(/\\/g, '/')}`]
+    ),
     {
       encoding: null,
+      env: canonicalGitEnvironment(),
       windowsHide: true,
       maxBuffer: 16 * 1024 * 1024
     }
@@ -130,11 +177,7 @@ function runClone(source, destination) {
     destination
   ], {
     encoding: 'utf8',
-    env: {
-      ...process.env,
-      GIT_TERMINAL_PROMPT: '0',
-      GIT_ASKPASS: 'echo'
-    },
+    env: canonicalGitEnvironment(),
     windowsHide: true
   });
   if (result.status !== 0) {
@@ -148,6 +191,39 @@ async function directoryIsEmpty(directory) {
   const directoryStat = await stat(directory);
   if (!directoryStat.isDirectory()) fail(`checkout root is not a directory: ${directory}`);
   return (await readdir(directory)).length === 0;
+}
+
+function nonEmptyFile(filePath) {
+  return existsSync(filePath) && statSync(filePath).size > 0;
+}
+
+export function assertCanonicalGitRepository(repositoryPath, label = 'producer source') {
+  const replaceRefs = runGit(
+    repositoryPath,
+    ['for-each-ref', '--format=%(refname)', 'refs/replace/'],
+    `${label} replace-ref inspection failed`
+  );
+  if (replaceRefs.length > 0) fail(`${label} contains forbidden replace refs`);
+  const shallow = runGit(
+    repositoryPath,
+    ['rev-parse', '--is-shallow-repository'],
+    `${label} shallow-state inspection failed`
+  );
+  if (shallow !== 'false') fail(`${label} must be a complete non-shallow repository`);
+  for (const [gitPath, description] of [
+    ['info/grafts', 'grafts'],
+    ['objects/info/alternates', 'object alternates']
+  ]) {
+    const candidate = runGit(
+      repositoryPath,
+      ['rev-parse', '--git-path', gitPath],
+      `${label} ${description} path inspection failed`
+    );
+    const resolved = path.isAbsolute(candidate)
+      ? candidate
+      : path.resolve(repositoryPath, candidate);
+    if (nonEmptyFile(resolved)) fail(`${label} contains forbidden ${description}`);
+  }
 }
 
 async function readProducerSourceMap(filePath) {
@@ -183,6 +259,14 @@ function requireCommit(value, label) {
 
 function requireSha256(value, label) {
   if (!sha256Pattern.test(value)) fail(`${label} must be a 64-hex SHA256`);
+  return value;
+}
+
+export function requireZeroReviewCounts(value, label = 'review counts') {
+  requireExactKeys(value, ['p0', 'p1', 'p2', 'p3'], ['p0', 'p1', 'p2', 'p3'], label);
+  if (Object.values(value).some(count => !Number.isInteger(count) || count !== 0)) {
+    fail(`${label} must contain exact integer zero counts`);
+  }
   return value;
 }
 
@@ -349,6 +433,7 @@ export async function validateDependencyClosure(value, manifest, options = {}) {
     ) !== 'true') {
       fail(`${item.repository} producer source is not a Git worktree`);
     }
+    assertCanonicalGitRepository(repositoryPath, `${item.repository} producer source`);
     const dirty = runGit(
       repositoryPath,
       ['status', '--porcelain', '--untracked-files=normal'],
@@ -428,8 +513,14 @@ export async function validateDependencyClosure(value, manifest, options = {}) {
         || report.approvedAdrSha !== 'NOT-APPROVED'
         || report.acceptance?.humanApproval !== 'pending'
         || report.independentReview?.secondCorrectiveVerdict !== 'GO'
-        || Object.values(report.independentReview?.secondCorrectiveCounts ?? {}).some(count => count !== 0)) {
+        || report.independentReview?.allPriorFindingsClosed !== true) {
       fail('P05 work-package report does not preserve proposed/not-approved GO evidence');
+    }
+    if (item.id === 'P05') {
+      requireZeroReviewCounts(
+        report.independentReview?.secondCorrectiveCounts,
+        'P05 second corrective review counts'
+      );
     }
   }
   return verified;
@@ -556,6 +647,7 @@ export async function validateManifest(options = {}) {
 
   const verifiedArtifacts = [];
   const verifiedProducerArtifacts = [];
+  const dependencyClosures = [];
   const devopsCarrier = manifest.repositories.find(repository =>
     repository.name === 'deep-devops');
   if (detachedManifest && !devopsCarrier) {
@@ -626,6 +718,7 @@ export async function validateManifest(options = {}) {
       fail(`contract artifact ${artifact.relativePath} protocol compatibility assertion failed`);
     }
     if (value.dependencyClosure) {
+      dependencyClosures.push(value.dependencyClosure);
       verifiedProducerArtifacts.push(...await validateDependencyClosure(
         value.dependencyClosure,
         manifest,
@@ -650,8 +743,117 @@ export async function validateManifest(options = {}) {
     manifestSha256: sha256(manifestRaw),
     packageFeedPath,
     verifiedArtifacts,
-    verifiedProducerArtifacts
+    verifiedProducerArtifacts,
+    dependencyClosure: dependencyClosures.length === 1 ? dependencyClosures[0] : null
   };
+}
+
+export function validateDependencyClosureEvidence(value, validated) {
+  requireExactKeys(
+    value,
+    [
+      'schema',
+      'accountableHuman',
+      'iteration',
+      'status',
+      'manifest',
+      'contract',
+      'P04',
+      'P05',
+      'verification',
+      'claims',
+      'execution',
+      'independentReviewRequired'
+    ],
+    [
+      'schema',
+      'accountableHuman',
+      'iteration',
+      'status',
+      'manifest',
+      'contract',
+      'P04',
+      'P05',
+      'verification',
+      'claims',
+      'execution',
+      'independentReviewRequired'
+    ],
+    'dependency closure evidence'
+  );
+  if (value.schema !== 'deep.w1w2-dependency-closure-evidence.v1'
+      || value.accountableHuman !== 'Mr. X'
+      || value.status !== 'W1-CONTRACT-CLOSED-W2-BLOCKED') {
+    fail('dependency closure evidence identity or status is invalid');
+  }
+  const closure = requireObject(validated.dependencyClosure, 'validated dependency closure');
+  const artifact = validated.verifiedArtifacts[0];
+  if (value.manifest.path !== path.relative(validated.root, validated.manifestPath).replace(/\\/g, '/')
+      || value.manifest.sha256 !== validated.manifestSha256
+      || value.manifest.repositoryCount !== validated.manifest.repositories.length
+      || value.manifest.offlineLocalOnly !== true) {
+    fail('dependency closure evidence manifest identity drifted');
+  }
+  if (value.contract.path !== artifact.relativePath
+      || value.contract.version !== artifact.version
+      || value.contract.sha256 !== artifact.actualSha256
+      || value.contract.carrierCommit !== artifact.carrierCommit
+      || value.contract.runtimeBaseCommit !== runGit(
+        validated.root,
+        ['rev-parse', `${artifact.carrierCommit}^`],
+        'dependency closure evidence carrier parent is unavailable'
+      )
+      || value.contract.verification !== 'raw-git-blob-from-pinned-carrier') {
+    fail('dependency closure evidence contract identity drifted');
+  }
+  for (const id of ['P04', 'P05']) {
+    const expected = closure.workPackages[id];
+    const actual = value[id];
+    if (actual.status !== expected.status
+        || actual.sourceCommit !== expected.sourceCommit
+        || actual.reviewedEvidenceCommit !== expected.reviewedEvidenceCommit
+        || actual.finalEvidenceCommit !== expected.finalEvidenceCommit
+        || actual.runtimeAuthorized !== false) {
+      fail(`dependency closure evidence ${id} identity drifted`);
+    }
+  }
+  if (value.P04.packageVersion !== closure.workPackages.P04.packageVersion
+      || value.P04.packageManifestSha256
+        !== closure.workPackages.P04.artifacts.find(item => item.kind === 'package-manifest')?.sha256
+      || value.P05.workPackageReportSha256
+        !== closure.workPackages.P05.artifacts.find(item => item.kind === 'work-package-report')?.sha256
+      || value.P05.approvedAdrSha !== 'NOT-APPROVED'
+      || !closure.blockedWorkPackages.every(id => value.P05.blockedWorkPackages.includes(id))) {
+    fail('dependency closure evidence package or approval pins drifted');
+  }
+  if (validated.verifiedProducerArtifacts.length !== 17
+      || value.verification.strictProducerGitArtifacts.verified !== 17
+      || value.verification.strictProducerGitArtifacts.failed !== 0
+      || value.verification.strictProducerGitArtifacts.sourceMapCommitted !== false
+      || value.verification.focusedManifestTests.passed !== 20
+      || value.verification.focusedManifestTests.failed !== 0
+      || value.verification.focusedManifestTests.skipped !== 0
+      || value.verification.metadataPrivacyGateTests.passed !== 16
+      || value.verification.metadataPrivacyGateTests.failed !== 0
+      || value.verification.metadataPrivacyGateTests.skipped !== 0
+      || value.verification.releaseGateContractCommands.passed !== 56
+      || value.verification.releaseGateContractCommands.failed !== 0
+      || value.verification.releaseGateContractCommands.syntheticPlaceholderEvidenceOnly !== true
+      || value.verification.actualProductionReadiness.status !== 'BLOCKED'
+      || value.verification.actualProductionReadiness.blockers !== 10) {
+    fail('dependency closure evidence verification claims are invalid');
+  }
+  if (Object.values(value.claims).some(claim => claim !== false)
+      || value.execution.networkUsed !== closure.execution.networkUsed
+      || value.execution.dockerUsed !== closure.execution.dockerUsed
+      || value.execution.pushPerformed !== closure.execution.pushPerformed
+      || value.execution.packagePublished !== closure.execution.packagePublished
+      || value.execution.deployPerformed !== closure.execution.deployPerformed
+      || value.execution.productionCredentialsAccessed !== false
+      || value.independentReviewRequired !== true) {
+    fail('dependency closure evidence authorization or execution claims drifted');
+  }
+  return value;
 }
 
 export function verifyLocalSource(repository, sourceRoot) {

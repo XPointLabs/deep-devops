@@ -44,6 +44,13 @@ source -> reviewed evidence -> final evidence ancestry. A local source map is
 an execution input only. It contains machine-local paths, is ignored, and must
 never be committed or included in evidence.
 
+The strict closure gate is mandatory in the release-contract suite. Missing
+`DEEP_W1W2_PRODUCER_SOURCE_MAP` fails the suite; there is no shape-only green
+path for this closure. Producer Git inspection clears repository-selection,
+object-database, replacement and injected config environment, disables
+replacement objects and fsmonitor, and rejects replace refs, grafts, object
+alternates and shallow repositories before checking ancestry or bytes.
+
 Example local-only verification:
 
 ```powershell
@@ -52,6 +59,8 @@ node .\scripts\pinned-integration-manifest.mjs `
   --producer-source-map .\artifacts\local-w1w2-producer-source-map.json `
   --verify-producer-artifacts `
   --validate-only
+
+node .\scripts\w1w2-dependency-closure-gate.mjs
 ```
 
 ## Gate interpretation
