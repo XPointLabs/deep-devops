@@ -8,13 +8,15 @@ Controls:
 - XNode request-noise categories raised to Warning.
 - Per-service Docker local logs are size-bounded.
 - Fresh local wall-clock observation binds the exact archive set and rejects files older than 24
-  hours, stale observation clocks and future archive mtimes.
+  hours, substituted/empty roots, path/content/count changes, stale observation clocks and future
+  archive mtimes. It requires a protected canonical deployment inventory; default is `not-run`.
 - Metric label allowlist blocks identifier and network/path labels.
 - Evidence scanner requires exact positive input counts, structurally parses JSON/JSONL and reports
   no matched values, logical paths or filenames.
 - Exact merged-Compose validation rejects host namespace sharing, public/additional listeners,
   Docker socket/bind mounts, devices, privilege, added capabilities, weakened security options and
-  unexpected services/networks/volumes/secrets/build keys.
+  unexpected services/networks/volumes/secrets/build keys. Label maps, healthchecks and
+  dependencies are exact.
 - Strict gate binds P01 expectations and pinned clean XNode source.
 - Break-glass closure, deletion verification and key-reference separation are machine checked.
 

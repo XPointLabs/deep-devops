@@ -1,0 +1,17 @@
+{
+  "schema": "deep-local-log-retention-inventory.v1",
+  "profile": "metadata-safe-v1",
+  "humanOwner": "Mr. X",
+  "inventoryId": "synthetic-uat-inventory",
+  "rootIdentitySha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "expectedArchives": [
+    "xnode-1/current.log"
+  ],
+  "countPolicy": {
+    "minimum": 1,
+    "maximum": 1,
+    "allowEmpty": false
+  },
+  "contentHashRequired": true,
+  "pointInTimeOnly": true
+}

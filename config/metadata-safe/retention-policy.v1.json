@@ -75,6 +75,7 @@
     "mustDiffer": true
   },
   "localRetention": {
+    "inventorySchema": "deep-local-log-retention-inventory.v1",
     "receiptSchema": "deep-local-log-retention-observation.v1",
     "maximumAgeHours": 24,
     "maximumClockSkewMinutes": 5,

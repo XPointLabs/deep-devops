@@ -14,7 +14,7 @@
   "metadataSafeProfileFailClosed": true,
   "providerDeletionGuaranteed": false,
   "focusedTests": {
-    "passed": 15,
+    "passed": 16,
     "failed": 0,
     "skipped": 0
   },
@@ -25,18 +25,19 @@
     "findingCount": 0,
     "exactFileCountsRequired": true,
     "logicalPathsEmitted": false,
-    "localRetentionClaimedByGate": false
+    "localRetentionDefaultStatus": "not-run"
   },
   "topologyContract": "exact-merged-compose-v1",
   "localRetentionReceiptImplemented": true,
+  "localRetentionProtectedInventoryImplemented": true,
   "focusedSecretScan": {
-    "scannedEntries": 258,
+    "scannedEntries": 434,
     "findingCount": 0
   },
   "fullReleaseGate": {
     "status": "passed",
     "commands": 49,
-    "secretScanFiles": 237,
+    "secretScanFiles": 238,
     "productionReadinessChecks": 191
   },
   "dockerUpPerformed": false,

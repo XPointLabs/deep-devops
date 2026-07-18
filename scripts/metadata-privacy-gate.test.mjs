@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rename, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {
   featureFlag,
+  calculateLocalRetentionRootIdentity,
   createLocalRetentionReceipt,
   inspectMetadataText,
   lintMetricText,
@@ -50,6 +51,18 @@ function pinnedGateInputs() {
       'metadata-expectations.v1.json'
     )
   };
+}
+
+function canonicalizeJson(value) {
+  if (Array.isArray(value)) return value.map(canonicalizeJson);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.keys(value).sort().map(key => [key, canonicalizeJson(value[key])])
+  );
+}
+
+async function writeCanonicalJson(file, value) {
+  await writeFile(file, `${JSON.stringify(canonicalizeJson(value), null, 2)}\n`);
 }
 
 function validReceipt(policy) {
@@ -285,42 +298,102 @@ test('local wall-clock retention receipt binds exact archive set and observed mt
   const root = await fixtureRoot();
   const policy = await loadPolicy();
   try {
-    const archive = path.join(root, syntheticSensitiveFilename);
+    const relativeArchive = `service/${syntheticSensitiveFilename}`;
+    const archive = path.join(root, relativeArchive);
+    await mkdir(path.dirname(archive));
     await writeFile(archive, 'warning: aggregate service unavailable\n');
     const recent = new Date('2030-01-01T11:30:00.000Z');
     await utimes(archive, recent, recent);
+    const inventory = {
+      schema: 'deep-local-log-retention-inventory.v1',
+      profile: metadataSafeProfile,
+      humanOwner: 'Mr. X',
+      inventoryId: 'synthetic-deployment-inventory',
+      rootIdentitySha256: await calculateLocalRetentionRootIdentity(root),
+      expectedArchives: [relativeArchive.replaceAll('\\', '/')],
+      countPolicy: {
+        minimum: 1,
+        maximum: 1,
+        allowEmpty: false
+      },
+      contentHashRequired: true,
+      pointInTimeOnly: true
+    };
     const receipt = await createLocalRetentionReceipt(
       root,
       '2030-01-01T12:00:00.000Z',
+      inventory,
       policy
     );
-    const observation = await validateLocalRetentionReceipt(receipt, root, policy, {
+    const observation = await validateLocalRetentionReceipt(receipt, root, inventory, policy, {
       verificationNow: Date.parse('2030-01-01T12:02:00.000Z')
     });
     assert.equal(observation.expiredArchiveCount, 0);
     assert.ok(!JSON.stringify(receipt).includes(syntheticSensitiveFilename));
 
+    const extraClaim = structuredClone(receipt);
+    extraClaim.providerDeletionGuaranteed = true;
+    await assert.rejects(() => validateLocalRetentionReceipt(
+      extraClaim,
+      root,
+      inventory,
+      policy,
+      { verificationNow: Date.parse('2030-01-01T12:02:00.000Z') }
+    ), /receipt keys must be exact/);
+
     const wrongHash = structuredClone(receipt);
     wrongHash.archiveSetSha256 = '00'.repeat(32);
-    await assert.rejects(() => validateLocalRetentionReceipt(wrongHash, root, policy, {
+    await assert.rejects(() => validateLocalRetentionReceipt(wrongHash, root, inventory, policy, {
       verificationNow: Date.parse('2030-01-01T12:02:00.000Z')
     }));
 
-    await writeFile(path.join(root, 'second.log'), 'warning: aggregate retry\n');
-    await assert.rejects(() => validateLocalRetentionReceipt(receipt, root, policy, {
+    const unrelated = await fixtureRoot();
+    await assert.rejects(() => validateLocalRetentionReceipt(receipt, unrelated, inventory, policy, {
       verificationNow: Date.parse('2030-01-01T12:02:00.000Z')
     }));
+    await rm(unrelated, { recursive: true, force: true });
 
-    await rm(path.join(root, 'second.log'));
+    const substitutedRoot = await fixtureRoot();
+    const substitutedArchive = path.join(substitutedRoot, relativeArchive);
+    await mkdir(path.dirname(substitutedArchive));
+    await writeFile(substitutedArchive, await readFile(archive));
+    await utimes(substitutedArchive, recent, recent);
+    await assert.rejects(() => validateLocalRetentionReceipt(
+      receipt,
+      substitutedRoot,
+      inventory,
+      policy,
+      { verificationNow: Date.parse('2030-01-01T12:02:00.000Z') }
+    ));
+    await rm(substitutedRoot, { recursive: true, force: true });
+
+    const originalContent = await readFile(archive);
+    await writeFile(archive, Buffer.from(originalContent).fill(0x78));
+    await utimes(archive, recent, recent);
+    await assert.rejects(() => validateLocalRetentionReceipt(receipt, root, inventory, policy, {
+      verificationNow: Date.parse('2030-01-01T12:02:00.000Z')
+    }));
+    await writeFile(archive, originalContent);
+    await utimes(archive, recent, recent);
+
+    const swapped = path.join(root, 'service', 'swapped.log');
+    await rename(archive, swapped);
+    await assert.rejects(() => validateLocalRetentionReceipt(receipt, root, inventory, policy, {
+      verificationNow: Date.parse('2030-01-01T12:02:00.000Z')
+    }));
+    await rename(swapped, archive);
+    await utimes(archive, recent, recent);
+
     const old = new Date('2029-12-30T00:00:00.000Z');
     await utimes(archive, old, old);
     const expired = await createLocalRetentionReceipt(
       root,
       '2030-01-01T12:00:00.000Z',
+      inventory,
       policy
     );
     await assert.rejects(
-      () => validateLocalRetentionReceipt(expired, root, policy, {
+      () => validateLocalRetentionReceipt(expired, root, inventory, policy, {
         verificationNow: Date.parse('2030-01-01T12:02:00.000Z')
       }),
       /expired archives/
@@ -328,10 +401,11 @@ test('local wall-clock retention receipt binds exact archive set and observed mt
     const staleClock = await createLocalRetentionReceipt(
       root,
       '2029-12-30T00:00:00.000Z',
+      inventory,
       policy
     );
     await assert.rejects(
-      () => validateLocalRetentionReceipt(staleClock, root, policy, {
+      () => validateLocalRetentionReceipt(staleClock, root, inventory, policy, {
         verificationNow: Date.parse('2030-01-01T12:02:00.000Z')
       }),
       /must be fresh/
@@ -341,10 +415,11 @@ test('local wall-clock retention receipt binds exact archive set and observed mt
     const futureReceipt = await createLocalRetentionReceipt(
       root,
       '2030-01-01T12:00:00.000Z',
+      inventory,
       policy
     );
     await assert.rejects(
-      () => validateLocalRetentionReceipt(futureReceipt, root, policy, {
+      () => validateLocalRetentionReceipt(futureReceipt, root, inventory, policy, {
         verificationNow: Date.parse('2030-01-01T12:02:00.000Z')
       }),
       /ahead of the observation clock/
@@ -409,7 +484,18 @@ test('metadata-safe topology rejects privilege, host escape, public listener and
     value => { value.services.calls.environment.HOST = '0.0.0.0'; },
     value => { value.services['xnode-1'].environment.Runtime__AllowPublicPeerEndpoints = 'true'; },
     value => { value.services['xnode-1'].environment.Runtime__RequireSignedRelayContacts = 'false'; },
-    value => { value.services['xnode-1'].environment.Vless__MockProcess = 'true'; }
+    value => { value.services['xnode-1'].environment.Vless__MockProcess = 'true'; },
+    value => { value.services.calls.labels['autodiscovery.example/enabled'] = 'true'; },
+    value => { value.services['xnode-1'].labels['log-agent.example/scrape'] = 'true'; },
+    value => { value.services.push.labels['io.deep.i01b.supply-chain-preflight-required'] = 'false'; },
+    value => { value.services.calls.healthcheck.test[1] = 'cat /run/secrets/private'; },
+    value => { value.services.file.healthcheck.disable = true; },
+    value => { value.services.push.healthcheck.interval = '1h'; },
+    value => { value.services['xnode-1'].healthcheck.start_period = '0s'; },
+    value => { value.services['xnode-1'].depends_on.storage.condition = 'service_started'; },
+    value => { value.services['xnode-2'].depends_on.storage.required = false; },
+    value => { value.services['xnode-3'].depends_on.storage.restart = true; },
+    value => { value.services['xnode-1'].depends_on.push = { condition: 'service_healthy', required: true }; }
   ]) {
     const candidate = structuredClone(topology);
     mutate(candidate);
@@ -462,6 +548,71 @@ test('strict gate binds P01, pinned XNode, compose profile and clean selected ev
     assert.equal(summary.status, 'ok');
     assert.equal(summary.findingCount, 0);
     assert.equal(summary.topologyServices, 7);
+    assert.equal(summary.providerDeletionGuaranteed, false);
+    assert.equal(summary.productionReady, false);
+    assert.equal(summary.localRetentionStatus, 'not-run');
+    assert.equal(summary.localRetentionInventorySha256, null);
+  } finally {
+    if (previous === undefined) delete process.env[featureFlag];
+    else process.env[featureFlag] = previous;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('strict gate verifies local retention only with an external protected exact inventory', async () => {
+  const root = await fixtureRoot();
+  const previous = process.env[featureFlag];
+  try {
+    const artifact = path.join(root, 'evidence.json');
+    const metrics = path.join(root, 'metrics.prom');
+    await writeFile(artifact, '{"service":"router","status":"degraded"}\n');
+    await writeFile(metrics, 'deep_requests_total{service="router",status_code="503"} 1\n');
+
+    const retentionRoot = path.join(root, 'deployment-logs');
+    const relativeArchive = 'xnode-1/current.log';
+    const archive = path.join(retentionRoot, relativeArchive);
+    await mkdir(path.dirname(archive), { recursive: true });
+    await writeFile(archive, 'warning: aggregate upstream unavailable\n');
+    const now = Date.now();
+    const recent = new Date(now - 60 * 60_000);
+    await utimes(archive, recent, recent);
+    const policy = await loadPolicy();
+    const inventory = {
+      schema: policy.localRetention.inventorySchema,
+      profile: metadataSafeProfile,
+      humanOwner: 'Mr. X',
+      inventoryId: 'protected-uat-inventory',
+      rootIdentitySha256: await calculateLocalRetentionRootIdentity(retentionRoot),
+      expectedArchives: [relativeArchive],
+      countPolicy: { minimum: 1, maximum: 1, allowEmpty: false },
+      contentHashRequired: true,
+      pointInTimeOnly: true
+    };
+    const observedAt = new Date(now).toISOString();
+    const receipt = await createLocalRetentionReceipt(
+      retentionRoot,
+      observedAt,
+      inventory,
+      policy
+    );
+    const inventoryPath = path.join(root, 'protected-inventory.json');
+    const receiptPath = path.join(root, 'retention-receipt.json');
+    await writeCanonicalJson(inventoryPath, inventory);
+    await writeCanonicalJson(receiptPath, receipt);
+
+    process.env[featureFlag] = metadataSafeProfile;
+    const summary = await runGate({
+      artifactPaths: [artifact],
+      metricPaths: [metrics],
+      expectedArtifactFiles: 1,
+      expectedMetricFiles: 1,
+      localRetentionInventoryPath: inventoryPath,
+      localRetentionReceiptPath: receiptPath,
+      localRetentionRoot: retentionRoot,
+      ...pinnedGateInputs()
+    });
+    assert.equal(summary.localRetentionStatus, 'verified-point-in-time');
+    assert.match(summary.localRetentionInventorySha256, /^[0-9a-f]{64}$/);
     assert.equal(summary.providerDeletionGuaranteed, false);
     assert.equal(summary.productionReady, false);
   } finally {

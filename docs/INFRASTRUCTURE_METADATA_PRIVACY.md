@@ -22,6 +22,17 @@ node scripts/metadata-privacy-gate.mjs `
   --summary <isolated-summary-path>
 ```
 
+Local retention evidence is optional and defaults to `localRetentionStatus: not-run`. It is enabled
+only when all three deployment-bound inputs are supplied:
+
+```powershell
+node scripts/metadata-privacy-gate.mjs `
+  <required arguments above> `
+  --local-retention-inventory <canonical-protected-inventory-outside-repository> `
+  --local-retention-root <deployment-log-root-bound-by-inventory> `
+  --local-retention-receipt <canonical-point-in-time-receipt>
+```
+
 The gate accepts explicit UTF-8 text inputs only. Each selected root must contain at least one file,
 and the aggregate artifact and metric counts must equal the separately declared positive counts.
 Empty/zero-match selections, unsupported or binary content, malformed selected JSON/JSONL, wrong
@@ -44,20 +55,25 @@ selection, parse error or harness/contract failure exits `2`.
 The machine-readable source of truth is
 `config/metadata-safe/retention-policy.v1.json`. Docker `local` logging is bounded to two compressed
 1 MiB segments per service. This is only a size bound and never proof of a 24-hour deletion SLA.
-The 24-hour value is a target until an operator validates a
-`deep-local-log-retention-observation.v1` receipt against the exact local archive directory. The
-validator binds the complete current archive set by generic ordinals, byte sizes and observed
-filesystem modification times, and rejects any archive older than 24 hours. This proves a
+The 24-hour value is a target until an operator validates a protected
+`deep-local-log-retention-inventory.v1` and a `deep-local-log-retention-observation.v1` receipt
+against the exact local archive directory. The inventory pins the canonical path plus filesystem
+object identity of the root, a
+nonempty exact relative archive list and exact count policy. The receipt binds each observed
+archive through a safe relative-identity hash, byte size, filesystem modification time and content
+SHA-256, and rejects any archive older than 24 hours. This proves a
 local point-in-time observation only. Validation requires the observation clock to be within five
 minutes of the verifier and rejects archive mtimes ahead of that clock. It does not prove prior
 deletion, continuous enforcement, remote replicas or provider deletion.
 
-The checked-in local-retention example represents an empty synthetic directory. A real receipt
-must be generated from and immediately revalidated against the deployment host's exact archive
-directory; copying the example is not operational evidence. The repository gate deliberately does
-not expose a free-form `--local-retention-root` option and never sets a local-retention verified
-claim: a deployment-specific trusted inventory must bind the real container/archive root before
-this standalone verifier can be used as operational evidence.
+The checked-in inventory and receipt are deliberately invalid synthetic templates. A protected
+inventory must be canonical JSON, stored outside the repository, and bind the deployment host's
+canonical archive root. Empty or substituted roots, extra/missing/swapped paths, count drift,
+content changes, stale/future clocks and extra receipt claims are rejected. The exact receipt
+schema has no provider-deletion field.
+
+Supplying only a free root or copying the templates cannot produce a passing claim. Without all
+three deployment-bound inputs, the repository gate reports `not-run`, never a false success.
 
 ## Exact Compose topology
 
@@ -66,7 +82,10 @@ seven services, one internal bridge network, seven named state volumes, three no
 reviewed loopback-only host ports. It rejects host network/PID/IPC sharing, public or additional
 ports, Docker socket and bind mounts, devices, privileged mode, added capabilities, weakened
 `cap_drop`/`security_opt`, host-gateway mappings, extra services/networks/listeners and unexpected
-service/build keys.
+service/build keys. Every service label map is exact, so autodiscovery/log-agent labels cannot be
+added. Healthcheck commands, timing, retries and optional fields are exact; secret-reading or
+disabled healthchecks fail. Router `depends_on` bodies are exact and require only healthy storage,
+with no replacement condition, restart behavior or extra dependency.
 
 The metadata-safe overlay moves the container-internal VLESS listener from privileged port `443` to
 `8443`, removes `NET_BIND_SERVICE`, and does not publish that listener to the host. This opt-in UAT

@@ -2,12 +2,18 @@
   "schema": "deep-local-log-retention-observation.v1",
   "profile": "metadata-safe-v1",
   "humanOwner": "Mr. X",
+  "inventoryId": "synthetic-uat-inventory",
+  "inventorySha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "rootIdentitySha256": "0000000000000000000000000000000000000000000000000000000000000000",
   "observedAt": "2030-01-01T00:00:00.000Z",
   "maximumAgeHours": 24,
   "exactArchiveSet": true,
-  "inspectedArchiveCount": 0,
-  "archiveSetSha256": "7acb96e3d19225e4ad757291bf137d1e4dab1801a01c67bab02d630100e3c378",
+  "expectedArchiveCount": 1,
+  "observedArchiveCount": 1,
+  "archiveSetSha256": "0000000000000000000000000000000000000000000000000000000000000000",
   "expiredArchiveCount": 0,
-  "oldestObservedMtime": null,
-  "newestObservedMtime": null
+  "oldestObservedMtime": "2029-12-31T23:30:00.000Z",
+  "newestObservedMtime": "2029-12-31T23:30:00.000Z",
+  "contentHashAlgorithm": "sha256",
+  "pointInTimeOnly": true
 }

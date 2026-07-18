@@ -7,7 +7,7 @@ All verification was executed from
 
 | Check | Result |
 |---|---|
-| `node --test scripts/metadata-privacy-gate.test.mjs` | PASS — 15 passed, 0 failed, 0 skipped |
+| `node --test scripts/metadata-privacy-gate.test.mjs` | PASS — 16 passed, 0 failed, 0 skipped |
 | Strict metadata-safe gate against pinned P01/XNode inputs | PASS — 1 artifact file and 1 metric file, 0 findings |
 | Deliberately seeded metadata leaks | EXPECTED FAIL — source IP, request target, Session ID, mailbox capability, push handle and correlation ID were rejected without echoing raw values |
 | Metric-label mutations | EXPECTED FAIL — identifier, address and request-path labels were rejected |
@@ -15,14 +15,14 @@ All verification was executed from
 | Structured metadata mutations | EXPECTED FAIL — nested/array/quoted IPv4, IPv6, path, Session, mailbox, push and correlation fields were rejected |
 | Output privacy mutation | PASS — sensitive logical filename and every synthetic value were absent from the complete finding/summary/console serialization |
 | Exit-code harness | PASS — metadata leak exited 1; incomplete selection exited 2 |
-| Compose-profile/topology mutations | EXPECTED FAIL — wrong profile, host network/PID/IPC, public/additional ports, Docker socket/bind mount, devices, privilege/capability/security-option changes, host-gateway, extra services/networks/listeners/volumes/secrets/build keys, unbounded logging and verbose framework logging were rejected |
+| Compose-profile/topology mutations | EXPECTED FAIL — wrong profile, host network/PID/IPC, public/additional ports, Docker socket/bind mount, devices, privilege/capability/security-option changes, host-gateway, extra services/networks/listeners/volumes/secrets/build keys, labels, healthchecks, dependencies, unbounded logging and verbose framework logging were rejected |
 | Xray logging mutations | EXPECTED FAIL — access logging and `info` log level were rejected |
 | Break-glass mutations | EXPECTED FAIL — open receipt, unverified deletion, raw export, shared key reference and duration over 60 minutes were rejected |
-| Local retention receipt | PASS — exact archive set and mtimes validated; changed set/hash and archive older than 24 hours were rejected |
+| Local retention protected inventory/receipt | PASS — default remained `not-run`; an external canonical inventory bound root/path/count/content/mtime, while empty/substituted roots, path/content swaps, extra claims and stale/future evidence were rejected |
 | `docker compose ... config --format json` through the strict gate | PASS — 7 metadata-safe services rendered and validated |
-| Focused secret scan | PASS — 258 selected/tracked/artifact text entries, 0 findings |
+| Final local secret scan | PASS — 434 manifested/selected files, 0 findings |
 | `node scripts/release-gate-contracts.mjs` | PASS — 49 commands |
-| Full-gate secret scan | PASS — 237 manifested/selected files |
+| Full-gate secret scan | PASS — 238 manifested/selected files |
 | Full production readiness gate | PASS — 191 checks |
 
 The full release suite also passed its 9 manifest tests, 21 secret-scan

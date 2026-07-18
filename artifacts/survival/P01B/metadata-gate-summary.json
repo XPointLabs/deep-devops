@@ -11,6 +11,8 @@
   "scannedArtifactFiles": 1,
   "scannedMetricFiles": 1,
   "breakGlassVerified": false,
+  "localRetentionStatus": "not-run",
+  "localRetentionInventorySha256": null,
   "findingCount": 0,
   "findings": []
 }

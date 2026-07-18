@@ -373,6 +373,7 @@ export function validateRetentionPolicy(policy) {
   assert.match(policy.keySeparation?.evidenceKeyRef ?? '', /^secretref:[a-z0-9-]+$/);
   assert.notEqual(policy.keySeparation.operationalLogKeyRef, policy.keySeparation.evidenceKeyRef);
   assert.deepEqual(policy.localRetention, {
+    inventorySchema: 'deep-local-log-retention-inventory.v1',
     receiptSchema: 'deep-local-log-retention-observation.v1',
     maximumAgeHours: 24,
     maximumClockSkewMinutes: 5,
@@ -404,56 +405,175 @@ export function validateBreakGlassReceipt(receipt, policy) {
   return receipt;
 }
 
-async function observeLocalRetentionRoot(rootPath, observedAt, maximumAgeHours) {
-  const files = [];
+function canonicalizeJson(value) {
+  if (Array.isArray(value)) return value.map(canonicalizeJson);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.keys(value).sort().map(key => [key, canonicalizeJson(value[key])])
+  );
+}
+
+function canonicalJsonBytes(value) {
+  return Buffer.from(`${JSON.stringify(canonicalizeJson(value), null, 2)}\n`, 'utf8');
+}
+
+function inventorySha256(inventory) {
+  return createHash('sha256').update(canonicalJsonBytes(inventory)).digest('hex');
+}
+
+export async function calculateLocalRetentionRootIdentity(rootPath) {
   try {
     const root = path.resolve(rootPath);
+    const info = await lstat(root);
+    contract(info.isDirectory() && !info.isSymbolicLink(), 'retention root must be a real directory');
+    const canonical = await realpath(root);
+    const portable = canonical.replaceAll('\\', '/');
+    const normalized = process.platform === 'win32' ? portable.toLowerCase() : portable;
+    return createHash('sha256')
+      .update(`deep-local-retention-root-v1\0${normalized}\0${info.dev}\0${info.ino}`)
+      .digest('hex');
+  } catch {
+    throw new Error('local retention root identity failed closed');
+  }
+}
+
+export async function validateLocalRetentionInventory(inventory, rootPath, policy) {
+  contract(exactKeys(inventory, [
+    'schema',
+    'profile',
+    'humanOwner',
+    'inventoryId',
+    'rootIdentitySha256',
+    'expectedArchives',
+    'countPolicy',
+    'contentHashRequired',
+    'pointInTimeOnly'
+  ]), 'local retention inventory keys must be exact');
+  contract(inventory.schema === policy.localRetention.inventorySchema, 'local retention inventory schema must be exact');
+  contract(inventory.profile === metadataSafeProfile, 'local retention inventory profile must be exact');
+  contract(inventory.humanOwner === 'Mr. X', 'local retention inventory owner must be Mr. X');
+  contract(/^[a-z0-9-]{8,64}$/.test(inventory.inventoryId ?? ''), 'local retention inventory ID must be safe');
+  contract(/^[0-9a-f]{64}$/.test(inventory.rootIdentitySha256 ?? ''), 'local retention root identity must be SHA256');
+  contract(Array.isArray(inventory.expectedArchives) && inventory.expectedArchives.length > 0, 'local retention inventory must bind nonempty archives');
+  const expectedArchives = inventory.expectedArchives.map(item => {
+    contract(typeof item === 'string' && item.length > 0, 'local retention archive identity must be text');
+    const normalized = item.replaceAll('\\', '/');
+    contract(
+      normalized === path.posix.normalize(normalized)
+        && !path.posix.isAbsolute(normalized)
+        && normalized !== '..'
+        && !normalized.startsWith('../')
+        && /^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*$/.test(normalized),
+      'local retention archive identity must be safe and relative'
+    );
+    return normalized;
+  });
+  contract(new Set(expectedArchives).size === expectedArchives.length, 'local retention archive identities must be unique');
+  contract(exactKeyValues(inventory.countPolicy, {
+    minimum: expectedArchives.length,
+    maximum: expectedArchives.length,
+    allowEmpty: false
+  }), 'local retention count policy must be exact and nonempty');
+  contract(inventory.contentHashRequired === true, 'local retention content hashes must be required');
+  contract(inventory.pointInTimeOnly === true, 'local retention claim must be point-in-time only');
+  const canonicalRoot = await realpath(path.resolve(rootPath));
+  const rootRelativeToRepository = path.relative(repositoryRoot, canonicalRoot);
+  contract(
+    rootRelativeToRepository.startsWith(`..${path.sep}`) || path.isAbsolute(rootRelativeToRepository),
+    'deployment retention root must be outside the repository'
+  );
+  contract(
+    inventory.rootIdentitySha256 === await calculateLocalRetentionRootIdentity(rootPath),
+    'local retention root does not match protected inventory'
+  );
+  return {
+    inventorySha256: inventorySha256(inventory),
+    expectedArchives: [...expectedArchives].sort()
+  };
+}
+
+async function observeLocalRetentionRoot(rootPath, observedAt, maximumAgeHours, inventory, policy) {
+  try {
+    const inventoryBinding = await validateLocalRetentionInventory(inventory, rootPath, policy);
+    const root = path.resolve(rootPath);
+    const files = [];
     await walkSelected(root, root, files);
+    contract(files.length > 0, 'local retention root must not be empty');
+    const relativeFiles = files.map(file => path.relative(root, file).replaceAll('\\', '/')).sort();
+    contract(
+      exactJson(relativeFiles, inventoryBinding.expectedArchives),
+      'local retention archive set does not match protected inventory'
+    );
     const entries = [];
-    for (const file of files) {
+    for (const relative of relativeFiles) {
+      const file = path.resolve(root, relative);
       const info = await stat(file);
-      const logical = path.relative(root, file) || 'archive-1';
+      const contentSha256 = createHash('sha256').update(await readFile(file)).digest('hex');
       entries.push({
-        logical,
+        identityHash: createHash('sha256')
+          .update(`deep-local-retention-relative-identity-v1\0${relative}`)
+          .digest('hex'),
         size: info.size,
-        mtime: new Date(info.mtimeMs).toISOString()
+        mtime: new Date(info.mtimeMs).toISOString(),
+        contentSha256
       });
     }
-    entries.sort((left, right) => left.logical.localeCompare(right.logical));
     const archiveSetSha256 = createHash('sha256')
-      .update(`${retentionSetDomain}\0${entries.map((entry, index) => (
-        `${index + 1}\0${entry.size}\0${entry.mtime}`
+      .update(`${retentionSetDomain}\0${entries.map(entry => (
+        `${entry.identityHash}\0${entry.size}\0${entry.mtime}\0${entry.contentSha256}`
       )).join('\n')}`)
       .digest('hex');
     const cutoff = observedAt - maximumAgeHours * 60 * 60_000;
     const mtimes = entries.map(entry => Date.parse(entry.mtime));
     return {
-      inspectedArchiveCount: entries.length,
+      inventorySha256: inventoryBinding.inventorySha256,
+      rootIdentitySha256: inventory.rootIdentitySha256,
+      expectedArchiveCount: inventoryBinding.expectedArchives.length,
+      observedArchiveCount: entries.length,
       archiveSetSha256,
       expiredArchiveCount: mtimes.filter(mtime => mtime < cutoff).length,
-      oldestObservedMtime: mtimes.length > 0
-        ? new Date(Math.min(...mtimes)).toISOString()
-        : null,
-      newestObservedMtime: mtimes.length > 0
-        ? new Date(Math.max(...mtimes)).toISOString()
-        : null
+      oldestObservedMtime: new Date(Math.min(...mtimes)).toISOString(),
+      newestObservedMtime: new Date(Math.max(...mtimes)).toISOString()
     };
-  } catch {
-    throw new Error('local retention observation root failed closed');
+  } catch (error) {
+    throw new Error(`local retention observation failed closed: ${error.message}`);
   }
 }
 
 export async function validateLocalRetentionReceipt(
   receipt,
   rootPath,
+  inventory,
   policy,
   { verificationNow = Date.now() } = {}
 ) {
-  contract(receipt?.schema === policy.localRetention.receiptSchema, 'local retention receipt schema must be exact');
+  contract(exactKeys(receipt, [
+    'schema',
+    'profile',
+    'humanOwner',
+    'inventoryId',
+    'inventorySha256',
+    'rootIdentitySha256',
+    'observedAt',
+    'maximumAgeHours',
+    'exactArchiveSet',
+    'expectedArchiveCount',
+    'observedArchiveCount',
+    'archiveSetSha256',
+    'expiredArchiveCount',
+    'oldestObservedMtime',
+    'newestObservedMtime',
+    'contentHashAlgorithm',
+    'pointInTimeOnly'
+  ]), 'local retention receipt keys must be exact');
+  contract(receipt.schema === policy.localRetention.receiptSchema, 'local retention receipt schema must be exact');
   contract(receipt.profile === metadataSafeProfile, 'local retention receipt profile must be exact');
   contract(receipt.humanOwner === 'Mr. X', 'local retention receipt owner must be Mr. X');
+  contract(receipt.inventoryId === inventory.inventoryId, 'local retention inventory ID must be exact');
   contract(receipt.maximumAgeHours === policy.localRetention.maximumAgeHours, 'local retention maximum age must be exact');
   contract(receipt.exactArchiveSet === true, 'local retention receipt must bind the exact archive set');
+  contract(receipt.contentHashAlgorithm === 'sha256', 'local retention content hash algorithm must be exact');
+  contract(receipt.pointInTimeOnly === true, 'local retention receipt must remain point-in-time only');
   const observedAt = Date.parse(receipt.observedAt);
   contract(Number.isFinite(observedAt), 'local retention observedAt must be valid');
   contract(
@@ -463,38 +583,51 @@ export async function validateLocalRetentionReceipt(
   const observation = await observeLocalRetentionRoot(
     rootPath,
     observedAt,
-    policy.localRetention.maximumAgeHours
+    policy.localRetention.maximumAgeHours,
+    inventory,
+    policy
   );
-  contract(receipt.inspectedArchiveCount === observation.inspectedArchiveCount, 'local retention archive count must be exact');
-  contract(receipt.archiveSetSha256 === observation.archiveSetSha256, 'local retention archive set hash must be exact');
-  contract(receipt.expiredArchiveCount === observation.expiredArchiveCount, 'local retention expired count must be exact');
-  contract(receipt.oldestObservedMtime === observation.oldestObservedMtime, 'local retention oldest mtime must be exact');
-  contract(receipt.newestObservedMtime === observation.newestObservedMtime, 'local retention newest mtime must be exact');
+  for (const key of [
+    'inventorySha256',
+    'rootIdentitySha256',
+    'expectedArchiveCount',
+    'observedArchiveCount',
+    'archiveSetSha256',
+    'expiredArchiveCount',
+    'oldestObservedMtime',
+    'newestObservedMtime'
+  ]) {
+    contract(receipt[key] === observation[key], `local retention ${key} must be exact`);
+  }
   contract(
-    observation.newestObservedMtime === null
-      || Date.parse(observation.newestObservedMtime)
-        <= observedAt + policy.localRetention.maximumClockSkewMinutes * 60_000,
+    Date.parse(observation.newestObservedMtime)
+      <= observedAt + policy.localRetention.maximumClockSkewMinutes * 60_000,
     'local retention archive mtime is ahead of the observation clock'
   );
   contract(observation.expiredArchiveCount === 0, 'local retention root contains expired archives');
   return observation;
 }
 
-export async function createLocalRetentionReceipt(rootPath, observedAt, policy) {
+export async function createLocalRetentionReceipt(rootPath, observedAt, inventory, policy) {
   const parsedObservedAt = Date.parse(observedAt);
   contract(Number.isFinite(parsedObservedAt), 'local retention observedAt must be valid');
   const observation = await observeLocalRetentionRoot(
     rootPath,
     parsedObservedAt,
-    policy.localRetention.maximumAgeHours
+    policy.localRetention.maximumAgeHours,
+    inventory,
+    policy
   );
   return {
     schema: policy.localRetention.receiptSchema,
     profile: metadataSafeProfile,
     humanOwner: 'Mr. X',
+    inventoryId: inventory.inventoryId,
     observedAt: new Date(parsedObservedAt).toISOString(),
     maximumAgeHours: policy.localRetention.maximumAgeHours,
     exactArchiveSet: true,
+    contentHashAlgorithm: 'sha256',
+    pointInTimeOnly: true,
     ...observation
   };
 }
@@ -598,6 +731,49 @@ function exactKeyValues(actual, expected) {
   return Object.entries(expected).every(([key, value]) => actual[key] === value);
 }
 
+function expectedServiceLabels(name) {
+  if (routers.includes(name)) {
+    return {
+      'io.deep.i01b.public-peer-authorization': 'DenyAll',
+      'io.deep.i01b.readiness-before-bootstrap': '503',
+      'io.deep.i01b.supply-chain-preflight-required': 'true',
+      'io.deep.i01b.xnode-dockerfile-sha256': 'e5'.repeat(32),
+      'io.deep.i01b.xnode-source-commit': 'd4'.repeat(20),
+      'io.deep.infrastructure-privacy-profile': metadataSafeProfile
+    };
+  }
+  return {
+    'io.deep.i01b.compat-content-sha256': '55'.repeat(32),
+    'io.deep.i01b.devops-source-commit': 'f6'.repeat(20),
+    'io.deep.i01b.supply-chain-preflight-required': 'true',
+    'io.deep.infrastructure-privacy-profile': metadataSafeProfile
+  };
+}
+
+function expectedServiceHealthcheck(name) {
+  if (routers.includes(name)) {
+    return {
+      test: [
+        'CMD-SHELL',
+        'curl -fsS http://127.0.0.1:8080/health/ready >/dev/null'
+      ],
+      timeout: '3s',
+      interval: '5s',
+      retries: 30,
+      start_period: '20s'
+    };
+  }
+  return {
+    test: [
+      'CMD-SHELL',
+      'node -e "fetch(\'http://127.0.0.1:8080/health/ready\').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"'
+    ],
+    timeout: '3s',
+    interval: '3s',
+    retries: 30
+  };
+}
+
 export function validateMetadataSafeTopology(topology) {
   const rootKeys = [
     'name',
@@ -674,7 +850,8 @@ export function validateMetadataSafeTopology(topology) {
       exactKeyValues(service.environment, expectedServiceEnvironment(name)),
       `${name} environment must be exact`
     );
-    contract(service.labels?.['io.deep.infrastructure-privacy-profile'] === metadataSafeProfile, `${name} label must be exact`);
+    contract(exactJson(service.labels, expectedServiceLabels(name)), `${name} labels must be exact`);
+    contract(exactJson(service.healthcheck, expectedServiceHealthcheck(name)), `${name} healthcheck must be exact`);
     contract(exactJson(service.logging, {
       driver: 'local',
       options: {
@@ -770,6 +947,12 @@ export function validateMetadataSafeTopology(topology) {
       target: 'i01b-private-uat-node-ed25519',
       mode: '0400'
     }]), `${name} secret attachment must be exact`);
+    contract(exactJson(topology.services[name].depends_on, {
+      storage: {
+        condition: 'service_healthy',
+        required: true
+      }
+    }), `${name} depends_on must be exact`);
   }
   for (const name of ancillaryServices) {
     contract(!Object.hasOwn(topology.services[name], 'secrets'), `${name} must not receive secrets`);
@@ -865,6 +1048,29 @@ export async function validatePinnedInputs({ xnodeDir, clientExpectationsPath })
   return { policy, xnodeCommit: xnode.sha };
 }
 
+async function readCanonicalJsonFile(filePath, { protectedInventory = false } = {}) {
+  const resolved = path.resolve(filePath);
+  const info = await lstat(resolved);
+  contract(info.isFile() && !info.isSymbolicLink(), 'retention evidence input must be a real file');
+  const canonicalPath = await realpath(resolved);
+  if (protectedInventory) {
+    const relative = path.relative(repositoryRoot, canonicalPath);
+    contract(
+      relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative),
+      'protected retention inventory must be outside the repository'
+    );
+  }
+  const bytes = await readFile(canonicalPath);
+  let value;
+  try {
+    value = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+  } catch {
+    throw new Error('retention evidence JSON must be valid UTF-8 JSON');
+  }
+  contract(bytes.equals(canonicalJsonBytes(value)), 'retention evidence JSON must be canonical');
+  return value;
+}
+
 export async function runGate(options) {
   assert.equal(process.env[featureFlag], metadataSafeProfile, `${featureFlag} must be exact ${metadataSafeProfile}`);
   const { policy, xnodeCommit } = await validatePinnedInputs(options);
@@ -885,6 +1091,32 @@ export async function runGate(options) {
     );
     breakGlassVerified = true;
   }
+  let localRetentionStatus = 'not-run';
+  let localRetentionInventorySha256 = null;
+  if (
+    options.localRetentionInventoryPath
+    || options.localRetentionReceiptPath
+    || options.localRetentionRoot
+  ) {
+    assert.ok(
+      options.localRetentionInventoryPath
+        && options.localRetentionReceiptPath
+        && options.localRetentionRoot,
+      'protected local retention inventory, receipt and root must be supplied together'
+    );
+    const inventory = await readCanonicalJsonFile(options.localRetentionInventoryPath, {
+      protectedInventory: true
+    });
+    const receipt = await readCanonicalJsonFile(options.localRetentionReceiptPath);
+    const observation = await validateLocalRetentionReceipt(
+      receipt,
+      options.localRetentionRoot,
+      inventory,
+      policy
+    );
+    localRetentionStatus = 'verified-point-in-time';
+    localRetentionInventorySha256 = observation.inventorySha256;
+  }
   return {
     schema: 'deep-infrastructure-metadata-privacy-gate.v1',
     profile: metadataSafeProfile,
@@ -898,6 +1130,8 @@ export async function runGate(options) {
     scannedArtifactFiles: artifactScan.scannedFiles,
     scannedMetricFiles: metricScan.scannedFiles,
     breakGlassVerified,
+    localRetentionStatus,
+    localRetentionInventorySha256,
     findingCount: findings.length,
     findings
   };
@@ -914,6 +1148,9 @@ function parseArguments(argv) {
       '--xnode-dir': 'xnodeDir',
       '--client-expectations': 'clientExpectationsPath',
       '--break-glass-receipt': 'breakGlassReceiptPath',
+      '--local-retention-inventory': 'localRetentionInventoryPath',
+      '--local-retention-receipt': 'localRetentionReceiptPath',
+      '--local-retention-root': 'localRetentionRoot',
       '--expected-artifact-files': 'expectedArtifactFiles',
       '--expected-metric-files': 'expectedMetricFiles'
     }[argument];
