@@ -3,21 +3,26 @@
   "accountableHuman": "Mr. X",
   "iteration": "W0-final",
   "manifest": {
-    "path": "release/manifests/survival-v2.0.2-w0.local.json",
-    "sha256": "fcf9d9f55e47229e95f4882858ba3a0b07c3ef9c300c9df1f69b7ade330c1ae1",
+    "path": "release/manifests/survival-v2.0.2-w0.detached.local.json",
+    "sha256": "575ea05f4ceda920169d6787b0db8f799a543b56b8e34d4a8669afb687df45bf",
     "repositoryCount": 13,
+    "distribution": "detached-raw-content-addressed-json",
     "offlineLocalOnly": true,
     "externalPublicationAuthorized": false
   },
   "contract": {
     "path": "release/contracts/survival-compatibility-v2.0.2-w0.json",
     "sha256": "340a0467a5108a41676b93f05bf357e76a92405812ccb7b0e8e4700fd6d25b68",
-    "version": "2.0.2-w0"
+    "version": "2.0.2-w0",
+    "carrierRepository": "deep-devops",
+    "carrierCommit": "7e4e392b72bddf24b262609f8a2994549a08ce20",
+    "runtimeBaseCommit": "67cb8113e94708a4597bb98a88e00ad9ba632415",
+    "verification": "raw-git-blob-from-pinned-carrier"
   },
   "acceptedHeads": {
     "deep-client-shared": "fb310d05a4b8bd5450695ab00569deb62aba1ff1",
     "deep-client-maui": "2d1cefd30a1e12b657288bca704aab4b10980dce",
-    "deep-devops": "67cb8113e94708a4597bb98a88e00ad9ba632415",
+    "deep-devops": "7e4e392b72bddf24b262609f8a2994549a08ce20",
     "deep-protocol": "8484b130a274ca7d8de574e563c83198180d7808",
     "xnode": "8b19577ef00f2169116cc08da51e9592089289a9"
   },
@@ -38,6 +43,7 @@
     "plannedIteration": "W1"
   },
   "productionReadinessClaimed": false,
+  "selfContainedInCarrierClaimed": false,
   "networkUsed": false,
   "dockerUsed": false,
   "pushPerformed": false,

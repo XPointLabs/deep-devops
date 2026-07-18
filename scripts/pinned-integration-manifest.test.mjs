@@ -162,19 +162,37 @@ test('validates the immutable local-only I01B repository matrix', async () => {
   assert.equal(validated.verifiedArtifacts[0].version, '2.0.1-i01b');
 });
 
-test('validates the immutable local-only W0 repository matrix and honest gate status', async () => {
-  const validated = await validateManifest({
-    manifestPath: path.join(
+test('retains the historical pre-carrier W0 manifest as rejected-construction evidence', async () => {
+  await assert.rejects(
+    validateManifest({
+      manifestPath: path.join(
       path.dirname(fileURLToPath(import.meta.url)),
       '..',
       'release',
       'manifests',
       'survival-v2.0.2-w0.local.json'
-    )
-  });
-  assert.equal(validated.manifest.releaseId, 'deep-survival-v2.0.2-w0-local');
+      )
+    }),
+    /pre-carrier W0 manifest is superseded/
+  );
+});
+
+test('validates detached W0 manifest from exact pinned carrier bytes and honest gate status', async () => {
+  const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const manifestPath = path.join(
+    root,
+    'release',
+    'manifests',
+    'survival-v2.0.2-w0.detached.local.json'
+  );
+  const validated = await validateManifest({ manifestPath });
+  assert.equal(validated.manifest.releaseId, 'deep-survival-v2.0.2-w0-detached-local');
   assert.equal(validated.manifest.repositories.length, 13);
   assert.equal(validated.verifiedArtifacts[0].version, '2.0.2-w0');
+  assert.equal(
+    validated.verifiedArtifacts[0].carrierCommit,
+    '7e4e392b72bddf24b262609f8a2994549a08ce20'
+  );
   const pins = Object.fromEntries(
     validated.manifest.repositories.map(repository => [repository.name, repository.sha])
   );
@@ -187,18 +205,12 @@ test('validates the immutable local-only W0 repository matrix and honest gate st
   }, {
     'deep-client-shared': 'fb310d05a4b8bd5450695ab00569deb62aba1ff1',
     'deep-client-maui': '2d1cefd30a1e12b657288bca704aab4b10980dce',
-    'deep-devops': '67cb8113e94708a4597bb98a88e00ad9ba632415',
+    'deep-devops': '7e4e392b72bddf24b262609f8a2994549a08ce20',
     'deep-protocol': '8484b130a274ca7d8de574e563c83198180d7808',
     xnode: '8b19577ef00f2169116cc08da51e9592089289a9'
   });
   const contract = JSON.parse(await readFile(
-    path.join(
-      path.dirname(fileURLToPath(import.meta.url)),
-      '..',
-      'release',
-      'contracts',
-      'survival-compatibility-v2.0.2-w0.json'
-    ),
+    path.join(root, 'release', 'contracts', 'survival-compatibility-v2.0.2-w0.json'),
     'utf8'
   ));
   assert.equal(contract.w0Evidence.metadataProductGate.status, 'EXPECTED-RED');
@@ -207,13 +219,7 @@ test('validates the immutable local-only W0 repository matrix and honest gate st
   assert.equal(contract.w0Evidence.externalPublicationAuthorized, false);
   assert.ok(contract.w0Evidence.packages.every(item => item.reviewStatus === 'GO'));
   const evidence = JSON.parse(await readFile(
-    path.join(
-      path.dirname(fileURLToPath(import.meta.url)),
-      '..',
-      'release',
-      'evidence',
-      'w0-final-manifest.json'
-    ),
+    path.join(root, 'release', 'evidence', 'w0-final-manifest.json'),
     'utf8'
   ));
   assert.equal(evidence.manifest.sha256, validated.manifestSha256);
@@ -223,7 +229,83 @@ test('validates the immutable local-only W0 repository matrix and honest gate st
   );
   assert.equal(evidence.metadataProductGate.status, 'EXPECTED-RED');
   assert.equal(evidence.productionReadinessClaimed, false);
+  assert.equal(evidence.selfContainedInCarrierClaimed, false);
+  assert.equal(evidence.contract.verification, 'raw-git-blob-from-pinned-carrier');
   assert.deepEqual(Object.values(evidence.workPackages), ['GO', 'GO', 'GO', 'GO', 'GO']);
+});
+
+test('detached W0 manifest rejects a pre-contract carrier pin', async t => {
+  const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const source = JSON.parse(await readFile(
+    path.join(root, 'release', 'manifests', 'survival-v2.0.2-w0.detached.local.json'),
+    'utf8'
+  ));
+  source.repositories.find(repository => repository.name === 'deep-devops').sha =
+    '67cb8113e94708a4597bb98a88e00ad9ba632415';
+  const sandbox = await mkdtemp(path.join(os.tmpdir(), 'deep-w0-detached-missing-'));
+  t.after(() => rm(sandbox, { recursive: true, force: true }));
+  const manifestPath = path.join(sandbox, 'manifest.json');
+  await writeJson(manifestPath, source);
+  await assert.rejects(
+    validateManifest({ manifestPath }),
+    /absent from pinned carrier/
+  );
+});
+
+test('detached W0 manifest rejects a tampered contract digest', async t => {
+  const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const source = JSON.parse(await readFile(
+    path.join(root, 'release', 'manifests', 'survival-v2.0.2-w0.detached.local.json'),
+    'utf8'
+  ));
+  for (const repository of source.repositories) {
+    repository.contractArtifact.sha256 = '00'.repeat(32);
+  }
+  const sandbox = await mkdtemp(path.join(os.tmpdir(), 'deep-w0-detached-tamper-'));
+  t.after(() => rm(sandbox, { recursive: true, force: true }));
+  const manifestPath = path.join(sandbox, 'manifest.json');
+  await writeJson(manifestPath, source);
+  await assert.rejects(
+    validateManifest({ manifestPath }),
+    /contract artifact hash mismatch/
+  );
+});
+
+test('detached W0 validation ignores a tampered working-tree contract and trusts carrier bytes', async t => {
+  const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const sandbox = await mkdtemp(path.join(os.tmpdir(), 'deep-w0-detached-worktree-'));
+  t.after(() => rm(sandbox, { recursive: true, force: true }));
+  const clone = path.join(sandbox, 'devops');
+  execFileSync(
+    'git',
+    ['clone', '--local', '--no-hardlinks', root, clone],
+    { windowsHide: true, stdio: 'ignore' }
+  );
+  await mkdir(path.join(clone, 'artifacts', 'packages', 'survival-v2.0.0'), {
+    recursive: true
+  });
+  await writeFile(
+    path.join(clone, 'release', 'contracts', 'survival-compatibility-v2.0.2-w0.json'),
+    '{"tamperedWorkingTree":true}\n',
+    'utf8'
+  );
+  const validated = await validateManifest({
+    devopsRoot: clone,
+    manifestPath: path.join(
+      root,
+      'release',
+      'manifests',
+      'survival-v2.0.2-w0.detached.local.json'
+    )
+  });
+  assert.equal(
+    validated.verifiedArtifacts[0].actualSha256,
+    '340a0467a5108a41676b93f05bf357e76a92405812ccb7b0e8e4700fd6d25b68'
+  );
+  assert.equal(
+    validated.verifiedArtifacts[0].carrierCommit,
+    '7e4e392b72bddf24b262609f8a2994549a08ce20'
+  );
 });
 
 test('rejects a branch-only repository ref', async t => {

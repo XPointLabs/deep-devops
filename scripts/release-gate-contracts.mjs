@@ -160,10 +160,10 @@ if (commandResults.every(result => result.passed)) {
     [
       'scripts/pinned-integration-manifest.mjs',
       '--manifest',
-      'release/manifests/survival-v2.0.2-w0.local.json',
+      'release/manifests/survival-v2.0.2-w0.detached.local.json',
       '--validate-only'
     ],
-    'pinned-integration-manifest:validate-v2.0.2-w0-local'
+    'pinned-integration-manifest:validate-v2.0.2-w0-detached-local'
   );
 }
 

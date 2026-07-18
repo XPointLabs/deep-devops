@@ -102,6 +102,24 @@ function runGit(repository, args, label) {
   return result.stdout.trim();
 }
 
+function readPinnedGitBlob(repository, commit, relativePath, label) {
+  if (!shaPattern.test(commit)) fail(`${label} carrier must be an exact 40-hex SHA`);
+  resolveInside(repository, relativePath, `${label} path`);
+  const result = spawnSync(
+    'git',
+    ['-C', repository, 'show', `${commit}:${relativePath.replace(/\\/g, '/')}`],
+    {
+      encoding: null,
+      windowsHide: true,
+      maxBuffer: 16 * 1024 * 1024
+    }
+  );
+  if (result.status !== 0) {
+    fail(`${label} is absent from pinned carrier ${commit}`);
+  }
+  return Buffer.from(result.stdout);
+}
+
 function runClone(source, destination) {
   const result = spawnSync('git', [
     'clone',
@@ -162,6 +180,9 @@ export async function validateManifest(options = {}) {
   );
   if (manifest.schemaVersion !== '1.0.0') fail('manifest.schemaVersion must be 1.0.0');
   requireString(manifest.releaseId, 'manifest.releaseId');
+  if (manifest.releaseId === 'deep-survival-v2.0.2-w0-local') {
+    fail('pre-carrier W0 manifest is superseded; use the detached carrier manifest');
+  }
   requireRevision(manifest.programRevision, 'manifest.programRevision');
 
   requireExactKeys(
@@ -208,6 +229,7 @@ export async function validateManifest(options = {}) {
 
   const repositoryNames = new Set();
   const artifacts = new Map();
+  const detachedManifest = /-detached-local$/.test(manifest.releaseId);
   for (const [index, repository] of manifest.repositories.entries()) {
     const label = `manifest.repositories[${index}]`;
     requireExactKeys(
@@ -248,9 +270,36 @@ export async function validateManifest(options = {}) {
   }
 
   const verifiedArtifacts = [];
+  const devopsCarrier = manifest.repositories.find(repository =>
+    repository.name === 'deep-devops');
+  if (detachedManifest && !devopsCarrier) {
+    fail('detached manifest requires a pinned deep-devops carrier');
+  }
   for (const artifact of artifacts.values()) {
-    const { raw, value } = await readJson(artifact.path, `contract artifact ${artifact.relativePath}`);
-    const actualSha256 = sha256(raw);
+    let raw;
+    let rawBytes;
+    let value;
+    if (detachedManifest) {
+      rawBytes = readPinnedGitBlob(
+        root,
+        devopsCarrier.sha,
+        artifact.relativePath,
+        `contract artifact ${artifact.relativePath}`
+      );
+      raw = rawBytes.toString('utf8');
+      try {
+        value = JSON.parse(raw);
+      } catch (error) {
+        fail(`contract artifact ${artifact.relativePath} from pinned carrier is not valid JSON: ${error.message}`);
+      }
+    } else {
+      ({ raw, value } = await readJson(
+        artifact.path,
+        `contract artifact ${artifact.relativePath}`
+      ));
+      rawBytes = Buffer.from(raw, 'utf8');
+    }
+    const actualSha256 = sha256(rawBytes);
     if (actualSha256 !== artifact.sha256) {
       fail(`contract artifact hash mismatch for ${artifact.relativePath}: expected ${artifact.sha256}, actual ${actualSha256}`);
     }
@@ -268,6 +317,20 @@ export async function validateManifest(options = {}) {
       fail(`contract artifact ${artifact.relativePath} repository set does not match the manifest`);
     }
     for (const repository of manifest.repositories) {
+      if (detachedManifest && repository.name === 'deep-devops') {
+        const carrierParent = runGit(
+          root,
+          ['rev-parse', `${repository.sha}^`],
+          'detached manifest carrier parent is unavailable'
+        );
+        if (required.get(repository.name) !== carrierParent) {
+          fail(
+            `contract artifact ${artifact.relativePath} DevOps runtime base `
+            + `does not equal pinned carrier first parent`
+          );
+        }
+        continue;
+      }
       if (required.get(repository.name) !== repository.sha) {
         fail(`contract artifact ${artifact.relativePath} is incompatible with ${repository.name}@${repository.sha}`);
       }
@@ -281,7 +344,8 @@ export async function validateManifest(options = {}) {
       version: artifact.version,
       relativePath: artifact.relativePath,
       expectedSha256: artifact.sha256,
-      actualSha256
+      actualSha256,
+      carrierCommit: detachedManifest ? devopsCarrier.sha : null
     });
   }
 
