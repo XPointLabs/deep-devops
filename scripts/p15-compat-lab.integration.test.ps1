@@ -38,14 +38,14 @@ try {
             -ExpectedSourceTree $sourceTree `
             -EvidencePath $evidence `
             -ProjectName $project `
-            -InjectValidationFailureAfterBuild
+            -InjectSemanticLabelDriftAfterBuild
     }
     catch {
         $failure = $_
     }
     if (-not $failure -or
-        $failure.Exception.Message -notmatch 'injected validation failure') {
-        throw 'P15A post-build validation failure did not fail at the intended boundary.'
+        $failure.Exception.Message -notmatch 'built image identity') {
+        throw 'P15A semantic image-label drift did not fail full validation.'
     }
 
     $filter = "label=com.docker.compose.project=$project"
@@ -58,7 +58,7 @@ try {
     )) -ne 0
     if ($containers -ne 0 -or $networks -ne 0 -or
         $volumes -ne 0 -or $images -ne 0 -or $runTagExists) {
-        throw 'P15A validation failure left a run-owned Docker resource.'
+        throw 'P15A semantic validation failure left a run-owned Docker resource.'
     }
 
     $sentinelId = (& docker image inspect $sentinelTag --format '{{.Id}}').Trim()
@@ -76,4 +76,4 @@ finally {
     }
 }
 
-Write-Output 'P15A post-build validation cleanup integration: PASS'
+Write-Output 'P15A semantic-label validation cleanup integration: PASS'

@@ -45,4 +45,34 @@ foreach ($failingStage in @('shutdown', 'image', 'inventory')) {
     }
 }
 
+$allCalls = [Collections.Generic.List[string]]::new()
+$aggregateFailure = $null
+try {
+    Invoke-P15CleanupStages `
+        -ShutdownProject {
+            $allCalls.Add('shutdown')
+            throw 'injected shutdown failure'
+        } `
+        -RemoveRunImage {
+            $allCalls.Add('image')
+            throw 'injected image failure'
+        } `
+        -AssertResidualInventory {
+            $allCalls.Add('inventory')
+            throw 'injected inventory failure'
+        }
+}
+catch {
+    $aggregateFailure = $_
+}
+if (-not $aggregateFailure -or
+    ($allCalls -join ',') -ne 'shutdown,image,inventory') {
+    throw 'P15A simultaneous cleanup failures were not failure-independent.'
+}
+foreach ($stage in @('shutdown', 'image', 'inventory')) {
+    if ($aggregateFailure.Exception.Message -notmatch $stage) {
+        throw "P15A aggregate cleanup failure omitted stage $stage."
+    }
+}
+
 Write-Output 'P15A independent cleanup stages: PASS'
