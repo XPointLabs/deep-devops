@@ -17,7 +17,8 @@ param(
     [string]$ProjectName,
 
     [switch]$InjectFailureAfterUp,
-    [switch]$InjectFailureAfterBuild
+    [switch]$InjectFailureAfterBuild,
+    [switch]$InjectValidationFailureAfterBuild
 )
 
 $ErrorActionPreference = 'Stop'
@@ -30,10 +31,12 @@ $BaseImageReference = "node@$BaseImageDigest"
 $BaseImageId = $BaseImageDigest
 $ComposeFile = Join-Path (Split-Path $PSScriptRoot -Parent) 'docker-compose.p15-compat.yml'
 $RepositoryRoot = [IO.Path]::GetFullPath((Split-Path $PSScriptRoot -Parent))
+. (Join-Path $PSScriptRoot 'p15-cleanup-state.ps1')
 $resourcesMayExist = $false
 $runImageReference = $null
 $runImageId = $null
 $runImageOwned = $false
+$buildMayHaveCreatedImage = $false
 $contextSha256 = $null
 $cleanupFailure = $null
 
@@ -237,14 +240,37 @@ function Assert-ComposeContract {
     }
 }
 
+function Get-OwnedRunImageId {
+    param([switch]$AllowMissing)
+
+    $result = Invoke-ProcessCapture -FilePath 'docker' -ArgumentList @(
+        'image', 'inspect', $runImageReference, '--format', '{{json .}}'
+    ) -AllowFailure:$AllowMissing
+    if ($result.ExitCode -ne 0) {
+        return $null
+    }
+    $image = $result.Text | ConvertFrom-Json
+    $labels = $image.Config.Labels
+    if ($image.Id -notmatch '^sha256:[0-9a-f]{64}$' -or
+        $labels.'com.docker.compose.project' -ne $ProjectName -or
+        $labels.'org.opencontainers.image.revision' -ne $ExpectedSourceSha -or
+        $labels.'com.xpoint.p15.source-tree' -ne $ExpectedSourceTree -or
+        $labels.'com.xpoint.p15.context-sha256' -ne $env:P15_CONTEXT_SHA256) {
+        throw 'P15A cannot establish ownership of the run image.'
+    }
+    return $image.Id
+}
+
 function Assert-BuiltImage {
+    param([Parameter(Mandatory = $true)][string]$ImageId)
+
     $image = ((Invoke-ProcessCapture -FilePath 'docker' -ArgumentList @(
-        'image', 'inspect', $env:P15_IMAGE_NAME, '--format', '{{json .}}'
+        'image', 'inspect', $ImageId, '--format', '{{json .}}'
     )).Text | ConvertFrom-Json)
     $labels = $image.Config.Labels
-    if ($image.Architecture -ne 'arm64' -or
+    if ($image.Id -ne $ImageId -or
+        $image.Architecture -ne 'arm64' -or
         $image.Os -ne 'linux' -or
-        $image.Id -notmatch '^sha256:[0-9a-f]{64}$' -or
         $labels.'org.opencontainers.image.revision' -ne $ExpectedSourceSha -or
         $labels.'org.opencontainers.image.source' -ne 'deep-devops' -or
         $labels.'com.xpoint.evidence-class' -ne 'compatibility-lab' -or
@@ -255,7 +281,6 @@ function Assert-BuiltImage {
         $labels.'com.xpoint.p15.base-image-digest' -ne $BaseImageReference) {
         throw 'P15A built image identity, architecture, or labels are invalid.'
     }
-    return $image.Id
 }
 
 function Get-ServiceContainer {
@@ -349,7 +374,15 @@ function Invoke-ScopedCleanup {
 
 function Remove-OwnedRunImage {
     if (-not $runImageOwned -or -not $runImageId) {
-        return
+        if (-not $buildMayHaveCreatedImage) {
+            return
+        }
+        $capturedImageId = Get-OwnedRunImageId -AllowMissing
+        if (-not $capturedImageId) {
+            return
+        }
+        $runImageId = $capturedImageId
+        $runImageOwned = $true
     }
     $imageResult = Invoke-ProcessCapture -FilePath 'docker' -ArgumentList @(
         'image', 'inspect', $runImageId, '--format', '{{json .}}'
@@ -518,9 +551,14 @@ try {
 
     # Docker Compose build expresses the no-network-pull invariant as pull=false;
     # container creation additionally uses the explicit --pull never policy.
+    $buildMayHaveCreatedImage = $true
     Invoke-Compose @('build', '--pull=false', 'storage') | Out-Null
-    $runImageId = Assert-BuiltImage
+    $runImageId = Get-OwnedRunImageId
     $runImageOwned = $true
+    if ($InjectValidationFailureAfterBuild) {
+        throw 'P15A injected validation failure after build ownership.'
+    }
+    Assert-BuiltImage -ImageId $runImageId
 
     if ($InjectFailureAfterBuild) {
         throw 'P15A injected failure after build.'
@@ -573,9 +611,10 @@ try {
 }
 finally {
     try {
-        Invoke-ScopedCleanup
-        Remove-OwnedRunImage
-        Assert-ZeroResidualResources
+        Invoke-P15CleanupStages `
+            -ShutdownProject { Invoke-ScopedCleanup } `
+            -RemoveRunImage { Remove-OwnedRunImage } `
+            -AssertResidualInventory { Assert-ZeroResidualResources }
     }
     catch {
         $cleanupFailure = $_
@@ -593,6 +632,9 @@ if ($InjectFailureAfterUp) {
 }
 if ($InjectFailureAfterBuild) {
     throw 'P15A injected build failure unexpectedly continued.'
+}
+if ($InjectValidationFailureAfterBuild) {
+    throw 'P15A injected validation failure unexpectedly continued.'
 }
 
 Write-SanitizedEvidence
