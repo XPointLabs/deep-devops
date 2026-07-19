@@ -14,8 +14,10 @@ $required = @(
     'Assert-ZeroResidualResources',
     'InjectFailureAfterUp',
     'InjectFailureAfterBuild',
+    'InjectValidationFailureAfterBuild',
     'Remove-OwnedRunImage',
     'Assert-EmptyImageReference',
+    'Invoke-P15CleanupStages',
     '--volumes',
     '--remove-orphans',
     'finally'
