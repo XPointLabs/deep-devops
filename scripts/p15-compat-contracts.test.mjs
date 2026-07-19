@@ -270,7 +270,8 @@ test('compose renders without host ports and with the exact internal network', a
         P15_SOURCE_TREE: expectedSourceTree,
         P15_BASE_IMAGE: `node@${expectedBaseDigest}`,
         P15_IMAGE_NAME: 'local/p15-compat:test',
-        P15_CONTEXT_SHA256: `sha256:${'6'.repeat(64)}`
+        P15_CONTEXT_SHA256: `sha256:${'6'.repeat(64)}`,
+        P15_OWNERSHIP_NONCE: '7'.repeat(32)
       }
     }
   );

@@ -18,7 +18,8 @@ param(
 
     [switch]$InjectFailureAfterUp,
     [switch]$InjectFailureAfterBuild,
-    [switch]$InjectValidationFailureAfterBuild
+    [switch]$InjectValidationFailureAfterBuild,
+    [switch]$InjectSemanticLabelDriftAfterBuild
 )
 
 $ErrorActionPreference = 'Stop'
@@ -37,6 +38,7 @@ $runImageReference = $null
 $runImageId = $null
 $runImageOwned = $false
 $buildMayHaveCreatedImage = $false
+$ownershipNonce = $null
 $contextSha256 = $null
 $cleanupFailure = $null
 
@@ -129,6 +131,18 @@ function New-P15ProjectName {
     }
     $hex = [BitConverter]::ToString($bytes).Replace('-', '').ToLowerInvariant()
     return "p15a-$hex"
+}
+
+function New-P15OwnershipNonce {
+    $bytes = [byte[]]::new(16)
+    $generator = [Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $generator.GetBytes($bytes)
+    }
+    finally {
+        $generator.Dispose()
+    }
+    return [BitConverter]::ToString($bytes).Replace('-', '').ToLowerInvariant()
 }
 
 function Assert-ProjectName {
@@ -240,7 +254,7 @@ function Assert-ComposeContract {
     }
 }
 
-function Get-OwnedRunImageId {
+function Get-MinimalOwnedRunImageId {
     param([switch]$AllowMissing)
 
     $result = Invoke-ProcessCapture -FilePath 'docker' -ArgumentList @(
@@ -253,9 +267,7 @@ function Get-OwnedRunImageId {
     $labels = $image.Config.Labels
     if ($image.Id -notmatch '^sha256:[0-9a-f]{64}$' -or
         $labels.'com.docker.compose.project' -ne $ProjectName -or
-        $labels.'org.opencontainers.image.revision' -ne $ExpectedSourceSha -or
-        $labels.'com.xpoint.p15.source-tree' -ne $ExpectedSourceTree -or
-        $labels.'com.xpoint.p15.context-sha256' -ne $env:P15_CONTEXT_SHA256) {
+        $labels.'com.xpoint.p15.ownership-nonce' -ne $ownershipNonce) {
         throw 'P15A cannot establish ownership of the run image.'
     }
     return $image.Id
@@ -278,6 +290,7 @@ function Assert-BuiltImage {
         $labels.'com.xpoint.p15.source-tree' -ne $ExpectedSourceTree -or
         $labels.'com.xpoint.p15.context-sha256' -ne $env:P15_CONTEXT_SHA256 -or
         $labels.'com.docker.compose.project' -ne $ProjectName -or
+        $labels.'com.xpoint.p15.ownership-nonce' -ne $ownershipNonce -or
         $labels.'com.xpoint.p15.base-image-digest' -ne $BaseImageReference) {
         throw 'P15A built image identity, architecture, or labels are invalid.'
     }
@@ -377,7 +390,7 @@ function Remove-OwnedRunImage {
         if (-not $buildMayHaveCreatedImage) {
             return
         }
-        $capturedImageId = Get-OwnedRunImageId -AllowMissing
+        $capturedImageId = Get-MinimalOwnedRunImageId -AllowMissing
         if (-not $capturedImageId) {
             return
         }
@@ -392,7 +405,10 @@ function Remove-OwnedRunImage {
         return
     }
     $image = $imageResult.Text | ConvertFrom-Json
-    if ($image.Config.Labels.'com.docker.compose.project' -ne $ProjectName) {
+    if ($image.Id -ne $runImageId -or
+        $image.Config.Labels.'com.docker.compose.project' -ne $ProjectName -or
+        $image.Config.Labels.'com.xpoint.p15.ownership-nonce' -ne
+            $ownershipNonce) {
         throw 'P15A refuses to remove a foreign image.'
     }
     $tagResult = Invoke-ProcessCapture -FilePath 'docker' -ArgumentList @(
@@ -524,7 +540,8 @@ foreach ($name in @(
     'P15_SOURCE_TREE',
     'P15_BASE_IMAGE',
     'P15_IMAGE_NAME',
-    'P15_CONTEXT_SHA256'
+    'P15_CONTEXT_SHA256',
+    'P15_OWNERSHIP_NONCE'
 )) {
     $savedEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
 }
@@ -534,6 +551,8 @@ try {
     $env:P15_SOURCE_SHA = $ExpectedSourceSha
     $env:P15_SOURCE_TREE = $ExpectedSourceTree
     $env:P15_BASE_IMAGE = $BaseImageReference
+    $ownershipNonce = New-P15OwnershipNonce
+    $env:P15_OWNERSHIP_NONCE = $ownershipNonce
     $runImageReference = "local/p15-compat:$ProjectName"
     $env:P15_IMAGE_NAME = $runImageReference
     $contextContract = Join-Path $RepositoryRoot 'release\contracts\p15-compat-lab-v1.json'
@@ -551,9 +570,12 @@ try {
 
     # Docker Compose build expresses the no-network-pull invariant as pull=false;
     # container creation additionally uses the explicit --pull never policy.
+    if ($InjectSemanticLabelDriftAfterBuild) {
+        $env:P15_SOURCE_TREE = '0000000000000000000000000000000000000000'
+    }
     $buildMayHaveCreatedImage = $true
     Invoke-Compose @('build', '--pull=false', 'storage') | Out-Null
-    $runImageId = Get-OwnedRunImageId
+    $runImageId = Get-MinimalOwnedRunImageId
     $runImageOwned = $true
     if ($InjectValidationFailureAfterBuild) {
         throw 'P15A injected validation failure after build ownership.'
@@ -635,6 +657,9 @@ if ($InjectFailureAfterBuild) {
 }
 if ($InjectValidationFailureAfterBuild) {
     throw 'P15A injected validation failure unexpectedly continued.'
+}
+if ($InjectSemanticLabelDriftAfterBuild) {
+    throw 'P15A injected semantic label drift unexpectedly continued.'
 }
 
 Write-SanitizedEvidence

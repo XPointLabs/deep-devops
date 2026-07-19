@@ -35,6 +35,13 @@ deny-by-default context-manifest hash, base-image lock, OCI source,
 containers are created from the captured immutable image ID, not from the
 mutable build tag. A pre-existing run tag is rejected.
 
+Each build also receives a random 128-bit lowercase-hex ownership nonce. The
+preflight-absent unique tag, exact Compose project label and nonce are the
+minimal ownership proof used to retain the immutable image ID before semantic
+source/tree/context/architecture validation. The nonce is an opaque non-secret
+cleanup marker: it is never printed, written to sanitized evidence or used as
+runtime authority.
+
 ## Run
 
 Use a clean exact implementation commit and tree. Evidence must be written
@@ -74,11 +81,19 @@ enter the Docker build context.
 ## Verification
 
 ```powershell
-node --test `
-  .\scripts\p15-compat-contracts.test.mjs `
-  .\scripts\p15-evidence-sanitizer.test.mjs
 powershell -NoProfile -ExecutionPolicy Bypass `
-  -File .\scripts\p15-compat-lab.test.ps1
+  -File .\scripts\verify-p15-compat-lab.ps1
+```
+
+That mandatory gate runs the Node contract/privacy suite, the static lifecycle
+contract, failure-independent cleanup-stage tests, and the real ARM64 Docker
+integration that injects a semantic image-label mismatch after minimal
+ownership capture. Omitting either cleanup test is a hard failure.
+
+Repository-wide readiness commands remain separate because their external
+source-map and release-evidence prerequisites are not P15A lab evidence:
+
+```powershell
 node .\scripts\release-gate-contracts.mjs
 node .\scripts\production-readiness-status.mjs
 ```
