@@ -1,0 +1,16 @@
+{
+  "schema": "deep-p15a-carrier-receipt-validation.v1",
+  "sourceCommit": "f605351dc34621b130690ed3f3fb7ef42d35c57b",
+  "sourceTree": "9b136e0ed09c379b3eec4a5878d5f2ed435a4c7c",
+  "requiredReceipts": [
+    {
+      "path": "failure-path-receipt.json",
+      "sha256": null
+    },
+    {
+      "path": "sentinel-receipt.json",
+      "sha256": null
+    }
+  ],
+  "validationStatus": "RED-MISSING-RECEIPTS"
+}
