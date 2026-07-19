@@ -141,19 +141,25 @@ function Get-LabeledInventory {
 function Assert-NoForeignNameCollision {
     $networkName = "${ProjectName}_lab"
     $network = Invoke-ProcessCapture -FilePath 'docker' -ArgumentList @(
-        'network', 'inspect', $networkName, '--format', '{{index .Labels "com.docker.compose.project"}}'
+        'network', 'inspect', $networkName, '--format', '{{json .}}'
     ) -AllowFailure
-    if ($network.ExitCode -eq 0 -and $network.Text.Trim() -ne $ProjectName) {
-        throw 'P15A refuses a foreign network name collision.'
+    if ($network.ExitCode -eq 0) {
+        $networkOwner = ($network.Text | ConvertFrom-Json).Labels.'com.docker.compose.project'
+        if ($networkOwner -ne $ProjectName) {
+            throw 'P15A refuses a foreign network name collision.'
+        }
     }
 
     foreach ($suffix in @('storage-state', 'file-state', 'push-state', 'calls-state')) {
         $volumeName = "${ProjectName}_$suffix"
         $volume = Invoke-ProcessCapture -FilePath 'docker' -ArgumentList @(
-            'volume', 'inspect', $volumeName, '--format', '{{index .Labels "com.docker.compose.project"}}'
+            'volume', 'inspect', $volumeName, '--format', '{{json .}}'
         ) -AllowFailure
-        if ($volume.ExitCode -eq 0 -and $volume.Text.Trim() -ne $ProjectName) {
-            throw 'P15A refuses a foreign volume name collision.'
+        if ($volume.ExitCode -eq 0) {
+            $volumeOwner = ($volume.Text | ConvertFrom-Json).Labels.'com.docker.compose.project'
+            if ($volumeOwner -ne $ProjectName) {
+                throw 'P15A refuses a foreign volume name collision.'
+            }
         }
     }
 }
@@ -272,25 +278,28 @@ function Invoke-Probe {
 function Assert-OwnedProjectResources {
     $inventory = Get-LabeledInventory
     foreach ($id in $inventory.Containers) {
-        $owner = (Invoke-ProcessCapture -FilePath 'docker' -ArgumentList @(
-            'container', 'inspect', $id, '--format', '{{index .Config.Labels "com.docker.compose.project"}}'
-        )).Text.Trim()
+        $resource = ((Invoke-ProcessCapture -FilePath 'docker' -ArgumentList @(
+            'container', 'inspect', $id, '--format', '{{json .}}'
+        )).Text | ConvertFrom-Json)
+        $owner = $resource.Config.Labels.'com.docker.compose.project'
         if ($owner -ne $ProjectName) {
             throw 'P15A cleanup refuses a foreign container.'
         }
     }
     foreach ($id in $inventory.Networks) {
-        $owner = (Invoke-ProcessCapture -FilePath 'docker' -ArgumentList @(
-            'network', 'inspect', $id, '--format', '{{index .Labels "com.docker.compose.project"}}'
-        )).Text.Trim()
+        $resource = ((Invoke-ProcessCapture -FilePath 'docker' -ArgumentList @(
+            'network', 'inspect', $id, '--format', '{{json .}}'
+        )).Text | ConvertFrom-Json)
+        $owner = $resource.Labels.'com.docker.compose.project'
         if ($owner -ne $ProjectName) {
             throw 'P15A cleanup refuses a foreign network.'
         }
     }
     foreach ($id in $inventory.Volumes) {
-        $owner = (Invoke-ProcessCapture -FilePath 'docker' -ArgumentList @(
-            'volume', 'inspect', $id, '--format', '{{index .Labels "com.docker.compose.project"}}'
-        )).Text.Trim()
+        $resource = ((Invoke-ProcessCapture -FilePath 'docker' -ArgumentList @(
+            'volume', 'inspect', $id, '--format', '{{json .}}'
+        )).Text | ConvertFrom-Json)
+        $owner = $resource.Labels.'com.docker.compose.project'
         if ($owner -ne $ProjectName) {
             throw 'P15A cleanup refuses a foreign volume.'
         }
