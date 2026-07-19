@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
 const expectedSourceSha = '1c01e24e24647a46b4f37622f3934dc2cc1284ef';
@@ -272,6 +274,94 @@ test('compose renders without host ports and with the exact internal network', a
   );
   const { validateComposeConfig } = await contracts();
   validateComposeConfig(JSON.parse(stdout));
+});
+
+test('run image reference is unique and a preexisting or foreign tag fails closed', async () => {
+  const { createRunImageReference, validateImageReferencePreflight } = await contracts();
+  const first = createRunImageReference('p15a-a1b2c3d4e5f60708');
+  const second = createRunImageReference('p15a-a1b2c3d4e5f60709');
+  assert.notEqual(first, second);
+  assert.match(first, /^local\/p15-compat:p15a-[0-9a-f]{16}$/);
+  assert.doesNotThrow(() => validateImageReferencePreflight({ reference: first, existing: null }));
+  assert.throws(() => validateImageReferencePreflight({
+    reference: first,
+    existing: { imageId: `sha256:${'1'.repeat(64)}`, project: 'deep-uat' }
+  }), /preexisting|foreign|image reference/i);
+});
+
+test('built image ownership and each started container image ID are exact', async () => {
+  const { validateRunImageOwnership, validateContainerImageIdentity } = await contracts();
+  const imageId = `sha256:${'2'.repeat(64)}`;
+  const project = 'p15a-a1b2c3d4e5f60708';
+  assert.doesNotThrow(() => validateRunImageOwnership({
+    imageId,
+    referenceImageId: imageId,
+    project,
+    labels: { 'com.docker.compose.project': project }
+  }));
+  assert.throws(() => validateRunImageOwnership({
+    imageId,
+    referenceImageId: `sha256:${'3'.repeat(64)}`,
+    project,
+    labels: { 'com.docker.compose.project': 'deep-uat' }
+  }), /ownership|reference/i);
+  assert.doesNotThrow(() => validateContainerImageIdentity({
+    expectedImageId: imageId,
+    observedImageId: imageId
+  }));
+  assert.throws(() => validateContainerImageIdentity({
+    expectedImageId: imageId,
+    observedImageId: `sha256:${'4'.repeat(64)}`
+  }), /container image/i);
+});
+
+test('cleanup inventory includes images and injected failures after build/up are covered', async () => {
+  const { validateCleanupInventory } = await contracts();
+  assert.doesNotThrow(() => validateCleanupInventory({
+    containers: 0, networks: 0, volumes: 0, images: 0
+  }));
+  assert.throws(() => validateCleanupInventory({
+    containers: 0, networks: 0, volumes: 0, images: 1
+  }), /image|residual/i);
+  const source = await readFile(new URL('./p15-compat-lab.ps1', import.meta.url), 'utf8');
+  assert.match(source, /InjectFailureAfterBuild/i);
+  assert.match(source, /Remove-OwnedRunImage/i);
+  assert.match(source, /Assert-ZeroResidualResources/is);
+  assert.match(source, /\.Image.+RunImageId|RunImageId.+\.Image/is);
+});
+
+test('deny-by-default context manifest ignores untracked and ignored fixture bytes', async () => {
+  const { computeContextManifestHash } = await contracts();
+  const root = await mkdtemp(path.join(tmpdir(), 'p15-context-'));
+  try {
+    await mkdir(path.join(root, 'tools'), { recursive: true });
+    await writeFile(path.join(root, 'tools', 'allowed.mjs'), 'allowed\n');
+    const files = ['tools/allowed.mjs'];
+    const first = await computeContextManifestHash(root, files);
+    await writeFile(path.join(root, 'ignored-secret.fixture'), 'must-not-enter-context\n');
+    const second = await computeContextManifestHash(root, files);
+    assert.equal(first, second);
+    assert.notEqual(first, await computeContextManifestHash(root, [
+      ...files,
+      'ignored-secret.fixture'
+    ]));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('.dockerignore is deny-by-default and allows only the tracked context manifest', async () => {
+  const source = await readFile(new URL('../.dockerignore', import.meta.url), 'utf8');
+  assert.match(source, /^\*\*\s*$/m);
+  assert.doesNotMatch(source, /^!\*\*/m);
+  assert.doesNotMatch(source, /test|fixture|artifact|\.git/i);
+  const contract = JSON.parse(await readFile(
+    new URL('../release/contracts/p15-compat-lab-v1.json', import.meta.url),
+    'utf8'
+  ));
+  assert.ok(Array.isArray(contract.buildContext?.files));
+  assert.ok(contract.buildContext.files.length > 0);
+  assert.equal(new Set(contract.buildContext.files).size, contract.buildContext.files.length);
 });
 
 function serviceFixture(identity, profile) {

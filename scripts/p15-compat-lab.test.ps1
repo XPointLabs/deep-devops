@@ -13,6 +13,9 @@ $required = @(
     'Invoke-ScopedCleanup',
     'Assert-ZeroResidualResources',
     'InjectFailureAfterUp',
+    'InjectFailureAfterBuild',
+    'Remove-OwnedRunImage',
+    'Assert-EmptyImageReference',
     '--volumes',
     '--remove-orphans',
     'finally'
