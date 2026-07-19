@@ -231,6 +231,7 @@ test('driver uses finally-scoped cleanup and injected post-up failure', async ()
   assert.match(source, /down.+--volumes.+--remove-orphans/is);
   assert.match(source, /InjectFailureAfterUp/i);
   assert.match(source, /network.+connect.+--alias.+file/is);
+  assert.doesNotMatch(source, /\$input\s*=/i);
   assert.doesNotMatch(source, /docker\s+(?:system|container|network|volume|image)\s+prune/i);
 });
 

@@ -355,7 +355,7 @@ function Write-SanitizedEvidence {
         throw 'P15A evidence output must not already exist.'
     }
 
-    $input = [ordered]@{
+    $evidenceInput = [ordered]@{
         clock = $EvidenceClock
         sourceSha = $ExpectedSourceSha
         sourceTree = $ExpectedSourceTree
@@ -389,7 +389,7 @@ function Write-SanitizedEvidence {
 
     $temporary = [IO.Path]::GetTempFileName()
     try {
-        $inputJson = $input | ConvertTo-Json -Depth 8
+        $inputJson = $evidenceInput | ConvertTo-Json -Depth 8
         [IO.File]::WriteAllText($temporary, $inputJson, [Text.UTF8Encoding]::new($false))
         $builder = @'
 import { readFile } from "node:fs/promises";
