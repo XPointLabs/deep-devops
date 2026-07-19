@@ -39,8 +39,17 @@ function Invoke-ProcessCapture {
         [switch]$AllowFailure
     )
 
-    $output = & $FilePath @ArgumentList 2>&1
-    $exitCode = $LASTEXITCODE
+    $savedErrorPreference = $ErrorActionPreference
+    try {
+        # Windows PowerShell promotes native stderr to ErrorRecord. Keep it
+        # capturable so AllowFailure can make the fail-closed decision itself.
+        $ErrorActionPreference = 'Continue'
+        $output = & $FilePath @ArgumentList 2>&1
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $savedErrorPreference
+    }
     if (-not $AllowFailure -and $exitCode -ne 0) {
         throw "$FilePath failed with exit code $exitCode."
     }
