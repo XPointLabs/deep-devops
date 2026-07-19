@@ -491,7 +491,7 @@ try {
     }
 
     Invoke-ProcessCapture -FilePath 'docker' -ArgumentList @(
-        'network', 'connect', $networkName, $fileContainer.Id
+        'network', 'connect', '--alias', 'file', $networkName, $fileContainer.Id
     ) | Out-Null
     Invoke-Probe 'health-target' 'file' | Out-Null
 
