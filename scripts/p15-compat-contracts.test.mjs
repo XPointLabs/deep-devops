@@ -198,8 +198,8 @@ test('network disconnect must fail boundedly and reconnect must restore service'
 
 test('cleanup and second-run inventory must be exactly empty', async () => {
   const { validateCleanupInventory, validateEmptyInventory } = await contracts();
-  assert.doesNotThrow(() => validateCleanupInventory({ containers: 0, networks: 0, volumes: 0 }));
-  assert.throws(() => validateCleanupInventory({ containers: 0, networks: 1, volumes: 0 }), /residual/i);
+  assert.doesNotThrow(() => validateCleanupInventory({ containers: 0, networks: 0, volumes: 0, images: 0 }));
+  assert.throws(() => validateCleanupInventory({ containers: 0, networks: 1, volumes: 0, images: 0 }), /residual/i);
   assert.doesNotThrow(() => validateEmptyInventory({
     storageMessages: 0,
     files: 0,
@@ -268,7 +268,8 @@ test('compose renders without host ports and with the exact internal network', a
         P15_SOURCE_SHA: expectedSourceSha,
         P15_SOURCE_TREE: expectedSourceTree,
         P15_BASE_IMAGE: `node@${expectedBaseDigest}`,
-        P15_IMAGE_NAME: 'local/p15-compat:test'
+        P15_IMAGE_NAME: 'local/p15-compat:test',
+        P15_CONTEXT_SHA256: `sha256:${'6'.repeat(64)}`
       }
     }
   );
@@ -433,6 +434,7 @@ function evidenceFixture() {
     sourceTree: expectedSourceTree,
     baseImageDigest: expectedBaseDigest,
     baseImageId: expectedBaseImageId,
+    contextSha256: `sha256:${'6'.repeat(64)}`,
     architecture: 'arm64',
     scenarios: Object.fromEntries(requiredScenarios().map(value => [value, 'pass'])),
     counts: {
@@ -440,7 +442,8 @@ function evidenceFixture() {
       probes: 4,
       restarts: 4,
       networkFaults: 1,
-      residualResources: 0
+      residualResources: 0,
+      residualImages: 0
     },
     durationBoundsMs: {
       health: 30_000,

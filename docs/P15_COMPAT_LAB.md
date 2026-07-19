@@ -29,9 +29,11 @@ Linux/arm64
 
 This is not claimed as a universal multi-platform registry lock. Build uses
 the local digest with pull disabled; container creation uses `--pull never`.
-The resulting image must carry the exact source revision/tree, base-image
-lock, OCI source, `evidenceClass=compatibility-lab` and
-`productRuntime=false` labels.
+The resulting run-unique image must carry the exact source revision/tree,
+deny-by-default context-manifest hash, base-image lock, OCI source,
+`evidenceClass=compatibility-lab` and `productRuntime=false` labels. Runtime
+containers are created from the captured immutable image ID, not from the
+mutable build tag. A pre-existing run tag is rejected.
 
 ## Run
 
@@ -58,9 +60,16 @@ The `finally` block checks exact project ownership, runs only:
 docker compose ... down --volumes --remove-orphans
 ```
 
-and proves zero containers, networks and volumes with the run label. Global
-prune is prohibited. Existing UAT and other Docker resources are never in
-scope.
+and proves zero containers, networks, volumes and owned images with the run
+label. The run tag and image are removed only after their project ownership
+and exact image ID are verified. Global prune is prohibited. Existing UAT and
+other Docker resources are never in scope.
+
+The root `.dockerignore` denies everything and then permits only the exact
+tracked files listed in `release/contracts/p15-compat-lab-v1.json`. Their
+ordered path-and-byte manifest hash is bound into the image labels and
+sanitized evidence. Ignored or untracked fixtures cannot affect that hash or
+enter the Docker build context.
 
 ## Verification
 

@@ -16,7 +16,8 @@ param(
 
     [string]$ProjectName,
 
-    [switch]$InjectFailureAfterUp
+    [switch]$InjectFailureAfterUp,
+    [switch]$InjectFailureAfterBuild
 )
 
 $ErrorActionPreference = 'Stop'
@@ -30,6 +31,9 @@ $BaseImageId = $BaseImageDigest
 $ComposeFile = Join-Path (Split-Path $PSScriptRoot -Parent) 'docker-compose.p15-compat.yml'
 $RepositoryRoot = [IO.Path]::GetFullPath((Split-Path $PSScriptRoot -Parent))
 $resourcesMayExist = $false
+$runImageReference = $null
+$runImageId = $null
+$runImageOwned = $false
 $cleanupFailure = $null
 
 function Invoke-ProcessCapture {
@@ -140,10 +144,14 @@ function Get-LabeledInventory {
     $volumes = (Invoke-ProcessCapture -FilePath 'docker' -ArgumentList @(
         'volume', 'ls', '-q', '--filter', $filter
     )).Text.Split([Environment]::NewLine, [StringSplitOptions]::RemoveEmptyEntries)
+    $images = (Invoke-ProcessCapture -FilePath 'docker' -ArgumentList @(
+        'image', 'ls', '-q', '--filter', $filter
+    )).Text.Split([Environment]::NewLine, [StringSplitOptions]::RemoveEmptyEntries)
     return [pscustomobject]@{
         Containers = @($containers)
         Networks = @($networks)
         Volumes = @($volumes)
+        Images = @($images)
     }
 }
 
@@ -177,10 +185,19 @@ function Assert-EmptyProjectNamespace {
     $inventory = Get-LabeledInventory
     if ($inventory.Containers.Count -ne 0 -or
         $inventory.Networks.Count -ne 0 -or
-        $inventory.Volumes.Count -ne 0) {
+        $inventory.Volumes.Count -ne 0 -or $inventory.Images.Count -ne 0) {
         throw 'P15A project namespace is not empty.'
     }
     Assert-NoForeignNameCollision
+}
+
+function Assert-EmptyImageReference {
+    $existing = Invoke-ProcessCapture -FilePath 'docker' -ArgumentList @(
+        'image', 'inspect', $runImageReference, '--format', '{{json .}}'
+    ) -AllowFailure
+    if ($existing.ExitCode -eq 0) {
+        throw 'P15A run image reference is preexisting or foreign.'
+    }
 }
 
 function Get-ComposeArguments {
@@ -232,9 +249,12 @@ function Assert-BuiltImage {
         $labels.'com.xpoint.evidence-class' -ne 'compatibility-lab' -or
         $labels.'com.xpoint.product-runtime' -ne 'false' -or
         $labels.'com.xpoint.p15.source-tree' -ne $ExpectedSourceTree -or
+        $labels.'com.xpoint.p15.context-sha256' -ne $env:P15_CONTEXT_SHA256 -or
+        $labels.'com.docker.compose.project' -ne $ProjectName -or
         $labels.'com.xpoint.p15.base-image-digest' -ne $BaseImageReference) {
         throw 'P15A built image identity, architecture, or labels are invalid.'
     }
+    return $image.Id
 }
 
 function Get-ServiceContainer {
@@ -250,6 +270,9 @@ function Get-ServiceContainer {
         $inspect.Config.Labels.'com.xpoint.evidence-class' -ne 'compatibility-lab' -or
         $inspect.Config.Labels.'com.xpoint.product-runtime' -ne 'false') {
         throw "P15A service $Service has wrong ownership or evidence labels."
+    }
+    if ($inspect.Image -ne $runImageId) {
+        throw "P15A service $Service did not start from the exact built image ID."
     }
     return $inspect
 }
@@ -323,11 +346,48 @@ function Invoke-ScopedCleanup {
     Invoke-Compose @('down', '--volumes', '--remove-orphans') | Out-Null
 }
 
+function Remove-OwnedRunImage {
+    if (-not $runImageOwned -or -not $runImageId) {
+        return
+    }
+    $imageResult = Invoke-ProcessCapture -FilePath 'docker' -ArgumentList @(
+        'image', 'inspect', $runImageId, '--format', '{{json .}}'
+    ) -AllowFailure
+    if ($imageResult.ExitCode -ne 0) {
+        $runImageOwned = $false
+        return
+    }
+    $image = $imageResult.Text | ConvertFrom-Json
+    if ($image.Config.Labels.'com.docker.compose.project' -ne $ProjectName) {
+        throw 'P15A refuses to remove a foreign image.'
+    }
+    $tagResult = Invoke-ProcessCapture -FilePath 'docker' -ArgumentList @(
+        'image', 'inspect', $runImageReference, '--format', '{{json .Id}}'
+    ) -AllowFailure
+    if ($tagResult.ExitCode -eq 0) {
+        $tagImageId = $tagResult.Text | ConvertFrom-Json
+        if ($tagImageId -eq $runImageId) {
+            Invoke-ProcessCapture -FilePath 'docker' -ArgumentList @(
+                'image', 'rm', $runImageReference
+            ) | Out-Null
+        }
+    }
+    $remaining = Invoke-ProcessCapture -FilePath 'docker' -ArgumentList @(
+        'image', 'inspect', $runImageId, '--format', '{{json .}}'
+    ) -AllowFailure
+    if ($remaining.ExitCode -eq 0) {
+        Invoke-ProcessCapture -FilePath 'docker' -ArgumentList @(
+            'image', 'rm', $runImageId
+        ) | Out-Null
+    }
+    $runImageOwned = $false
+}
+
 function Assert-ZeroResidualResources {
     $inventory = Get-LabeledInventory
     if ($inventory.Containers.Count -ne 0 -or
         $inventory.Networks.Count -ne 0 -or
-        $inventory.Volumes.Count -ne 0) {
+        $inventory.Volumes.Count -ne 0 -or $inventory.Images.Count -ne 0) {
         throw 'P15A cleanup left residual project resources.'
     }
 }
@@ -361,6 +421,7 @@ function Write-SanitizedEvidence {
         sourceTree = $ExpectedSourceTree
         baseImageDigest = $BaseImageDigest
         baseImageId = $BaseImageId
+        contextSha256 = $env:P15_CONTEXT_SHA256
         architecture = 'arm64'
         scenarios = [ordered]@{
             'source-lock' = 'pass'
@@ -379,6 +440,7 @@ function Write-SanitizedEvidence {
             restarts = 4
             networkFaults = 1
             residualResources = 0
+            residualImages = 0
         }
         durationBoundsMs = [ordered]@{
             health = 30000
@@ -427,7 +489,8 @@ foreach ($name in @(
     'P15_SOURCE_SHA',
     'P15_SOURCE_TREE',
     'P15_BASE_IMAGE',
-    'P15_IMAGE_NAME'
+    'P15_IMAGE_NAME',
+    'P15_CONTEXT_SHA256'
 )) {
     $savedEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
 }
@@ -437,15 +500,33 @@ try {
     $env:P15_SOURCE_SHA = $ExpectedSourceSha
     $env:P15_SOURCE_TREE = $ExpectedSourceTree
     $env:P15_BASE_IMAGE = $BaseImageReference
-    $env:P15_IMAGE_NAME = "local/p15-compat:$($ExpectedSourceSha.Substring(0, 12))"
+    $runImageReference = "local/p15-compat:$ProjectName"
+    $env:P15_IMAGE_NAME = $runImageReference
+    $contextContract = Join-Path $RepositoryRoot 'release\contracts\p15-compat-lab-v1.json'
+    $env:P15_CONTEXT_SHA256 = (Invoke-ProcessCapture -FilePath 'node' -ArgumentList @(
+        (Join-Path $PSScriptRoot 'p15-compat-contracts.mjs'),
+        'context-hash',
+        $RepositoryRoot,
+        $contextContract
+    )).Text.Trim()
 
     Assert-EmptyProjectNamespace
+    Assert-EmptyImageReference
     Assert-ComposeContract
 
     # Docker Compose build expresses the no-network-pull invariant as pull=false;
     # container creation additionally uses the explicit --pull never policy.
     Invoke-Compose @('build', '--pull=false', 'storage') | Out-Null
-    Assert-BuiltImage
+    $runImageId = Assert-BuiltImage
+    $runImageOwned = $true
+
+    if ($InjectFailureAfterBuild) {
+        throw 'P15A injected failure after build.'
+    }
+
+    # Use the immutable built image ID for create/up; the mutable build tag is
+    # never a runtime authority.
+    $env:P15_IMAGE_NAME = $runImageId
 
     $resourcesMayExist = $true
     Invoke-Compose @(
@@ -491,6 +572,7 @@ try {
 finally {
     try {
         Invoke-ScopedCleanup
+        Remove-OwnedRunImage
         Assert-ZeroResidualResources
     }
     catch {
@@ -506,6 +588,9 @@ finally {
 
 if ($InjectFailureAfterUp) {
     throw 'P15A injected failure unexpectedly continued.'
+}
+if ($InjectFailureAfterBuild) {
+    throw 'P15A injected build failure unexpectedly continued.'
 }
 
 Write-SanitizedEvidence

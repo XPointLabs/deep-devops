@@ -1,5 +1,7 @@
 import { pathToFileURL } from 'node:url';
 import { readFile, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import path from 'node:path';
 import {
   createTestStorageSigningIdentity,
   pushSignatureVersion
@@ -14,6 +16,60 @@ export const P15_E2E_SHA = 'da24f530f187dbd81258905bc28feedce0eb23eb';
 export const P15_E2E_TREE = '566ee86cd01ec5a32d3ad60d1c9eac9183328c1f';
 export const P15_BASE_IMAGE_DIGEST = 'sha256:242549cd46785b480c832479a730f4f2a20865d61ea2e404fdb2a5c3d3b73ecf';
 export const P15_BASE_IMAGE_ID = P15_BASE_IMAGE_DIGEST;
+
+export function createRunImageReference(project) {
+  validateProjectName(project);
+  return `local/p15-compat:${project}`;
+}
+
+export function validateImageReferencePreflight({ reference, existing }) {
+  if (!/^local\/p15-compat:p15a-[0-9a-f]{16}$/.test(String(reference))) {
+    fail('run image reference is invalid');
+  }
+  if (existing !== null && existing !== undefined) {
+    fail('preexisting or foreign run image reference is prohibited');
+  }
+  return true;
+}
+
+export function validateRunImageOwnership({
+  imageId, referenceImageId, project, labels
+}) {
+  if (!/^sha256:[0-9a-f]{64}$/.test(String(imageId)) ||
+      referenceImageId !== imageId) {
+    fail('run image reference does not resolve to the built image');
+  }
+  if (labels?.['com.docker.compose.project'] !== project) {
+    fail('run image ownership label does not match');
+  }
+  return true;
+}
+
+export function validateContainerImageIdentity({ expectedImageId, observedImageId }) {
+  if (expectedImageId !== observedImageId) {
+    fail('container image does not match the exact built image ID');
+  }
+  return true;
+}
+
+export async function computeContextManifestHash(root, files) {
+  if (!Array.isArray(files) || files.length === 0 ||
+      new Set(files).size !== files.length) {
+    fail('build context manifest is invalid');
+  }
+  const hash = createHash('sha256');
+  for (const relative of [...files].sort()) {
+    if (typeof relative !== 'string' || path.isAbsolute(relative) ||
+        relative.includes('..') || relative.includes('\\')) {
+      fail('build context manifest path is invalid');
+    }
+    hash.update(relative);
+    hash.update('\0');
+    hash.update(await readFile(path.join(root, ...relative.split('/'))));
+    hash.update('\0');
+  }
+  return `sha256:${hash.digest('hex')}`;
+}
 
 const serviceNames = Object.freeze(['storage', 'file', 'push', 'calls', 'probe']);
 const requiredScenarios = Object.freeze([
@@ -249,7 +305,8 @@ export function validateNetworkFault({
 }
 
 export function validateCleanupInventory(value) {
-  if (!value || value.containers !== 0 || value.networks !== 0 || value.volumes !== 0) {
+  if (!value || value.containers !== 0 || value.networks !== 0 ||
+      value.volumes !== 0 || value.images !== 0) {
     fail('residual P15A resources remain after cleanup');
   }
   return true;
@@ -303,6 +360,7 @@ export function buildEvidence({
   sourceTree,
   baseImageDigest,
   baseImageId,
+  contextSha256,
   architecture,
   scenarios,
   counts,
@@ -321,6 +379,7 @@ export function buildEvidence({
     image: {
       baseDigest: baseImageDigest,
       baseImageId,
+      contextSha256,
       architecture
     },
     scenarios,
@@ -605,6 +664,11 @@ async function main() {
       canonicalJson(buildEvidence(input)),
       { encoding: 'utf8', flag: 'wx' }
     );
+    return;
+  }
+  if (command === 'context-hash' && args.length === 2) {
+    const contract = JSON.parse(await readFile(args[1], 'utf8'));
+    process.stdout.write(await computeContextManifestHash(args[0], contract.buildContext.files));
     return;
   }
   if (command === 'probe') {

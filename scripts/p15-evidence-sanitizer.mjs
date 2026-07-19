@@ -28,8 +28,8 @@ const exactKeys = Object.freeze({
     'result'
   ],
   source: ['sha', 'tree'],
-  image: ['baseDigest', 'baseImageId', 'architecture'],
-  counts: ['services', 'probes', 'restarts', 'networkFaults', 'residualResources'],
+  image: ['baseDigest', 'baseImageId', 'architecture', 'contextSha256'],
+  counts: ['services', 'probes', 'restarts', 'networkFaults', 'residualResources', 'residualImages'],
   durationBoundsMs: ['health', 'operation', 'networkFailure']
 });
 
@@ -73,6 +73,7 @@ export function sanitizeEvidence(value) {
   }
   if (!isDigest(value.image.baseDigest) ||
       !isDigest(value.image.baseImageId) ||
+      !isDigest(value.image.contextSha256) ||
       value.image.architecture !== 'arm64') {
     fail('image identity is invalid');
   }
@@ -85,7 +86,8 @@ export function sanitizeEvidence(value) {
     probes: 4,
     restarts: 4,
     networkFaults: 1,
-    residualResources: 0
+    residualResources: 0,
+    residualImages: 0
   };
   for (const [name, expected] of Object.entries(expectedCounts)) {
     if (value.counts[name] !== expected) {

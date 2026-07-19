@@ -17,6 +17,25 @@
     "architecture": "arm64",
     "scope": "cache-local-windows-arm64"
   },
+  "buildContext": {
+    "denyByDefault": true,
+    "files": [
+      ".dockerignore",
+      "docker-compose.p15-compat.yml",
+      "scripts/p15-compat-contracts.mjs",
+      "scripts/p15-evidence-sanitizer.mjs",
+      "tools/calls-service/calls-service-runtime.mjs",
+      "tools/calls-service/calls-service.mjs",
+      "tools/compat-services/blake2b.mjs",
+      "tools/compat-services/storage-signatures.mjs",
+      "tools/file-service/file-service-runtime.mjs",
+      "tools/file-service/file-service.mjs",
+      "tools/push-service/push-service-runtime.mjs",
+      "tools/push-service/push-service.mjs",
+      "tools/storage-service/storage-service-runtime.mjs",
+      "tools/storage-service/storage-service.mjs"
+    ]
+  },
   "profiles": [
     "p15-compat-core",
     "p15-compat-probe",
@@ -38,7 +57,8 @@
     "command": "down --volumes --remove-orphans",
     "scope": "exact-compose-project-label",
     "globalPruneAllowed": false,
-    "foreignResourcesAllowed": false
+    "foreignResourcesAllowed": false,
+    "ownedImageRetention": 0
   },
   "evidence": {
     "schema": "deep-p15-compat-lab-evidence.v1",

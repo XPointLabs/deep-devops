@@ -41,20 +41,24 @@ services:
         NODE_IMAGE: ${P15_BASE_IMAGE:?P15_BASE_IMAGE is required}
         P15_SOURCE_SHA: ${P15_SOURCE_SHA}
         P15_SOURCE_TREE: ${P15_SOURCE_TREE:?P15_SOURCE_TREE is required}
+        P15_CONTEXT_SHA256: ${P15_CONTEXT_SHA256:?P15_CONTEXT_SHA256 is required}
       labels:
         <<: *p15-labels
         com.xpoint.p15.source-tree: ${P15_SOURCE_TREE}
         com.xpoint.p15.base-image-digest: ${P15_BASE_IMAGE}
+        com.xpoint.p15.context-sha256: ${P15_CONTEXT_SHA256}
       dockerfile_inline: |
         ARG NODE_IMAGE
         FROM $${NODE_IMAGE}
         ARG P15_SOURCE_SHA
         ARG P15_SOURCE_TREE
+        ARG P15_CONTEXT_SHA256
         LABEL org.opencontainers.image.revision="$${P15_SOURCE_SHA}" \
               org.opencontainers.image.source="deep-devops" \
               com.xpoint.evidence-class="compatibility-lab" \
               com.xpoint.product-runtime="false" \
               com.xpoint.p15.source-tree="$${P15_SOURCE_TREE}" \
+              com.xpoint.p15.context-sha256="$${P15_CONTEXT_SHA256}" \
               com.xpoint.p15.base-image-digest="$${NODE_IMAGE}"
         WORKDIR /service
         COPY --chown=node:node tools/compat-services ./tools/compat-services

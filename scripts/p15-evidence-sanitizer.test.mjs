@@ -17,6 +17,7 @@ const safeEvidence = {
   image: {
     baseDigest: 'sha256:242549cd46785b480c832479a730f4f2a20865d61ea2e404fdb2a5c3d3b73ecf',
     baseImageId: 'sha256:242549cd46785b480c832479a730f4f2a20865d61ea2e404fdb2a5c3d3b73ecf',
+    contextSha256: `sha256:${'6'.repeat(64)}`,
     architecture: 'arm64'
   },
   scenarios: {
@@ -35,7 +36,8 @@ const safeEvidence = {
     probes: 4,
     restarts: 4,
     networkFaults: 1,
-    residualResources: 0
+    residualResources: 0,
+    residualImages: 0
   },
   durationBoundsMs: {
     health: 30_000,
