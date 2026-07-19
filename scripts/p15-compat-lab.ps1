@@ -34,6 +34,7 @@ $resourcesMayExist = $false
 $runImageReference = $null
 $runImageId = $null
 $runImageOwned = $false
+$contextSha256 = $null
 $cleanupFailure = $null
 
 function Invoke-ProcessCapture {
@@ -421,7 +422,7 @@ function Write-SanitizedEvidence {
         sourceTree = $ExpectedSourceTree
         baseImageDigest = $BaseImageDigest
         baseImageId = $BaseImageId
-        contextSha256 = $env:P15_CONTEXT_SHA256
+        contextSha256 = $contextSha256
         architecture = 'arm64'
         scenarios = [ordered]@{
             'source-lock' = 'pass'
@@ -503,12 +504,13 @@ try {
     $runImageReference = "local/p15-compat:$ProjectName"
     $env:P15_IMAGE_NAME = $runImageReference
     $contextContract = Join-Path $RepositoryRoot 'release\contracts\p15-compat-lab-v1.json'
-    $env:P15_CONTEXT_SHA256 = (Invoke-ProcessCapture -FilePath 'node' -ArgumentList @(
+    $contextSha256 = (Invoke-ProcessCapture -FilePath 'node' -ArgumentList @(
         (Join-Path $PSScriptRoot 'p15-compat-contracts.mjs'),
         'context-hash',
         $RepositoryRoot,
         $contextContract
     )).Text.Trim()
+    $env:P15_CONTEXT_SHA256 = $contextSha256
 
     Assert-EmptyProjectNamespace
     Assert-EmptyImageReference
