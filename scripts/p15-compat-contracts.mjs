@@ -1,5 +1,5 @@
 import { pathToFileURL } from 'node:url';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import {
   createTestStorageSigningIdentity,
   pushSignatureVersion
@@ -596,6 +596,15 @@ async function main() {
   const [command, ...args] = process.argv.slice(2);
   if (command === 'validate-compose' && args.length === 1) {
     validateComposeConfig(JSON.parse(await readFile(args[0], 'utf8')));
+    return;
+  }
+  if (command === 'write-evidence' && args.length === 2) {
+    const input = JSON.parse(await readFile(args[0], 'utf8'));
+    await writeFile(
+      args[1],
+      canonicalJson(buildEvidence(input)),
+      { encoding: 'utf8', flag: 'wx' }
+    );
     return;
   }
   if (command === 'probe') {

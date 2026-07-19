@@ -391,18 +391,9 @@ function Write-SanitizedEvidence {
     try {
         $inputJson = $evidenceInput | ConvertTo-Json -Depth 8
         [IO.File]::WriteAllText($temporary, $inputJson, [Text.UTF8Encoding]::new($false))
-        $builder = @'
-import { readFile } from "node:fs/promises";
-import { buildEvidence, canonicalJson } from "./scripts/p15-compat-contracts.mjs";
-import { writeFile } from "node:fs/promises";
-const [input, output] = process.argv.slice(1);
-const value = JSON.parse(await readFile(input, "utf8"));
-await writeFile(output, canonicalJson(buildEvidence(value)), { encoding: "utf8", flag: "wx" });
-'@
         Invoke-ProcessCapture -FilePath 'node' -ArgumentList @(
-            '--input-type=module',
-            '--eval',
-            $builder,
+            (Join-Path $PSScriptRoot 'p15-compat-contracts.mjs'),
+            'write-evidence',
             $temporary,
             $evidenceFullPath
         ) | Out-Null
