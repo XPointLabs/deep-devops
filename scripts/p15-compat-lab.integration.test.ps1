@@ -53,8 +53,9 @@ try {
     $networks = Get-Count @('network', 'ls', '-q', '--filter', $filter)
     $volumes = Get-Count @('volume', 'ls', '-q', '--filter', $filter)
     $images = Get-Count @('image', 'ls', '-q', '--filter', $filter)
-    & docker image inspect $runTag --format '{{.Id}}' 2>$null | Out-Null
-    $runTagExists = $LASTEXITCODE -eq 0
+    $runTagExists = (Get-Count @(
+        'image', 'ls', '-q', '--filter', "reference=$runTag"
+    )) -ne 0
     if ($containers -ne 0 -or $networks -ne 0 -or
         $volumes -ne 0 -or $images -ne 0 -or $runTagExists) {
         throw 'P15A validation failure left a run-owned Docker resource.'
