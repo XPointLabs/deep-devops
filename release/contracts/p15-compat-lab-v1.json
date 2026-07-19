@@ -1,0 +1,56 @@
+{
+  "schema": "deep-p15-compat-lab-contract.v1",
+  "status": "COMPATIBILITY-LAB / PRODUCT-RUNTIME-NO-GO",
+  "decisionOwner": "Mr. X",
+  "sourceBase": {
+    "commit": "1c01e24e24647a46b4f37622f3934dc2cc1284ef",
+    "tree": "f608ecf9a53d1ce2c99d9c71bdebe4e95b2ebea2"
+  },
+  "readOnlyE2E": {
+    "commit": "da24f530f187dbd81258905bc28feedce0eb23eb",
+    "tree": "566ee86cd01ec5a32d3ad60d1c9eac9183328c1f"
+  },
+  "localArm64ImageLock": {
+    "reference": "node@sha256:242549cd46785b480c832479a730f4f2a20865d61ea2e404fdb2a5c3d3b73ecf",
+    "imageId": "sha256:242549cd46785b480c832479a730f4f2a20865d61ea2e404fdb2a5c3d3b73ecf",
+    "os": "linux",
+    "architecture": "arm64",
+    "scope": "cache-local-windows-arm64"
+  },
+  "profiles": [
+    "p15-compat-core",
+    "p15-compat-probe",
+    "p15-compat-faults"
+  ],
+  "services": [
+    "storage",
+    "file",
+    "push",
+    "calls",
+    "probe"
+  ],
+  "network": {
+    "internal": true,
+    "hostPorts": 0,
+    "externalPushProvider": false
+  },
+  "cleanup": {
+    "command": "down --volumes --remove-orphans",
+    "scope": "exact-compose-project-label",
+    "globalPruneAllowed": false,
+    "foreignResourcesAllowed": false
+  },
+  "evidence": {
+    "schema": "deep-p15-compat-lab-evidence.v1",
+    "committedInImplementation": false,
+    "privacyFindingsAreWarnings": false
+  },
+  "claims": {
+    "compatibilityLifecycleLab": true,
+    "windowsArm64Docker": true,
+    "productRuntime": false,
+    "replicaChaos": false,
+    "bridgeImpairment": false,
+    "productionReady": false
+  }
+}

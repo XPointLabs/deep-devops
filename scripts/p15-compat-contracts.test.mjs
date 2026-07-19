@@ -261,6 +261,7 @@ test('compose renders without host ports and with the exact internal network', a
         ...process.env,
         P15_PROJECT_NAME: 'p15a-a1b2c3d4e5f60708',
         P15_SOURCE_SHA: expectedSourceSha,
+        P15_SOURCE_TREE: expectedSourceTree,
         P15_BASE_IMAGE: `node@${expectedBaseDigest}`,
         P15_IMAGE_NAME: 'local/p15-compat:test'
       }
@@ -272,7 +273,7 @@ test('compose renders without host ports and with the exact internal network', a
 
 function serviceFixture(identity, profile) {
   return {
-    profiles: [profile],
+    profiles: [profile, 'p15-compat-faults'],
     labels: {
       'com.xpoint.p15.service-identity': identity,
       'com.xpoint.evidence-class': 'compatibility-lab',
