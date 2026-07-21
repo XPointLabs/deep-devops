@@ -46,6 +46,21 @@
     "failureIndependentCleanup": "PASSED",
     "nativeArm64SemanticLabelIntegration": "PASSED"
   },
+  "correctiveExecutionReceipts": {
+    "sourceCommit": "f605351dc34621b130690ed3f3fb7ef42d35c57b",
+    "sourceTree": "9b136e0ed09c379b3eec4a5878d5f2ed435a4c7c",
+    "contextSha256": "sha256:e2efbcf3696acb20cdfb1de7c6141e13de73fb4e6be4c849bfc8e363ced55ee9",
+    "failurePaths": {
+      "path": "failure-path-receipt.json",
+      "sha256": "d8dcd6e4fb339e70edb644ddbb08083e20ed6629f6526dbc9b861ab8a30ad545"
+    },
+    "sentinel": {
+      "path": "sentinel-receipt.json",
+      "sha256": "6d9e264355e2cc008c8801c4b9941ddcb0eb4b9ecf20cb01ffc9f1101a616190"
+    },
+    "validationManifest": "receipt-validation.json",
+    "validationManifestSha256": "9738cdf52afaf2d71b973b3beee75583464558406e0ea8c4e6307b107667620a"
+  },
   "parallelRuns": {
     "count": 2,
     "architecture": "arm64",
@@ -71,6 +86,8 @@
   },
   "failurePathCleanup": {
     "status": "PASSED",
+    "receiptPath": "failure-path-receipt.json",
+    "receiptSha256": "d8dcd6e4fb339e70edb644ddbb08083e20ed6629f6526dbc9b861ab8a30ad545",
     "paths": [
       "pre-semantic-validation",
       "post-build",
@@ -87,6 +104,12 @@
     }
   },
   "sentinelContainerUnchanged": true,
+  "sentinelReceipt": {
+    "path": "sentinel-receipt.json",
+    "sha256": "6d9e264355e2cc008c8801c4b9941ddcb0eb4b9ecf20cb01ffc9f1101a616190",
+    "beforeAfterDigestEqual": true,
+    "rawIdentityFieldsIncluded": false
+  },
   "sanitization": {
     "secretMaterialIncluded": false,
     "ownershipNonceIncluded": false,

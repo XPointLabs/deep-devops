@@ -38,9 +38,34 @@ This carrier records sanitized evidence for source commit
 - Pre-semantic-validation, post-build, post-up, and semantic-label-drift
   failure paths each ended with zero containers, networks, volumes, images,
   run tags, and evidence files.
-- An unrelated `deep-uat` sentinel container retained its exact identity,
-  image, state, restart count, project, and service labels across a complete
-  successful run.
+- An unrelated sentinel container retained its exact identity, image, state,
+  restart count, project, and service labels across a complete successful run.
+
+## Corrective machine-readable receipts
+
+The C4 corrective reran the four failure scenarios and one successful sentinel
+scenario from a separately materialized clean worktree of the same exact
+source commit and tree. Its raw-byte build-context identity is
+`sha256:e2efbcf3696acb20cdfb1de7c6141e13de73fb4e6be4c849bfc8e363ced55ee9`;
+it is recorded separately and does not replace or conflate the earlier
+two-parallel-run context identity.
+
+| Receipt | SHA-256 | Coverage |
+|---|---|---|
+| [`failure-path-receipt.json`](failure-path-receipt.json) | `d8dcd6e4fb339e70edb644ddbb08083e20ed6629f6526dbc9b861ab8a30ad545` | Four fail-closed process exits and per-scenario zero container/network/volume/image/tag/evidence inventory |
+| [`sentinel-receipt.json`](sentinel-receipt.json) | `6d9e264355e2cc008c8801c4b9941ddcb0eb4b9ecf20cb01ffc9f1101a616190` | Successful run evidence hash, zero residual Docker inventory, and equal SHA-256 digests of the canonical sentinel field set before and after |
+
+[`receipt-validation.json`](receipt-validation.json) binds both required
+receipt paths and hashes to the exact source commit/tree and records
+`validationStatus=PASSED`; its SHA-256 is
+`9738cdf52afaf2d71b973b3beee75583464558406e0ea8c4e6307b107667620a`.
+That validation hash is bound into [`work-package-report.json`](work-package-report.json),
+whose SHA-256 is
+`908f510f0d489980a49061bb2f1e758946d2af0dca46fc6116c884285ce7f9e2`.
+This provides the immutable receipt-to-validation-to-report-to-acceptance
+chain. The sentinel receipt contains only digests and the canonical field
+names; it contains no raw sentinel identity, image, status, project, service,
+or container name.
 
 The evidence contains no project names, ownership nonces, container IDs,
 endpoints, ports, credentials, tokens, keys, payloads, raw responses, or

@@ -5,12 +5,12 @@
   "requiredReceipts": [
     {
       "path": "failure-path-receipt.json",
-      "sha256": null
+      "sha256": "d8dcd6e4fb339e70edb644ddbb08083e20ed6629f6526dbc9b861ab8a30ad545"
     },
     {
       "path": "sentinel-receipt.json",
-      "sha256": null
+      "sha256": "6d9e264355e2cc008c8801c4b9941ddcb0eb4b9ecf20cb01ffc9f1101a616190"
     }
   ],
-  "validationStatus": "RED-MISSING-RECEIPTS"
+  "validationStatus": "PASSED"
 }
