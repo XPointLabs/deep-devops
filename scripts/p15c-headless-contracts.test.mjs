@@ -241,12 +241,14 @@ test('receipt resources validate containers, networks, volumes and images by kin
 test('exact owned image removal validates all receipt bindings before first call', async () => {
   const labels = { 'org.opencontainers.image.revision': sha, 'org.opencontainers.image.source-tree': tree, 'com.xpoint.p15c.role': 'xnode', 'com.xpoint.p15c.ownership-nonce': nonce, 'com.xpoint.evidence-class': 'headless-harness', 'com.xpoint.product-runtime': 'false', 'org.opencontainers.image.source': 'xnode' };
   const owned = [{ kind: 'image', project, nonce, role: 'xnode', id: digest, os: 'linux', architecture: 'arm64', labels }];
-  const receipt = { project, nonce, images: [{ role: 'xnode', id: digest }] };
+  const receipt = { schema: 'deep-p15c-ownership.v1', project, nonce, composeSha256: '9'.repeat(64), sources: { xnode: { sha, tree } }, images: [{ role: 'xnode', source: 'xnode', sha, tree, id: digest }] };
   const calls = [];
   await removeValidatedOwnedImages(receipt, owned, async args => calls.push(args));
   assert.deepEqual(calls, [['image', 'rm', digest]]);
   calls.length = 0;
   await assert.rejects(() => removeValidatedOwnedImages({ ...receipt, nonce: 'e'.repeat(32) }, owned, async args => calls.push(args)));
+  assert.equal(calls.length, 0);
+  await assert.rejects(() => removeValidatedOwnedImages({ project, nonce, images: receipt.images }, owned, async args => calls.push(args)));
   assert.equal(calls.length, 0);
   const foreignId = `sha256:${'f'.repeat(64)}`;
   assert.equal(calls.flat().includes(foreignId), false);

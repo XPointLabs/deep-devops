@@ -36,6 +36,10 @@ test('exact source pin table rejects the known P14C2 evidence carrier even if se
     { name: 'contracts', path: 'C:\\Work\\DeepSession\\XPointLabs\\xpoint-staking-contracts', sha: 'd5063212b491b4c7bd649a3ab367491dfed9909f', tree: '89f506e9c1c33cce0e1ad928b72602aa533b012c' }
   ];
   assert.equal(validateSourcePinTable(pins), true);
+  for (let index = 0; index < pins.length; index += 1) assert.throws(() => validateSourcePinTable(pins.filter((_, current) => current !== index)));
+  assert.throws(() => validateSourcePinTable([...pins, pins[0]]));
+  assert.throws(() => validateSourcePinTable([...pins, { name: 'extra', path: 'C:\\extra', sha: 'f'.repeat(40), tree: 'e'.repeat(40) }]));
+  assert.throws(() => validateSourcePinTable([...pins].reverse()));
   assert.throws(() => validateSourcePinTable([{ ...pins[0], sha: carrier }]));
   assert.throws(() => validateSourcePinTable([{ ...pins[0], path: 'C:\\carrier' }]));
   assert.throws(() => validateSourcePinTable([{ ...pins[0], tree: 'f'.repeat(40) }]));
