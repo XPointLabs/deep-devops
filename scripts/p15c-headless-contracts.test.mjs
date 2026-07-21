@@ -6,12 +6,18 @@ import {
   assertOwnedResources,
   assertSafeCleanupCommand,
   executeWithGuaranteedCleanup,
+  executeReceiptAction,
+  executeStagedLifecycle,
+  validateBuildPolicy,
   validateCollisionInventory,
   validateCleanupInventory,
   validateComposeModel,
   validateForeignInventoryInvariant,
   validateImageMetadata,
+  validateHardhatIsolation,
+  validateIdentitySurfaces,
   validateKeepRunningGate,
+  validateLifecycleOperationOrder,
   validateOwnershipReceipt,
   validateReceiptResources,
   validateProjectName
@@ -48,7 +54,7 @@ test('foreign resources are rejected before mutation', () => {
 
 test('forbidden authority, transport and host-integration text is rejected', () => {
   assert.equal(assertNoForbiddenText('Vless__Enabled=false\nproductRuntime=false'), true);
-  for (const value of ['mnemonic', 'arbitrum sepolia', 'host-gateway', '/var/run/docker.sock', 'privileged: true', 'profile signer']) {
+  for (const value of ['mnemonic', 'arbitrum sepolia', 'deep-uat', 'UAT authority', 'old identity', 'legacy compose', 'host-gateway', '/var/run/docker.sock', 'privileged: true', 'mock Xray', 'profile activation', 'profile signer', 'client verifier', 'runtime registration', 'product-runtime: true']) {
     assert.throws(() => assertNoForbiddenText(value));
   }
 });
@@ -71,7 +77,8 @@ test('compose model is isolated Linux ARM64 headless topology', () => {
       'com.xpoint.evidence-class': 'headless-harness',
       'com.xpoint.product-runtime': 'false'
     },
-    environment: role.startsWith('xnode-') ? { Vless__Enabled: 'false' } : {},
+    environment: role.startsWith('xnode-') ? { Vless__Enabled: 'false', Node__Ed25519PrivateKeyPath: `/run/secrets/${role}` } : {},
+    secrets: role.startsWith('xnode-') ? [{ source: `${role}-identity`, target: role }, { source: `${role}-config`, target: `appsettings.${role}.json` }] : undefined,
     ports: ['127.0.0.1:39001:8080']
   }]));
   services['test-client'].restart = 'no';
@@ -94,7 +101,7 @@ test('compose mutations fail for every isolation and image invariant', () => {
       cap_drop: ['ALL'], security_opt: ['no-new-privileges:true'], healthcheck: role === 'test-client' ? undefined : { test: ['CMD', 'true'] },
       labels: { 'org.opencontainers.image.revision': sha, 'org.opencontainers.image.source-tree': tree, 'com.xpoint.p15c.role': role, 'com.xpoint.evidence-class': 'headless-harness', 'com.xpoint.product-runtime': 'false' },
       environment: role.startsWith('xnode-') ? { Vless__Enabled: 'false', Node__Ed25519PrivateKeyPath: `/run/secrets/${role}` } : {},
-      secrets: role.startsWith('xnode-') ? [{ source: `${role}-identity`, target: role }] : undefined,
+      secrets: role.startsWith('xnode-') ? [{ source: `${role}-identity`, target: role }, { source: `${role}-config`, target: `appsettings.${role}.json` }] : undefined,
       ports: ['127.0.0.1:39001:8080']
     }]));
     for (const role of ['storage', 'file', 'push', 'calls', 'test-client']) delete services[role].ports;
@@ -111,6 +118,12 @@ test('compose mutations fail for every isolation and image invariant', () => {
     m => { m.services.registry.ports = ['0.0.0.0:39001:8080']; },
     m => { m.services.storage.ports = ['127.0.0.1:39002:8080']; },
     m => { m.services.registry.volumes = ['/host/source:/app']; },
+    m => { m.services.registry.volumes = ['C:\\host\\source:/app']; },
+    m => { m.services.registry.volumes = ['./source:/app']; },
+    m => { m.services.registry.network_mode = 'host'; },
+    m => { m.services.registry.privileged = true; },
+    m => { m.services.registry.devices = ['/dev/net/tun']; },
+    m => { m.services.registry.volumes = ['/var/run/docker.sock:/var/run/docker.sock']; },
     m => { m.services.registry.extra_hosts = ['host.docker.internal:host-gateway']; },
     m => { m.services.registry.cap_add = ['NET_ADMIN']; },
     m => { m.services['xnode-2'].image = 'p15c-xnode:different'; },
@@ -127,6 +140,43 @@ test('compose mutations fail for every isolation and image invariant', () => {
     if (index === 6) assert.equal(validateComposeModel(model, { sha, tree }), true);
     else assert.throws(() => validateComposeModel(model, { sha, tree }), `mutation ${index} must fail`);
   }
+});
+
+test('orchestrator order proves collision and foreign snapshot precede build/up', () => {
+  const valid = ['source-preflight', 'image-preflight', 'collision-check', 'foreign-snapshot', 'generate-secrets', 'compose-config', 'build', 'up-contracts', 'deploy-contracts', 'up-runtime', 'probe', 'e2e', 'labels', 'evidence', 'cleanup'];
+  assert.equal(validateLifecycleOperationOrder(valid), true);
+  for (const mutation of [
+    valid.filter(value => value !== 'collision-check'),
+    valid.filter(value => value !== 'foreign-snapshot'),
+    [...valid.slice(0, 6), 'build', 'collision-check', ...valid.slice(7)],
+    [...valid.slice(0, 7), 'up-contracts', 'foreign-snapshot', ...valid.slice(8)]
+  ]) assert.throws(() => validateLifecycleOperationOrder(mutation));
+});
+
+test('Hardhat is ephemeral chain 31337 without chain volume or external authority env', () => {
+  const valid = { chainId: 31337, volumes: [], environment: {}, command: ['pnpm', 'exec', 'hardhat', 'node'], stakingAddressSource: 'validated-local-manifest' };
+  assert.equal(validateHardhatIsolation(valid), true);
+  for (const patch of [{ chainId: 421614 }, { volumes: ['chain-state:/data'] }, { environment: { ETH_RPC_URL: 'https://outside' } }, { environment: { PRIVATE_KEY: 'x' } }, { stakingAddressSource: 'environment-default' }]) {
+    assert.throws(() => validateHardhatIsolation({ ...valid, ...patch }));
+  }
+});
+
+test('build definitions require exact operator digest, pull never and distinct SDK/runtime', () => {
+  const sdk = `mcr.microsoft.com/dotnet/sdk@${digest}`;
+  const runtime = `mcr.microsoft.com/dotnet/aspnet@sha256:${'d'.repeat(64)}`;
+  const node = `node@sha256:${'e'.repeat(64)}`;
+  const valid = { operatorSupplied: { sdk, runtime, node }, usedBases: [sdk, runtime, node], pullPolicy: 'never', buildPull: false, sdk, runtime };
+  assert.equal(validateBuildPolicy(valid), true);
+  for (const patch of [{ pullPolicy: 'missing' }, { buildPull: true }, { usedBases: ['node:latest'] }, { runtime: sdk }, { operatorSupplied: { sdk, runtime } }]) {
+    assert.throws(() => validateBuildPolicy({ ...valid, ...patch }));
+  }
+});
+
+test('generated identities are absent from command, env, logs, evidence and receipt', () => {
+  const identity = 'f'.repeat(64);
+  const surfaces = { commands: ['dotnet XNode.dll'], environments: { Vless__Enabled: 'false' }, logs: ['gate passed'], evidence: { result: 'pass' }, receipt: { schema: 'owned' } };
+  assert.equal(validateIdentitySurfaces([identity], surfaces), true);
+  for (const name of Object.keys(surfaces)) assert.throws(() => validateIdentitySurfaces([identity], { ...surfaces, [name]: `${identity}` }));
 });
 
 test('built image metadata is exact and non-product', () => {
@@ -181,6 +231,27 @@ test('cleanup is guaranteed after injected probe or label failure', async () => 
     await assert.rejects(() => executeWithGuaranteedCleanup(async () => { throw new Error(stage); }, async () => { cleaned = true; }));
     assert.equal(cleaned, true);
   }
+});
+
+test('staged lifecycle cleans normal success and every build/up/probe/label/e2e failure', async () => {
+  const stages = ['build', 'up', 'probe', 'label', 'e2e'];
+  for (const failure of [undefined, ...stages]) {
+    const calls = [];
+    const run = stage => async () => { calls.push(stage); if (stage === failure) throw new Error(stage); };
+    const operations = Object.fromEntries(stages.map(stage => [stage, run(stage)]));
+    if (failure) await assert.rejects(() => executeStagedLifecycle(operations, async () => calls.push('cleanup'), { keepRunning: false }));
+    else await executeStagedLifecycle(operations, async () => calls.push('cleanup'), { keepRunning: false });
+    assert.equal(calls.at(-1), 'cleanup');
+  }
+});
+
+test('KeepRunning occurs only after gates and wrong receipt makes zero Docker calls', async () => {
+  const calls = [];
+  await assert.rejects(() => executeStagedLifecycle({ build: async () => calls.push('build'), gates: async () => { throw new Error('gate'); } }, async () => calls.push('cleanup'), { keepRunning: true }));
+  assert.deepEqual(calls, ['build', 'cleanup']);
+  let dockerCalls = 0;
+  await assert.rejects(() => executeReceiptAction({ bad: true }, () => { throw new Error('receipt'); }, async () => { dockerCalls += 1; }));
+  assert.equal(dockerCalls, 0);
 });
 
 test('cleanup inventory must be empty', () => {

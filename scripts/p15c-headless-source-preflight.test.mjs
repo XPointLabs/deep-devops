@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { validateDotnetRuntimeInventory, validateImageLock, validateNodeInventory, validateSdkInventory, validateSourceRecord } from './p15c-headless-source-preflight.mjs';
+import { validateDotnetRuntimeInventory, validateImageLock, validateNodeInventory, validateSdkInventory, validateSourcePinTable, validateSourceRecord } from './p15c-headless-source-preflight.mjs';
 
 const sha = 'a'.repeat(40);
 const tree = 'b'.repeat(40);
@@ -20,6 +20,15 @@ test('runtime and Node inventories are exact accepted versions', () => {
   assert.throws(() => validateDotnetRuntimeInventory('Microsoft.AspNetCore.App 10.0.9\nMicrosoft.NETCore.App 10.0.10\n'));
   assert.equal(validateNodeInventory('v24.16.0\n'), true);
   assert.throws(() => validateNodeInventory('v24.15.0\n'));
+});
+
+test('exact source pin table rejects the known P14C2 evidence carrier even if self-consistent', () => {
+  const carrier = '2a21902ff5a613242180fdd75233991da896f879';
+  const pins = [{ name: 'xnode', path: 'C:\\xnode', sha: 'cd9d20a8ec8346d171d4cd070dde170aa5f471d7', tree: 'e27c1d7c2517bd9d1bcdfbacda8c68c57a2ced59' }];
+  assert.equal(validateSourcePinTable(pins), true);
+  assert.throws(() => validateSourcePinTable([{ ...pins[0], sha: carrier }]));
+  assert.throws(() => validateSourcePinTable([{ ...pins[0], path: 'C:\\carrier' }]));
+  assert.throws(() => validateSourcePinTable([{ ...pins[0], tree: 'f'.repeat(40) }]));
 });
 
 test('image lock requires local exact RepoDigest on Linux ARM64', () => {
