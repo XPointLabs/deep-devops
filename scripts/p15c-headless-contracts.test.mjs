@@ -8,6 +8,7 @@ import {
   executeWithGuaranteedCleanup,
   executeReceiptAction,
   executeStagedLifecycle,
+  removeValidatedOwnedImages,
   validateBuildPolicy,
   validateCollisionInventory,
   validateCleanupInventory,
@@ -20,6 +21,7 @@ import {
   validateLifecycleOperationOrder,
   validateOwnershipReceipt,
   validateReceiptResources,
+  validateImageSourceBindings,
   validateProjectName
 } from './p15c-headless-contracts.mjs';
 
@@ -219,10 +221,41 @@ test('foreign inventory comparison is byte-for-byte stable', () => {
 
 test('receipt resources revalidate nonce, sources and exact image labels', () => {
   const expected = { project, nonce, sources: { devops: { sha, tree } } };
-  const valid = [{ project, nonce, role: 'xnode', id: digest, labels: { 'org.opencontainers.image.revision': sha, 'org.opencontainers.image.source-tree': tree, 'com.xpoint.p15c.role': 'xnode', 'com.xpoint.p15c.ownership-nonce': nonce, 'com.xpoint.evidence-class': 'headless-harness', 'com.xpoint.product-runtime': 'false', 'org.opencontainers.image.source': 'xnode' } }];
+  const valid = [{ kind: 'image', project, nonce, role: 'xnode', id: digest, os: 'linux', architecture: 'arm64', labels: { 'org.opencontainers.image.revision': sha, 'org.opencontainers.image.source-tree': tree, 'com.xpoint.p15c.role': 'xnode', 'com.xpoint.p15c.ownership-nonce': nonce, 'com.xpoint.evidence-class': 'headless-harness', 'com.xpoint.product-runtime': 'false', 'org.opencontainers.image.source': 'xnode' } }];
   assert.equal(validateReceiptResources(valid, expected), true);
   assert.throws(() => validateReceiptResources(valid.map(value => ({ ...value, nonce: 'e'.repeat(32) })), expected));
   assert.throws(() => validateReceiptResources(valid.map(value => ({ ...value, labels: { ...value.labels, 'org.opencontainers.image.source-tree': 'e'.repeat(40) } })), expected));
+});
+
+test('receipt resources validate containers, networks, volumes and images by kind', () => {
+  const labels = { 'com.xpoint.p15c.ownership-nonce': nonce };
+  const expected = { project, nonce, sources: { devops: { sha, tree } } };
+  const nonImages = ['container', 'network', 'volume'].map(kind => ({ kind, project, nonce, labels }));
+  assert.equal(validateReceiptResources(nonImages, expected), true);
+  for (const kind of ['container', 'network', 'volume']) {
+    assert.throws(() => validateReceiptResources([{ kind, project: 'foreign', nonce, labels }], expected));
+    assert.throws(() => validateReceiptResources([{ kind, project, nonce: 'e'.repeat(32), labels }], expected));
+  }
+});
+
+test('exact owned image removal validates all receipt bindings before first call', async () => {
+  const labels = { 'org.opencontainers.image.revision': sha, 'org.opencontainers.image.source-tree': tree, 'com.xpoint.p15c.role': 'xnode', 'com.xpoint.p15c.ownership-nonce': nonce, 'com.xpoint.evidence-class': 'headless-harness', 'com.xpoint.product-runtime': 'false', 'org.opencontainers.image.source': 'xnode' };
+  const owned = [{ kind: 'image', project, nonce, role: 'xnode', id: digest, os: 'linux', architecture: 'arm64', labels }];
+  const receipt = { project, nonce, images: [{ role: 'xnode', id: digest }] };
+  const calls = [];
+  await removeValidatedOwnedImages(receipt, owned, async args => calls.push(args));
+  assert.deepEqual(calls, [['image', 'rm', digest]]);
+  calls.length = 0;
+  await assert.rejects(() => removeValidatedOwnedImages({ ...receipt, nonce: 'e'.repeat(32) }, owned, async args => calls.push(args)));
+  assert.equal(calls.length, 0);
+  const foreignId = `sha256:${'f'.repeat(64)}`;
+  assert.equal(calls.flat().includes(foreignId), false);
+});
+
+test('image roles bind to their own exact source pins', () => {
+  const sources = { devops: { sha, tree }, xnode: { sha: '1'.repeat(40), tree: '2'.repeat(40) }, e2e: { sha: '3'.repeat(40), tree: '4'.repeat(40) } };
+  assert.equal(validateImageSourceBindings([{ role: 'xnode', source: 'xnode', sha: sources.xnode.sha, tree: sources.xnode.tree }, { role: 'storage', source: 'devops', sha, tree }, { role: 'test-client', source: 'e2e', sha: sources.e2e.sha, tree: sources.e2e.tree }], sources), true);
+  assert.throws(() => validateImageSourceBindings([{ role: 'xnode', source: 'devops', sha, tree }], sources));
 });
 
 test('cleanup is guaranteed after injected probe or label failure', async () => {
@@ -231,6 +264,13 @@ test('cleanup is guaranteed after injected probe or label failure', async () => 
     await assert.rejects(() => executeWithGuaranteedCleanup(async () => { throw new Error(stage); }, async () => { cleaned = true; }));
     assert.equal(cleaned, true);
   }
+});
+
+test('operation plus cleanup failure surfaces both errors', async () => {
+  await assert.rejects(
+    () => executeWithGuaranteedCleanup(async () => { throw new Error('operation failed'); }, async () => { throw new Error('cleanup failed'); }),
+    error => error instanceof AggregateError && error.errors.some(value => value.message === 'operation failed') && error.errors.some(value => value.message === 'cleanup failed')
+  );
 });
 
 test('staged lifecycle cleans normal success and every build/up/probe/label/e2e failure', async () => {
