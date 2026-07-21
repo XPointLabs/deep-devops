@@ -17,6 +17,9 @@ test('evidence rejects paths, endpoints, Docker ids, keys and payload identifier
     { privateKey: 'x' },
     { payloadId: 'x' },
     { rawResponse: { ok: true } },
+    { environmentDump: { SAFE: 'still forbidden raw environment' } },
+    { rawLogs: ['container output'] },
+    { resourceIds: ['abc'] },
     { nested: { mnemonic: 'x' } }
   ]) assert.throws(() => sanitizeEvidence(value));
 });

@@ -12,4 +12,7 @@ if ($text -notmatch 'down\s+--volumes\s+--remove-orphans') { throw 'exact compos
 if ($text -notmatch 'Vless__Enabled:\s*["'']?false') { throw 'VLESS is not explicitly disabled' }
 if ($text -notmatch '127\.0\.0\.1:') { throw 'loopback-only host bindings are absent' }
 if ($text -notmatch 'internal:\s*true') { throw 'internal runtime bridge is absent' }
+if ($text -notmatch 'Node__Ed25519PrivateKeyPath') { throw 'XNode file-only identity setting is absent' }
+if ($text -match 'Node__Ed25519PrivateKey\s*:') { throw 'XNode private key must never enter environment' }
+if ($text -match '(?im)^\s*(?:pull|pull_policy)\s*:\s*(?:always|missing)') { throw 'silent image pull policy is prohibited' }
 Write-Output 'P15C lifecycle static tests passed.'

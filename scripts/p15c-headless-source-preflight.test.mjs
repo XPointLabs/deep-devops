@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { validateImageLock, validateSdkInventory, validateSourceRecord } from './p15c-headless-source-preflight.mjs';
+import { validateDotnetRuntimeInventory, validateImageLock, validateNodeInventory, validateSdkInventory, validateSourceRecord } from './p15c-headless-source-preflight.mjs';
 
 const sha = 'a'.repeat(40);
 const tree = 'b'.repeat(40);
@@ -10,9 +10,16 @@ const digest = `sha256:${'c'.repeat(64)}`;
 test('source record requires canonical clean exact non-shallow Git root', () => {
   const valid = { expectedPath: 'C:\\source', canonicalPath: 'C:\\source', gitRoot: 'C:\\source', sha, tree, expectedSha: sha, expectedTree: tree, dirty: false, reparse: false, shallow: false, replaceRefs: [], alternates: [], grafts: false };
   assert.equal(validateSourceRecord(valid), true);
-  for (const patch of [{ dirty: true }, { reparse: true }, { shallow: true }, { replaceRefs: ['x'] }, { alternates: ['x'] }, { sha: 'd'.repeat(40) }, { gitRoot: 'C:\\other' }]) {
+  for (const patch of [{ dirty: true }, { reparse: true }, { shallow: true }, { replaceRefs: ['x'] }, { alternates: ['x'] }, { grafts: true }, { sha: 'd'.repeat(40) }, { tree: 'd'.repeat(40) }, { gitRoot: 'C:\\other' }, { expectedPath: 'C:\\carrier' }]) {
     assert.throws(() => validateSourceRecord({ ...valid, ...patch }));
   }
+});
+
+test('runtime and Node inventories are exact accepted versions', () => {
+  assert.equal(validateDotnetRuntimeInventory('Microsoft.AspNetCore.App 10.0.10\nMicrosoft.NETCore.App 10.0.10\n'), true);
+  assert.throws(() => validateDotnetRuntimeInventory('Microsoft.AspNetCore.App 10.0.9\nMicrosoft.NETCore.App 10.0.10\n'));
+  assert.equal(validateNodeInventory('v24.16.0\n'), true);
+  assert.throws(() => validateNodeInventory('v24.15.0\n'));
 });
 
 test('image lock requires local exact RepoDigest on Linux ARM64', () => {

@@ -5,11 +5,15 @@ import {
   assertNoForbiddenText,
   assertOwnedResources,
   assertSafeCleanupCommand,
+  executeWithGuaranteedCleanup,
+  validateCollisionInventory,
   validateCleanupInventory,
   validateComposeModel,
+  validateForeignInventoryInvariant,
   validateImageMetadata,
   validateKeepRunningGate,
   validateOwnershipReceipt,
+  validateReceiptResources,
   validateProjectName
 } from './p15c-headless-contracts.mjs';
 
@@ -82,6 +86,49 @@ test('compose model is isolated Linux ARM64 headless topology', () => {
   assert.throws(() => validateComposeModel(model, { sha, tree }));
 });
 
+test('compose mutations fail for every isolation and image invariant', () => {
+  const make = () => {
+    const roles = ['contracts-devnet', 'xnode-1', 'xnode-2', 'xnode-3', 'registry', 'staking-backend', 'storage', 'file', 'push', 'calls', 'test-client'];
+    const services = Object.fromEntries(roles.map(role => [role, {
+      platform: 'linux/arm64', networks: ['runtime'], image: role.startsWith('xnode-') ? 'p15c-xnode:exact' : `p15c-${role}:exact`, pull_policy: 'never', read_only: true,
+      cap_drop: ['ALL'], security_opt: ['no-new-privileges:true'], healthcheck: role === 'test-client' ? undefined : { test: ['CMD', 'true'] },
+      labels: { 'org.opencontainers.image.revision': sha, 'org.opencontainers.image.source-tree': tree, 'com.xpoint.p15c.role': role, 'com.xpoint.evidence-class': 'headless-harness', 'com.xpoint.product-runtime': 'false' },
+      environment: role.startsWith('xnode-') ? { Vless__Enabled: 'false', Node__Ed25519PrivateKeyPath: `/run/secrets/${role}` } : {},
+      secrets: role.startsWith('xnode-') ? [{ source: `${role}-identity`, target: role }] : undefined,
+      ports: ['127.0.0.1:39001:8080']
+    }]));
+    for (const role of ['storage', 'file', 'push', 'calls', 'test-client']) delete services[role].ports;
+    return { name: project, services, networks: { runtime: { internal: true } }, volumes: {}, secrets: {} };
+  };
+  const mutations = [
+    m => { m.services.registry.platform = 'linux/amd64'; },
+    m => { m.services.registry.pull_policy = 'always'; },
+    m => { m.services.registry.read_only = false; },
+    m => { m.services.registry.cap_drop = []; },
+    m => { m.services.registry.security_opt = []; },
+    m => { m.services.registry.healthcheck = undefined; },
+    m => { m.services['test-client'].healthcheck = undefined; }, // remains legal one-shot
+    m => { m.services.registry.ports = ['0.0.0.0:39001:8080']; },
+    m => { m.services.storage.ports = ['127.0.0.1:39002:8080']; },
+    m => { m.services.registry.volumes = ['/host/source:/app']; },
+    m => { m.services.registry.extra_hosts = ['host.docker.internal:host-gateway']; },
+    m => { m.services.registry.cap_add = ['NET_ADMIN']; },
+    m => { m.services['xnode-2'].image = 'p15c-xnode:different'; },
+    m => { m.services['xnode-2'].environment.Vless__Enabled = 'true'; },
+    m => { m.services['xnode-2'].environment.Node__Ed25519PrivateKey = 'inline'; },
+    m => { delete m.services['xnode-2'].environment.Node__Ed25519PrivateKeyPath; },
+    m => { m.services['xnode-2'].secrets = []; },
+    m => { m.services.registry.labels['com.xpoint.product-runtime'] = 'true'; },
+    m => { m.services.registry.labels['org.opencontainers.image.source-tree'] = 'c'.repeat(40); }
+  ];
+  for (let index = 0; index < mutations.length; index += 1) {
+    const model = make();
+    mutations[index](model);
+    if (index === 6) assert.equal(validateComposeModel(model, { sha, tree }), true);
+    else assert.throws(() => validateComposeModel(model, { sha, tree }), `mutation ${index} must fail`);
+  }
+});
+
 test('built image metadata is exact and non-product', () => {
   const labels = {
     'org.opencontainers.image.revision': sha,
@@ -103,6 +150,37 @@ test('KeepRunning and receipt validation fail closed', () => {
   const receipt = { schema: 'deep-p15c-ownership.v1', project, nonce, composeSha256: digest.slice(7), sources: { devops: { sha, tree } }, images: [{ role: 'xnode', id: digest }] };
   assert.equal(validateOwnershipReceipt(receipt, { project, nonce, composeSha256: digest.slice(7), sources: receipt.sources }), true);
   assert.throws(() => validateOwnershipReceipt({ ...receipt, nonce: 'e'.repeat(32) }, { project, nonce, composeSha256: digest.slice(7), sources: receipt.sources }));
+});
+
+test('collision gate runs before build and rejects every owned namespace collision', () => {
+  assert.equal(validateCollisionInventory(project, { containers: [], networks: [], volumes: [], images: [] }), true);
+  for (const kind of ['containers', 'networks', 'volumes', 'images']) {
+    const inventory = { containers: [], networks: [], volumes: [], images: [] };
+    inventory[kind].push({ project });
+    assert.throws(() => validateCollisionInventory(project, inventory));
+  }
+});
+
+test('foreign inventory comparison is byte-for-byte stable', () => {
+  const before = '{"containers":["foreign-a"],"images":["foreign-b"]}\n';
+  assert.equal(validateForeignInventoryInvariant(before, before), true);
+  assert.throws(() => validateForeignInventoryInvariant(before, before.replace('a', 'c')));
+});
+
+test('receipt resources revalidate nonce, sources and exact image labels', () => {
+  const expected = { project, nonce, sources: { devops: { sha, tree } } };
+  const valid = [{ project, nonce, role: 'xnode', id: digest, labels: { 'org.opencontainers.image.revision': sha, 'org.opencontainers.image.source-tree': tree, 'com.xpoint.p15c.role': 'xnode', 'com.xpoint.p15c.ownership-nonce': nonce, 'com.xpoint.evidence-class': 'headless-harness', 'com.xpoint.product-runtime': 'false', 'org.opencontainers.image.source': 'xnode' } }];
+  assert.equal(validateReceiptResources(valid, expected), true);
+  assert.throws(() => validateReceiptResources(valid.map(value => ({ ...value, nonce: 'e'.repeat(32) })), expected));
+  assert.throws(() => validateReceiptResources(valid.map(value => ({ ...value, labels: { ...value.labels, 'org.opencontainers.image.source-tree': 'e'.repeat(40) } })), expected));
+});
+
+test('cleanup is guaranteed after injected probe or label failure', async () => {
+  for (const stage of ['probe', 'labels']) {
+    let cleaned = false;
+    await assert.rejects(() => executeWithGuaranteedCleanup(async () => { throw new Error(stage); }, async () => { cleaned = true; }));
+    assert.equal(cleaned, true);
+  }
 });
 
 test('cleanup inventory must be empty', () => {
