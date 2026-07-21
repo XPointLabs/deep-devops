@@ -15,4 +15,16 @@ if ($text -notmatch 'internal:\s*true') { throw 'internal runtime bridge is abse
 if ($text -notmatch 'Node__Ed25519PrivateKeyPath') { throw 'XNode file-only identity setting is absent' }
 if ($text -match 'Node__Ed25519PrivateKey\s*:') { throw 'XNode private key must never enter environment' }
 if ($text -match '(?im)^\s*(?:pull|pull_policy)\s*:\s*(?:always|missing)') { throw 'silent image pull policy is prohibited' }
+
+$planMatch = [regex]::Match($text, '(?m)^# P15C_OPERATION_PLAN: (?<plan>[a-z,-]+)$')
+if (-not $planMatch.Success) { throw 'real orchestrator must export its exact fail-closed operation plan' }
+$expectedPlan = 'source-preflight,image-preflight,collision-check,foreign-snapshot,generate-secrets,compose-config,build,up-contracts,deploy-contracts,up-runtime,probe,e2e,labels,evidence,cleanup'
+if ($planMatch.Groups['plan'].Value -ne $expectedPlan) { throw 'real orchestrator operation plan is not exact' }
+foreach ($requiredCall in @('Assert-P15COperationPlan', 'Invoke-P15CBuild', 'Invoke-P15CUp')) {
+    if ($text.IndexOf($requiredCall, [StringComparison]::Ordinal) -lt 0) { throw "real orchestrator call is absent: $requiredCall" }
+}
+$planCall = $text.LastIndexOf('Assert-P15COperationPlan', [StringComparison]::Ordinal)
+$buildCall = $text.LastIndexOf('Invoke-P15CBuild', [StringComparison]::Ordinal)
+$upCall = $text.LastIndexOf('Invoke-P15CUp', [StringComparison]::Ordinal)
+if ($planCall -ge $buildCall -or $planCall -ge $upCall) { throw 'real orchestrator can Build/Up before validating preflight/collision/snapshot order' }
 Write-Output 'P15C lifecycle static tests passed.'
