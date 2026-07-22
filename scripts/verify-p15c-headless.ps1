@@ -3,8 +3,10 @@ $root = Split-Path $PSScriptRoot -Parent
 $tests = @(
     @('node','--test','scripts/p15c-headless-contracts.test.mjs'),
     @('node','--test','scripts/p15c-headless-source-preflight.test.mjs'),
+    @('node','--test','scripts/p15c-source-export.test.mjs'),
     @('node','--test','scripts/p15c-local-contract-manifest.test.mjs'),
     @('node','--test','scripts/p15c-evidence-sanitizer.test.mjs'),
+    @('node','--test','tools/calls-service/calls-service-runtime.test.mjs'),
     @('powershell','-NoProfile','-ExecutionPolicy','Bypass','-File','scripts/p15c-ephemeral-secrets.test.ps1'),
     @('powershell','-NoProfile','-ExecutionPolicy','Bypass','-File','scripts/p15c-headless-lab.test.ps1')
 )
