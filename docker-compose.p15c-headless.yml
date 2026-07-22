@@ -56,11 +56,11 @@ x-xnode: &xnode
       com.xpoint.p15c.ownership-nonce: ${P15C_OWNERSHIP_NONCE}
     dockerfile_inline: |
       ARG SDK_IMAGE
+      ARG RUNTIME_IMAGE
       FROM $${SDK_IMAGE} AS build
       WORKDIR /src
       COPY --from=xnode_source . .
       RUN test "$$(dotnet --version)" = "10.0.301" && dotnet publish src/XNode/XNode.csproj -c Release -o /out --runtime linux-arm64 --self-contained false -p:UseAppHost=false
-      ARG RUNTIME_IMAGE
       FROM $${RUNTIME_IMAGE}
       ARG SOURCE_SHA SOURCE_TREE OWNERSHIP_NONCE
       LABEL org.opencontainers.image.revision="$${SOURCE_SHA}" org.opencontainers.image.source-tree="$${SOURCE_TREE}" org.opencontainers.image.source="xnode" com.xpoint.p15c.role="xnode" com.xpoint.evidence-class="headless-harness" com.xpoint.product-runtime="false" com.xpoint.p15c.ownership-nonce="$${OWNERSHIP_NONCE}"
@@ -192,11 +192,11 @@ services:
       labels: { org.opencontainers.image.revision: "${P15C_REGISTRY_SHA}", org.opencontainers.image.source-tree: "${P15C_REGISTRY_TREE}", org.opencontainers.image.source: deep-registry-api, com.xpoint.p15c.role: registry, com.xpoint.evidence-class: headless-harness, com.xpoint.product-runtime: "false", com.xpoint.p15c.ownership-nonce: "${P15C_OWNERSHIP_NONCE}" }
       dockerfile_inline: |
         ARG SDK_IMAGE
+        ARG RUNTIME_IMAGE
         FROM $${SDK_IMAGE} AS build
         WORKDIR /src
         COPY --from=registry_source . .
         RUN dotnet publish src/Deep.Registry.Api/Deep.Registry.Api.csproj -c Release -o /out --runtime linux-arm64 --self-contained false -p:UseAppHost=false
-        ARG RUNTIME_IMAGE
         FROM $${RUNTIME_IMAGE}
         ARG SOURCE_SHA SOURCE_TREE OWNERSHIP_NONCE
         LABEL org.opencontainers.image.revision="$${SOURCE_SHA}" org.opencontainers.image.source-tree="$${SOURCE_TREE}" org.opencontainers.image.source="deep-registry-api" com.xpoint.p15c.role="registry" com.xpoint.evidence-class="headless-harness" com.xpoint.product-runtime="false" com.xpoint.p15c.ownership-nonce="$${OWNERSHIP_NONCE}"
@@ -222,11 +222,11 @@ services:
       labels: { org.opencontainers.image.revision: "${P15C_STAKING_SHA}", org.opencontainers.image.source-tree: "${P15C_STAKING_TREE}", org.opencontainers.image.source: xpoint-staking-backend, com.xpoint.p15c.role: staking-backend, com.xpoint.evidence-class: headless-harness, com.xpoint.product-runtime: "false", com.xpoint.p15c.ownership-nonce: "${P15C_OWNERSHIP_NONCE}" }
       dockerfile_inline: |
         ARG SDK_IMAGE
+        ARG RUNTIME_IMAGE
         FROM $${SDK_IMAGE} AS build
         WORKDIR /src
         COPY --from=staking_source . .
         RUN dotnet publish src/XPoint.Staking.Backend/XPoint.Staking.Backend.csproj -c Release -o /out --runtime linux-arm64 --self-contained false -p:UseAppHost=false
-        ARG RUNTIME_IMAGE
         FROM $${RUNTIME_IMAGE}
         ARG SOURCE_SHA SOURCE_TREE OWNERSHIP_NONCE
         LABEL org.opencontainers.image.revision="$${SOURCE_SHA}" org.opencontainers.image.source-tree="$${SOURCE_TREE}" org.opencontainers.image.source="xpoint-staking-backend" com.xpoint.p15c.role="staking-backend" com.xpoint.evidence-class="headless-harness" com.xpoint.product-runtime="false" com.xpoint.p15c.ownership-nonce="$${OWNERSHIP_NONCE}"

@@ -153,7 +153,7 @@ function Invoke-DockerQuiet([string[]]$Arguments,[string]$LogPath) {
     } finally {
         $ErrorActionPreference = $priorPreference
     }
-    if ($nativeExitCode -ne 0) { throw 'P15C Docker operation failed; raw output remains only in the owned run directory.' }
+    if ($nativeExitCode -ne 0) { throw 'P15C Docker operation failed.' }
 }
 
 function Invoke-NodeQuiet([string[]]$Arguments) {
