@@ -52,6 +52,7 @@ x-xnode: &xnode
     Node__PublicPeerRpcPort: "8081"
     Runtime__BootstrapFromStorage: "true"
     Runtime__AllowLoopbackPeerEndpoints: "true"
+    Runtime__AllowPrivatePeerEndpoints: "true"
     RegistryBootstrap__BaseUrl: http://relay-bootstrap:8080
     StorageRpc__BaseUrl: http://storage:8080
     RegistryHeartbeat__Enabled: "false"
