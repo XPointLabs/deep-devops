@@ -153,6 +153,24 @@ function Invoke-NodeCapture([string[]]$Arguments) {
     return ($value -join "`n").Trim()
 }
 
+function Write-P15CComposeModel(
+    [string]$Project,
+    [string]$ComposeFile,
+    [string]$Path
+) {
+    $stdout = @(
+        Invoke-DockerCapture @(
+            'compose', '-p', $Project, '-f', $ComposeFile,
+            'config', '--format', 'json'
+        )
+    )
+    $json = ($stdout -join "`n").Trim()
+    if ([string]::IsNullOrWhiteSpace($json)) {
+        throw 'P15C Compose configuration returned no JSON.'
+    }
+    return Write-NewUtf8File $Path $json
+}
+
 function Get-GitValue([string]$Path,[string[]]$Arguments) {
     $value = @(& git -C $Path @Arguments 2>$null)
     if ($LASTEXITCODE -ne 0) { throw 'P15C Git query failed.' }
@@ -811,7 +829,12 @@ function Invoke-OwnedResourceCleanup(
         Get-OwnedResourceInventory $Project $Nonce $OwnedImages -AllowPartial:$AllowPartial
     )
     if ($captured.Count -eq 0) {
-        throw 'P15C cleanup has no captured owned resource evidence.'
+        Assert-ZeroOwned $Project $Nonce
+        if ((Get-ForeignInventory $Project) -ne $ForeignBefore) {
+            throw 'P15C foreign Docker identity or membership changed.'
+        }
+        $ResourcesClean.Value = $true
+        return
     }
     $remaining = [Collections.Generic.List[object]]::new()
     foreach ($resource in $captured) { $remaining.Add($resource) }
@@ -1391,14 +1414,7 @@ function Invoke-Run {
             $project $nonce $secretDirectory $sources $contexts $images $null
         Set-ComposeEnvironment $composeContext
         $composeModel = Join-Path $runDirectory 'compose.json'
-        & docker compose `
-            -p $project `
-            -f $ComposePath `
-            config --format json *> $composeModel
-        if ($LASTEXITCODE -ne 0) {
-            throw 'P15C Compose configuration failed.'
-        }
-        Protect-P15CAuthorityFile $composeModel
+        [void](Write-P15CComposeModel $project $ComposePath $composeModel)
         $composeExpected = @{ sha = $devopsSha; tree = $devopsTree } |
             ConvertTo-Json -Compress
         Invoke-NodeQuiet @(

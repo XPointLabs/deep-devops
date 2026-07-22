@@ -10,7 +10,8 @@ $tests = @(
     @('powershell','-NoProfile','-ExecutionPolicy','Bypass','-File','scripts/p15c-ephemeral-secrets.test.ps1'),
     @('powershell','-NoProfile','-ExecutionPolicy','Bypass','-File','scripts/p15c-headless-lab.test.ps1'),
     @('powershell','-NoProfile','-ExecutionPolicy','Bypass','-File','scripts/p15c-corrective-races.test.ps1'),
-    @('powershell','-NoProfile','-ExecutionPolicy','Bypass','-File','scripts/p15c-foreign-inventory-native.test.ps1')
+    @('powershell','-NoProfile','-ExecutionPolicy','Bypass','-File','scripts/p15c-foreign-inventory-native.test.ps1'),
+    @('powershell','-NoProfile','-ExecutionPolicy','Bypass','-File','scripts/p15c-early-lifecycle.test.ps1')
 )
 Push-Location $root
 try {

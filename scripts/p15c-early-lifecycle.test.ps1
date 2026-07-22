@@ -26,14 +26,9 @@ function Import-ProductionFunction([string]$Name) {
 }
 
 function Test-ComposeModelIsUtf8Json {
-    $pipeline = $driverAst.Find({
-        param($node)
-        $node -is [Management.Automation.Language.PipelineAst] `
-            -and $node.Extent.Text -match 'config\s+--format\s+json\s+\*>\s+\$composeModel'
-    }, $true)
-    if ($null -eq $pipeline) {
-        throw 'P15C production Compose persistence pipeline is missing.'
-    }
+    Import-ProductionFunction 'Invoke-DockerCapture'
+    Import-ProductionFunction 'Write-NewUtf8File'
+    Import-ProductionFunction 'Write-P15CComposeModel'
     $root = Join-Path $env:TEMP ('p15c-compose-encoding-' + [guid]::NewGuid().ToString('N'))
     [void][IO.Directory]::CreateDirectory($root)
     $composeModel = Join-Path $root 'compose.json'
@@ -43,8 +38,10 @@ function Test-ComposeModelIsUtf8Json {
         Write-Output '{"name":"p15c","services":{}}'
         $global:LASTEXITCODE = 0
     }
+    function Protect-P15CAuthorityFile {}
+    function Get-FileSha256 { return 'a' * 64 }
     try {
-        Invoke-Expression $pipeline.Extent.Text
+        [void](Write-P15CComposeModel $project $ComposePath $composeModel)
         $bytes = [IO.File]::ReadAllBytes($composeModel)
         $utf8 = [Text.UTF8Encoding]::new($false,$true).GetString($bytes)
         [void]($utf8 | ConvertFrom-Json)
