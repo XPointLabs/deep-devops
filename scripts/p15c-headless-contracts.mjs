@@ -574,27 +574,39 @@ export async function runCallsSignalingE2E(baseUrl) {
 }
 
 async function main() {
-  const [command, path, expectedJson] = process.argv.slice(2);
-  if (command === 'validate-compose' && path && expectedJson) {
-    validateComposeModel(JSON.parse(await readFile(path, 'utf8')), JSON.parse(expectedJson));
+  const [command, path, expectedPath] = process.argv.slice(2);
+  if (command === 'validate-compose' && path && expectedPath) {
+    validateComposeModel(
+      parseJsonNoDuplicateKeys(await readFile(path, 'utf8')),
+      parseJsonNoDuplicateKeys(await readFile(expectedPath, 'utf8'))
+    );
     return;
   }
-  if (command === 'validate-receipt' && path && expectedJson) {
-    validateOwnershipReceipt(parseJsonNoDuplicateKeys(await readFile(path, 'utf8')), JSON.parse(expectedJson));
+  if (command === 'validate-receipt' && path && expectedPath) {
+    validateOwnershipReceipt(
+      parseJsonNoDuplicateKeys(await readFile(path, 'utf8')),
+      parseJsonNoDuplicateKeys(await readFile(expectedPath, 'utf8'))
+    );
     return;
   }
-  if (command === 'summarize-receipt' && path && expectedJson) {
+  if (command === 'summarize-receipt' && path && expectedPath) {
     const bytes = await readFile(path);
     const receipt = parseJsonNoDuplicateKeys(bytes.toString('utf8'));
-    validateOwnershipReceipt(receipt, JSON.parse(expectedJson));
+    validateOwnershipReceipt(
+      receipt,
+      parseJsonNoDuplicateKeys(await readFile(expectedPath, 'utf8'))
+    );
     process.stdout.write(JSON.stringify({
       receipt,
       receiptSha256: createHash('sha256').update(bytes).digest('hex')
     }));
     return;
   }
-  if (command === 'validate-runtime-inventory' && path && expectedJson) {
-    validateOwnedProjectRuntimeInventory(parseJsonNoDuplicateKeys(await readFile(path, 'utf8')), JSON.parse(expectedJson));
+  if (command === 'validate-runtime-inventory' && path && expectedPath) {
+    validateOwnedProjectRuntimeInventory(
+      parseJsonNoDuplicateKeys(await readFile(path, 'utf8')),
+      parseJsonNoDuplicateKeys(await readFile(expectedPath, 'utf8'))
+    );
     return;
   }
   if (command === 'test-client' && path) {

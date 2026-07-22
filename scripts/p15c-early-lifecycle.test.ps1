@@ -149,10 +149,59 @@ function Test-ZeroOwnedEarlyFailureCleanup {
     }
 }
 
+function Test-CleanupFailureIsTypedAndObservable {
+    Import-ProductionFunction 'Invoke-OwnedResourceCleanup'
+    Import-ProductionFunction 'Invoke-FailedRunCleanup'
+    $root = Join-Path $env:TEMP ('p15c-cleanup-errors-' + [guid]::NewGuid().ToString('N'))
+    $run = Join-Path $root 'run'
+    $secrets = Join-Path $run 'secrets'
+    [void][IO.Directory]::CreateDirectory($secrets)
+    $secretSentinel = 'never-emit-this-secret-value'
+    [IO.File]::WriteAllText((Join-Path $secrets 'sentinel'),$secretSentinel)
+    function Get-OwnedResourceInventory { return @() }
+    function Assert-ZeroOwned {}
+    function Get-ForeignInventory { return '{"changed":true}' }
+    $outputs = [Collections.Generic.List[object]]::new()
+    try {
+        $cleanupErrors = @(Invoke-FailedRunCleanup `
+            'p15c-0123456789abcdef' `
+            ('d' * 32) `
+            $run `
+            $secrets `
+            @() `
+            '{"stable":true}' `
+            $true `
+            $false `
+            $outputs)
+        if ($cleanupErrors.Count -ne 1 -or
+            @($cleanupErrors | Where-Object { $_ -isnot [Exception] }).Count) {
+            throw 'Cleanup returned non-exception pipeline records.'
+        }
+        $primary = [InvalidOperationException]::new('primary validation failure')
+        $aggregate = [AggregateException]::new(
+            'P15C operation and cleanup failed; owned state preserved.',
+            @($primary) + $cleanupErrors
+        )
+        $messages = @($aggregate.InnerExceptions | ForEach-Object Message)
+        if ($messages -notcontains $primary.Message -or
+            $messages -notcontains 'P15C foreign Docker identity or membership changed.') {
+            throw 'Primary and cleanup causes are not both observable.'
+        }
+        if (($aggregate.ToString()).Contains($secretSentinel)) {
+            throw 'Cleanup diagnostics leaked secret content.'
+        }
+    } finally {
+        if (Test-Path -LiteralPath $root) {
+            Remove-Item -LiteralPath $root -Recurse -Force
+        }
+    }
+}
+
 $failures = [Collections.Generic.List[Exception]]::new()
 foreach ($case in @(
     ${function:Test-ComposeModelIsUtf8Json},
-    ${function:Test-ZeroOwnedEarlyFailureCleanup}
+    ${function:Test-ZeroOwnedEarlyFailureCleanup},
+    ${function:Test-CleanupFailureIsTypedAndObservable}
 )) {
     try { & $case }
     catch {

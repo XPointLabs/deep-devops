@@ -1133,7 +1133,7 @@ function Invoke-FailedRunCleanup(
     $cleanupState = $ResourcesClean
     if ($MutationStarted -and -not $ResourcesClean) {
         try {
-            Invoke-OwnedResourceCleanup `
+            $null = Invoke-OwnedResourceCleanup `
                 $Project `
                 $Nonce `
                 $Images `
@@ -1148,7 +1148,7 @@ function Invoke-FailedRunCleanup(
     $mayRemoveSecrets = $cleanupState -or -not $MutationStarted
     if ($mayRemoveSecrets -and (Test-Path -LiteralPath $SecretDirectory)) {
         try {
-            & (Join-Path $PSScriptRoot 'p15c-ephemeral-secrets.ps1') `
+            $null = & (Join-Path $PSScriptRoot 'p15c-ephemeral-secrets.ps1') `
                 -Action Remove `
                 -RunDirectory $SecretDirectory
         } catch {
@@ -1157,15 +1157,15 @@ function Invoke-FailedRunCleanup(
     }
     foreach ($record in $OwnedOutputs) {
         if ($failures.Count -eq 0 -and (Test-Path -LiteralPath $record.path)) {
-            try { Remove-ExclusivelyCreatedFile $record }
+            try { $null = Remove-ExclusivelyCreatedFile $record }
             catch { $failures.Add($_.Exception) }
         }
     }
     if ($failures.Count -eq 0 -and (Test-Path -LiteralPath $RunDirectory)) {
-        try { Remove-OwnedRunDirectory $RunDirectory }
+        try { $null = Remove-OwnedRunDirectory $RunDirectory }
         catch { $failures.Add($_.Exception) }
     }
-    return $failures
+    return $failures.ToArray()
 }
 
 function New-P15CSources(
@@ -1269,12 +1269,14 @@ function Read-ValidatedReceiptOnce([string]$Path,[string]$Expectation) {
     [void][IO.Directory]::CreateDirectory($directory)
     Protect-P15CAuthorityFile $directory -Directory
     $copy = Join-Path $directory 'receipt.json'
+    $expectationPath = Join-Path $directory 'expectation.json'
     try {
         [IO.File]::WriteAllBytes($copy, $bytes)
         Protect-P15CAuthorityFile $copy
+        [void](Write-NewUtf8File $expectationPath $Expectation)
         $summaryRaw = Invoke-NodeCapture @(
             (Join-Path $PSScriptRoot 'p15c-headless-contracts.mjs'),
-            'summarize-receipt', $copy, $Expectation
+            'summarize-receipt', $copy, $expectationPath
         )
         return $summaryRaw | ConvertFrom-Json
     } finally {
@@ -1417,9 +1419,13 @@ function Invoke-Run {
         [void](Write-P15CComposeModel $project $ComposePath $composeModel)
         $composeExpected = @{ sha = $devopsSha; tree = $devopsTree } |
             ConvertTo-Json -Compress
+        $composeExpectationPath = Join-Path `
+            $runDirectory `
+            'compose.expectation.json'
+        [void](Write-NewUtf8File $composeExpectationPath $composeExpected)
         Invoke-NodeQuiet @(
             (Join-Path $PSScriptRoot 'p15c-headless-contracts.mjs'),
-            'validate-compose', $composeModel, $composeExpected
+            'validate-compose', $composeModel, $composeExpectationPath
         )
         $operations.Add('compose-config')
         Assert-P15COperationPlan $operations.ToArray() -Prefix
@@ -1516,9 +1522,13 @@ function Invoke-Run {
                 $receipt.composeSha256 `
                 $receipt.manifestSha256 `
                 $receipt.foreignSnapshotSha256
+            $expectationPath = Join-Path `
+                $runDirectory `
+                'ownership-receipt.expectation.json'
+            [void](Write-NewUtf8File $expectationPath $expectation)
             Invoke-NodeQuiet @(
                 (Join-Path $PSScriptRoot 'p15c-headless-contracts.mjs'),
-                'validate-receipt', $stagePath, $expectation
+                'validate-receipt', $stagePath, $expectationPath
             )
             $publishedReceipt = Publish-OwnedOutput `
                 $stageRecord $ReceiptPath $sources $runDirectory

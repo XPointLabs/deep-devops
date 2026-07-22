@@ -32,7 +32,7 @@ $input = Join-Path $root 'input.json'
 $probeSource = @'
 import { readFileSync } from 'node:fs';
 
-const [command, inputPath, expectation] = process.argv.slice(2);
+const [command, inputPath, expectationPath] = process.argv.slice(2);
 const commands = new Set([
   'validate-compose',
   'validate-receipt',
@@ -40,7 +40,7 @@ const commands = new Set([
   'validate-runtime-inventory'
 ]);
 if (!commands.has(command) || !inputPath) process.exit(2);
-const value = JSON.parse(expectation);
+const value = JSON.parse(readFileSync(expectationPath, 'utf8'));
 if (value.marker !== command || value.nested?.quoted !== 'exact value') process.exit(3);
 readFileSync(inputPath);
 '@
@@ -59,8 +59,14 @@ try {
             marker = $command
             nested = [ordered]@{ quoted = 'exact value' }
         } | ConvertTo-Json -Depth 4 -Compress
+        $expectationPath = Join-Path $root "$command.expectation.json"
+        [IO.File]::WriteAllText(
+            $expectationPath,
+            $expectation,
+            [Text.UTF8Encoding]::new($false)
+        )
         try {
-            Invoke-NodeQuiet @($probe,$command,$input,$expectation)
+            Invoke-NodeQuiet @($probe,$command,$input,$expectationPath)
         } catch {
             $failures.Add($command)
         }

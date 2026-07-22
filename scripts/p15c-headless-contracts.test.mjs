@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { createServer } from 'node:http';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 import {
@@ -385,6 +389,27 @@ test('project runtime inventory rejects injected same-project resources before c
   assert.throws(() => validateOwnedProjectRuntimeInventory({ ...valid, containers: [...valid.containers, { project, nonce, service: 'injected-orphan', labels: label }] }, { project, nonce, services, networks: ['runtime'], volumes, allowPartial: false }));
   assert.throws(() => validateOwnedProjectRuntimeInventory({ ...valid, volumes: [{ project, nonce, volume: 'substituted', labels: label }] }, { project, nonce, services, networks: ['runtime'], volumes, allowPartial: false }));
   assert.equal(validateOwnedProjectRuntimeInventory({ containers: valid.containers.slice(0, 1), networks: [], volumes: [] }, { project, nonce, services, networks: ['runtime'], volumes, allowPartial: true }), true);
+});
+
+test('runtime inventory CLI reads expectation from a file and rejects duplicate keys', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'p15c-expectation-'));
+  const inventoryPath = join(directory, 'inventory.json');
+  const expectationPath = join(directory, 'expectation.json');
+  const contractScript = fileURLToPath(new URL('./p15c-headless-contracts.mjs', import.meta.url));
+  const inventory = { containers: [], networks: [], volumes: [] };
+  const expectation = { project, nonce, services: [], networks: [], volumes: [], allowPartial: false };
+  try {
+    writeFileSync(inventoryPath, JSON.stringify(inventory));
+    writeFileSync(expectationPath, JSON.stringify(expectation));
+    const valid = spawnSync(process.execPath, [contractScript, 'validate-runtime-inventory', inventoryPath, expectationPath], { encoding: 'utf8' });
+    assert.equal(valid.status, 0, valid.stderr);
+    writeFileSync(expectationPath, `{"project":"${project}","project":"${project}","nonce":"${nonce}","services":[],"networks":[],"volumes":[],"allowPartial":false}`);
+    const duplicate = spawnSync(process.execPath, [contractScript, 'validate-runtime-inventory', inventoryPath, expectationPath], { encoding: 'utf8' });
+    assert.notEqual(duplicate.status, 0);
+    assert.match(duplicate.stderr, /duplicate JSON key: project/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test('failure cleanup deletes only exclusively created and still-bound output files', () => {
