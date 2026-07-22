@@ -124,6 +124,7 @@ test('compose mutations fail for every isolation and image invariant', () => {
     return { name: project, services, networks: { runtime: { internal: true } }, volumes: {}, secrets: {} };
   };
   const mutations = [
+    m => { m.volumes.state = {}; },
     m => { m.services.registry.platform = 'linux/amd64'; },
     m => { m.services.registry.pull_policy = 'always'; },
     m => { m.services.registry.read_only = false; },
@@ -153,7 +154,7 @@ test('compose mutations fail for every isolation and image invariant', () => {
   for (let index = 0; index < mutations.length; index += 1) {
     const model = make();
     mutations[index](model);
-    if (index === 6) assert.equal(validateComposeModel(model, { sha, tree }), true);
+    if (index === 7) assert.equal(validateComposeModel(model, { sha, tree }), true);
     else assert.throws(() => validateComposeModel(model, { sha, tree }), `mutation ${index} must fail`);
   }
 });
@@ -267,7 +268,6 @@ test('exact cleanup captures evidence and revalidates every resource immediately
   const resources = [
     { kind: 'container', id: '1'.repeat(64), name: `${project}-storage-1`, project, nonce, role: 'storage', labels: label },
     { kind: 'network', id: '2'.repeat(64), name: `${project}_runtime`, project, nonce, role: 'runtime', labels: label },
-    { kind: 'volume', id: `${project}_calls-state`, name: `${project}_calls-state`, project, nonce, role: 'calls-state', labels: label },
     { kind: 'image', id: `sha256:${'3'.repeat(64)}`, name: `${project}-calls`, project, nonce, role: 'calls', labels: label }
   ];
   const live = new Map(resources.map(resource => [`${resource.kind}:${resource.id}`, structuredClone(resource)]));
@@ -286,7 +286,6 @@ test('exact cleanup captures evidence and revalidates every resource immediately
   assert.deepEqual(calls, [
     ['container', 'rm', '--force', '1'.repeat(64)],
     ['network', 'rm', '2'.repeat(64)],
-    ['volume', 'rm', `${project}_calls-state`],
     ['image', 'rm', `sha256:${'3'.repeat(64)}`]
   ]);
 });
@@ -361,29 +360,30 @@ test('receipt resources revalidate nonce, sources and exact image labels', () =>
   assert.throws(() => validateReceiptResources(valid.map(value => ({ ...value, labels: { ...value.labels, 'org.opencontainers.image.source-tree': 'e'.repeat(40) } })), expected));
 });
 
-test('receipt resources validate containers, networks, volumes and images by kind', () => {
+test('receipt resources validate only immutable-ID cleanup kinds', () => {
   const labels = { 'com.xpoint.p15c.ownership-nonce': nonce };
   const expected = { project, nonce, sources: { devops: { sha, tree } } };
-  const nonImages = ['container', 'network', 'volume'].map(kind => ({ kind, project, nonce, labels }));
+  const nonImages = ['container', 'network'].map(kind => ({ kind, project, nonce, labels }));
   assert.equal(validateReceiptResources(nonImages, expected), true);
-  for (const kind of ['container', 'network', 'volume']) {
+  for (const kind of ['container', 'network']) {
     assert.throws(() => validateReceiptResources([{ kind, project: 'foreign', nonce, labels }], expected));
     assert.throws(() => validateReceiptResources([{ kind, project, nonce: 'e'.repeat(32), labels }], expected));
   }
+  assert.throws(() => validateReceiptResources([{ kind: 'volume', project, nonce, labels }], expected));
 });
 
 test('project runtime inventory rejects injected same-project resources before compose down', () => {
   const services = ['contracts-devnet', 'xnode-1'];
-  const volumes = ['xnode-1-state'];
+  const volumes = [];
   const label = { 'com.xpoint.p15c.ownership-nonce': nonce };
   const valid = {
     containers: services.map(service => ({ project, nonce, service, labels: label })),
     networks: [{ project, nonce, network: 'runtime', labels: label }],
-    volumes: volumes.map(volume => ({ project, nonce, volume, labels: label }))
+    volumes: []
   };
   assert.equal(validateOwnedProjectRuntimeInventory(valid, { project, nonce, services, networks: ['runtime'], volumes, allowPartial: false }), true);
   assert.throws(() => validateOwnedProjectRuntimeInventory({ ...valid, containers: [...valid.containers, { project, nonce, service: 'injected-orphan', labels: label }] }, { project, nonce, services, networks: ['runtime'], volumes, allowPartial: false }));
-  assert.throws(() => validateOwnedProjectRuntimeInventory({ ...valid, volumes: valid.volumes.map(value => ({ ...value, nonce: 'e'.repeat(32), labels: { 'com.xpoint.p15c.ownership-nonce': 'e'.repeat(32) } })) }, { project, nonce, services, networks: ['runtime'], volumes, allowPartial: false }));
+  assert.throws(() => validateOwnedProjectRuntimeInventory({ ...valid, volumes: [{ project, nonce, volume: 'substituted', labels: label }] }, { project, nonce, services, networks: ['runtime'], volumes, allowPartial: false }));
   assert.equal(validateOwnedProjectRuntimeInventory({ containers: valid.containers.slice(0, 1), networks: [], volumes: [] }, { project, nonce, services, networks: ['runtime'], volumes, allowPartial: true }), true);
 });
 

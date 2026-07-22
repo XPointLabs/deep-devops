@@ -17,6 +17,14 @@ x-health: &health
   retries: 40
   start_period: 5s
 
+x-state-tmpfs: &state-tmpfs
+  - /tmp:rw,noexec,nosuid,nodev,size=32m
+  - /state:rw,noexec,nosuid,nodev,size=64m,uid=65532,gid=65532,mode=0700
+
+x-node-state-tmpfs: &node-state-tmpfs
+  - /tmp:rw,noexec,nosuid,nodev,size=32m
+  - /state:rw,noexec,nosuid,nodev,size=64m,uid=1000,gid=1000,mode=0700
+
 x-labels: &labels
   org.opencontainers.image.revision: ${P15C_DEVOPS_SHA:?P15C_DEVOPS_SHA is required}
   org.opencontainers.image.source-tree: ${P15C_DEVOPS_TREE:?P15C_DEVOPS_TREE is required}
@@ -149,7 +157,7 @@ services:
   xnode-1:
     <<: *xnode
     ports: ["127.0.0.1:${P15C_XNODE1_PORT:?P15C_XNODE1_PORT is required}:8080"]
-    volumes: [xnode-1-state:/state]
+    tmpfs: *state-tmpfs
     secrets:
       - { source: xnode-1-identity, target: node-seed, uid: "65532", gid: "65532", mode: 0400 }
       - { source: xnode-1-config, target: /app/appsettings.P15C.json, uid: "65532", gid: "65532", mode: 0400 }
@@ -158,7 +166,7 @@ services:
   xnode-2:
     <<: *xnode
     ports: ["127.0.0.1:${P15C_XNODE2_PORT:?P15C_XNODE2_PORT is required}:8080"]
-    volumes: [xnode-2-state:/state]
+    tmpfs: *state-tmpfs
     secrets:
       - { source: xnode-2-identity, target: node-seed, uid: "65532", gid: "65532", mode: 0400 }
       - { source: xnode-2-config, target: /app/appsettings.P15C.json, uid: "65532", gid: "65532", mode: 0400 }
@@ -167,7 +175,7 @@ services:
   xnode-3:
     <<: *xnode
     ports: ["127.0.0.1:${P15C_XNODE3_PORT:?P15C_XNODE3_PORT is required}:8080"]
-    volumes: [xnode-3-state:/state]
+    tmpfs: *state-tmpfs
     secrets:
       - { source: xnode-3-identity, target: node-seed, uid: "65532", gid: "65532", mode: 0400 }
       - { source: xnode-3-config, target: /app/appsettings.P15C.json, uid: "65532", gid: "65532", mode: 0400 }
@@ -199,7 +207,7 @@ services:
         ENTRYPOINT ["dotnet","Deep.Registry.Api.dll"]
     environment: { ASPNETCORE_URLS: http://0.0.0.0:8080, Registry__StatePath: /state/registry.json, Registry__StakingBackendBaseUrl: http://staking-backend:8080 }
     ports: ["127.0.0.1:${P15C_REGISTRY_PORT:?P15C_REGISTRY_PORT is required}:8080"]
-    volumes: [registry-state:/state]
+    tmpfs: *state-tmpfs
     labels: { <<: *labels, com.xpoint.p15c.role: registry }
     healthcheck: { <<: *health, test: [CMD-SHELL, "test -r /proc/1/status"] }
 
@@ -239,7 +247,7 @@ services:
       Registry__BaseUrl: http://registry:8080
       Price__EthereumRpcUrl: ""
     ports: ["127.0.0.1:${P15C_STAKING_PORT:?P15C_STAKING_PORT is required}:8080"]
-    volumes: [staking-state:/state]
+    tmpfs: *state-tmpfs
     labels: { <<: *labels, com.xpoint.p15c.role: staking-backend }
     healthcheck: { <<: *health, test: [CMD-SHELL, "test -r /proc/1/status"] }
 
@@ -249,7 +257,7 @@ services:
     build: { <<: *compat-build, args: { NODE_IMAGE: "${P15C_NODE_IMAGE}", SOURCE_SHA: "${P15C_DEVOPS_SHA}", SOURCE_TREE: "${P15C_DEVOPS_TREE}", OWNERSHIP_NONCE: "${P15C_OWNERSHIP_NONCE}", ROLE: storage } }
     command: [node, tools/storage-service/storage-service.mjs]
     environment: { PORT: "8080", SERVICE_NAME: p15c-storage, COMPAT_STATE_DIR: /state, PUSH_COMPAT_NOTIFY_URL: http://push:8080 }
-    volumes: [storage-state:/state]
+    tmpfs: *node-state-tmpfs
     labels: { <<: *labels, com.xpoint.p15c.role: storage }
     healthcheck: { <<: *health, test: [CMD, node, --eval, "fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"] }
 
@@ -259,7 +267,7 @@ services:
     build: { <<: *compat-build, args: { NODE_IMAGE: "${P15C_NODE_IMAGE}", SOURCE_SHA: "${P15C_DEVOPS_SHA}", SOURCE_TREE: "${P15C_DEVOPS_TREE}", OWNERSHIP_NONCE: "${P15C_OWNERSHIP_NONCE}", ROLE: file } }
     command: [node, tools/file-service/file-service.mjs]
     environment: { PORT: "8080", SERVICE_NAME: p15c-file, COMPAT_STATE_DIR: /state }
-    volumes: [file-state:/state]
+    tmpfs: *node-state-tmpfs
     labels: { <<: *labels, com.xpoint.p15c.role: file }
     healthcheck: { <<: *health, test: [CMD, node, --eval, "fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"] }
 
@@ -269,7 +277,7 @@ services:
     build: { <<: *compat-build, args: { NODE_IMAGE: "${P15C_NODE_IMAGE}", SOURCE_SHA: "${P15C_DEVOPS_SHA}", SOURCE_TREE: "${P15C_DEVOPS_TREE}", OWNERSHIP_NONCE: "${P15C_OWNERSHIP_NONCE}", ROLE: push } }
     command: [node, tools/push-service/push-service.mjs]
     environment: { PORT: "8080", SERVICE_NAME: p15c-push, COMPAT_STATE_DIR: /state }
-    volumes: [push-state:/state]
+    tmpfs: *node-state-tmpfs
     labels: { <<: *labels, com.xpoint.p15c.role: push }
     healthcheck: { <<: *health, test: [CMD, node, --eval, "fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"] }
 
@@ -279,7 +287,7 @@ services:
     build: { <<: *compat-build, args: { NODE_IMAGE: "${P15C_NODE_IMAGE}", SOURCE_SHA: "${P15C_DEVOPS_SHA}", SOURCE_TREE: "${P15C_DEVOPS_TREE}", OWNERSHIP_NONCE: "${P15C_OWNERSHIP_NONCE}", ROLE: calls } }
     command: [node, tools/calls-service/calls-service.mjs]
     environment: { PORT: "8080", SERVICE_NAME: p15c-calls, CALLS_STATE_DIR: /state }
-    volumes: [calls-state:/state]
+    tmpfs: *node-state-tmpfs
     labels: { <<: *labels, com.xpoint.p15c.role: calls }
     healthcheck: { <<: *health, test: [CMD, node, --eval, "fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"] }
 
@@ -328,17 +336,6 @@ services:
 
 networks:
   runtime: { internal: true, labels: { com.xpoint.p15c.ownership-nonce: "${P15C_OWNERSHIP_NONCE}" } }
-
-volumes:
-  xnode-1-state: { labels: { com.xpoint.p15c.ownership-nonce: "${P15C_OWNERSHIP_NONCE}" } }
-  xnode-2-state: { labels: { com.xpoint.p15c.ownership-nonce: "${P15C_OWNERSHIP_NONCE}" } }
-  xnode-3-state: { labels: { com.xpoint.p15c.ownership-nonce: "${P15C_OWNERSHIP_NONCE}" } }
-  registry-state: { labels: { com.xpoint.p15c.ownership-nonce: "${P15C_OWNERSHIP_NONCE}" } }
-  staking-state: { labels: { com.xpoint.p15c.ownership-nonce: "${P15C_OWNERSHIP_NONCE}" } }
-  storage-state: { labels: { com.xpoint.p15c.ownership-nonce: "${P15C_OWNERSHIP_NONCE}" } }
-  file-state: { labels: { com.xpoint.p15c.ownership-nonce: "${P15C_OWNERSHIP_NONCE}" } }
-  push-state: { labels: { com.xpoint.p15c.ownership-nonce: "${P15C_OWNERSHIP_NONCE}" } }
-  calls-state: { labels: { com.xpoint.p15c.ownership-nonce: "${P15C_OWNERSHIP_NONCE}" } }
 
 secrets:
   xnode-1-identity: { file: "${P15C_SECRET_DIR:?P15C_SECRET_DIR is required}/node-1.seed" }

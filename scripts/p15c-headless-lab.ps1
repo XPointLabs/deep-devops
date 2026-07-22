@@ -19,7 +19,7 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $Expected = [ordered]@{
-    XNode = [ordered]@{ Sha='cd9d20a8ec8346d171d4cd070dde170aa5f471d7'; Tree='e27c1d7c2517bd9d1bcdfbacda8c68c57a2ced59'; Path='C:\W\deep-survival\wave09\xnode-p15c-source' }
+    XNode = [ordered]@{ Sha='a8fe6165d2392831c9450c0107fa00efb081ec66'; Tree='ee32782ff810c8b9c4c6f0a893b485ef7edd9396'; Path='C:\Work\DeepSession\XPointLabs\xnode' }
     E2E = [ordered]@{ Sha='da24f530f187dbd81258905bc28feedce0eb23eb'; Tree='566ee86cd01ec5a32d3ad60d1c9eac9183328c1f'; Path='C:\Work\DeepSession\XPointLabs\deep-tests-e2e' }
     Registry = [ordered]@{ Sha='fb7ebac6404e7a53241af08bb2f80d8a81022be8'; Tree='be7a44e68933fa0773e81f6ad898feebd752a67a'; Path='C:\Work\DeepSession\XPointLabs\deep-registry-api' }
     Staking = [ordered]@{ Sha='c4638486d1f658f3cda2b5060eb3709e255d7288'; Tree='a0dafebbd380425e5b4c5e86bdb3138bf77fa3e0'; Path='C:\Work\DeepSession\XPointLabs\xpoint-staking-backend' }
@@ -39,7 +39,6 @@ $CommonPlan = @(
 $NormalPlan = @($CommonPlan) + @('cleanup','evidence')
 $RetainedPlan = @($CommonPlan) + @('receipt-retained')
 $RuntimeServices = @('contracts-devnet','xnode-1','xnode-2','xnode-3','registry','staking-backend','storage','file','push','calls')
-$RuntimeVolumes = @('xnode-1-state','xnode-2-state','xnode-3-state','registry-state','staking-state','storage-state','file-state','push-state','calls-state')
 $ImageRoles = @('calls','contracts-devnet','file','push','registry','staking-backend','storage','test-client','xnode')
 $Ports = [ordered]@{ Contracts=39545; XNode1=39801; XNode2=39802; XNode3=39803; Registry=39810; Staking=39811 }
 
@@ -90,13 +89,31 @@ function Write-NewUtf8File([string]$Path,[string]$Content) {
     return [pscustomobject]@{ created=$true; path=$full; expectedSha256=(Get-FileSha256 $full) }
 }
 
+function Initialize-P15CNativePublication {
+    if ($null -ne ('P15CNativePublication' -as [type])) { return }
+    Add-Type -Path (Join-Path $PSScriptRoot 'P15C.NativePublication.cs')
+}
+
 function Remove-ExclusivelyCreatedFile($Record) {
     if ($null -eq $Record -or $Record.created -ne $true -or $Record.expectedSha256 -notmatch '^[0-9a-f]{64}$') { throw 'P15C owned output record is invalid.' }
+    if ($null -ne $Record.PSObject.Properties['lease'] -and $null -ne $Record.lease) {
+        $Record.lease.Rollback()
+        $Record.lease = $null
+        return
+    }
     $full = [System.IO.Path]::GetFullPath([string]$Record.path)
     if ($full -ne [string]$Record.path -or -not (Test-Path -LiteralPath $full -PathType Leaf)) { throw 'P15C owned output no longer names an exact file.' }
     $item = Get-Item -LiteralPath $full -Force
     if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0 -or (Get-FileSha256 $full) -ne $Record.expectedSha256) { throw 'P15C owned output binding changed; refusing deletion.' }
     [System.IO.File]::Delete($full)
+}
+
+function Commit-OwnedOutput($Record) {
+    if ($null -eq $Record -or $null -eq $Record.PSObject.Properties['lease'] -or $null -eq $Record.lease) {
+        throw 'P15C published output lease is absent.'
+    }
+    $Record.lease.Commit()
+    $Record.lease = $null
 }
 
 function Assert-P15COperationPlan([string[]]$Observed,[switch]$Prefix,[switch]$Retained) {
@@ -603,30 +620,21 @@ function Get-OwnedResourceInventory(
         })
     }
 
-    $volumeNames = [Collections.Generic.HashSet[string]]::new(
-        [StringComparer]::OrdinalIgnoreCase
+    $volumeNames = @(
+        Invoke-DockerCapture @(
+            'volume', 'ls', '-q', '--filter',
+            "label=com.docker.compose.project=$Project"
+        )
     )
-    Add-DockerIds $volumeNames @(
-        'volume', 'ls', '-q', '--filter',
-        "label=com.docker.compose.project=$Project"
+    $volumeNames += @(
+        Invoke-DockerCapture @(
+            'volume', 'ls', '-q', '--filter',
+            "label=com.xpoint.p15c.ownership-nonce=$Nonce"
+        )
     )
-    Add-DockerIds $volumeNames @(
-        'volume', 'ls', '-q', '--filter',
-        "label=com.xpoint.p15c.ownership-nonce=$Nonce"
-    )
-    foreach ($name in $volumeNames) {
-        $raw = (Invoke-DockerCapture @(
-            'volume', 'inspect', $name, '--format', '{{json .}}'
-        ) -join '')
-        $value = $raw | ConvertFrom-Json
-        $result.Add([pscustomobject][ordered]@{
-            kind = 'volume'
-            id = [string]$value.Name
-            name = [string]$value.Name
-            project = [string]$value.Labels.'com.docker.compose.project'
-            nonce = [string]$value.Labels.'com.xpoint.p15c.ownership-nonce'
-            role = [string]$value.Labels.'com.docker.compose.volume'
-        })
+    $volumeNames = @($volumeNames | Where-Object { $_ } | Sort-Object -Unique)
+    if ($volumeNames.Count) {
+        throw 'P15C named volumes are prohibited and cannot be cleanup targets.'
     }
 
     $imageIds = [Collections.Generic.HashSet[string]]::new(
@@ -683,7 +691,6 @@ function Assert-OwnedResourceInventory(
     $allowed = @{
         container = $containerRoles
         network = @('runtime')
-        volume = @($RuntimeVolumes)
         image = @($ImageRoles)
     }
     $keys = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
@@ -705,7 +712,7 @@ function Assert-OwnedResourceInventory(
         }
     }
     if (-not $AllowPartial) {
-        foreach ($kind in @('container', 'network', 'volume', 'image')) {
+        foreach ($kind in @('container', 'network', 'image')) {
             $actual = @(
                 $Inventory |
                     Where-Object kind -eq $kind |
@@ -752,7 +759,6 @@ function Remove-ExactOwnedResource($Resource,[string]$LogPath) {
     $arguments = switch ($Resource.kind) {
         'container' { @('container', 'rm', '--force', $Resource.id) }
         'network' { @('network', 'rm', $Resource.id) }
-        'volume' { @('volume', 'rm', $Resource.name) }
         'image' { @('image', 'rm', $Resource.id) }
         default { throw 'P15C cleanup resource kind is invalid.' }
     }
@@ -786,7 +792,10 @@ function Invoke-OwnedResourceCleanup(
     }
     $remaining = [Collections.Generic.List[object]]::new()
     foreach ($resource in $captured) { $remaining.Add($resource) }
-    $order = @{ container = 0; network = 1; volume = 2; image = 3 }
+    if (@($captured | Where-Object kind -eq 'volume').Count) {
+        throw 'P15C named volumes are not removable ownership authority.'
+    }
+    $order = @{ container = 0; network = 1; image = 2 }
     $logPath = Join-Path $RunDirectory 'exact-resource-cleanup.log'
     foreach ($resource in @(
         $captured | Sort-Object @{ Expression = { $order[$_.kind] } }, kind, id
@@ -931,15 +940,17 @@ function Publish-OwnedOutput(
     if ((Get-FileSha256 $Record.path) -ne $Record.expectedSha256) {
         throw 'P15C staged output changed before publication.'
     }
-    # Windows PowerShell does not expose a durable parent-relative rename. This
-    # implementation reparses every parent immediately before the no-overwrite
-    # File.Move and fails closed on every reparse or existing destination.
-    [IO.File]::Move($Record.path, $destinationFull)
-    Assert-ProtectedAcl $destinationFull
+    Initialize-P15CNativePublication
+    $lease = [P15CNativePublication]::MoveNoReplaceVerified(
+        [string]$Record.path,
+        $destinationFull,
+        [string]$Record.expectedSha256
+    )
     return [pscustomobject]@{
         created = $true
         path = $destinationFull
-        expectedSha256 = Get-FileSha256 $destinationFull
+        expectedSha256 = [string]$Record.expectedSha256
+        lease = $lease
     }
 }
 
@@ -1283,6 +1294,7 @@ function Complete-RetainedStateCleanup($Context,[string]$FinalEvidencePath) {
         }
         throw $stateError
     }
+    Commit-OwnedOutput $publishedRecord
 }
 
 function Invoke-Run {
@@ -1474,6 +1486,7 @@ function Invoke-Run {
             $ownedOutputs.Add($publishedReceipt)
             $operations.Add('receipt-retained')
             Assert-CompletedPlan $operations.ToArray() -Retained
+            Commit-OwnedOutput $publishedReceipt
             $retained = $true
             $ownedOutputs.Clear()
             return
@@ -1498,6 +1511,7 @@ function Invoke-Run {
         $operations.Add('evidence')
         Assert-CompletedPlan $operations.ToArray()
         Remove-OwnedRunDirectory $runDirectory
+        Commit-OwnedOutput $publishedEvidence
         $ownedOutputs.Clear()
     } catch {
         $operationError = $_.Exception

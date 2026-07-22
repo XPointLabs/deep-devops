@@ -117,6 +117,7 @@ export function validateComposeModel(model, expected) {
   if (!same(roles, [...exactRoles].sort())) fail('Compose service set is not the exact P15C headless topology');
   const networks = Object.keys(model.networks ?? {});
   if (!same(networks, ['runtime']) || model.networks.runtime?.internal !== true) fail('exact internal runtime bridge is required');
+  if (Object.keys(model.volumes ?? {}).length !== 0) fail('P15C named volumes are prohibited');
 
   const xnodeImages = new Set();
   for (const role of exactRoles) {
@@ -137,11 +138,7 @@ export function validateComposeModel(model, expected) {
       if (typeof env.Node__Ed25519PrivateKeyPath !== 'string' || !env.Node__Ed25519PrivateKeyPath.startsWith('/run/secrets/') || Object.hasOwn(env, 'Node__Ed25519PrivateKey')) fail(`${role} identity must use only a Compose secret file path`);
       if (!Array.isArray(service.secrets) || service.secrets.length !== 2) fail(`${role} must receive only its generated seed and generated configuration secrets`);
     }
-    for (const mount of service.volumes ?? []) {
-      if (typeof mount === 'string' && (/^[A-Za-z]:[\\/]/.test(mount) || mount.startsWith('/') || mount.startsWith('.'))) fail(`${role} has a runtime source bind mount`);
-      const source = typeof mount === 'string' ? mount.split(':', 1)[0] : mount.source;
-      if (typeof source === 'string' && (/^[A-Za-z]:[\\/]/.test(source) || source.startsWith('/') || source.startsWith('.'))) fail(`${role} has a runtime source bind mount`);
-    }
+    if ((service.volumes?.length ?? 0) !== 0) fail(`${role} has a prohibited volume mount`);
   }
   if (xnodeImages.size !== 1) fail('all three XNodes must consume one exact image');
   return true;
@@ -242,7 +239,7 @@ export function stableForeignInventory(inventory) {
 }
 
 function validateCleanupResource(resource, project, nonce) {
-  if (!object(resource) || !['container', 'network', 'volume', 'image'].includes(resource.kind)) {
+  if (!object(resource) || !['container', 'network', 'image'].includes(resource.kind)) {
     fail('captured cleanup resource is invalid');
   }
   if (resource.project !== project || resource.nonce !== nonce
@@ -255,9 +252,6 @@ function validateCleanupResource(resource, project, nonce) {
   if (['container', 'network'].includes(resource.kind) && !/^[0-9a-f]{12,64}$/.test(resource.id ?? '')) {
     fail(`captured ${resource.kind} identity is invalid`);
   }
-  if (resource.kind === 'volume' && (!resource.name || resource.id !== resource.name)) {
-    fail('captured volume identity is invalid');
-  }
 }
 
 function resourceKey(resource) {
@@ -267,7 +261,6 @@ function resourceKey(resource) {
 function exactRemovalCommand(resource) {
   if (resource.kind === 'container') return ['container', 'rm', '--force', resource.id];
   if (resource.kind === 'network') return ['network', 'rm', resource.id];
-  if (resource.kind === 'volume') return ['volume', 'rm', resource.name];
   return ['image', 'rm', resource.id];
 }
 
@@ -279,7 +272,7 @@ export async function executeExactResourceCleanup({ project, nonce, captured, li
   for (const resource of captured) validateCleanupResource(resource, project, nonce);
   const keys = captured.map(resourceKey);
   if (new Set(keys).size !== keys.length) fail('cleanup authority contains duplicate resource identities');
-  const rank = { container: 0, network: 1, volume: 2, image: 3 };
+  const rank = { container: 0, network: 1, image: 2 };
   const remaining = new Map(captured.map(resource => [resourceKey(resource), structuredClone(resource)]));
   const ordered = [...captured].sort((left, right) => rank[left.kind] - rank[right.kind] || resourceKey(left).localeCompare(resourceKey(right)));
   for (const resource of ordered) {
@@ -336,7 +329,7 @@ export async function publishOwnedOutput({ staged, destination, ownedRoot, desti
 export function validateReceiptResources(resources, expected) {
   assertOwnedResources(expected.project, resources);
   for (const resource of resources ?? []) {
-    if (!['container', 'network', 'volume', 'image'].includes(resource.kind) || resource.nonce !== expected.nonce || resource.labels?.['com.xpoint.p15c.ownership-nonce'] !== expected.nonce) fail('owned runtime resource binding is invalid');
+    if (!['container', 'network', 'image'].includes(resource.kind) || resource.nonce !== expected.nonce || resource.labels?.['com.xpoint.p15c.ownership-nonce'] !== expected.nonce) fail('owned runtime resource binding is invalid');
     if (resource.kind === 'image') {
       validateImageMetadata({ id: resource.id, os: resource.os, architecture: resource.architecture, labels: resource.labels }, { sha: expected.sources.devops.sha, tree: expected.sources.devops.tree, role: resource.role, nonce: expected.nonce });
     }
@@ -497,10 +490,11 @@ export function validateImageSourceBindings(bindings, sources) {
 export function validateOwnedProjectRuntimeInventory(inventory, expected) {
   validateProjectName(expected.project);
   if (!/^[0-9a-f]{32}$/.test(expected.nonce ?? '') || !exactKeys(inventory, ['containers', 'networks', 'volumes'])) fail('owned runtime inventory envelope is invalid');
+  if (!Array.isArray(inventory.volumes) || inventory.volumes.length !== 0
+    || !Array.isArray(expected.volumes) || expected.volumes.length !== 0) fail('named volumes are prohibited');
   const specifications = [
     ['containers', 'service', expected.services],
-    ['networks', 'network', expected.networks],
-    ['volumes', 'volume', expected.volumes]
+    ['networks', 'network', expected.networks]
   ];
   for (const [kind, property, allowed] of specifications) {
     const records = inventory[kind];

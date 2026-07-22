@@ -78,8 +78,9 @@ hash. They also validate the current Compose hash, exact
 six-source pins, exact run/secret markers, protected secret contents and the
 strict local-contract manifest before the first Docker query. They then
 revalidate the owned image IDs and labels. `Verify` proves every long-running
-service, including calls, is healthy. `Down` removes only the validated project
-container IDs, network IDs, volume names and image IDs. Each resource's
+service, including calls, is healthy. Runtime state uses container-local tmpfs;
+named volumes are prohibited. `Down` removes only validated project container
+IDs, network IDs and image IDs. Each resource's
 project/nonce/role and current same-project membership are revalidated
 immediately before its individual removal. Compose `down`, orphan removal and
 prune operations are not used. A post-capture injected resource is never
@@ -103,12 +104,12 @@ cleanup is incomplete, the run directory, logs, secrets and receipt are retained
 for diagnosis and no final evidence is emitted.
 
 Receipt and evidence bytes are first created inside the protected owned run
-tree. Immediately before a no-overwrite `File.Move`, every destination parent
-is reparsed and rejected if it is missing or a reparse point, and destination
-existence is checked twice. Windows PowerShell does not expose a durable
-directory-handle-relative rename, so this package makes no stronger claim: any
-observed parent race fails closed, and an unknown destination is never replaced
-or deleted.
+tree. Publication opens the staged file and destination parent with Windows
+handles, verifies both final paths and the staged SHA-256 from those handles,
+then performs a no-replace rename relative to the bound directory handle. The
+published file handle remains leased until lifecycle commit. Failure rollback
+marks that exact handle for deletion, so a later path replacement is never
+deleted by name.
 
 Current status: **implemented / real lifecycle pending / no-go**. The following
 is the acceptance target only after both real lifecycle shapes pass and their

@@ -53,9 +53,9 @@ export function validateNodeInventory(output) {
 
 const acceptedPins = Object.freeze({
   xnode: Object.freeze({
-    path: 'C:\\W\\deep-survival\\wave09\\xnode-p15c-source',
-    sha: 'cd9d20a8ec8346d171d4cd070dde170aa5f471d7',
-    tree: 'e27c1d7c2517bd9d1bcdfbacda8c68c57a2ced59'
+    path: 'C:\\Work\\DeepSession\\XPointLabs\\xnode',
+    sha: 'a8fe6165d2392831c9450c0107fa00efb081ec66',
+    tree: 'ee32782ff810c8b9c4c6f0a893b485ef7edd9396'
   }),
   e2e: Object.freeze({ path: 'C:\\Work\\DeepSession\\XPointLabs\\deep-tests-e2e', sha: 'da24f530f187dbd81258905bc28feedce0eb23eb', tree: '566ee86cd01ec5a32d3ad60d1c9eac9183328c1f' }),
   registry: Object.freeze({ path: 'C:\\Work\\DeepSession\\XPointLabs\\deep-registry-api', sha: 'fb7ebac6404e7a53241af08bb2f80d8a81022be8', tree: 'be7a44e68933fa0773e81f6ad898feebd752a67a' }),

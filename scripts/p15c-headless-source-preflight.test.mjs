@@ -29,7 +29,7 @@ test('runtime and Node inventories are exact accepted versions', () => {
 test('exact source pin table rejects the known P14C2 evidence carrier even if self-consistent', () => {
   const carrier = '2a21902ff5a613242180fdd75233991da896f879';
   const pins = [
-    { name: 'xnode', path: 'C:\\W\\deep-survival\\wave09\\xnode-p15c-source', sha: 'cd9d20a8ec8346d171d4cd070dde170aa5f471d7', tree: 'e27c1d7c2517bd9d1bcdfbacda8c68c57a2ced59' },
+    { name: 'xnode', path: 'C:\\Work\\DeepSession\\XPointLabs\\xnode', sha: 'a8fe6165d2392831c9450c0107fa00efb081ec66', tree: 'ee32782ff810c8b9c4c6f0a893b485ef7edd9396' },
     { name: 'e2e', path: 'C:\\Work\\DeepSession\\XPointLabs\\deep-tests-e2e', sha: 'da24f530f187dbd81258905bc28feedce0eb23eb', tree: '566ee86cd01ec5a32d3ad60d1c9eac9183328c1f' },
     { name: 'registry', path: 'C:\\Work\\DeepSession\\XPointLabs\\deep-registry-api', sha: 'fb7ebac6404e7a53241af08bb2f80d8a81022be8', tree: 'be7a44e68933fa0773e81f6ad898feebd752a67a' },
     { name: 'staking', path: 'C:\\Work\\DeepSession\\XPointLabs\\xpoint-staking-backend', sha: 'c4638486d1f658f3cda2b5060eb3709e255d7288', tree: 'a0dafebbd380425e5b4c5e86bdb3138bf77fa3e0' },

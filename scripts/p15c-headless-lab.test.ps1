@@ -50,8 +50,12 @@ if ($driverText -match 'Get-Content[^\r\n]+ReceiptPath') { throw 'validated rece
 foreach ($binding in @('manifestSha256','foreignSnapshotSha256','Get-OwnedResourceInventory','Remove-ExclusivelyCreatedFile','Protect-P15CAuthorityFile','Publish-OwnedOutput','Assert-RetainedHashes')) {
     if ($driverText -notmatch $binding) { throw "retained authority or cleanup binding is absent: $binding" }
 }
-if ($driverText -notmatch "'container', 'rm', '--force'" -or $driverText -notmatch "'network', 'rm'" -or $driverText -notmatch "'volume', 'rm'" -or $driverText -notmatch "'image', 'rm'") { throw 'exact per-resource removal commands are incomplete' }
+if ($driverText -notmatch "'container', 'rm', '--force'" -or $driverText -notmatch "'network', 'rm'" -or $driverText -notmatch "'image', 'rm'") { throw 'exact immutable-ID removal commands are incomplete' }
+if ($driverText -match "'volume',\s*'rm'" -or $composeText -match '(?m)^volumes:\s*$') { throw 'named-volume creation or deletion authority is prohibited' }
 if ($driverText -notmatch 'Assert-ResourceStillOwned' -or $driverText -notmatch 'Assert-InventoryKeysEqual') { throw 'resource identities are not revalidated immediately before removal' }
+foreach ($nativeBinding in @('P15CNativePublication','MoveNoReplaceVerified','PublicationLease','Rollback')) {
+    if (($driverText + (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'P15C.NativePublication.cs') -Raw)) -notmatch $nativeBinding) { throw "handle-bound publication primitive is incomplete: $nativeBinding" }
+}
 $cleanMarker = $driverText.IndexOf('$ResourcesClean.Value = $true', [StringComparison]::Ordinal)
 $foreignCheck = $driverText.IndexOf('Get-ForeignInventory $Project', $cleanMarker, [StringComparison]::Ordinal)
 if ($cleanMarker -lt 0 -or $foreignCheck -lt $cleanMarker) { throw 'owned-resource clean state is not recorded before unrelated foreign validation' }

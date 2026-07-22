@@ -8,7 +8,8 @@ $tests = @(
     @('node','--test','scripts/p15c-evidence-sanitizer.test.mjs'),
     @('node','--test','tools/calls-service/calls-service-runtime.test.mjs'),
     @('powershell','-NoProfile','-ExecutionPolicy','Bypass','-File','scripts/p15c-ephemeral-secrets.test.ps1'),
-    @('powershell','-NoProfile','-ExecutionPolicy','Bypass','-File','scripts/p15c-headless-lab.test.ps1')
+    @('powershell','-NoProfile','-ExecutionPolicy','Bypass','-File','scripts/p15c-headless-lab.test.ps1'),
+    @('powershell','-NoProfile','-ExecutionPolicy','Bypass','-File','scripts/p15c-corrective-races.test.ps1')
 )
 Push-Location $root
 try {
