@@ -24,6 +24,34 @@ function Invoke-SurvivalDocker([string[]]$Arguments) {
     }
 }
 
+function Assert-SurvivalHostEndpoints {
+    $targets = @(
+        'http://127.0.0.1:41801/api/network/contact',
+        'http://127.0.0.1:41802/api/network/contact',
+        'http://127.0.0.1:41803/api/network/contact',
+        'http://127.0.0.1:41810/health/live',
+        'http://127.0.0.1:41820/health/ready',
+        'http://127.0.0.1:41821/health/ready',
+        'http://127.0.0.1:41822/health/ready',
+        'http://127.0.0.1:41823/health/ready',
+        'http://127.0.0.1:41999/health/ready'
+    )
+    foreach ($target in $targets) {
+        $ready = $false
+        foreach ($attempt in 1..40) {
+            try {
+                $response = Invoke-WebRequest -UseBasicParsing -Uri $target -TimeoutSec 3
+                if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 300) {
+                    $ready = $true
+                    break
+                }
+            } catch {}
+            Start-Sleep -Milliseconds 500
+        }
+        if (-not $ready) { throw "Survival dev endpoint is unreachable: $target" }
+    }
+}
+
 function Write-ClientEnvironment([string]$HostName) {
     $address = $null
     if (-not [Net.IPAddress]::TryParse($HostName, [ref]$address) -or
@@ -70,11 +98,15 @@ switch ($Action) {
         $env:SURVIVAL_BIND_HOST = if ([string]::IsNullOrWhiteSpace($LanHost)) { '127.0.0.1' } else { '0.0.0.0' }
         $upArguments = @($baseArguments)
         if ($Chain) { $upArguments += @('--profile', 'chain') }
-        Invoke-SurvivalDocker ($upArguments + @('up', '-d', '--build', '--wait') + $Service)
+        Invoke-SurvivalDocker ($upArguments + @('up', '-d', '--build', '--wait', '--force-recreate') + $Service)
+        Assert-SurvivalHostEndpoints
         & node (Join-Path $PSScriptRoot 'survival-dev-seed.mjs')
         if ($LASTEXITCODE -ne 0) { throw 'Survival relay contact seed failed.' }
         Invoke-SurvivalDocker ($baseArguments + @('restart', 'xnode-1', 'xnode-2', 'xnode-3'))
         Invoke-SurvivalDocker ($baseArguments + @('up', '-d', '--wait', 'xnode-1', 'xnode-2', 'xnode-3'))
+        Assert-SurvivalHostEndpoints
+        & node (Join-Path $PSScriptRoot 'survival-dev-verify.mjs')
+        if ($LASTEXITCODE -ne 0) { throw 'Survival relay contact verification failed.' }
     }
     'Down' {
         $arguments = $baseArguments + @('down')

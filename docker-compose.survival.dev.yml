@@ -117,7 +117,7 @@ services:
       <<: *xnode-environment
       Node__PublicHost: xnode-1
       Node__RouterId: 4cb5abf6ad79fbf5abbccafcc269d85cd2651ed4b885b5869f241aedf0a5ba29
-      Node__Ed25519PrivateKey: 0000000000000000000000000000000000000000000000000000000000000001
+      Node__Ed25519PrivateKey: "0000000000000000000000000000000000000000000000000000000000000001"
     ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41801:8080"]
     volumes: [xnode-1-state:/state]
     depends_on: { relay-bootstrap: { condition: service_healthy } }
@@ -128,7 +128,7 @@ services:
       <<: *xnode-environment
       Node__PublicHost: xnode-2
       Node__RouterId: 7422b9887598068e32c4448a949adb290d0f4e35b9e01b0ee5f1a1e600fe2674
-      Node__Ed25519PrivateKey: 0000000000000000000000000000000000000000000000000000000000000002
+      Node__Ed25519PrivateKey: "0000000000000000000000000000000000000000000000000000000000000002"
     ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41802:8080"]
     volumes: [xnode-2-state:/state]
     depends_on: { relay-bootstrap: { condition: service_healthy } }
@@ -139,7 +139,7 @@ services:
       <<: *xnode-environment
       Node__PublicHost: xnode-3
       Node__RouterId: f381626e41e7027ea431bfe3009e94bdd25a746beec468948d6c3c7c5dc9a54b
-      Node__Ed25519PrivateKey: 0000000000000000000000000000000000000000000000000000000000000003
+      Node__Ed25519PrivateKey: "0000000000000000000000000000000000000000000000000000000000000003"
     ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41803:8080"]
     volumes: [xnode-3-state:/state]
     depends_on: { relay-bootstrap: { condition: service_healthy } }
