@@ -571,4 +571,8 @@ test('release contract and documentation keep GO outcomes conditional until real
   const compose = readFileSync(new URL('../docker-compose.p15c-headless.yml', import.meta.url), 'utf8');
   assert.match(compose, /COPY --chown=node:node scripts\/p15c-headless-contracts\.mjs \/p15c\//);
   assert.match(compose, /command:\s*\[node, \/p15c\/p15c-headless-contracts\.mjs, test-client, http:\/\/calls:8080\]/);
+  assert.match(compose, /COPY scripts\/p15c-package-json-normalizer\.mjs \/p15c\//);
+  assert.match(compose, /RUN node \/p15c\/p15c-package-json-normalizer\.mjs package\.json && corepack enable/);
+  const dockerignore = readFileSync(new URL('../.dockerignore', import.meta.url), 'utf8');
+  assert.match(dockerignore, /^!scripts\/p15c-package-json-normalizer\.mjs$/m);
 });
