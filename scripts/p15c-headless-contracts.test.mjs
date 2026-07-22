@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { createServer } from 'node:http';
 import test from 'node:test';
 
 import {
@@ -10,6 +12,7 @@ import {
   executeCleanupPlan,
   executeStagedLifecycle,
   removeValidatedOwnedImages,
+  runCallsSignalingE2E,
   validateBuildPolicy,
   validateCollisionInventory,
   validateCleanupInventory,
@@ -359,4 +362,50 @@ test('KeepRunning occurs only after gates and wrong receipt makes zero Docker ca
 test('cleanup inventory must be empty', () => {
   assert.equal(validateCleanupInventory({ containers: 0, networks: 0, volumes: 0, images: 0 }), true);
   assert.throws(() => validateCleanupInventory({ containers: 0, networks: 1, volumes: 0, images: 0 }));
+});
+
+test('owned test-client runs semantic calls signaling queue, drain, rejection and pending behavior', async () => {
+  const pending = [];
+  const server = createServer(async (request, response) => {
+    const url = new URL(request.url, 'http://127.0.0.1');
+    const json = (status, value) => { response.writeHead(status, { 'content-type': 'application/json' }); response.end(JSON.stringify(value)); };
+    if (request.method === 'POST' && url.pathname === '/api/calls/signal') {
+      const chunks = [];
+      for await (const chunk of request) chunks.push(chunk);
+      const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      if (!body.callId || !body.conversationId || !body.sender?.value || !body.recipient?.value) return json(400, { error: 'invalid-request' });
+      pending.push(body);
+      return json(202, { accepted: true, callId: body.callId });
+    }
+    if (request.method === 'GET' && url.pathname.startsWith('/api/calls/inbox/')) {
+      const recipient = decodeURIComponent(url.pathname.slice('/api/calls/inbox/'.length));
+      const selected = pending.filter(value => value.recipient.value === recipient);
+      pending.splice(0, pending.length, ...pending.filter(value => value.recipient.value !== recipient));
+      return json(200, selected);
+    }
+    if (request.method === 'GET' && url.pathname === '/stats') return json(200, { inventory: { callSignals: pending.length } });
+    return json(404, { error: 'not-found' });
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const address = server.address();
+    const result = await runCallsSignalingE2E(`http://127.0.0.1:${address.port}`);
+    assert.deepEqual(result, { malformedRejected: true, firstDrained: true, unrelatedPending: true, finalPending: 0 });
+  } finally {
+    await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  }
+});
+
+test('release contract and documentation keep GO outcomes conditional until real lifecycle', () => {
+  const contract = JSON.parse(readFileSync(new URL('../release/contracts/p15c-headless-v1.json', import.meta.url), 'utf8'));
+  assert.equal(Object.hasOwn(contract, 'acceptance'), false);
+  assert.deepEqual(contract.currentStatus, ['IMPLEMENTED', 'REAL-LIFECYCLE-PENDING', 'NO-GO']);
+  assert.ok(Array.isArray(contract.acceptanceTarget) && contract.acceptanceTarget.includes('P15C1-HEADLESS-HARNESS-GO'));
+  const docs = readFileSync(new URL('../docs/P15C_HEADLESS_HARNESS.md', import.meta.url), 'utf8');
+  assert.doesNotMatch(docs, /Passing P15C means only:/);
+  assert.match(docs, /acceptance target/i);
+  assert.match(docs, /real lifecycle pending/i);
+  const compose = readFileSync(new URL('../docker-compose.p15c-headless.yml', import.meta.url), 'utf8');
+  assert.match(compose, /COPY --chown=node:node scripts\/p15c-headless-contracts\.mjs \/p15c\//);
+  assert.match(compose, /command:\s*\[node, \/p15c\/p15c-headless-contracts\.mjs, test-client, http:\/\/calls:8080\]/);
 });

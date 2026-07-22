@@ -33,4 +33,8 @@ if ($planCall -ge $buildCall -or $planCall -ge $upCall) { throw 'real orchestrat
 if ($text -notmatch "eth_chainId" -or $text -notmatch "0x7a69") { throw 'Hardhat readiness must prove exact JSON-RPC chain id' }
 if ($text -notmatch 'Clear-P15CEnvironment') { throw 'driver must clear every P15C process environment value' }
 if ($text -notmatch 'receipt-retained') { throw 'retained Run must use a distinct no-cleanup/no-evidence plan' }
+
+$integration = Join-Path $PSScriptRoot 'p15c-headless-lab.integration.test.ps1'
+powershell -NoProfile -ExecutionPolicy Bypass -File $integration -NonDockerSequenceRegression *> $null
+if ($LASTEXITCODE -ne 0) { throw 'integration wrapper loses snapshotted inputs across sequential in-process driver calls' }
 Write-Output 'P15C lifecycle static tests passed.'
