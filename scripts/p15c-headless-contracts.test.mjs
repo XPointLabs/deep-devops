@@ -32,6 +32,10 @@ import {
   canDeleteOwnedOutput,
   validateReceiptResources,
   validateImageSourceBindings,
+  executeExactResourceCleanup,
+  loadValidatedReceiptOnce,
+  publishOwnedOutput,
+  stableForeignInventory,
   validateProjectName
 } from './p15c-headless-contracts.mjs';
 
@@ -48,14 +52,14 @@ test('project namespace is exact and bounded', () => {
   }
 });
 
-test('cleanup is exact-project compose down only', () => {
-  assert.equal(assertSafeCleanupCommand(`docker compose -p ${project} -f docker-compose.p15c-headless.yml down --volumes --remove-orphans`, project), true);
+test('cleanup rejects compose down and every broad Docker mutation', () => {
   for (const command of [
     'docker system prune -af',
     'docker container prune',
     'docker rm -f $(docker ps -aq)',
     'docker compose down --volumes',
-    `docker compose -p p15c-fedcba9876543210 down --volumes --remove-orphans`
+    `docker compose -p p15c-fedcba9876543210 down --volumes --remove-orphans`,
+    `docker compose -p ${project} -f docker-compose.p15c-headless.yml down --volumes --remove-orphans`
   ]) assert.throws(() => assertSafeCleanupCommand(command, project));
 });
 
@@ -243,10 +247,110 @@ test('collision gate runs before build and rejects every owned namespace collisi
   }
 });
 
-test('foreign inventory comparison is byte-for-byte stable', () => {
-  const before = '{"containers":["foreign-a"],"images":["foreign-b"]}\n';
+test('foreign inventory ignores runtime state but rejects identity or membership drift', () => {
+  const records = {
+    containers: [{ id: 'a'.repeat(64), name: '/foreign', image: 'sha256:' + 'b'.repeat(64), project: 'other', status: 'running', health: 'healthy', restartCount: 0 }],
+    images: [{ id: 'sha256:' + 'c'.repeat(64), repository: 'foreign', tag: 'one', digest: 'sha256:' + 'd'.repeat(64) }],
+    networks: [{ id: 'e'.repeat(64), name: 'foreign', driver: 'bridge', scope: 'local', project: 'other' }],
+    volumes: [{ name: 'foreign', driver: 'local', project: 'other' }]
+  };
+  const before = stableForeignInventory(records);
+  const afterRestart = stableForeignInventory({ ...records, containers: [{ ...records.containers[0], status: 'restarting', health: 'starting', restartCount: 9 }] });
+  assert.equal(validateForeignInventoryInvariant(before, afterRestart), true);
   assert.equal(validateForeignInventoryInvariant(before, before), true);
-  assert.throws(() => validateForeignInventoryInvariant(before, before.replace('a', 'c')));
+  assert.throws(() => validateForeignInventoryInvariant(before, stableForeignInventory({ ...records, containers: [] })));
+  assert.throws(() => validateForeignInventoryInvariant(before, stableForeignInventory({ ...records, containers: [{ ...records.containers[0], id: 'f'.repeat(64) }] })));
+});
+
+test('exact cleanup captures evidence and revalidates every resource immediately before exact removal', async () => {
+  const label = { 'com.xpoint.p15c.ownership-nonce': nonce };
+  const resources = [
+    { kind: 'container', id: '1'.repeat(64), name: `${project}-storage-1`, project, nonce, role: 'storage', labels: label },
+    { kind: 'network', id: '2'.repeat(64), name: `${project}_runtime`, project, nonce, role: 'runtime', labels: label },
+    { kind: 'volume', id: `${project}_calls-state`, name: `${project}_calls-state`, project, nonce, role: 'calls-state', labels: label },
+    { kind: 'image', id: `sha256:${'3'.repeat(64)}`, name: `${project}-calls`, project, nonce, role: 'calls', labels: label }
+  ];
+  const live = new Map(resources.map(resource => [`${resource.kind}:${resource.id}`, structuredClone(resource)]));
+  const calls = [];
+  await executeExactResourceCleanup({
+    project,
+    nonce,
+    captured: resources,
+    list: async () => [...live.values()],
+    inspect: async resource => live.get(`${resource.kind}:${resource.id}`),
+    remove: async (resource, command) => {
+      calls.push(command);
+      live.delete(`${resource.kind}:${resource.id}`);
+    }
+  });
+  assert.deepEqual(calls, [
+    ['container', 'rm', '--force', '1'.repeat(64)],
+    ['network', 'rm', '2'.repeat(64)],
+    ['volume', 'rm', `${project}_calls-state`],
+    ['image', 'rm', `sha256:${'3'.repeat(64)}`]
+  ]);
+});
+
+test('post-capture same-project orphan injection is never removed', async () => {
+  const label = { 'com.xpoint.p15c.ownership-nonce': nonce };
+  const owned = { kind: 'container', id: '1'.repeat(64), name: `${project}-storage-1`, project, nonce, role: 'storage', labels: label };
+  const injected = { kind: 'container', id: '9'.repeat(64), name: `${project}-injected`, project, nonce, role: 'injected', labels: label };
+  const calls = [];
+  await assert.rejects(() => executeExactResourceCleanup({
+    project,
+    nonce,
+    captured: [owned],
+    list: async () => [owned, injected],
+    inspect: async () => owned,
+    remove: async (_resource, command) => calls.push(command)
+  }));
+  assert.deepEqual(calls, []);
+});
+
+test('stranded labelled preflight container is removable but zero-owned evidence fails closed', async () => {
+  const label = { 'com.xpoint.p15c.ownership-nonce': nonce };
+  const preflight = { kind: 'container', id: '4'.repeat(64), name: `${project}-preflight`, project, nonce, role: 'p15c-preflight-node', labels: label };
+  const live = new Map([[`container:${preflight.id}`, preflight]]);
+  const calls = [];
+  await executeExactResourceCleanup({ project, nonce, captured: [preflight], list: async () => [...live.values()], inspect: async () => preflight, remove: async (resource, command) => { calls.push(command); live.delete(`${resource.kind}:${resource.id}`); } });
+  assert.deepEqual(calls, [['container', 'rm', '--force', preflight.id]]);
+  await assert.rejects(() => executeExactResourceCleanup({ project, nonce, captured: [], list: async () => [], inspect: async () => null, remove: async () => assert.fail('must not remove') }));
+});
+
+test('retained receipt bytes are read once and validated summary is the only authority', async () => {
+  let reads = 0;
+  let bytes = Buffer.from('{"project":"first"}');
+  const summary = await loadValidatedReceiptOnce({
+    read: async () => { reads += 1; const result = bytes; bytes = Buffer.from('{"project":"substituted"}'); return result; },
+    validate: raw => ({ project: JSON.parse(raw).project, receiptSha256: 'a'.repeat(64) })
+  });
+  assert.equal(reads, 1);
+  assert.deepEqual(summary, { project: 'first', receiptSha256: 'a'.repeat(64) });
+  assert.throws(() => { summary.project = 'mutated'; });
+});
+
+test('output publication stages in owned tree and revalidates parents immediately before atomic no-overwrite move', async () => {
+  const calls = [];
+  await publishOwnedOutput({
+    staged: 'C:\\owned\\run\\evidence.stage',
+    destination: 'C:\\evidence\\result.json',
+    ownedRoot: 'C:\\owned\\run',
+    destinationExists: async () => false,
+    validateParents: async () => { calls.push('parents'); return true; },
+    moveNoReplace: async () => calls.push('move')
+  });
+  assert.deepEqual(calls, ['parents', 'parents', 'move']);
+
+  calls.length = 0;
+  await assert.rejects(() => publishOwnedOutput({
+    staged: 'C:\\owned\\run\\evidence.stage',
+    destination: 'C:\\evidence\\result.json',
+    ownedRoot: 'C:\\owned\\run',
+    destinationExists: async () => false,
+    validateParents: async () => { calls.push('parents'); return calls.length === 1; },
+    moveNoReplace: async () => calls.push('move')
+  }));
+  assert.deepEqual(calls, ['parents', 'parents']);
 });
 
 test('receipt resources revalidate nonce, sources and exact image labels', () => {
@@ -406,12 +510,13 @@ test('owned test-client runs semantic calls signaling queue, drain, rejection an
       const chunks = [];
       for await (const chunk of request) chunks.push(chunk);
       const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-      if (!body.callId || !body.conversationId || !body.sender?.value || !body.recipient?.value) return json(400, { error: 'invalid-request' });
+      if (!body.callId || !body.conversationId || !/^05[0-9a-f]{64}$/.test(body.sender?.value) || !/^05[0-9a-f]{64}$/.test(body.recipient?.value)) return json(400, { error: 'invalid-request' });
       pending.push(body);
       return json(202, { accepted: true, callId: body.callId });
     }
     if (request.method === 'GET' && url.pathname.startsWith('/api/calls/inbox/')) {
       const recipient = decodeURIComponent(url.pathname.slice('/api/calls/inbox/'.length));
+      if (!/^05[0-9a-f]{64}$/.test(recipient)) return json(400, { error: 'invalid-request' });
       const selected = pending.filter(value => value.recipient.value === recipient);
       pending.splice(0, pending.length, ...pending.filter(value => value.recipient.value !== recipient));
       return json(200, selected);

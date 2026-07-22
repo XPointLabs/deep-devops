@@ -12,9 +12,9 @@ const tree = 'b'.repeat(40);
 const digest = `sha256:${'c'.repeat(64)}`;
 
 test('source record requires canonical clean exact non-shallow Git root', () => {
-  const valid = { expectedPath: 'C:\\source', canonicalPath: 'C:\\source', gitRoot: 'C:\\source', sha, tree, expectedSha: sha, expectedTree: tree, dirty: false, reparse: false, shallow: false, replaceRefs: [], alternates: [], grafts: false, indexFlags: [], trackedContentMatches: true, sparse: false, ambientGitOverrides: [] };
+  const valid = { expectedPath: 'C:\\source', canonicalPath: 'C:\\source', gitRoot: 'C:\\source', sha, tree, expectedSha: sha, expectedTree: tree, dirty: false, reparse: false, shallow: false, replaceRefs: [], alternates: [], grafts: false, infoAttributes: false, coreAttributesFile: '', specialMetadata: [], indexFlags: [], trackedContentMatches: true, sparse: false, ambientGitOverrides: [] };
   assert.equal(validateSourceRecord(valid), true);
-  for (const patch of [{ dirty: true }, { reparse: true }, { shallow: true }, { replaceRefs: ['x'] }, { alternates: ['x'] }, { grafts: true }, { indexFlags: ['S hidden.cs'] }, { trackedContentMatches: false }, { sparse: true }, { ambientGitOverrides: ['GIT_OBJECT_DIRECTORY'] }, { sha: 'd'.repeat(40) }, { tree: 'd'.repeat(40) }, { gitRoot: 'C:\\other' }, { expectedPath: 'C:\\carrier' }]) {
+  for (const patch of [{ dirty: true }, { reparse: true }, { shallow: true }, { replaceRefs: ['x'] }, { alternates: ['x'] }, { grafts: true }, { infoAttributes: true }, { coreAttributesFile: 'C:\\poison' }, { specialMetadata: ['info/suspicious'] }, { indexFlags: ['S hidden.cs'] }, { trackedContentMatches: false }, { sparse: true }, { ambientGitOverrides: ['GIT_OBJECT_DIRECTORY'] }, { sha: 'd'.repeat(40) }, { tree: 'd'.repeat(40) }, { gitRoot: 'C:\\other' }, { expectedPath: 'C:\\carrier' }]) {
     assert.throws(() => validateSourceRecord({ ...valid, ...patch }));
   }
 });
@@ -83,6 +83,28 @@ test('inspectSource checks common-dir alternates and grafts for linked worktrees
     rmSync(join(objectInfo, 'alternates'));
     writeFileSync(join(commonPath, 'info', 'grafts'), `${sha} ${'0'.repeat(40)}\n`);
     assert.throws(() => inspectSource({ path: linked, sha, tree }));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('inspectSource rejects repository-local export attributes and configured attribute files', () => {
+  const root = mkdtempSync(join(tmpdir(), 'p15c-attributes-'));
+  try {
+    execFileSync('git', ['init', root]);
+    execFileSync('git', ['-C', root, 'config', 'user.email', 'p15c@example.invalid']);
+    execFileSync('git', ['-C', root, 'config', 'user.name', 'P15C Test']);
+    writeFileSync(join(root, 'source.txt'), 'exact source\n');
+    execFileSync('git', ['-C', root, 'add', 'source.txt']);
+    execFileSync('git', ['-C', root, 'commit', '-m', 'source']);
+    const commit = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    const commitTree = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD^{tree}'], { encoding: 'utf8' }).trim();
+    const info = join(root, '.git', 'info');
+    writeFileSync(join(info, 'attributes'), 'source.txt export-ignore\n');
+    assert.throws(() => inspectSource({ path: root, sha: commit, tree: commitTree }), /attributes/i);
+    rmSync(join(info, 'attributes'));
+    execFileSync('git', ['-C', root, 'config', 'core.attributesFile', join(root, 'poison.attributes')]);
+    assert.throws(() => inspectSource({ path: root, sha: commit, tree: commitTree }), /attributes/i);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

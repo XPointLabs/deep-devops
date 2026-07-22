@@ -161,6 +161,38 @@ test('calls runtime queues, returns, and drains recipient inbox signals', async 
   }
 });
 
+test('calls runtime rejects every noncanonical party shape without queue or drain mutation', async () => {
+  const stateDir = await mkdtemp(path.join(tmpdir(), 'calls-service-runtime-'));
+  const service = await startCallsService({ port: randomPort(), stateDir });
+  const malformed = [
+    '', '04' + 'a'.repeat(64), '05' + 'a'.repeat(63), '05' + 'a'.repeat(65),
+    '05' + 'g'.repeat(64), '05' + 'A'.repeat(64), 'a'.repeat(64)
+  ];
+
+  try {
+    const accepted = await postSignal(service, callSignal({ callId: 'preserved' }));
+    assert.equal(accepted.response.status, 202);
+
+    for (const party of malformed) {
+      for (const field of ['sender', 'recipient']) {
+        const result = await postSignal(service, callSignal({ callId: `bad-${field}`, [field]: { value: party } }));
+        assert.equal(result.response.status, 400, `${field}=${party}`);
+      }
+      const inbox = await fetch(`${service.baseUrl}/api/calls/inbox/${encodeURIComponent(party)}`);
+      assert.equal(inbox.status, 400, `inbox=${party}`);
+    }
+
+    const statsResponse = await fetch(`${service.baseUrl}/stats`);
+    assert.equal((await statsResponse.json()).inventory.callSignals, 1);
+    const preserved = await fetch(`${service.baseUrl}/api/calls/inbox/${encodeURIComponent(bob)}`);
+    assert.equal(preserved.status, 200);
+    assert.deepEqual((await preserved.json()).map(signal => signal.callId), ['preserved']);
+  } finally {
+    await service.stop();
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
 test('calls runtime reloads pending signals across restart', async () => {
   const stateDir = await mkdtemp(path.join(tmpdir(), 'calls-service-runtime-'));
   const callStatePath = path.join(stateDir, 'calls.json');
