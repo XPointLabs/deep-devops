@@ -239,19 +239,30 @@ function Assert-NoCollision([string]$Project,[string]$Nonce) {
     if (($counts | Measure-Object -Sum).Sum) { throw 'P15C project/tag/resource collision exists.' }
 }
 
+function Get-DockerLabelValue($Labels,[string]$Name) {
+    if ($null -eq $Labels) { return '' }
+    $property = $Labels.PSObject.Properties[$Name]
+    if ($null -eq $property -or $null -eq $property.Value) { return '' }
+    return [string]$property.Value
+}
+
 function Get-ForeignInventory([string]$Project) {
     $containers = [Collections.Generic.List[string]]::new()
     foreach ($id in @(Invoke-DockerCapture @('container','ls','-aq','--no-trunc'))) {
         if ($id -notmatch '^[0-9a-f]{12,64}$') { throw 'P15C foreign container id is invalid.' }
-        $record = (Invoke-DockerCapture @(
-            'container', 'inspect', $id, '--format',
-            '{{.Id}}|{{.Name}}|{{.Image}}|{{index .Config.Labels "com.docker.compose.project"}}'
+        $raw = (Invoke-DockerCapture @(
+            'container', 'inspect', $id, '--format', '{{json .}}'
         ) -join '').Trim()
-        $parts = $record -split '\|', 4
-        if ($parts.Count -ne 4) {
-            throw 'P15C stable foreign container identity is invalid.'
-        }
-        if ($parts[3] -ne $Project) { $containers.Add($record) }
+        $value = $raw | ConvertFrom-Json
+        $projectLabel = Get-DockerLabelValue $value.Config.Labels `
+            'com.docker.compose.project'
+        $record = @(
+            [string]$value.Id,
+            [string]$value.Name,
+            [string]$value.Image,
+            $projectLabel
+        ) -join '|'
+        if ($projectLabel -ne $Project) { $containers.Add($record) }
     }
     $images = @(
         Invoke-DockerCapture @(
@@ -263,23 +274,35 @@ function Get-ForeignInventory([string]$Project) {
     )
     $networks = [Collections.Generic.List[string]]::new()
     foreach ($id in @(Invoke-DockerCapture @('network','ls','-q','--no-trunc'))) {
-        $record = (Invoke-DockerCapture @(
-            'network', 'inspect', $id, '--format',
-            '{{.Id}}|{{.Name}}|{{.Driver}}|{{.Scope}}|{{index .Labels "com.docker.compose.project"}}'
+        $raw = (Invoke-DockerCapture @(
+            'network', 'inspect', $id, '--format', '{{json .}}'
         ) -join '').Trim()
-        $parts = $record -split '\|',5
-        if ($parts.Count -ne 5) { throw 'P15C stable foreign network inventory is invalid.' }
-        if ($parts[4] -ne $Project) { $networks.Add($record) }
+        $value = $raw | ConvertFrom-Json
+        $projectLabel = Get-DockerLabelValue $value.Labels `
+            'com.docker.compose.project'
+        $record = @(
+            [string]$value.Id,
+            [string]$value.Name,
+            [string]$value.Driver,
+            [string]$value.Scope,
+            $projectLabel
+        ) -join '|'
+        if ($projectLabel -ne $Project) { $networks.Add($record) }
     }
     $volumes = [Collections.Generic.List[string]]::new()
     foreach ($name in @(Invoke-DockerCapture @('volume','ls','-q'))) {
-        $record = (Invoke-DockerCapture @(
-            'volume', 'inspect', $name, '--format',
-            '{{.Name}}|{{.Driver}}|{{index .Labels "com.docker.compose.project"}}'
+        $raw = (Invoke-DockerCapture @(
+            'volume', 'inspect', $name, '--format', '{{json .}}'
         ) -join '').Trim()
-        $parts = $record -split '\|',3
-        if ($parts.Count -ne 3) { throw 'P15C stable foreign volume inventory is invalid.' }
-        if ($parts[2] -ne $Project) { $volumes.Add($record) }
+        $value = $raw | ConvertFrom-Json
+        $projectLabel = Get-DockerLabelValue $value.Labels `
+            'com.docker.compose.project'
+        $record = @(
+            [string]$value.Name,
+            [string]$value.Driver,
+            $projectLabel
+        ) -join '|'
+        if ($projectLabel -ne $Project) { $volumes.Add($record) }
     }
     return [ordered]@{
         containers = @($containers | Sort-Object)

@@ -54,6 +54,31 @@ public static class FakeDocker
                 return 0;
             }
         }
+        if (args.Length >= 2 && args[0] == "network" && args[1] == "ls")
+        {
+            Console.WriteLine(new string('c', 64));
+            return 0;
+        }
+        if (args.Length >= 2 && args[0] == "network" && args[1] == "inspect" &&
+            command.Contains("{{json .}}"))
+        {
+            Console.WriteLine("{\"Id\":\"" + new string('c', 64) +
+                "\",\"Name\":\"foreign-net\",\"Driver\":\"bridge\"," +
+                "\"Scope\":\"local\",\"Labels\":null}");
+            return 0;
+        }
+        if (args.Length >= 2 && args[0] == "volume" && args[1] == "ls")
+        {
+            Console.WriteLine("foreign-volume");
+            return 0;
+        }
+        if (args.Length >= 2 && args[0] == "volume" && args[1] == "inspect" &&
+            command.Contains("{{json .}}"))
+        {
+            Console.WriteLine("{\"Name\":\"foreign-volume\",\"Driver\":\"local\"," +
+                "\"Labels\":null}");
+            return 0;
+        }
         return 0;
     }
 }
@@ -71,6 +96,7 @@ try {
         -OutputType ConsoleApplication
     $env:PATH = $root + [IO.Path]::PathSeparator + $priorPath
     Import-ProductionFunction 'Invoke-DockerCapture'
+    Import-ProductionFunction 'Get-DockerLabelValue'
     Import-ProductionFunction 'Get-ForeignInventory'
     try {
         $inventory = Get-ForeignInventory 'p15c-0123456789abcdef'
@@ -81,6 +107,14 @@ try {
     if (@($value.containers).Count -ne 1 -or
         $value.containers[0] -notmatch ('^a{64}\|/foreign\|sha256:b{64}\|$')) {
         throw 'P15C foreign container identity projection is not stable or null-label safe.'
+    }
+    if (@($value.networks).Count -ne 1 -or
+        $value.networks[0] -notmatch ('^c{64}\|foreign-net\|bridge\|local\|$')) {
+        throw 'P15C foreign network identity projection is not stable or null-label safe.'
+    }
+    if (@($value.volumes).Count -ne 1 -or
+        $value.volumes[0] -ne 'foreign-volume|local|') {
+        throw 'P15C foreign volume identity projection is not stable or null-label safe.'
     }
 } finally {
     $env:PATH = $priorPath
