@@ -7,6 +7,7 @@ import {
   assertSafeCleanupCommand,
   executeWithGuaranteedCleanup,
   executeReceiptAction,
+  executeCleanupPlan,
   executeStagedLifecycle,
   removeValidatedOwnedImages,
   validateBuildPolicy,
@@ -19,6 +20,10 @@ import {
   validateIdentitySurfaces,
   validateKeepRunningGate,
   validateLifecycleOperationOrder,
+  validateLifecycleOperationPrefix,
+  validateOwnedOutputPaths,
+  validateRetainedOwnershipState,
+  validateFinalEvidenceEligibility,
   validateOwnershipReceipt,
   validateReceiptResources,
   validateImageSourceBindings,
@@ -145,7 +150,7 @@ test('compose mutations fail for every isolation and image invariant', () => {
 });
 
 test('orchestrator order proves collision and foreign snapshot precede build/up', () => {
-  const valid = ['source-preflight', 'image-preflight', 'collision-check', 'foreign-snapshot', 'generate-secrets', 'compose-config', 'build', 'up-contracts', 'deploy-contracts', 'up-runtime', 'probe', 'e2e', 'labels', 'evidence', 'cleanup'];
+  const valid = ['source-preflight', 'image-preflight', 'collision-check', 'foreign-snapshot', 'generate-secrets', 'compose-config', 'build', 'up-contracts', 'deploy-contracts', 'up-runtime', 'probe', 'e2e', 'labels', 'cleanup', 'evidence'];
   assert.equal(validateLifecycleOperationOrder(valid), true);
   for (const mutation of [
     valid.filter(value => value !== 'collision-check'),
@@ -153,6 +158,21 @@ test('orchestrator order proves collision and foreign snapshot precede build/up'
     [...valid.slice(0, 6), 'build', 'collision-check', ...valid.slice(7)],
     [...valid.slice(0, 7), 'up-contracts', 'foreign-snapshot', ...valid.slice(8)]
   ]) assert.throws(() => validateLifecycleOperationOrder(mutation));
+});
+
+test('actual observed normal and retained prefixes cannot fake cleanup/evidence', () => {
+  const common = ['source-preflight', 'image-preflight', 'collision-check', 'foreign-snapshot', 'generate-secrets', 'compose-config', 'build', 'up-contracts', 'deploy-contracts', 'up-runtime', 'probe', 'e2e', 'labels'];
+  assert.equal(validateLifecycleOperationPrefix([...common, 'cleanup', 'evidence'], { retained: false }), true);
+  assert.equal(validateLifecycleOperationPrefix([...common, 'receipt-retained'], { retained: true }), true);
+  assert.throws(() => validateLifecycleOperationPrefix([...common, 'cleanup', 'evidence'], { retained: true }));
+  assert.throws(() => validateLifecycleOperationPrefix([...common, 'evidence', 'cleanup'], { retained: false }));
+});
+
+test('final PASS evidence is legal only after proved cleanup and foreign invariance', () => {
+  assert.equal(validateFinalEvidenceEligibility({ retained: false, zeroOwned: true, foreignUnchanged: true }), true);
+  for (const value of [{ retained: true, zeroOwned: true, foreignUnchanged: true }, { retained: false, zeroOwned: false, foreignUnchanged: true }, { retained: false, zeroOwned: true, foreignUnchanged: false }]) {
+    assert.throws(() => validateFinalEvidenceEligibility(value));
+  }
 });
 
 test('Hardhat is ephemeral chain 31337 without chain volume or external authority env', () => {
@@ -273,6 +293,38 @@ test('operation plus cleanup failure surfaces both errors', async () => {
     () => executeWithGuaranteedCleanup(async () => { throw new Error('operation failed'); }, async () => { throw new Error('cleanup failed'); }),
     error => error instanceof AggregateError && error.errors.some(value => value.message === 'operation failed') && error.errors.some(value => value.message === 'cleanup failed')
   );
+});
+
+test('cleanup plan runs every step, aggregates failures and preserves ownership state', async () => {
+  const calls = [];
+  await assert.rejects(
+    () => executeCleanupPlan([
+      async () => { calls.push('down'); throw new Error('down failed'); },
+      async () => { calls.push('images'); throw new Error('images failed'); },
+      async () => { calls.push('secrets'); },
+      async () => { calls.push('run-state'); }
+    ]),
+    error => error instanceof AggregateError && error.errors.length === 2 && error.preserveOwnershipState === true
+  );
+  assert.deepEqual(calls, ['down', 'images', 'secrets', 'run-state']);
+});
+
+test('retained state validates exact markers, children, manifest, sources and receipt before Docker', () => {
+  const base = 'C:\\Users\\test\\AppData\\Local\\Deep\\P15C';
+  const runPath = `${base}\\${project}-${nonce}`;
+  const receipt = { schema: 'deep-p15c-ownership.v1', project, nonce, composeSha256: '9'.repeat(64), sources: { devops: { sha, tree } }, images: [{ role: 'storage', source: 'devops', sha, tree, id: digest }] };
+  const valid = { base, runPath, runMarker: 'deep-p15c-run.v1', secretMarker: 'deep-p15c-ephemeral-secrets.v1', secretChildren: ['.p15c-secret-owner', 'node-1.seed', 'node-2.seed', 'node-3.seed', 'node-1.config.json', 'node-2.config.json', 'node-3.config.json'], receipt, expectedSources: receipt.sources, expectedRoles: ['storage'], manifestValid: true, sourcePreflightPassed: true };
+  assert.equal(validateRetainedOwnershipState(valid), true);
+  for (const patch of [{ runMarker: 'bad' }, { secretMarker: 'bad' }, { secretChildren: [...valid.secretChildren, 'extra'] }, { runPath: 'C:\\repo\\owned' }, { manifestValid: false }, { sourcePreflightPassed: false }, { receipt: { ...receipt, images: [...receipt.images, receipt.images[0]] } }]) {
+    assert.throws(() => validateRetainedOwnershipState({ ...valid, ...patch }));
+  }
+});
+
+test('evidence and receipt paths are canonical outside repos and owned run tree', () => {
+  const repos = ['C:\\Work\\repo'];
+  const runTree = 'C:\\Users\\test\\AppData\\Local\\Deep\\P15C\\run';
+  assert.equal(validateOwnedOutputPaths({ evidence: 'C:\\evidence\\result.json', receipt: 'C:\\evidence\\receipt.json', repos, runTree }), true);
+  for (const patch of [{ evidence: 'C:\\Work\\repo\\e.json' }, { receipt: `${runTree}\\receipt.json` }, { evidence: 'C:\\evidence\\..\\Work\\repo\\e.json' }]) assert.throws(() => validateOwnedOutputPaths({ evidence: 'C:\\evidence\\result.json', receipt: 'C:\\evidence\\receipt.json', repos, runTree, ...patch }));
 });
 
 test('staged lifecycle cleans normal success and every build/up/probe/label/e2e failure', async () => {
