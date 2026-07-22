@@ -305,6 +305,9 @@ services:
         USER node
     command: [npm, run, ci:full]
     environment:
+      HOME: /tmp
+      NPM_CONFIG_CACHE: /tmp/npm-cache
+      NPM_CONFIG_UPDATE_NOTIFIER: "false"
       XNODE_URL: http://xnode-1:8080
       DEEP_REGISTRY_URL: http://registry:8080
       DEEP_STORAGE_URL: http://storage:8080

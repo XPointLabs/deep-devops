@@ -46,6 +46,13 @@ function Get-FileSha256([string]$Path) {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 
+function Write-NewUtf8File([string]$Path, [string]$Content) {
+    $bytes = [System.Text.UTF8Encoding]::new($false).GetBytes($Content)
+    $stream = [System.IO.FileStream]::new($Path, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+    try { $stream.Write($bytes, 0, $bytes.Length); $stream.Flush($true) }
+    finally { $stream.Dispose(); [Array]::Clear($bytes, 0, $bytes.Length) }
+}
+
 function Assert-P15COperationPlan([string[]]$Observed, [switch]$Prefix, [switch]$Retained) {
     $expected = if ($Retained) { $RetainedPlan } else { $NormalPlan }
     if ($Prefix) { $expected = @($expected | Select-Object -First $Observed.Count) }
@@ -356,7 +363,7 @@ function Assert-ForeignSnapshot([string]$Path) {
 function New-Evidence([string]$Path) {
     $input = "$Path.input"
     $value = [ordered]@{ schema='deep-p15c-headless-evidence.v1'; evidenceClass='headless-harness'; productRuntime=$false; result='pass'; gates=[ordered]@{ source='pass'; images='pass'; contracts='pass'; runtime='pass'; e2e='pass'; cleanup='pass' }; counts=[ordered]@{ services=11; xnodes=3; localContracts=4 } }
-    [System.IO.File]::WriteAllText($input, ($value | ConvertTo-Json -Depth 8), [System.Text.UTF8Encoding]::new($false))
+    Write-NewUtf8File $input ($value | ConvertTo-Json -Depth 8)
     try { Invoke-NodeQuiet @((Join-Path $PSScriptRoot 'p15c-evidence-sanitizer.mjs'),'write',$input,$Path) }
     finally { if (Test-Path -LiteralPath $input) { [System.IO.File]::Delete($input) } }
 }
@@ -516,7 +523,7 @@ function Invoke-Run {
         if ($KeepRunning) {
             $receiptSources = [ordered]@{}; foreach ($name in $sources.Keys) { $receiptSources[$name] = [ordered]@{sha=$sources[$name].Sha;tree=$sources[$name].Tree} }
             $receipt = [ordered]@{schema='deep-p15c-ownership.v1';project=$project;nonce=$nonce;composeSha256=(Get-FileSha256 $ComposePath);sources=$receiptSources;images=$imagesReceipt}
-            [System.IO.File]::WriteAllText($ReceiptPath,($receipt|ConvertTo-Json -Depth 10),[System.Text.UTF8Encoding]::new($false))
+            Write-NewUtf8File $ReceiptPath ($receipt | ConvertTo-Json -Depth 10)
             $operations.Add('receipt-retained'); Assert-CompletedPlan $operations.ToArray() -Retained; $retained = $true
             return
         }
