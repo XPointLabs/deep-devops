@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
@@ -589,9 +590,13 @@ async function main() {
     return;
   }
   if (command === 'summarize-receipt' && path && expectedJson) {
-    const receipt = parseJsonNoDuplicateKeys(await readFile(path, 'utf8'));
+    const bytes = await readFile(path);
+    const receipt = parseJsonNoDuplicateKeys(bytes.toString('utf8'));
     validateOwnershipReceipt(receipt, JSON.parse(expectedJson));
-    process.stdout.write(JSON.stringify({ project: receipt.project, nonce: receipt.nonce, manifestSha256: receipt.manifestSha256, foreignSnapshotSha256: receipt.foreignSnapshotSha256 }));
+    process.stdout.write(JSON.stringify({
+      receipt,
+      receiptSha256: createHash('sha256').update(bytes).digest('hex')
+    }));
     return;
   }
   if (command === 'validate-runtime-inventory' && path && expectedJson) {

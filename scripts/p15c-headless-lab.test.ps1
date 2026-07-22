@@ -13,7 +13,7 @@ foreach ($forbidden in @('docker system prune', 'docker container prune', '/var/
 foreach ($forbiddenPattern in @('\bUAT\b', 'deep-uat', 'old\s+identity', 'legacy\s+compose', 'mock\s+Xray', 'profile\s+(?:activation|signer)', 'client\s+verifier', 'runtime\s+registration', 'product[- ]?runtime\s*:\s*true')) {
     if ($text -match $forbiddenPattern) { throw "forbidden authority or activation construct: $forbiddenPattern" }
 }
-if ($text -notmatch 'down\s+--volumes\s+--remove-orphans') { throw 'exact compose cleanup is absent' }
+if ($text -match 'down\s+--volumes|--remove-orphans') { throw 'broad compose cleanup is prohibited' }
 if ($text -notmatch 'Vless__Enabled:\s*["'']?false') { throw 'VLESS is not explicitly disabled' }
 if ($text -notmatch '127\.0\.0\.1:') { throw 'loopback-only host bindings are absent' }
 if ($text -notmatch 'internal:\s*true') { throw 'internal runtime bridge is absent' }
@@ -36,26 +36,33 @@ if ($text -notmatch "eth_chainId" -or $text -notmatch "0x7a69") { throw 'Hardhat
 if ($text -notmatch 'Clear-P15CEnvironment') { throw 'driver must clear every P15C process environment value' }
 if ($text -notmatch 'receipt-retained') { throw 'retained Run must use a distinct no-cleanup/no-evidence plan' }
 if ($driverText -match '\{\{\.Status\}\}') { throw 'foreign inventory must not use human-formatted Docker status' }
-foreach ($stableField in @('.State.Status','.State.Health.Status','.State.StartedAt','.State.FinishedAt','.RestartCount')) {
-    if ($driverText.IndexOf($stableField, [StringComparison]::Ordinal) -lt 0) { throw "stable inspect-derived foreign inventory field is absent: $stableField" }
+foreach ($volatileField in @('.State.StartedAt','.State.FinishedAt','.RestartCount')) {
+    if ($driverText.IndexOf($volatileField, [StringComparison]::Ordinal) -ge 0) { throw "foreign inventory contains volatile runtime state: $volatileField" }
 }
 if ($composeText -match '(?m)^\s*# syntax=docker/dockerfile:1\.7\s*$') { throw 'floating Dockerfile frontend is prohibited' }
 foreach ($contextName in @('XNODE','E2E','REGISTRY','STAKING','CONTRACTS')) {
     if ($composeText -notmatch "P15C_$($contextName)_CONTEXT") { throw "exact archived build context is absent: $contextName" }
 }
-if ($composeText -match 'additional_contexts:[^\r\n]*P15C_(?:XNODE|E2E|REGISTRY|STAKING|CONTRACTS)_PATH' -or $driverText -notmatch 'New-ExactSourceExports') { throw 'build contexts can still copy dirty or ignored checkout outputs' }
+if ($composeText -match 'additional_contexts:[^\r\n]*P15C_(?:XNODE|E2E|REGISTRY|STAKING|CONTRACTS)_PATH' -or $driverText -notmatch 'p15c-source-export\.mjs' -or $driverText -match 'git\s+-C.+archive') { throw 'build contexts can still consume checkout-local Git attributes' }
 if ($driverText -notmatch "'--list-sdks'" -or $driverText -notmatch "com\.xpoint\.p15c\.ownership-nonce") { throw 'SDK or transient preflight container ownership accounting is incomplete' }
-if ($driverText -match 'function Assert-ReceiptSyntax' -or $driverText -notmatch 'validate-receipt') { throw 'driver and tests must use one canonical receipt validator' }
-foreach ($binding in @('manifestSha256','foreignSnapshotSha256','Assert-OwnedProjectRuntimeInventory','Remove-ExclusivelyCreatedFile','Protect-P15CAuthorityFile')) {
+if ($driverText -match 'function Assert-ReceiptSyntax' -or $driverText -notmatch 'Read-ValidatedReceiptOnce') { throw 'driver must consume one canonical receipt byte read' }
+if ($driverText -match 'Get-Content[^\r\n]+ReceiptPath') { throw 'validated receipt authority is re-read from its path' }
+foreach ($binding in @('manifestSha256','foreignSnapshotSha256','Get-OwnedResourceInventory','Remove-ExclusivelyCreatedFile','Protect-P15CAuthorityFile','Publish-OwnedOutput','Assert-RetainedHashes')) {
     if ($driverText -notmatch $binding) { throw "retained authority or cleanup binding is absent: $binding" }
 }
-$ownershipGate = $driverText.LastIndexOf('Assert-OwnedProjectRuntimeInventory', [StringComparison]::Ordinal)
-$downMutation = $driverText.LastIndexOf('Invoke-ExactDown', [StringComparison]::Ordinal)
-if ($ownershipGate -lt 0 -or $downMutation -lt 0 -or $ownershipGate -ge $downMutation) { throw 'same-project resources are not validated before compose down' }
+if ($driverText -notmatch "'container', 'rm', '--force'" -or $driverText -notmatch "'network', 'rm'" -or $driverText -notmatch "'volume', 'rm'" -or $driverText -notmatch "'image', 'rm'") { throw 'exact per-resource removal commands are incomplete' }
+if ($driverText -notmatch 'Assert-ResourceStillOwned' -or $driverText -notmatch 'Assert-InventoryKeysEqual') { throw 'resource identities are not revalidated immediately before removal' }
+$cleanMarker = $driverText.IndexOf('$ResourcesClean.Value = $true', [StringComparison]::Ordinal)
+$foreignCheck = $driverText.IndexOf('Get-ForeignInventory $Project', $cleanMarker, [StringComparison]::Ordinal)
+if ($cleanMarker -lt 0 -or $foreignCheck -lt $cleanMarker) { throw 'owned-resource clean state is not recorded before unrelated foreign validation' }
+$criticalLongLines = @(Get-Content -LiteralPath $script | Where-Object { $_.Length -gt 200 -and $_ -notmatch '^# P15C_OPERATION_PLAN:' })
+if ($criticalLongLines.Count) { throw 'critical lifecycle logic still contains lines longer than 200 characters' }
 
 $integration = Join-Path $PSScriptRoot 'p15c-headless-lab.integration.test.ps1'
 $integrationText = Get-Content -LiteralPath $integration -Raw
 if ($integrationText -notmatch 'NonDockerSequenceRegression' -or $integrationText -notmatch 'P15C_REAL_INTEGRATION\s*=\s*\$env:P15C_REAL_INTEGRATION') { throw 'integration wrapper does not snapshot P15C inputs before the first driver invocation' }
 powershell -NoProfile -ExecutionPolicy Bypass -File $integration -NonDockerSequenceRegression *> $null
 if ($LASTEXITCODE -ne 0) { throw 'integration wrapper loses snapshotted inputs across sequential in-process driver calls' }
+node --test (Join-Path $PSScriptRoot 'p15c-headless-contracts.test.mjs') *> $null
+if ($LASTEXITCODE -ne 0) { throw 'fake-Docker lifecycle behavior tests failed' }
 Write-Output 'P15C lifecycle static tests passed.'

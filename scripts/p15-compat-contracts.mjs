@@ -424,6 +424,18 @@ async function fetchBounded(target, pathname, options = {}, timeoutMs = 3_000) {
   return body;
 }
 
+async function fetchRejected(target, pathname, options = {}, expectedStatus = 400) {
+  const response = await fetch(`${target.origin}${pathname}`, {
+    ...options,
+    signal: AbortSignal.timeout(3_000)
+  });
+  const body = await response.json();
+  if (response.status !== expectedStatus || body?.error !== 'invalid-request') {
+    fail('malformed calls party did not fail with the exact rejection contract');
+  }
+  return body;
+}
+
 async function observeHealth(name) {
   const target = probeTargets[name];
   if (!target) {
@@ -545,9 +557,27 @@ async function probeOperations() {
   const callRequest = {
     callId: 'p15-call-v1',
     conversationId: 'p15-conversation-v1',
-    sender: { value: 'p15-sender-v1' },
-    recipient: { value: 'p15-recipient-v1' }
+    sender: { value: `05${'1'.repeat(64)}` },
+    recipient: { value: `05${'2'.repeat(64)}` }
   };
+  for (const malformed of [
+    { ...callRequest, sender: { value: `04${'1'.repeat(64)}` } },
+    { ...callRequest, recipient: { value: `05${'A'.repeat(64)}` } }
+  ]) {
+    await fetchRejected(
+      probeTargets.calls,
+      '/api/calls/signal',
+      jsonPost(malformed)
+    );
+  }
+  await fetchRejected(
+    probeTargets.calls,
+    `/api/calls/inbox/${encodeURIComponent(`05${'g'.repeat(64)}`)}`
+  );
+  const callsBeforeValid = await fetchBounded(probeTargets.calls, '/stats');
+  if (callsBeforeValid.inventory?.callSignals !== 0) {
+    fail('malformed calls parties mutated the pending queue');
+  }
   const callResult = await fetchBounded(
     probeTargets.calls,
     '/api/calls/signal',
@@ -609,7 +639,7 @@ async function verifyPersistenceOperations() {
 
   const inbox = await fetchBounded(
     probeTargets.calls,
-    '/api/calls/inbox/p15-recipient-v1'
+    `/api/calls/inbox/${encodeURIComponent(`05${'2'.repeat(64)}`)}`
   );
   if (!Array.isArray(inbox) || inbox.length !== 1) {
     fail('calls persistence read failed');
