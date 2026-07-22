@@ -132,14 +132,28 @@ function Clear-P15CEnvironment {
 }
 
 function Invoke-DockerCapture([string[]]$Arguments) {
-    $output = @(& docker @Arguments 2>$null)
-    if ($LASTEXITCODE -ne 0) { throw 'P15C Docker query failed.' }
+    $priorPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $output = @(& docker @Arguments 2>$null)
+        $nativeExitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $priorPreference
+    }
+    if ($nativeExitCode -ne 0) { throw 'P15C Docker query failed.' }
     return $output
 }
 
 function Invoke-DockerQuiet([string[]]$Arguments,[string]$LogPath) {
-    & docker @Arguments *> $LogPath
-    if ($LASTEXITCODE -ne 0) { throw 'P15C Docker operation failed; raw output remains only in the owned run directory.' }
+    $priorPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        & docker @Arguments *> $LogPath
+        $nativeExitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $priorPreference
+    }
+    if ($nativeExitCode -ne 0) { throw 'P15C Docker operation failed; raw output remains only in the owned run directory.' }
 }
 
 function Invoke-NodeQuiet([string[]]$Arguments) {
@@ -446,7 +460,8 @@ function New-ComposeContext(
 
 function Invoke-P15CBuild([string]$Project,[string]$LogPath) {
     Invoke-DockerQuiet @(
-        'compose', '-p', $Project, '-f', $ComposePath, 'build', '--no-cache'
+        'compose', '-p', $Project, '-f', $ComposePath,
+        'build', '--no-cache', '--pull=false'
     ) $LogPath
 }
 
@@ -593,12 +608,15 @@ function Add-DockerIds(
 
 function Get-ExpectedImageIds($OwnedImages) {
     if ($null -eq $OwnedImages) { return @() }
-    return @(
-        $OwnedImages |
-            ForEach-Object { $_.id } |
-            Where-Object { $_ -match '^sha256:[0-9a-f]{64}$' } |
-            Sort-Object -Unique
-    )
+    $ids = foreach ($candidate in @($OwnedImages)) {
+        if ($null -eq $candidate) { continue }
+        $property = $candidate.PSObject.Properties['id']
+        if ($null -ne $property -and
+            [string]$property.Value -match '^sha256:[0-9a-f]{64}$') {
+            [string]$property.Value
+        }
+    }
+    return @($ids | Sort-Object -Unique)
 }
 
 function Get-OwnedResourceInventory(
@@ -803,8 +821,15 @@ function Remove-ExactOwnedResource($Resource,[string]$LogPath) {
         'image' { @('image', 'rm', $Resource.id) }
         default { throw 'P15C cleanup resource kind is invalid.' }
     }
-    & docker @arguments *>> $LogPath
-    if ($LASTEXITCODE -ne 0) {
+    $priorPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        & docker @arguments *>> $LogPath
+        $nativeExitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $priorPreference
+    }
+    if ($nativeExitCode -ne 0) {
         throw 'P15C exact owned resource removal failed.'
     }
 }
