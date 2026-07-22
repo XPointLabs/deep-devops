@@ -1,3 +1,9 @@
+import { isIP } from 'node:net';
+
+const hostArgument = process.argv.indexOf('--host');
+const host = hostArgument >= 0 ? process.argv[hostArgument + 1] : '127.0.0.1';
+if (isIP(host) !== 4) throw new Error('seed host must be an IPv4 address');
+
 const expected = new Set([
   '4cb5abf6ad79fbf5abbccafcc269d85cd2651ed4b885b5869f241aedf0a5ba29',
   '7422b9887598068e32c4448a949adb290d0f4e35b9e01b0ee5f1a1e600fe2674',
@@ -5,7 +11,7 @@ const expected = new Set([
 ]);
 
 const contacts = await Promise.all([41801, 41802, 41803].map(async port => {
-  const response = await fetch(`http://127.0.0.1:${port}/api/network/contact`);
+  const response = await fetch(`http://${host}:${port}/api/network/contact`);
   if (!response.ok) throw new Error(`xnode contact request failed on ${port}`);
   return response.json();
 }));

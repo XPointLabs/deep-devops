@@ -7,6 +7,7 @@ const docs = readFileSync(new URL('../docs/SURVIVAL_DEV_STACK.md', import.meta.u
 const launcher = readFileSync(new URL('./survival-dev.ps1', import.meta.url), 'utf8');
 const seed = readFileSync(new URL('./survival-dev-seed.mjs', import.meta.url), 'utf8');
 const verify = readFileSync(new URL('./survival-dev-verify.mjs', import.meta.url), 'utf8');
+const contextExport = readFileSync(new URL('./survival-dev-context-export.mjs', import.meta.url), 'utf8');
 const bootstrap = readFileSync(new URL('../tools/relay-bootstrap/relay-bootstrap.mjs', import.meta.url), 'utf8');
 
 function serviceBlock(name) {
@@ -49,16 +50,31 @@ test('only local Hardhat and loopback host ports are configured', () => {
   assert.equal(new Set(bindings.map(match => match[1])).size, bindings.length);
 });
 
+test('LAN opt-in binds only the supplied IPv4 address and documents exact device forwarding', () => {
+  assert.match(launcher, /\$env:SURVIVAL_BIND_HOST = \$advertisedHost/);
+  assert.doesNotMatch(launcher, /SURVIVAL_BIND_HOST\s*=.*0\.0\.0\.0/);
+  assert.match(launcher, /Name = 'client\.windows\.env'; Host = \$HostName/);
+  assert.match(launcher, /survival-dev-seed\.mjs'\) '--host' \$advertisedHost/);
+  assert.match(launcher, /survival-dev-verify\.mjs'\) '--host' \$advertisedHost/);
+  assert.match(seed, /isIP\(host\) !== 4/);
+  assert.match(verify, /isIP\(host\) !== 4/);
+  assert.match(docs, /41801, 41802, 41803, 41810, 41821, 41822, 41823/);
+  assert.match(docs, /41545, 41811/);
+});
+
 test('every stateful service uses a named volume and operator commands are documented', () => {
   for (const volume of [
     'contracts-deployments', 'xnode-1-state', 'xnode-2-state', 'xnode-3-state',
     'registry-state', 'staking-state', 'storage-state', 'file-state', 'push-state', 'calls-state'
   ]) assert.match(compose, new RegExp(`^  ${volume}:$`, 'm'));
-  assert.match(docs, /docker compose -f docker-compose\.survival\.dev\.yml up -d --build --wait/);
+  assert.match(docs, /survival-dev\.ps1 -Action Up/);
   assert.match(docs, /docker compose -f docker-compose\.survival\.dev\.yml ps/);
   assert.match(docs, /docker compose -f docker-compose\.survival\.dev\.yml logs -f --tail=200/);
   assert.match(docs, /docker compose -f docker-compose\.survival\.dev\.yml down/);
   assert.match(docs, /formal P15C release gate/i);
+  assert.match(docs, /raw `docker compose .*up.*` is not supported/i);
+  assert.match(docs, /chain.*unsupported|unsupported.*chain/i);
+  assert.doesNotMatch(docs, /вЂ|Ã|â|�/);
   assert.doesNotMatch(docs, /--no-cache/);
 });
 
@@ -78,6 +94,7 @@ test('daily launcher always uses the fixed project without release-gate ceremony
     'f381626e41e7027ea431bfe3009e94bdd25a746beec468948d6c3c7c5dc9a54b'
   ]) assert.match(launcher, new RegExp(routerId));
   assert.match(launcher, /survival-dev-seed\.mjs/);
+  assert.match(launcher, /survival-dev-context-export\.mjs/);
   assert.doesNotMatch(launcher, /Up requires -LanHost/);
   assert.match(seed, /api\/network\/contact/);
   assert.match(seed, /relay-bootstrap/);
@@ -90,12 +107,24 @@ test('daily launcher always uses the fixed project without release-gate ceremony
   assert.match(compose, /Runtime__BootstrapFromStorage: "true"/);
   assert.match(compose, /RegistryBootstrap__BaseUrl: http:\/\/relay-bootstrap:8080/);
   assert.doesNotMatch(launcher, /nonce|evidence|receipt|P15C_/i);
+  assert.match(contextExport, /git.*ls-files/si);
+  assert.match(contextExport, /prohibited source entries/i);
 });
 
 test('development identities remain exact strings and Up proves host HTTP reachability', () => {
   for (const suffix of ['1', '2', '3']) {
     assert.match(compose, new RegExp(`Node__Ed25519PrivateKey: "[0]{63}${suffix}"`));
   }
+  assert.match(compose, /SURVIVAL_XNODE_BUILD_CONTEXT/);
+  assert.match(compose, /SURVIVAL_REGISTRY_BUILD_CONTEXT/);
+  assert.match(compose, /SURVIVAL_STAKING_BUILD_CONTEXT/);
+  assert.match(compose, /SURVIVAL_CONTRACTS_BUILD_CONTEXT/);
+  assert.doesNotMatch(compose, /additional_contexts:[\s\S]*?SURVIVAL_(?:XNODE|REGISTRY|STAKING|CONTRACTS)_PATH/);
+  assert.match(compose, /health\/live/);
+  assert.match(compose, /^x-xnode:[\s\S]*?GET \/health\/live HTTP\/1\.1[\s\S]*?^x-compat-build:/m);
+  assert.match(serviceBlock('registry'), /GET \/health\/live HTTP\/1\.1/);
+  assert.doesNotMatch(serviceBlock('xnode-1'), /test -r \/proc\/1\/status/);
+  assert.doesNotMatch(serviceBlock('registry'), /test -r \/proc\/1\/status/);
   assert.match(launcher, /--force-recreate/);
   assert.match(launcher, /Assert-SurvivalHostEndpoints/);
   for (const port of [41801, 41802, 41803, 41810, 41820, 41821, 41822, 41823, 41999]) {

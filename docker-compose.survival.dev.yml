@@ -20,7 +20,7 @@ x-xnode-build: &xnode-build
   context: .
   pull: false
   additional_contexts:
-    xnode_source: ${SURVIVAL_XNODE_PATH:-../xnode}
+    xnode_source: ${SURVIVAL_XNODE_BUILD_CONTEXT:-./artifacts/survival-dev/build-contexts/xnode}
   args:
     SDK_IMAGE: ${SURVIVAL_DOTNET_SDK_IMAGE:-mcr.microsoft.com/dotnet/sdk@sha256:7e964ea8bc6c1e18ea9fbc76ed403da41c9b19aeee2aab6bf9c845f25e891380}
     RUNTIME_IMAGE: ${SURVIVAL_DOTNET_RUNTIME_IMAGE:-mcr.microsoft.com/dotnet/aspnet@sha256:e3736b0d423db99c6988e1ddf5ea725c14b12579bb120024e5ff7ff204a14080}
@@ -58,7 +58,7 @@ x-xnode: &xnode
     Vless__Enabled: "false"
   healthcheck:
     <<: *health
-    test: [CMD-SHELL, "test -r /proc/1/status"]
+    test: [CMD, bash, -c, 'exec 3<>/dev/tcp/127.0.0.1/8080; printf "GET /health/live HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3; read -r status <&3; case "$$status" in *" 200 "*) exit 0;; *) exit 1;; esac']
 
 x-compat-build: &compat-build
   context: .
@@ -87,7 +87,7 @@ services:
       context: .
       pull: false
       additional_contexts:
-        contracts_source: ${SURVIVAL_CONTRACTS_PATH:-../xpoint-staking-contracts}
+        contracts_source: ${SURVIVAL_CONTRACTS_BUILD_CONTEXT:-./artifacts/survival-dev/build-contexts/contracts}
       args:
         NODE_IMAGE: ${SURVIVAL_NODE_IMAGE:-node@sha256:242549cd46785b480c832479a730f4f2a20865d61ea2e404fdb2a5c3d3b73ecf}
       dockerfile_inline: |
@@ -151,7 +151,7 @@ services:
       context: .
       pull: false
       additional_contexts:
-        registry_source: ${SURVIVAL_REGISTRY_PATH:-../deep-registry-api}
+        registry_source: ${SURVIVAL_REGISTRY_BUILD_CONTEXT:-./artifacts/survival-dev/build-contexts/registry}
       args:
         SDK_IMAGE: ${SURVIVAL_DOTNET_SDK_IMAGE:-mcr.microsoft.com/dotnet/sdk@sha256:7e964ea8bc6c1e18ea9fbc76ed403da41c9b19aeee2aab6bf9c845f25e891380}
         RUNTIME_IMAGE: ${SURVIVAL_DOTNET_RUNTIME_IMAGE:-mcr.microsoft.com/dotnet/aspnet@sha256:e3736b0d423db99c6988e1ddf5ea725c14b12579bb120024e5ff7ff204a14080}
@@ -174,7 +174,7 @@ services:
       Registry__StakingBackendBaseUrl: http://staking-backend:8080
     ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41810:8080"]
     volumes: [registry-state:/state]
-    healthcheck: { <<: *health, test: [CMD-SHELL, "test -r /proc/1/status"] }
+    healthcheck: { <<: *health, test: [CMD, bash, -c, 'exec 3<>/dev/tcp/127.0.0.1/8080; printf "GET /health/live HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3; read -r status <&3; case "$$status" in *" 200 "*) exit 0;; *) exit 1;; esac'] }
 
   staking-backend:
     <<: *service
@@ -184,7 +184,7 @@ services:
       context: .
       pull: false
       additional_contexts:
-        staking_source: ${SURVIVAL_STAKING_PATH:-../xpoint-staking-backend}
+        staking_source: ${SURVIVAL_STAKING_BUILD_CONTEXT:-./artifacts/survival-dev/build-contexts/staking}
       args:
         SDK_IMAGE: ${SURVIVAL_DOTNET_SDK_IMAGE:-mcr.microsoft.com/dotnet/sdk@sha256:7e964ea8bc6c1e18ea9fbc76ed403da41c9b19aeee2aab6bf9c845f25e891380}
         RUNTIME_IMAGE: ${SURVIVAL_DOTNET_RUNTIME_IMAGE:-mcr.microsoft.com/dotnet/aspnet@sha256:e3736b0d423db99c6988e1ddf5ea725c14b12579bb120024e5ff7ff204a14080}

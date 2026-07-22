@@ -16,6 +16,7 @@ $Root = [IO.Path]::GetFullPath((Split-Path $PSScriptRoot -Parent))
 $ComposePath = Join-Path $Root 'docker-compose.survival.dev.yml'
 $Project = 'deep-survival-dev'
 $baseArguments = @('compose', '-p', $Project, '-f', $ComposePath)
+$ContextRoot = Join-Path $Root 'artifacts\survival-dev\build-contexts'
 
 function Invoke-SurvivalDocker([string[]]$Arguments) {
     & docker @Arguments
@@ -24,16 +25,42 @@ function Invoke-SurvivalDocker([string[]]$Arguments) {
     }
 }
 
-function Assert-SurvivalHostEndpoints {
+function Resolve-SurvivalSource([string]$EnvironmentName,[string]$DefaultRelativePath) {
+    $configured = [Environment]::GetEnvironmentVariable($EnvironmentName)
+    $candidate = if ([string]::IsNullOrWhiteSpace($configured)) {
+        Join-Path $Root $DefaultRelativePath
+    } else {
+        $configured
+    }
+    return [IO.Path]::GetFullPath($candidate)
+}
+
+function Export-SurvivalContext([string]$Kind,[string]$Source,[string]$Name,[string]$EnvironmentName) {
+    $destination = Join-Path $ContextRoot $Name
+    & node (Join-Path $PSScriptRoot 'survival-dev-context-export.mjs') $Kind $Source $destination $ContextRoot
+    if ($LASTEXITCODE -ne 0) { throw "Survival $Name build context export failed." }
+    Set-Item -Path "Env:$EnvironmentName" -Value $destination
+}
+
+function Prepare-SurvivalBuildContexts([switch]$IncludeChain) {
+    Export-SurvivalContext 'dotnet' (Resolve-SurvivalSource 'SURVIVAL_XNODE_PATH' '..\xnode') 'xnode' 'SURVIVAL_XNODE_BUILD_CONTEXT'
+    Export-SurvivalContext 'dotnet' (Resolve-SurvivalSource 'SURVIVAL_REGISTRY_PATH' '..\deep-registry-api') 'registry' 'SURVIVAL_REGISTRY_BUILD_CONTEXT'
+    if ($IncludeChain) {
+        Export-SurvivalContext 'dotnet' (Resolve-SurvivalSource 'SURVIVAL_STAKING_PATH' '..\xpoint-staking-backend') 'staking' 'SURVIVAL_STAKING_BUILD_CONTEXT'
+        Export-SurvivalContext 'contracts' (Resolve-SurvivalSource 'SURVIVAL_CONTRACTS_PATH' '..\xpoint-staking-contracts') 'contracts' 'SURVIVAL_CONTRACTS_BUILD_CONTEXT'
+    }
+}
+
+function Assert-SurvivalHostEndpoints([string]$HostName) {
     $targets = @(
-        'http://127.0.0.1:41801/api/network/contact',
-        'http://127.0.0.1:41802/api/network/contact',
-        'http://127.0.0.1:41803/api/network/contact',
-        'http://127.0.0.1:41810/health/live',
-        'http://127.0.0.1:41820/health/ready',
-        'http://127.0.0.1:41821/health/ready',
-        'http://127.0.0.1:41822/health/ready',
-        'http://127.0.0.1:41823/health/ready',
+        "http://$HostName`:41801/api/network/contact",
+        "http://$HostName`:41802/api/network/contact",
+        "http://$HostName`:41803/api/network/contact",
+        "http://$HostName`:41810/health/live",
+        "http://$HostName`:41820/health/ready",
+        "http://$HostName`:41821/health/ready",
+        "http://$HostName`:41822/health/ready",
+        "http://$HostName`:41823/health/ready",
         'http://127.0.0.1:41999/health/ready'
     )
     foreach ($target in $targets) {
@@ -68,7 +95,7 @@ function Write-ClientEnvironment([string]$HostName,[switch]$IncludeChain) {
     )
     foreach ($target in @(
         [pscustomobject]@{ Name = 'client.android.env'; Host = $HostName },
-        [pscustomobject]@{ Name = 'client.windows.env'; Host = '127.0.0.1' }
+        [pscustomobject]@{ Name = 'client.windows.env'; Host = $HostName }
     )) {
         $hostValue = $target.Host
         $values = @(
@@ -98,17 +125,18 @@ switch ($Action) {
     'Up' {
         $advertisedHost = if ([string]::IsNullOrWhiteSpace($LanHost)) { '127.0.0.1' } else { $LanHost }
         Write-ClientEnvironment $advertisedHost -IncludeChain:$Chain
-        $env:SURVIVAL_BIND_HOST = if ([string]::IsNullOrWhiteSpace($LanHost)) { '127.0.0.1' } else { '0.0.0.0' }
+        $env:SURVIVAL_BIND_HOST = $advertisedHost
+        Prepare-SurvivalBuildContexts -IncludeChain:$Chain
         $upArguments = @($baseArguments)
         if ($Chain) { $upArguments += @('--profile', 'chain') }
         Invoke-SurvivalDocker ($upArguments + @('up', '-d', '--build', '--wait', '--force-recreate') + $Service)
-        Assert-SurvivalHostEndpoints
-        & node (Join-Path $PSScriptRoot 'survival-dev-seed.mjs')
+        Assert-SurvivalHostEndpoints $advertisedHost
+        & node (Join-Path $PSScriptRoot 'survival-dev-seed.mjs') '--host' $advertisedHost
         if ($LASTEXITCODE -ne 0) { throw 'Survival relay contact seed failed.' }
         Invoke-SurvivalDocker ($baseArguments + @('restart', 'xnode-1', 'xnode-2', 'xnode-3'))
         Invoke-SurvivalDocker ($baseArguments + @('up', '-d', '--wait', 'xnode-1', 'xnode-2', 'xnode-3'))
-        Assert-SurvivalHostEndpoints
-        & node (Join-Path $PSScriptRoot 'survival-dev-verify.mjs')
+        Assert-SurvivalHostEndpoints $advertisedHost
+        & node (Join-Path $PSScriptRoot 'survival-dev-verify.mjs') '--host' $advertisedHost
         if ($LASTEXITCODE -ne 0) { throw 'Survival relay contact verification failed.' }
     }
     'Down' {
@@ -118,7 +146,11 @@ switch ($Action) {
     }
     'Status' { Invoke-SurvivalDocker ($baseArguments + @('ps')) }
     'Logs' { Invoke-SurvivalDocker ($baseArguments + @('logs', '-f', '--tail=200') + $Service) }
-    'Build' { Invoke-SurvivalDocker ($baseArguments + @('build') + $Service) }
+    'Build' {
+        $includeChainContexts = $Chain -or $Service -contains 'contracts-devnet' -or $Service -contains 'staking-backend'
+        Prepare-SurvivalBuildContexts -IncludeChain:$includeChainContexts
+        Invoke-SurvivalDocker ($baseArguments + @('build') + $Service)
+    }
     'Restart' {
         if ($Service.Count -eq 0) { throw 'Restart requires at least one -Service.' }
         Invoke-SurvivalDocker ($baseArguments + @('restart') + $Service)
