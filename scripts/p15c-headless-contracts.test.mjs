@@ -102,6 +102,7 @@ test('compose model is isolated Linux ARM64 headless topology', () => {
     ports: ['127.0.0.1:39001:8080']
   }]));
   services['test-client'].restart = 'no';
+  services['xnode-1'].build = { context: 'owned-exact-source' };
   delete services['test-client'].ports;
   delete services.storage.ports;
   delete services.file.ports;
@@ -125,6 +126,7 @@ test('compose mutations fail for every isolation and image invariant', () => {
       ports: ['127.0.0.1:39001:8080']
     }]));
     for (const role of ['storage', 'file', 'push', 'calls', 'test-client']) delete services[role].ports;
+    services['xnode-1'].build = { context: 'owned-exact-source' };
     return { name: project, services, networks: { runtime: { internal: true } }, volumes: {}, secrets: {} };
   };
   const mutations = [
@@ -153,7 +155,8 @@ test('compose mutations fail for every isolation and image invariant', () => {
     m => { delete m.services['xnode-2'].environment.Node__Ed25519PrivateKeyPath; },
     m => { m.services['xnode-2'].secrets = []; },
     m => { m.services.registry.labels['com.xpoint.product-runtime'] = 'true'; },
-    m => { m.services.registry.labels['org.opencontainers.image.source-tree'] = 'c'.repeat(40); }
+    m => { m.services.registry.labels['org.opencontainers.image.source-tree'] = 'c'.repeat(40); },
+    m => { m.services['xnode-2'].build = { context: 'duplicate-image-producer' }; }
   ];
   for (let index = 0; index < mutations.length; index += 1) {
     const model = make();
