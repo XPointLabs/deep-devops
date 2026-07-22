@@ -17,6 +17,14 @@ try {
         if (@(Compare-Object -ReferenceObject ($allowedSids | Sort-Object) -DifferenceObject $observedSids).Count -ne 0) { throw 'secret ACL may contain only current user and SYSTEM' }
         if (@($acl.Access | Where-Object { $_.AccessControlType -ne 'Allow' -or $_.FileSystemRights -notmatch 'FullControl' }).Count -ne 0) { throw 'secret ACL entries must be allow/full-control' }
     }
+    $configs = @(Get-ChildItem -LiteralPath $root -Filter 'node-*.config.json' -File)
+    if ($configs.Count -ne 3) { throw 'exactly three protected public configuration files are required' }
+    foreach ($file in $configs) {
+        $value = Get-Content -LiteralPath $file.FullName -Raw | ConvertFrom-Json
+        if ($value.Node.RouterId -notmatch '^[0-9a-f]{64}$') { throw 'derived router identity is invalid' }
+        $acl = Get-Acl -LiteralPath $file.FullName
+        if (-not $acl.AreAccessRulesProtected) { throw 'configuration ACL inheritance must be disabled' }
+    }
     & $script -Action Remove -RunDirectory $root
     if (Test-Path -LiteralPath $root) { throw 'secret directory was not removed' }
 }

@@ -1,0 +1,332 @@
+import { readFile } from 'node:fs/promises';
+import { pathToFileURL } from 'node:url';
+
+const exactRoles = Object.freeze([
+  'contracts-devnet', 'xnode-1', 'xnode-2', 'xnode-3', 'registry',
+  'staking-backend', 'storage', 'file', 'push', 'calls', 'test-client'
+]);
+const longRunningRoles = new Set(exactRoles.filter(role => role !== 'test-client'));
+const forbiddenText = /(?:\buat\b|\bmnemonic\b|sepolia|deep[-_](?:uat|dev|integration)|deep-staking-prod-local|old\s+identity|legacy\s+compose|host-gateway|\/var\/run\/docker\.sock|\bprivileged\s*:\s*true\b|\bcap_add\b|\bdevices\s*:|\bextra_hosts\b|\bnetwork_mode\s*:\s*host\b|profile\s*(?:signer|activation)|client\s+verifier|runtime\s+registration|mock\s*xray|product[- ]?runtime\s*:\s*true)/i;
+
+function fail(message) { throw new Error(`P15C contract failure: ${message}`); }
+function object(value) { return value && typeof value === 'object' && !Array.isArray(value); }
+function same(left, right) {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+export function validateProjectName(value) {
+  if (typeof value !== 'string' || !/^p15c-[0-9a-f]{16}$/.test(value)) fail('project name must be p15c- plus 16 lowercase hex characters');
+  return true;
+}
+
+export function assertSafeCleanupCommand(command, project) {
+  validateProjectName(project);
+  const normalized = String(command).trim().replace(/\s+/g, ' ');
+  if (/\b(?:system|container|network|volume|image)\s+prune\b/i.test(normalized) || /\bdocker\s+(?:rm|rmi)\b/i.test(normalized)) {
+    fail('broad Docker cleanup is prohibited');
+  }
+  const escaped = project.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = new RegExp(`^docker compose -p ${escaped} -f [^ ]*docker-compose\\.p15c-headless\\.yml down --volumes --remove-orphans$`, 'i');
+  if (!pattern.test(normalized)) fail('cleanup must be exact-project compose down with volumes and orphans');
+  return true;
+}
+
+export function assertOwnedResources(project, resources) {
+  validateProjectName(project);
+  for (const resource of resources ?? []) {
+    if (!object(resource) || resource.project !== project) fail(`foreign ${resource?.kind ?? 'Docker'} resource must not be touched`);
+  }
+  return true;
+}
+
+export function assertNoForbiddenText(value) {
+  if (forbiddenText.test(String(value))) fail('forbidden authority, legacy, host-integration or activation text is present');
+  return true;
+}
+
+function networksOf(service) {
+  return Array.isArray(service.networks) ? service.networks : Object.keys(service.networks ?? {});
+}
+
+function validatePorts(role, ports) {
+  for (const value of ports ?? []) {
+    const text = typeof value === 'string' ? value : `${value.host_ip ?? ''}:${value.published ?? ''}:${value.target ?? ''}`;
+    if (!/^127\.0\.0\.1:\d{2,5}:\d{2,5}(?:\/(?:tcp|udp))?$/.test(text)) fail(`host port for ${role} must bind only 127.0.0.1`);
+  }
+  if (['storage', 'file', 'push', 'calls', 'test-client'].includes(role) && (ports?.length ?? 0) !== 0) {
+    fail(`${role} must remain internal-only`);
+  }
+}
+
+export function validateComposeModel(model, expected) {
+  if (!object(model)) fail('Compose model is missing');
+  validateProjectName(model.name);
+  const roles = Object.keys(model.services ?? {}).sort();
+  if (!same(roles, [...exactRoles].sort())) fail('Compose service set is not the exact P15C headless topology');
+  const networks = Object.keys(model.networks ?? {});
+  if (!same(networks, ['runtime']) || model.networks.runtime?.internal !== true) fail('exact internal runtime bridge is required');
+
+  const xnodeImages = new Set();
+  for (const role of exactRoles) {
+    const service = model.services[role];
+    if (!object(service) || service.platform !== 'linux/arm64' || service.pull_policy !== 'never') fail(`${role} is not locked to local Linux ARM64/no-pull`);
+    if (!same(networksOf(service), ['runtime'])) fail(`${role} must use only runtime bridge`);
+    if (service.network_mode || service.pid || service.ipc || service.privileged === true || service.devices || service.extra_hosts || service.cap_add) fail(`unsafe host integration exists for ${role}`);
+    if (service.read_only !== true || !Array.isArray(service.cap_drop) || !service.cap_drop.includes('ALL') || !Array.isArray(service.security_opt) || !service.security_opt.includes('no-new-privileges:true')) fail(`${role} hardening is incomplete`);
+    if (longRunningRoles.has(role) && (!object(service.healthcheck) || service.healthcheck.disable === true || !Array.isArray(service.healthcheck.test))) fail(`${role} healthcheck is missing`);
+    validatePorts(role, service.ports);
+
+    const labels = service.labels ?? {};
+    if (labels['org.opencontainers.image.revision'] !== expected.sha || labels['org.opencontainers.image.source-tree'] !== expected.tree || labels['com.xpoint.p15c.role'] !== role || labels['com.xpoint.evidence-class'] !== 'headless-harness' || String(labels['com.xpoint.product-runtime']) !== 'false') fail(`${role} service labels are invalid`);
+    if (role.startsWith('xnode-')) {
+      xnodeImages.add(service.image);
+      const env = service.environment ?? {};
+      if (String(env.Vless__Enabled).toLowerCase() !== 'false') fail(`${role} must explicitly disable VLESS`);
+      if (typeof env.Node__Ed25519PrivateKeyPath !== 'string' || !env.Node__Ed25519PrivateKeyPath.startsWith('/run/secrets/') || Object.hasOwn(env, 'Node__Ed25519PrivateKey')) fail(`${role} identity must use only a Compose secret file path`);
+      if (!Array.isArray(service.secrets) || service.secrets.length !== 2) fail(`${role} must receive only its generated seed and generated configuration secrets`);
+    }
+    for (const mount of service.volumes ?? []) {
+      if (typeof mount === 'string' && (/^[A-Za-z]:[\\/]/.test(mount) || mount.startsWith('/') || mount.startsWith('.'))) fail(`${role} has a runtime source bind mount`);
+      const source = typeof mount === 'string' ? mount.split(':', 1)[0] : mount.source;
+      if (typeof source === 'string' && (/^[A-Za-z]:[\\/]/.test(source) || source.startsWith('/') || source.startsWith('.'))) fail(`${role} has a runtime source bind mount`);
+    }
+  }
+  if (xnodeImages.size !== 1) fail('all three XNodes must consume one exact image');
+  return true;
+}
+
+export function validateImageMetadata(image, expected) {
+  if (!/^sha256:[0-9a-f]{64}$/.test(String(image?.id ?? ''))) fail('built image id is missing');
+  if (image.os !== 'linux' || image.architecture !== 'arm64') fail('built image is not Linux ARM64');
+  const labels = image.labels ?? {};
+  const values = {
+    'org.opencontainers.image.revision': expected.sha,
+    'org.opencontainers.image.source-tree': expected.tree,
+    'com.xpoint.p15c.role': expected.role,
+    'com.xpoint.evidence-class': 'headless-harness',
+    'com.xpoint.product-runtime': 'false',
+    'com.xpoint.p15c.ownership-nonce': expected.nonce
+  };
+  for (const [key, value] of Object.entries(values)) if (String(labels[key] ?? '') !== value) fail(`image label ${key} is invalid`);
+  if (!String(labels['org.opencontainers.image.source'] ?? '').trim()) fail('image source label is missing');
+  return true;
+}
+
+export function validateKeepRunningGate({ allGatesPassed, requested }) {
+  if (requested === true && allGatesPassed !== true) fail('KeepRunning is legal only after all gates pass');
+  return true;
+}
+
+export function validateOwnershipReceipt(receipt, expected) {
+  if (!object(receipt) || receipt.schema !== 'deep-p15c-ownership.v1') fail('ownership receipt schema is invalid');
+  validateProjectName(receipt.project);
+  if (receipt.project !== expected.project || receipt.nonce !== expected.nonce || !/^[0-9a-f]{32}$/.test(receipt.nonce ?? '') || receipt.composeSha256 !== expected.composeSha256 || !/^[0-9a-f]{64}$/.test(receipt.composeSha256 ?? '')) fail('ownership receipt binding is invalid');
+  if (JSON.stringify(receipt.sources) !== JSON.stringify(expected.sources)) fail('ownership receipt source pins are invalid');
+  if (!Array.isArray(receipt.images) || receipt.images.length < 1 || receipt.images.some(image => !/^sha256:[0-9a-f]{64}$/.test(image?.id ?? '') || !image.role)) fail('ownership receipt image inventory is invalid');
+  assertNoForbiddenReceiptFields(receipt);
+  return true;
+}
+
+function assertNoForbiddenReceiptFields(value, key = '') {
+  if (Array.isArray(value)) return value.forEach(item => assertNoForbiddenReceiptFields(item, key));
+  if (!object(value)) return;
+  for (const [name, child] of Object.entries(value)) {
+    if (/(?:secret|key|seed|mnemonic|endpoint|url|path|identity)/i.test(name)) fail(`ownership receipt field ${name} is prohibited`);
+    assertNoForbiddenReceiptFields(child, name);
+  }
+}
+
+export function validateCleanupInventory(value) {
+  for (const key of ['containers', 'networks', 'volumes', 'images']) if (value?.[key] !== 0) fail('owned resources remain after cleanup');
+  return true;
+}
+
+export function validateCollisionInventory(project, inventory) {
+  validateProjectName(project);
+  for (const kind of ['containers', 'networks', 'volumes', 'images']) {
+    if (!Array.isArray(inventory?.[kind])) fail('collision inventory is incomplete');
+    if (inventory[kind].some(resource => resource?.project === project || String(resource?.name ?? '').startsWith(`${project}-`) || String(resource?.name ?? '').startsWith(`${project}_`))) fail(`project ${kind} collision exists`);
+  }
+  return true;
+}
+
+export function validateForeignInventoryInvariant(before, after) {
+  if (typeof before !== 'string' || before !== after) fail('foreign Docker inventory changed');
+  return true;
+}
+
+export function validateReceiptResources(resources, expected) {
+  assertOwnedResources(expected.project, resources);
+  for (const resource of resources ?? []) {
+    if (!['container', 'network', 'volume', 'image'].includes(resource.kind) || resource.nonce !== expected.nonce || resource.labels?.['com.xpoint.p15c.ownership-nonce'] !== expected.nonce) fail('owned runtime resource binding is invalid');
+    if (resource.kind === 'image') {
+      validateImageMetadata({ id: resource.id, os: resource.os, architecture: resource.architecture, labels: resource.labels }, { sha: expected.sources.devops.sha, tree: expected.sources.devops.tree, role: resource.role, nonce: expected.nonce });
+    }
+  }
+  return true;
+}
+
+export async function executeWithGuaranteedCleanup(operation, cleanup) {
+  let result;
+  let operationError;
+  let cleanupError;
+  try { result = await operation(); } catch (error) { operationError = error; }
+  try { await cleanup(); } catch (error) { cleanupError = error; }
+  if (operationError && cleanupError) throw new AggregateError([operationError, cleanupError], 'P15C operation and cleanup both failed');
+  if (operationError) throw operationError;
+  if (cleanupError) throw cleanupError;
+  return result;
+}
+
+export function validateLifecycleOperationOrder(operations) {
+  const required = ['source-preflight', 'image-preflight', 'collision-check', 'foreign-snapshot', 'generate-secrets', 'compose-config', 'build', 'up-contracts', 'deploy-contracts', 'up-runtime', 'probe', 'e2e', 'labels', 'cleanup', 'evidence'];
+  if (!Array.isArray(operations) || operations.length !== required.length || !same(operations, required)) fail('lifecycle operation order is invalid');
+  return true;
+}
+
+export function validateLifecycleOperationPrefix(operations, { retained }) {
+  const common = ['source-preflight', 'image-preflight', 'collision-check', 'foreign-snapshot', 'generate-secrets', 'compose-config', 'build', 'up-contracts', 'deploy-contracts', 'up-runtime', 'probe', 'e2e', 'labels'];
+  const expected = retained ? [...common, 'receipt-retained'] : [...common, 'cleanup', 'evidence'];
+  if (!Array.isArray(operations) || !same(operations, expected)) fail('observed lifecycle does not match its exact normal/retained plan');
+  return true;
+}
+
+export function validateFinalEvidenceEligibility({ retained, zeroOwned, foreignUnchanged }) {
+  if (retained === true || zeroOwned !== true || foreignUnchanged !== true) fail('final PASS evidence requires completed cleanup and unchanged foreign inventory');
+  return true;
+}
+
+export async function executeCleanupPlan({ resources, state }) {
+  const failures = [];
+  for (const action of resources ?? []) { try { await action(); } catch (error) { failures.push(error); } }
+  if (failures.length) {
+    const aggregate = new AggregateError(failures, 'P15C resource cleanup failed; ownership state preserved');
+    aggregate.preserveOwnershipState = true;
+    throw aggregate;
+  }
+  for (const action of state ?? []) {
+    try { await action(); }
+    catch (error) {
+      const aggregate = new AggregateError([error], 'P15C state cleanup failed; remaining ownership state preserved');
+      aggregate.preserveOwnershipState = true;
+      throw aggregate;
+    }
+  }
+  return true;
+}
+
+function canonicalWindows(value) {
+  const normalizedValue = String(value ?? '').replace(/\//g, '\\');
+  const parts = [];
+  for (const part of normalizedValue.split('\\')) {
+    if (!part || part === '.') continue;
+    if (part === '..') parts.pop(); else parts.push(part);
+  }
+  return parts.join('\\').toLowerCase();
+}
+
+export function validateOwnedOutputPaths({ evidence, receipt, repos, runTree }) {
+  for (const value of [evidence, receipt]) {
+    if (!/^[A-Za-z]:[\\/]/.test(value ?? '') || /(?:^|[\\/])\.\.(?:[\\/]|$)/.test(value)) fail('output path is not canonical absolute');
+    const candidate = `${canonicalWindows(value)}\\`;
+    for (const root of [...(repos ?? []), runTree]) {
+      const boundary = `${canonicalWindows(root)}\\`;
+      if (candidate.startsWith(boundary)) fail('output path enters a source repository or owned run tree');
+    }
+  }
+  return true;
+}
+
+export function validateRetainedOwnershipState(value) {
+  const expectedRun = `${canonicalWindows(value.base)}\\${value.receipt.project}-${value.receipt.nonce}`;
+  if (canonicalWindows(value.runPath) !== expectedRun || value.runMarker !== 'deep-p15c-run.v1' || value.secretMarker !== 'deep-p15c-ephemeral-secrets.v1' || value.manifestValid !== true || value.sourcePreflightPassed !== true) fail('retained owned state markers or preflight are invalid');
+  const children = ['.p15c-secret-owner', 'node-1.config.json', 'node-1.seed', 'node-2.config.json', 'node-2.seed', 'node-3.config.json', 'node-3.seed'];
+  if (![...value.secretChildren].sort().every((item, index) => item === children[index]) || value.secretChildren.length !== children.length) fail('retained secret directory contains missing or extra entries');
+  const receipt = value.receipt;
+  if (receipt.schema !== 'deep-p15c-ownership.v1' || JSON.stringify(receipt.sources) !== JSON.stringify(value.expectedSources) || receipt.images.length !== value.expectedRoles.length) fail('retained receipt envelope is invalid');
+  const roles = receipt.images.map(item => item.role).sort();
+  if (!same(roles, [...value.expectedRoles].sort()) || new Set(receipt.images.map(item => item.id)).size !== receipt.images.length) fail('retained receipt roles or image ids are invalid');
+  return true;
+}
+
+export function validateHardhatIsolation(value) {
+  if (value?.chainId !== 31337 || !Array.isArray(value.command) || !value.command.join(' ').includes('hardhat node')) fail('Hardhat local chain contract is invalid');
+  if (!Array.isArray(value.volumes) || value.volumes.length !== 0) fail('Hardhat chain persistence is prohibited');
+  for (const name of Object.keys(value.environment ?? {})) if (/(?:rpc|url|private|mnemonic|secret|key)/i.test(name)) fail('Hardhat external authority environment is prohibited');
+  if (value.stakingAddressSource !== 'validated-local-manifest') fail('staking addresses must come only from validated local manifest');
+  return true;
+}
+
+export function validateBuildPolicy(value) {
+  const supplied = value?.operatorSupplied ?? {};
+  const refs = [supplied.sdk, supplied.runtime, supplied.node];
+  if (refs.some(reference => !/^[a-z0-9./_-]+@sha256:[0-9a-f]{64}$/.test(reference ?? ''))) fail('operator-supplied image lock is incomplete or not digest-addressed');
+  if (!Array.isArray(value.usedBases) || value.usedBases.some(reference => !refs.includes(reference)) || value.usedBases.length !== refs.length) fail('build base is not an operator-supplied exact local lock');
+  if (value.pullPolicy !== 'never' || value.buildPull !== false) fail('build or runtime may pull silently');
+  if (value.sdk !== supplied.sdk || value.runtime !== supplied.runtime || value.sdk === value.runtime) fail('SDK/runtime separation is invalid');
+  return true;
+}
+
+export function validateIdentitySurfaces(identities, surfaces) {
+  for (const identity of identities ?? []) {
+    if (!/^[0-9a-f]{64}$/.test(identity)) fail('generated identity shape is invalid');
+    for (const [name, value] of Object.entries(surfaces ?? {})) if (JSON.stringify(value).toLowerCase().includes(identity)) fail(`generated identity leaked into ${name}`);
+  }
+  return true;
+}
+
+export async function executeStagedLifecycle(operations, cleanup, { keepRunning }) {
+  let complete = false;
+  try {
+    for (const operation of Object.values(operations ?? {})) await operation();
+    complete = true;
+  }
+  finally {
+    if (!keepRunning || !complete) await cleanup();
+  }
+  return true;
+}
+
+export async function executeReceiptAction(receipt, validator, dockerAction) {
+  await validator(receipt);
+  return dockerAction(receipt);
+}
+
+export async function removeValidatedOwnedImages(receipt, resources, runner) {
+  if (!receipt || receipt.schema !== 'deep-p15c-ownership.v1' || !/^[0-9a-f]{64}$/.test(receipt.composeSha256 ?? '') || receipt.project !== resources?.[0]?.project || receipt.nonce !== resources?.[0]?.nonce || !Array.isArray(receipt.images) || receipt.images.length !== resources.length || !receipt.sources || typeof receipt.sources !== 'object') fail('image removal receipt binding is invalid');
+  const expectedIds = receipt.images.map(value => value.id).sort();
+  const observedIds = resources.map(value => value.id).sort();
+  if (!same(expectedIds, observedIds)) fail('image removal inventory differs from receipt');
+  for (const binding of receipt.images) {
+    const resource = resources.find(value => value.id === binding.id && value.role === binding.role);
+    const source = receipt.sources[binding.source];
+    if (!resource || resource.kind !== 'image' || resource.project !== receipt.project || resource.nonce !== receipt.nonce || resource.os !== 'linux' || resource.architecture !== 'arm64' || !source || binding.sha !== source.sha || binding.tree !== source.tree) fail('image removal source/ownership binding is invalid');
+    validateImageMetadata({ id: resource.id, os: resource.os, architecture: resource.architecture, labels: resource.labels }, { sha: source.sha, tree: source.tree, role: binding.role, nonce: receipt.nonce });
+  }
+  for (const id of expectedIds) await runner(['image', 'rm', id]);
+  return true;
+}
+
+export function validateImageSourceBindings(bindings, sources) {
+  for (const binding of bindings ?? []) {
+    const expectedSource = binding.role === 'xnode' ? 'xnode' : binding.role === 'test-client' ? 'e2e' : binding.source;
+    const expected = sources?.[expectedSource];
+    if (!expected || binding.source !== expectedSource || binding.sha !== expected.sha || binding.tree !== expected.tree) fail(`image role ${binding.role} is not bound to its exact source`);
+  }
+  return true;
+}
+
+async function main() {
+  const [command, path, expectedJson] = process.argv.slice(2);
+  if (command === 'validate-compose' && path && expectedJson) {
+    validateComposeModel(JSON.parse(await readFile(path, 'utf8')), JSON.parse(expectedJson));
+    return;
+  }
+  if (command === 'validate-receipt' && path && expectedJson) {
+    validateOwnershipReceipt(JSON.parse(await readFile(path, 'utf8')), JSON.parse(expectedJson));
+    return;
+  }
+  throw new Error('P15C contract command is invalid');
+}
+
+if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) main().catch(error => { console.error(error.message); process.exitCode = 1; });

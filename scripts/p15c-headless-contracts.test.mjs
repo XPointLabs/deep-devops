@@ -298,15 +298,23 @@ test('operation plus cleanup failure surfaces both errors', async () => {
 test('cleanup plan runs every step, aggregates failures and preserves ownership state', async () => {
   const calls = [];
   await assert.rejects(
-    () => executeCleanupPlan([
-      async () => { calls.push('down'); throw new Error('down failed'); },
-      async () => { calls.push('images'); throw new Error('images failed'); },
-      async () => { calls.push('secrets'); },
-      async () => { calls.push('run-state'); }
-    ]),
+    () => executeCleanupPlan({
+      resources: [async () => { calls.push('down'); throw new Error('down failed'); }, async () => { calls.push('images'); throw new Error('images failed'); }],
+      state: [async () => { calls.push('secrets'); }, async () => { calls.push('run-state'); }]
+    }),
     error => error instanceof AggregateError && error.errors.length === 2 && error.preserveOwnershipState === true
   );
-  assert.deepEqual(calls, ['down', 'images', 'secrets', 'run-state']);
+  assert.deepEqual(calls, ['down', 'images']);
+
+  calls.length = 0;
+  await assert.rejects(
+    () => executeCleanupPlan({
+      resources: [async () => calls.push('resources-clean')],
+      state: [async () => { calls.push('secret-state'); throw new Error('secret cleanup failed'); }, async () => calls.push('run-and-receipt-erased')]
+    }),
+    error => error instanceof AggregateError && error.errors.length === 1 && error.preserveOwnershipState === true
+  );
+  assert.deepEqual(calls, ['resources-clean', 'secret-state']);
 });
 
 test('retained state validates exact markers, children, manifest, sources and receipt before Docker', () => {
