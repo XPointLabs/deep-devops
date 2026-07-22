@@ -6,6 +6,7 @@ const compose = readFileSync(new URL('../docker-compose.survival.dev.yml', impor
 const docs = readFileSync(new URL('../docs/SURVIVAL_DEV_STACK.md', import.meta.url), 'utf8');
 const launcher = readFileSync(new URL('./survival-dev.ps1', import.meta.url), 'utf8');
 const seed = readFileSync(new URL('./survival-dev-seed.mjs', import.meta.url), 'utf8');
+const verify = readFileSync(new URL('./survival-dev-verify.mjs', import.meta.url), 'utf8');
 const bootstrap = readFileSync(new URL('../tools/relay-bootstrap/relay-bootstrap.mjs', import.meta.url), 'utf8');
 
 function serviceBlock(name) {
@@ -23,7 +24,7 @@ test('daily stack has a fixed isolated project and exact persistent service set'
     'calls', 'contracts-devnet', 'file', 'push', 'registry', 'relay-bootstrap', 'staking-backend',
     'storage', 'xnode-1', 'xnode-2', 'xnode-3'
   ]);
-  assert.match(compose, /^networks:\r?\n  runtime:\r?\n    internal: true$/m);
+  assert.match(compose, /^networks:\r?\n  runtime:\r?\n    driver: bridge$/m);
 });
 
 test('shared images have one incremental build producer and persistent consumers', () => {
@@ -69,6 +70,8 @@ test('daily launcher always uses the fixed project without release-gate ceremony
   assert.match(launcher, /SURVIVAL_BIND_HOST/);
   assert.match(launcher, /client\.android\.env/);
   assert.match(launcher, /client\.windows\.env/);
+  assert.doesNotMatch(launcher, /DEEP_STAKING_URL/);
+  assert.match(launcher, /DEEP_STAKING_BACKEND_URL/);
   for (const routerId of [
     '4cb5abf6ad79fbf5abbccafcc269d85cd2651ed4b885b5869f241aedf0a5ba29',
     '7422b9887598068e32c4448a949adb290d0f4e35b9e01b0ee5f1a1e600fe2674',
@@ -78,6 +81,8 @@ test('daily launcher always uses the fixed project without release-gate ceremony
   assert.doesNotMatch(launcher, /Up requires -LanHost/);
   assert.match(seed, /api\/network\/contact/);
   assert.match(seed, /relay-bootstrap/);
+  assert.match(verify, /JSON\.stringify\(\{ id: `survival-\$\{method\}`, method, payload: \{\} \}\)/);
+  assert.doesNotMatch(verify, /params:/);
   assert.match(bootstrap, /api\/relay-contacts/);
   assert.match(bootstrap, /\/seed/);
   assert.match(serviceBlock('contracts-devnet'), /profiles: \[chain\]/);

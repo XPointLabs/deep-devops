@@ -52,7 +52,7 @@ function Assert-SurvivalHostEndpoints {
     }
 }
 
-function Write-ClientEnvironment([string]$HostName) {
+function Write-ClientEnvironment([string]$HostName,[switch]$IncludeChain) {
     $address = $null
     if (-not [Net.IPAddress]::TryParse($HostName, [ref]$address) -or
         $address.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork -or
@@ -71,17 +71,20 @@ function Write-ClientEnvironment([string]$HostName) {
         [pscustomobject]@{ Name = 'client.windows.env'; Host = '127.0.0.1' }
     )) {
         $hostValue = $target.Host
-        $content = @(
+        $values = @(
             'SURVIVAL_ENV=Development',
             "XNODE_URLS=$($routerIds[0])|http://$hostValue`:41801;$($routerIds[1])|http://$hostValue`:41802;$($routerIds[2])|http://$hostValue`:41803",
             "DEEP_REGISTRY_URL=http://$hostValue`:41810",
-            "DEEP_STAKING_URL=http://$hostValue`:41811",
             "DEEP_FILE_URL=http://$hostValue`:41821",
             "DEEP_PUSH_URL=http://$hostValue`:41822",
             "DEEP_CALL_SIGNALING_BASE_URL=http://$hostValue`:41823",
-            "DEEP_DEVNET_RPC_URL=http://$hostValue`:41545",
             'DEEP_TLS_PINS='
-        ) -join "`n"
+        )
+        if ($IncludeChain) {
+            $values += "DEEP_STAKING_BACKEND_URL=http://$hostValue`:41811"
+            $values += "DEEP_DEVNET_RPC_URL=http://$hostValue`:41545"
+        }
+        $content = $values -join "`n"
         [IO.File]::WriteAllText(
             (Join-Path $outputDirectory $target.Name),
             $content + "`n",
@@ -94,7 +97,7 @@ function Write-ClientEnvironment([string]$HostName) {
 switch ($Action) {
     'Up' {
         $advertisedHost = if ([string]::IsNullOrWhiteSpace($LanHost)) { '127.0.0.1' } else { $LanHost }
-        Write-ClientEnvironment $advertisedHost
+        Write-ClientEnvironment $advertisedHost -IncludeChain:$Chain
         $env:SURVIVAL_BIND_HOST = if ([string]::IsNullOrWhiteSpace($LanHost)) { '127.0.0.1' } else { '0.0.0.0' }
         $upArguments = @($baseArguments)
         if ($Chain) { $upArguments += @('--profile', 'chain') }

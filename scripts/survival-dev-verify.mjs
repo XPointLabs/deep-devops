@@ -8,7 +8,7 @@ async function rpc(port, method) {
   const response = await fetch(`http://127.0.0.1:${port}/api/session/rpc`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ id: `survival-${method}`, method, params: {} })
+    body: JSON.stringify({ id: `survival-${method}`, method, payload: {} })
   });
   if (!response.ok) throw new Error(`${method} failed on ${port} with ${response.status}`);
   const body = await response.json();
