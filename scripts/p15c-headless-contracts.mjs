@@ -120,6 +120,7 @@ export function validateComposeModel(model, expected) {
   if (Object.keys(model.volumes ?? {}).length !== 0) fail('P15C named volumes are prohibited');
 
   const xnodeImages = new Set();
+  const xnodeImageBuilders = [];
   for (const role of exactRoles) {
     const service = model.services[role];
     if (!object(service) || service.platform !== 'linux/arm64' || service.pull_policy !== 'never') fail(`${role} is not locked to local Linux ARM64/no-pull`);
@@ -133,6 +134,7 @@ export function validateComposeModel(model, expected) {
     if (labels['org.opencontainers.image.revision'] !== expected.sha || labels['org.opencontainers.image.source-tree'] !== expected.tree || labels['com.xpoint.p15c.role'] !== role || labels['com.xpoint.evidence-class'] !== 'headless-harness' || String(labels['com.xpoint.product-runtime']) !== 'false') fail(`${role} service labels are invalid`);
     if (role.startsWith('xnode-')) {
       xnodeImages.add(service.image);
+      if (object(service.build)) xnodeImageBuilders.push(role);
       const env = service.environment ?? {};
       if (String(env.Vless__Enabled).toLowerCase() !== 'false') fail(`${role} must explicitly disable VLESS`);
       if (typeof env.Node__Ed25519PrivateKeyPath !== 'string' || !env.Node__Ed25519PrivateKeyPath.startsWith('/run/secrets/') || Object.hasOwn(env, 'Node__Ed25519PrivateKey')) fail(`${role} identity must use only a Compose secret file path`);
@@ -141,6 +143,7 @@ export function validateComposeModel(model, expected) {
     if ((service.volumes?.length ?? 0) !== 0) fail(`${role} has a prohibited volume mount`);
   }
   if (xnodeImages.size !== 1) fail('all three XNodes must consume one exact image');
+  if (!same(xnodeImageBuilders, ['xnode-1'])) fail('the shared XNode image must have exactly one producer');
   return true;
 }
 

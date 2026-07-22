@@ -32,43 +32,44 @@ x-labels: &labels
   com.xpoint.product-runtime: "false"
   com.xpoint.p15c.ownership-nonce: ${P15C_OWNERSHIP_NONCE:?P15C_OWNERSHIP_NONCE is required}
 
+x-xnode-build: &xnode-build
+  context: ${P15C_DEVOPS_CONTEXT:?P15C_DEVOPS_CONTEXT is required}
+  pull: false
+  additional_contexts:
+    xnode_source: ${P15C_XNODE_CONTEXT:?P15C_XNODE_CONTEXT is required}
+  args:
+    SDK_IMAGE: ${P15C_DOTNET_SDK_IMAGE:?P15C_DOTNET_SDK_IMAGE is required}
+    RUNTIME_IMAGE: ${P15C_DOTNET_RUNTIME_IMAGE:?P15C_DOTNET_RUNTIME_IMAGE is required}
+    SOURCE_SHA: ${P15C_XNODE_SHA:?P15C_XNODE_SHA is required}
+    SOURCE_TREE: ${P15C_XNODE_TREE:?P15C_XNODE_TREE is required}
+    OWNERSHIP_NONCE: ${P15C_OWNERSHIP_NONCE}
+  labels:
+    org.opencontainers.image.revision: ${P15C_XNODE_SHA}
+    org.opencontainers.image.source-tree: ${P15C_XNODE_TREE}
+    org.opencontainers.image.source: xnode
+    com.xpoint.p15c.role: xnode
+    com.xpoint.evidence-class: headless-harness
+    com.xpoint.product-runtime: "false"
+    com.xpoint.p15c.ownership-nonce: ${P15C_OWNERSHIP_NONCE}
+  dockerfile_inline: |
+    ARG SDK_IMAGE
+    ARG RUNTIME_IMAGE
+    FROM $${SDK_IMAGE} AS build
+    WORKDIR /src
+    COPY --from=xnode_source . .
+    RUN test "$$(dotnet --version)" = "10.0.301" && dotnet publish src/XNode/XNode.csproj -c Release -o /out --runtime linux-arm64 --self-contained false -p:UseAppHost=false
+    FROM $${RUNTIME_IMAGE}
+    ARG SOURCE_SHA SOURCE_TREE OWNERSHIP_NONCE
+    LABEL org.opencontainers.image.revision="$${SOURCE_SHA}" org.opencontainers.image.source-tree="$${SOURCE_TREE}" org.opencontainers.image.source="xnode" com.xpoint.p15c.role="xnode" com.xpoint.evidence-class="headless-harness" com.xpoint.product-runtime="false" com.xpoint.p15c.ownership-nonce="$${OWNERSHIP_NONCE}"
+    WORKDIR /app
+    COPY --from=build /out .
+    RUN mkdir /state && chown 65532:65532 /state
+    USER 65532:65532
+    ENTRYPOINT ["dotnet","XNode.dll"]
+
 x-xnode: &xnode
   <<: *service
   image: ${P15C_XNODE_IMAGE_NAME:?P15C_XNODE_IMAGE_NAME is required}
-  build:
-    context: ${P15C_DEVOPS_CONTEXT:?P15C_DEVOPS_CONTEXT is required}
-    pull: false
-    additional_contexts:
-      xnode_source: ${P15C_XNODE_CONTEXT:?P15C_XNODE_CONTEXT is required}
-    args:
-      SDK_IMAGE: ${P15C_DOTNET_SDK_IMAGE:?P15C_DOTNET_SDK_IMAGE is required}
-      RUNTIME_IMAGE: ${P15C_DOTNET_RUNTIME_IMAGE:?P15C_DOTNET_RUNTIME_IMAGE is required}
-      SOURCE_SHA: ${P15C_XNODE_SHA:?P15C_XNODE_SHA is required}
-      SOURCE_TREE: ${P15C_XNODE_TREE:?P15C_XNODE_TREE is required}
-      OWNERSHIP_NONCE: ${P15C_OWNERSHIP_NONCE}
-    labels:
-      org.opencontainers.image.revision: ${P15C_XNODE_SHA}
-      org.opencontainers.image.source-tree: ${P15C_XNODE_TREE}
-      org.opencontainers.image.source: xnode
-      com.xpoint.p15c.role: xnode
-      com.xpoint.evidence-class: headless-harness
-      com.xpoint.product-runtime: "false"
-      com.xpoint.p15c.ownership-nonce: ${P15C_OWNERSHIP_NONCE}
-    dockerfile_inline: |
-      ARG SDK_IMAGE
-      ARG RUNTIME_IMAGE
-      FROM $${SDK_IMAGE} AS build
-      WORKDIR /src
-      COPY --from=xnode_source . .
-      RUN test "$$(dotnet --version)" = "10.0.301" && dotnet publish src/XNode/XNode.csproj -c Release -o /out --runtime linux-arm64 --self-contained false -p:UseAppHost=false
-      FROM $${RUNTIME_IMAGE}
-      ARG SOURCE_SHA SOURCE_TREE OWNERSHIP_NONCE
-      LABEL org.opencontainers.image.revision="$${SOURCE_SHA}" org.opencontainers.image.source-tree="$${SOURCE_TREE}" org.opencontainers.image.source="xnode" com.xpoint.p15c.role="xnode" com.xpoint.evidence-class="headless-harness" com.xpoint.product-runtime="false" com.xpoint.p15c.ownership-nonce="$${OWNERSHIP_NONCE}"
-      WORKDIR /app
-      COPY --from=build /out .
-      RUN mkdir /state && chown 65532:65532 /state
-      USER 65532:65532
-      ENTRYPOINT ["dotnet","XNode.dll"]
   environment:
     ASPNETCORE_ENVIRONMENT: P15C
     Node__Ed25519PrivateKeyPath: /run/secrets/node-seed
@@ -157,6 +158,7 @@ services:
 
   xnode-1:
     <<: *xnode
+    build: *xnode-build
     ports: ["127.0.0.1:${P15C_XNODE1_PORT:?P15C_XNODE1_PORT is required}:8080"]
     tmpfs: *state-tmpfs
     secrets:
