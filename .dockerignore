@@ -21,3 +21,5 @@
 !tools/calls-service/
 !tools/calls-service/calls-service.mjs
 !tools/calls-service/calls-service-runtime.mjs
+!tools/relay-bootstrap/
+!tools/relay-bootstrap/relay-bootstrap.mjs

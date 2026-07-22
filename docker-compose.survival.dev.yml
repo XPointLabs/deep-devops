@@ -1,0 +1,278 @@
+name: deep-survival-dev
+
+x-service: &service
+  platform: linux/arm64
+  init: true
+  restart: unless-stopped
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  networks: [runtime]
+  labels:
+    com.xpoint.survival.stack: dev
+
+x-health: &health
+  interval: 3s
+  timeout: 2s
+  retries: 60
+  start_period: 10s
+
+x-xnode-build: &xnode-build
+  context: .
+  pull: false
+  additional_contexts:
+    xnode_source: ${SURVIVAL_XNODE_PATH:-../xnode}
+  args:
+    SDK_IMAGE: ${SURVIVAL_DOTNET_SDK_IMAGE:-mcr.microsoft.com/dotnet/sdk@sha256:7e964ea8bc6c1e18ea9fbc76ed403da41c9b19aeee2aab6bf9c845f25e891380}
+    RUNTIME_IMAGE: ${SURVIVAL_DOTNET_RUNTIME_IMAGE:-mcr.microsoft.com/dotnet/aspnet@sha256:e3736b0d423db99c6988e1ddf5ea725c14b12579bb120024e5ff7ff204a14080}
+  dockerfile_inline: |
+    ARG SDK_IMAGE
+    ARG RUNTIME_IMAGE
+    FROM $${SDK_IMAGE} AS build
+    WORKDIR /src
+    COPY --from=xnode_source . .
+    RUN dotnet publish src/XNode/XNode.csproj -c Debug -o /out --runtime linux-arm64 --self-contained false -p:UseAppHost=false
+    FROM $${RUNTIME_IMAGE}
+    WORKDIR /app
+    COPY --from=build /out .
+    RUN mkdir /state && chown 65532:65532 /state
+    USER 65532:65532
+    ENTRYPOINT ["dotnet","XNode.dll"]
+
+x-xnode: &xnode
+  <<: *service
+  image: deep-survival/xnode:dev
+  environment: &xnode-environment
+    ASPNETCORE_ENVIRONMENT: Development
+    ASPNETCORE_URLS: http://0.0.0.0:8080
+    Node__ApiListenUrl: http://0.0.0.0:8080
+    Node__PeerRpcListenUrl: http://0.0.0.0:8081
+    Node__DataDirectory: /state
+    Node__Network: survival-local
+    Node__PublicPort: "8080"
+    Node__PublicPeerRpcPort: "8081"
+    Runtime__BootstrapFromStorage: "true"
+    Runtime__AllowLoopbackPeerEndpoints: "true"
+    RegistryBootstrap__BaseUrl: http://relay-bootstrap:8080
+    StorageRpc__BaseUrl: http://storage:8080
+    RegistryHeartbeat__Enabled: "false"
+    Vless__Enabled: "false"
+  healthcheck:
+    <<: *health
+    test: [CMD-SHELL, "test -r /proc/1/status"]
+
+x-compat-build: &compat-build
+  context: .
+  pull: false
+  args:
+    NODE_IMAGE: ${SURVIVAL_NODE_IMAGE:-node@sha256:242549cd46785b480c832479a730f4f2a20865d61ea2e404fdb2a5c3d3b73ecf}
+  dockerfile_inline: |
+    ARG NODE_IMAGE
+    FROM $${NODE_IMAGE}
+    WORKDIR /service
+    COPY --chown=node:node tools/compat-services ./tools/compat-services
+    COPY --chown=node:node tools/storage-service ./tools/storage-service
+    COPY --chown=node:node tools/file-service ./tools/file-service
+    COPY --chown=node:node tools/push-service ./tools/push-service
+    COPY --chown=node:node tools/calls-service ./tools/calls-service
+    COPY --chown=node:node tools/relay-bootstrap ./tools/relay-bootstrap
+    RUN mkdir /state && chown node:node /state
+    USER node
+
+services:
+  contracts-devnet:
+    <<: *service
+    profiles: [chain]
+    image: deep-survival/contracts-devnet:dev
+    build:
+      context: .
+      pull: false
+      additional_contexts:
+        contracts_source: ${SURVIVAL_CONTRACTS_PATH:-../xpoint-staking-contracts}
+      args:
+        NODE_IMAGE: ${SURVIVAL_NODE_IMAGE:-node@sha256:242549cd46785b480c832479a730f4f2a20865d61ea2e404fdb2a5c3d3b73ecf}
+      dockerfile_inline: |
+        ARG NODE_IMAGE
+        FROM $${NODE_IMAGE}
+        WORKDIR /workspace
+        COPY --from=contracts_source . .
+        COPY scripts/p15c-package-json-normalizer.mjs /survival/
+        RUN node /survival/p15c-package-json-normalizer.mjs package.json && corepack enable && pnpm install --frozen-lockfile && pnpm exec hardhat compile && chown -R node:node /workspace
+        USER node
+    command: [pnpm, exec, hardhat, node, --hostname, 0.0.0.0]
+    environment:
+      CI: "true"
+      HARDHAT_DISABLE_TELEMETRY: "true"
+      HOME: /tmp
+    ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41545:8545"]
+    volumes:
+      - contracts-deployments:/workspace/deployments
+    healthcheck:
+      <<: *health
+      test: [CMD, node, --eval, "fetch('http://127.0.0.1:8545',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'eth_chainId',params:[]})}).then(r=>r.json()).then(v=>process.exit(v.result==='0x7a69'?0:1)).catch(()=>process.exit(1))"]
+
+  xnode-1:
+    <<: *xnode
+    build: *xnode-build
+    environment:
+      <<: *xnode-environment
+      Node__PublicHost: xnode-1
+      Node__RouterId: 4cb5abf6ad79fbf5abbccafcc269d85cd2651ed4b885b5869f241aedf0a5ba29
+      Node__Ed25519PrivateKey: 0000000000000000000000000000000000000000000000000000000000000001
+    ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41801:8080"]
+    volumes: [xnode-1-state:/state]
+    depends_on: { relay-bootstrap: { condition: service_healthy } }
+
+  xnode-2:
+    <<: *xnode
+    environment:
+      <<: *xnode-environment
+      Node__PublicHost: xnode-2
+      Node__RouterId: 7422b9887598068e32c4448a949adb290d0f4e35b9e01b0ee5f1a1e600fe2674
+      Node__Ed25519PrivateKey: 0000000000000000000000000000000000000000000000000000000000000002
+    ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41802:8080"]
+    volumes: [xnode-2-state:/state]
+    depends_on: { relay-bootstrap: { condition: service_healthy } }
+
+  xnode-3:
+    <<: *xnode
+    environment:
+      <<: *xnode-environment
+      Node__PublicHost: xnode-3
+      Node__RouterId: f381626e41e7027ea431bfe3009e94bdd25a746beec468948d6c3c7c5dc9a54b
+      Node__Ed25519PrivateKey: 0000000000000000000000000000000000000000000000000000000000000003
+    ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41803:8080"]
+    volumes: [xnode-3-state:/state]
+    depends_on: { relay-bootstrap: { condition: service_healthy } }
+
+  registry:
+    <<: *service
+    image: deep-survival/registry:dev
+    build:
+      context: .
+      pull: false
+      additional_contexts:
+        registry_source: ${SURVIVAL_REGISTRY_PATH:-../deep-registry-api}
+      args:
+        SDK_IMAGE: ${SURVIVAL_DOTNET_SDK_IMAGE:-mcr.microsoft.com/dotnet/sdk@sha256:7e964ea8bc6c1e18ea9fbc76ed403da41c9b19aeee2aab6bf9c845f25e891380}
+        RUNTIME_IMAGE: ${SURVIVAL_DOTNET_RUNTIME_IMAGE:-mcr.microsoft.com/dotnet/aspnet@sha256:e3736b0d423db99c6988e1ddf5ea725c14b12579bb120024e5ff7ff204a14080}
+      dockerfile_inline: |
+        ARG SDK_IMAGE
+        ARG RUNTIME_IMAGE
+        FROM $${SDK_IMAGE} AS build
+        WORKDIR /src
+        COPY --from=registry_source . .
+        RUN dotnet publish src/Deep.Registry.Api/Deep.Registry.Api.csproj -c Debug -o /out --runtime linux-arm64 --self-contained false -p:UseAppHost=false
+        FROM $${RUNTIME_IMAGE}
+        WORKDIR /app
+        COPY --from=build /out .
+        RUN mkdir /state && chown 65532:65532 /state
+        USER 65532:65532
+        ENTRYPOINT ["dotnet","Deep.Registry.Api.dll"]
+    environment:
+      ASPNETCORE_URLS: http://0.0.0.0:8080
+      Registry__StatePath: /state/registry.json
+      Registry__StakingBackendBaseUrl: http://staking-backend:8080
+    ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41810:8080"]
+    volumes: [registry-state:/state]
+    healthcheck: { <<: *health, test: [CMD-SHELL, "test -r /proc/1/status"] }
+
+  staking-backend:
+    <<: *service
+    profiles: [chain]
+    image: deep-survival/staking-backend:dev
+    build:
+      context: .
+      pull: false
+      additional_contexts:
+        staking_source: ${SURVIVAL_STAKING_PATH:-../xpoint-staking-backend}
+      args:
+        SDK_IMAGE: ${SURVIVAL_DOTNET_SDK_IMAGE:-mcr.microsoft.com/dotnet/sdk@sha256:7e964ea8bc6c1e18ea9fbc76ed403da41c9b19aeee2aab6bf9c845f25e891380}
+        RUNTIME_IMAGE: ${SURVIVAL_DOTNET_RUNTIME_IMAGE:-mcr.microsoft.com/dotnet/aspnet@sha256:e3736b0d423db99c6988e1ddf5ea725c14b12579bb120024e5ff7ff204a14080}
+      dockerfile_inline: |
+        ARG SDK_IMAGE
+        ARG RUNTIME_IMAGE
+        FROM $${SDK_IMAGE} AS build
+        WORKDIR /src
+        COPY --from=staking_source . .
+        RUN dotnet publish src/XPoint.Staking.Backend/XPoint.Staking.Backend.csproj -c Debug -o /out --runtime linux-arm64 --self-contained false -p:UseAppHost=false
+        FROM $${RUNTIME_IMAGE}
+        WORKDIR /app
+        COPY --from=build /out .
+        RUN mkdir /state && chown 65532:65532 /state
+        USER 65532:65532
+        ENTRYPOINT ["dotnet","XPoint.Staking.Backend.dll"]
+    environment:
+      ASPNETCORE_URLS: http://0.0.0.0:8080
+      Contracts__ChainId: "31337"
+      Contracts__EthereumRpcUrl: http://contracts-devnet:8545
+      Contracts__StatePath: /state/staking.json
+      Registry__BaseUrl: http://registry:8080
+      Price__EthereumRpcUrl: ""
+    ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41811:8080"]
+    volumes: [staking-state:/state]
+    depends_on:
+      contracts-devnet: { condition: service_healthy }
+    healthcheck: { <<: *health, test: [CMD-SHELL, "test -r /proc/1/status"] }
+
+  storage:
+    <<: *service
+    image: deep-survival/compat:dev
+    build: *compat-build
+    command: [node, tools/storage-service/storage-service.mjs]
+    environment: { PORT: "8080", SERVICE_NAME: survival-storage, COMPAT_STATE_DIR: /state, PUSH_COMPAT_NOTIFY_URL: http://push:8080 }
+    ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41820:8080"]
+    volumes: [storage-state:/state]
+    healthcheck: { <<: *health, test: [CMD, node, --eval, "fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"] }
+
+  file:
+    <<: *service
+    image: deep-survival/compat:dev
+    command: [node, tools/file-service/file-service.mjs]
+    environment: { PORT: "8080", SERVICE_NAME: survival-file, COMPAT_STATE_DIR: /state }
+    ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41821:8080"]
+    volumes: [file-state:/state]
+    healthcheck: { <<: *health, test: [CMD, node, --eval, "fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"] }
+
+  push:
+    <<: *service
+    image: deep-survival/compat:dev
+    command: [node, tools/push-service/push-service.mjs]
+    environment: { PORT: "8080", SERVICE_NAME: survival-push, COMPAT_STATE_DIR: /state }
+    ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41822:8080"]
+    volumes: [push-state:/state]
+    healthcheck: { <<: *health, test: [CMD, node, --eval, "fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"] }
+
+  calls:
+    <<: *service
+    image: deep-survival/compat:dev
+    command: [node, tools/calls-service/calls-service.mjs]
+    environment: { PORT: "8080", SERVICE_NAME: survival-calls, CALLS_STATE_DIR: /state }
+    ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41823:8080"]
+    volumes: [calls-state:/state]
+    healthcheck: { <<: *health, test: [CMD, node, --eval, "fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"] }
+
+  relay-bootstrap:
+    <<: *service
+    image: deep-survival/compat:dev
+    command: [node, tools/relay-bootstrap/relay-bootstrap.mjs]
+    environment: { PORT: "8080", RELAY_BOOTSTRAP_STATE_DIR: /state }
+    ports: ["127.0.0.1:41999:8080"]
+    volumes: [relay-bootstrap-state:/state]
+    healthcheck: { <<: *health, test: [CMD, node, --eval, "fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"] }
+
+networks:
+  runtime:
+    internal: true
+
+volumes:
+  contracts-deployments:
+  xnode-1-state:
+  xnode-2-state:
+  xnode-3-state:
+  registry-state:
+  staking-state:
+  storage-state:
+  file-state:
+  push-state:
+  calls-state:
+  relay-bootstrap-state:
