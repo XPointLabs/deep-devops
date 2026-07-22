@@ -4,7 +4,9 @@ $compose = Join-Path (Split-Path $PSScriptRoot -Parent) 'docker-compose.p15c-hea
 if (-not (Test-Path -LiteralPath $script -PathType Leaf)) { throw 'P15C lifecycle implementation is absent' }
 if (-not (Test-Path -LiteralPath $compose -PathType Leaf)) { throw 'P15C topology implementation is absent' }
 
-$text = (Get-Content -LiteralPath $script -Raw) + "`n" + (Get-Content -LiteralPath $compose -Raw)
+$driverText = Get-Content -LiteralPath $script -Raw
+$composeText = Get-Content -LiteralPath $compose -Raw
+$text = $driverText + "`n" + $composeText
 foreach ($forbidden in @('docker system prune', 'docker container prune', '/var/run/docker.sock', 'host-gateway', 'privileged: true')) {
     if ($text -match [regex]::Escape($forbidden)) { throw "forbidden lifecycle construct: $forbidden" }
 }
@@ -21,7 +23,7 @@ if ($text -match '(?im)^\s*(?:pull|pull_policy)\s*:\s*(?:always|missing)') { thr
 
 $planMatch = [regex]::Match($text, '(?m)^# P15C_OPERATION_PLAN: (?<plan>[a-z0-9,-]+)(?=\r?$)')
 if (-not $planMatch.Success) { throw 'real orchestrator must export its exact fail-closed operation plan' }
-$expectedPlan = 'source-preflight,image-preflight,collision-check,foreign-snapshot,generate-secrets,compose-config,build,up-contracts,deploy-contracts,up-runtime,probe,e2e,labels,cleanup,evidence'
+$expectedPlan = 'source-preflight,collision-check,foreign-snapshot,image-preflight,generate-secrets,source-export,compose-config,build,up-contracts,deploy-contracts,up-runtime,probe,e2e,labels,cleanup,evidence'
 if ($planMatch.Groups['plan'].Value -ne $expectedPlan) { throw 'real orchestrator operation plan is not exact' }
 foreach ($requiredCall in @('Assert-P15COperationPlan', 'Invoke-P15CBuild', 'Invoke-P15CUp')) {
     if ($text.IndexOf($requiredCall, [StringComparison]::Ordinal) -lt 0) { throw "real orchestrator call is absent: $requiredCall" }
@@ -33,6 +35,23 @@ if ($planCall -ge $buildCall -or $planCall -ge $upCall) { throw 'real orchestrat
 if ($text -notmatch "eth_chainId" -or $text -notmatch "0x7a69") { throw 'Hardhat readiness must prove exact JSON-RPC chain id' }
 if ($text -notmatch 'Clear-P15CEnvironment') { throw 'driver must clear every P15C process environment value' }
 if ($text -notmatch 'receipt-retained') { throw 'retained Run must use a distinct no-cleanup/no-evidence plan' }
+if ($driverText -match '\{\{\.Status\}\}') { throw 'foreign inventory must not use human-formatted Docker status' }
+foreach ($stableField in @('.State.Status','.State.Health.Status','.State.StartedAt','.State.FinishedAt','.RestartCount')) {
+    if (-not $driverText.Contains($stableField, [StringComparison]::Ordinal)) { throw "stable inspect-derived foreign inventory field is absent: $stableField" }
+}
+if ($composeText -match '(?m)^\s*# syntax=docker/dockerfile:1\.7\s*$') { throw 'floating Dockerfile frontend is prohibited' }
+foreach ($contextName in @('XNODE','E2E','REGISTRY','STAKING','CONTRACTS')) {
+    if ($composeText -notmatch "P15C_$($contextName)_CONTEXT") { throw "exact archived build context is absent: $contextName" }
+}
+if ($composeText -match 'additional_contexts:[^\r\n]*P15C_(?:XNODE|E2E|REGISTRY|STAKING|CONTRACTS)_PATH' -or $driverText -notmatch 'New-ExactSourceExports') { throw 'build contexts can still copy dirty or ignored checkout outputs' }
+if ($driverText -notmatch "'--list-sdks'" -or $driverText -notmatch "com\.xpoint\.p15c\.ownership-nonce") { throw 'SDK or transient preflight container ownership accounting is incomplete' }
+if ($driverText -match 'function Assert-ReceiptSyntax' -or $driverText -notmatch 'validate-receipt') { throw 'driver and tests must use one canonical receipt validator' }
+foreach ($binding in @('manifestSha256','foreignSnapshotSha256','Assert-OwnedProjectRuntimeInventory','Remove-ExclusivelyCreatedFile','Protect-P15CAuthorityFile')) {
+    if ($driverText -notmatch $binding) { throw "retained authority or cleanup binding is absent: $binding" }
+}
+$ownershipGate = $driverText.LastIndexOf('Assert-OwnedProjectRuntimeInventory', [StringComparison]::Ordinal)
+$downMutation = $driverText.LastIndexOf('Invoke-ExactDown', [StringComparison]::Ordinal)
+if ($ownershipGate -lt 0 -or $downMutation -lt 0 -or $ownershipGate -ge $downMutation) { throw 'same-project resources are not validated before compose down' }
 
 $integration = Join-Path $PSScriptRoot 'p15c-headless-lab.integration.test.ps1'
 $integrationText = Get-Content -LiteralPath $integration -Raw

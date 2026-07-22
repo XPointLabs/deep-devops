@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { addressesForCodeQuery, validateLocalContractManifest } from './p15c-local-contract-manifest.mjs';
+import { addressesForCodeQuery, observeAndValidateLocalContractManifest, validateLocalContractManifest } from './p15c-local-contract-manifest.mjs';
 
 const address = digit => `0x${digit.repeat(40)}`;
 const manifest = {
@@ -44,4 +44,17 @@ test('manifest envelope, exact keys and bounded deploy blocks fail closed', () =
 
 test('bytecode query list contains exactly the four required addresses', () => {
   assert.deepEqual(addressesForCodeQuery({ ...manifest, contracts: { ...manifest.contracts, ignored: address('9') } }), Object.values(manifest.contracts));
+});
+
+test('retained validation performs live chain and eth_getCode observations for all four addresses', async () => {
+  const methods = [];
+  const fetchImpl = async (_url, init) => {
+    const request = JSON.parse(init.body);
+    methods.push([request.method, ...(request.params ?? [])]);
+    const result = request.method === 'eth_chainId' ? '0x7a69' : '0x6001';
+    return { ok: true, json: async () => ({ jsonrpc: '2.0', id: request.id, result }) };
+  };
+  assert.equal(await observeAndValidateLocalContractManifest(manifest, 'http://127.0.0.1:39545', fetchImpl), true);
+  assert.deepEqual(methods.map(value => value[0]), ['eth_chainId', 'eth_getCode', 'eth_getCode', 'eth_getCode', 'eth_getCode']);
+  assert.deepEqual(methods.slice(1).map(value => value[1]), addressesForCodeQuery(manifest));
 });

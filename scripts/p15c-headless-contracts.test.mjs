@@ -28,6 +28,8 @@ import {
   validateRetainedOwnershipState,
   validateFinalEvidenceEligibility,
   validateOwnershipReceipt,
+  validateOwnedProjectRuntimeInventory,
+  canDeleteOwnedOutput,
   validateReceiptResources,
   validateImageSourceBindings,
   validateProjectName
@@ -153,7 +155,7 @@ test('compose mutations fail for every isolation and image invariant', () => {
 });
 
 test('orchestrator order proves collision and foreign snapshot precede build/up', () => {
-  const valid = ['source-preflight', 'image-preflight', 'collision-check', 'foreign-snapshot', 'generate-secrets', 'compose-config', 'build', 'up-contracts', 'deploy-contracts', 'up-runtime', 'probe', 'e2e', 'labels', 'cleanup', 'evidence'];
+  const valid = ['source-preflight', 'collision-check', 'foreign-snapshot', 'image-preflight', 'generate-secrets', 'source-export', 'compose-config', 'build', 'up-contracts', 'deploy-contracts', 'up-runtime', 'probe', 'e2e', 'labels', 'cleanup', 'evidence'];
   assert.equal(validateLifecycleOperationOrder(valid), true);
   for (const mutation of [
     valid.filter(value => value !== 'collision-check'),
@@ -164,7 +166,7 @@ test('orchestrator order proves collision and foreign snapshot precede build/up'
 });
 
 test('actual observed normal and retained prefixes cannot fake cleanup/evidence', () => {
-  const common = ['source-preflight', 'image-preflight', 'collision-check', 'foreign-snapshot', 'generate-secrets', 'compose-config', 'build', 'up-contracts', 'deploy-contracts', 'up-runtime', 'probe', 'e2e', 'labels'];
+  const common = ['source-preflight', 'collision-check', 'foreign-snapshot', 'image-preflight', 'generate-secrets', 'source-export', 'compose-config', 'build', 'up-contracts', 'deploy-contracts', 'up-runtime', 'probe', 'e2e', 'labels'];
   assert.equal(validateLifecycleOperationPrefix([...common, 'cleanup', 'evidence'], { retained: false }), true);
   assert.equal(validateLifecycleOperationPrefix([...common, 'receipt-retained'], { retained: true }), true);
   assert.throws(() => validateLifecycleOperationPrefix([...common, 'cleanup', 'evidence'], { retained: true }));
@@ -222,9 +224,14 @@ test('built image metadata is exact and non-product', () => {
 test('KeepRunning and receipt validation fail closed', () => {
   assert.equal(validateKeepRunningGate({ allGatesPassed: true, requested: true }), true);
   assert.throws(() => validateKeepRunningGate({ allGatesPassed: false, requested: true }));
-  const receipt = { schema: 'deep-p15c-ownership.v1', project, nonce, composeSha256: digest.slice(7), sources: { devops: { sha, tree } }, images: [{ role: 'xnode', id: digest }] };
-  assert.equal(validateOwnershipReceipt(receipt, { project, nonce, composeSha256: digest.slice(7), sources: receipt.sources }), true);
-  assert.throws(() => validateOwnershipReceipt({ ...receipt, nonce: 'e'.repeat(32) }, { project, nonce, composeSha256: digest.slice(7), sources: receipt.sources }));
+  const receipt = { schema: 'deep-p15c-ownership.v1', project, nonce, composeSha256: digest.slice(7), manifestSha256: '1'.repeat(64), foreignSnapshotSha256: '2'.repeat(64), sources: { devops: { sha, tree } }, images: [{ role: 'xnode', source: 'xnode', sha, tree, id: digest }] };
+  const expected = { project, nonce, composeSha256: digest.slice(7), manifestSha256: receipt.manifestSha256, foreignSnapshotSha256: receipt.foreignSnapshotSha256, sources: receipt.sources, roles: ['xnode'] };
+  assert.equal(validateOwnershipReceipt(receipt, expected), true);
+  assert.throws(() => validateOwnershipReceipt({ ...receipt, nonce: 'e'.repeat(32) }, expected));
+  assert.throws(() => validateOwnershipReceipt({ ...receipt, manifestSha256: '3'.repeat(64) }, expected));
+  assert.throws(() => validateOwnershipReceipt({ ...receipt, foreignSnapshotSha256: '4'.repeat(64) }, expected));
+  assert.throws(() => validateOwnershipReceipt({ ...receipt, images: [...receipt.images, { ...receipt.images[0], id: `sha256:${'f'.repeat(64)}` }] }, expected));
+  assert.throws(() => validateOwnershipReceipt({ ...receipt, images: [...receipt.images, { ...receipt.images[0], role: 'other' }] }, { ...expected, roles: ['xnode', 'other'] }));
 });
 
 test('collision gate runs before build and rejects every owned namespace collision', () => {
@@ -259,6 +266,32 @@ test('receipt resources validate containers, networks, volumes and images by kin
     assert.throws(() => validateReceiptResources([{ kind, project: 'foreign', nonce, labels }], expected));
     assert.throws(() => validateReceiptResources([{ kind, project, nonce: 'e'.repeat(32), labels }], expected));
   }
+});
+
+test('project runtime inventory rejects injected same-project resources before compose down', () => {
+  const services = ['contracts-devnet', 'xnode-1'];
+  const volumes = ['xnode-1-state'];
+  const label = { 'com.xpoint.p15c.ownership-nonce': nonce };
+  const valid = {
+    containers: services.map(service => ({ project, nonce, service, labels: label })),
+    networks: [{ project, nonce, network: 'runtime', labels: label }],
+    volumes: volumes.map(volume => ({ project, nonce, volume, labels: label }))
+  };
+  assert.equal(validateOwnedProjectRuntimeInventory(valid, { project, nonce, services, networks: ['runtime'], volumes, allowPartial: false }), true);
+  assert.throws(() => validateOwnedProjectRuntimeInventory({ ...valid, containers: [...valid.containers, { project, nonce, service: 'injected-orphan', labels: label }] }, { project, nonce, services, networks: ['runtime'], volumes, allowPartial: false }));
+  assert.throws(() => validateOwnedProjectRuntimeInventory({ ...valid, volumes: valid.volumes.map(value => ({ ...value, nonce: 'e'.repeat(32), labels: { 'com.xpoint.p15c.ownership-nonce': 'e'.repeat(32) } })) }, { project, nonce, services, networks: ['runtime'], volumes, allowPartial: false }));
+  assert.equal(validateOwnedProjectRuntimeInventory({ containers: valid.containers.slice(0, 1), networks: [], volumes: [] }, { project, nonce, services, networks: ['runtime'], volumes, allowPartial: true }), true);
+});
+
+test('failure cleanup deletes only exclusively created and still-bound output files', () => {
+  const record = { created: true, path: 'C:\\evidence\\owned.json', expectedSha256: '1'.repeat(64) };
+  assert.equal(canDeleteOwnedOutput(record, { path: record.path, kind: 'file', sha256: record.expectedSha256 }), true);
+  for (const candidate of [
+    { ...record, created: false },
+    { ...record, path: 'C:\\evidence\\raced.json' },
+    { ...record, expectedSha256: '2'.repeat(64) }
+  ]) assert.equal(canDeleteOwnedOutput(candidate, { path: record.path, kind: 'file', sha256: record.expectedSha256 }), false);
+  assert.equal(canDeleteOwnedOutput(record, { path: record.path, kind: 'directory', sha256: record.expectedSha256 }), false);
 });
 
 test('exact owned image removal validates all receipt bindings before first call', async () => {

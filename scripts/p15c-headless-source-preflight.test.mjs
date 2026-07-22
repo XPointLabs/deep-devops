@@ -12,9 +12,9 @@ const tree = 'b'.repeat(40);
 const digest = `sha256:${'c'.repeat(64)}`;
 
 test('source record requires canonical clean exact non-shallow Git root', () => {
-  const valid = { expectedPath: 'C:\\source', canonicalPath: 'C:\\source', gitRoot: 'C:\\source', sha, tree, expectedSha: sha, expectedTree: tree, dirty: false, reparse: false, shallow: false, replaceRefs: [], alternates: [], grafts: false };
+  const valid = { expectedPath: 'C:\\source', canonicalPath: 'C:\\source', gitRoot: 'C:\\source', sha, tree, expectedSha: sha, expectedTree: tree, dirty: false, reparse: false, shallow: false, replaceRefs: [], alternates: [], grafts: false, indexFlags: [], trackedContentMatches: true, sparse: false, ambientGitOverrides: [] };
   assert.equal(validateSourceRecord(valid), true);
-  for (const patch of [{ dirty: true }, { reparse: true }, { shallow: true }, { replaceRefs: ['x'] }, { alternates: ['x'] }, { grafts: true }, { sha: 'd'.repeat(40) }, { tree: 'd'.repeat(40) }, { gitRoot: 'C:\\other' }, { expectedPath: 'C:\\carrier' }]) {
+  for (const patch of [{ dirty: true }, { reparse: true }, { shallow: true }, { replaceRefs: ['x'] }, { alternates: ['x'] }, { grafts: true }, { indexFlags: ['S hidden.cs'] }, { trackedContentMatches: false }, { sparse: true }, { ambientGitOverrides: ['GIT_OBJECT_DIRECTORY'] }, { sha: 'd'.repeat(40) }, { tree: 'd'.repeat(40) }, { gitRoot: 'C:\\other' }, { expectedPath: 'C:\\carrier' }]) {
     assert.throws(() => validateSourceRecord({ ...valid, ...patch }));
   }
 });
@@ -65,6 +65,15 @@ test('inspectSource checks common-dir alternates and grafts for linked worktrees
     const sha = execFileSync('git', ['-C', linked, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
     const tree = execFileSync('git', ['-C', linked, 'rev-parse', 'HEAD^{tree}'], { encoding: 'utf8' }).trim();
     assert.deepEqual(inspectSource({ path: linked, sha, tree }), { sha, tree });
+    execFileSync('git', ['-C', linked, 'update-index', '--skip-worktree', 'source.txt']);
+    assert.throws(() => inspectSource({ path: linked, sha, tree }));
+    execFileSync('git', ['-C', linked, 'update-index', '--no-skip-worktree', 'source.txt']);
+    execFileSync('git', ['-C', linked, 'update-index', '--assume-unchanged', 'source.txt']);
+    assert.throws(() => inspectSource({ path: linked, sha, tree }));
+    execFileSync('git', ['-C', linked, 'update-index', '--no-assume-unchanged', 'source.txt']);
+    execFileSync('git', ['-C', linked, 'config', 'core.sparseCheckout', 'true']);
+    assert.throws(() => inspectSource({ path: linked, sha, tree }));
+    execFileSync('git', ['-C', linked, 'config', '--unset', 'core.sparseCheckout']);
     const common = execFileSync('git', ['-C', linked, 'rev-parse', '--git-common-dir'], { encoding: 'utf8' }).trim();
     const commonPath = common.match(/^[A-Za-z]:[\\/]/) ? common : join(linked, common);
     const objectInfo = join(commonPath, 'objects', 'info');
