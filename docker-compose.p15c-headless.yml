@@ -139,7 +139,8 @@ services:
         LABEL org.opencontainers.image.revision="$${SOURCE_SHA}" org.opencontainers.image.source-tree="$${SOURCE_TREE}" org.opencontainers.image.source="xpoint-staking-contracts" com.xpoint.p15c.role="contracts-devnet" com.xpoint.evidence-class="headless-harness" com.xpoint.product-runtime="false" com.xpoint.p15c.ownership-nonce="$${OWNERSHIP_NONCE}"
         WORKDIR /workspace
         COPY --from=contracts_source . .
-        RUN corepack enable && pnpm install --frozen-lockfile && pnpm exec hardhat compile
+        COPY scripts/p15c-package-json-normalizer.mjs /p15c/
+        RUN node /p15c/p15c-package-json-normalizer.mjs package.json && corepack enable && pnpm install --frozen-lockfile && pnpm exec hardhat compile
         USER node
     command: [pnpm, exec, hardhat, node, --hostname, 0.0.0.0]
     environment: { CI: "true", HARDHAT_DISABLE_TELEMETRY: "true", HOME: /tmp }
