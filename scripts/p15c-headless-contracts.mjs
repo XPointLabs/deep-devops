@@ -79,10 +79,7 @@ export function assertSafeCleanupCommand(command, project) {
   if (/\b(?:system|container|network|volume|image)\s+prune\b/i.test(normalized) || /\bdocker\s+(?:rm|rmi)\b/i.test(normalized)) {
     fail('broad Docker cleanup is prohibited');
   }
-  const escaped = project.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const pattern = new RegExp(`^docker compose -p ${escaped} -f [^ ]*docker-compose\\.p15c-headless\\.yml down --volumes --remove-orphans$`, 'i');
-  if (!pattern.test(normalized)) fail('cleanup must be exact-project compose down with volumes and orphans');
-  return true;
+  fail('cleanup must use individually captured and revalidated resource identities');
 }
 
 export function assertOwnedResources(project, resources) {
@@ -203,6 +200,135 @@ export function validateCollisionInventory(project, inventory) {
 
 export function validateForeignInventoryInvariant(before, after) {
   if (typeof before !== 'string' || before !== after) fail('foreign Docker inventory changed');
+  return true;
+}
+
+export function stableForeignInventory(inventory) {
+  const containers = (inventory?.containers ?? []).map(value => ({
+    id: value.id,
+    name: value.name,
+    image: value.image,
+    project: value.project ?? ''
+  }));
+  const images = (inventory?.images ?? []).map(value => ({
+    id: value.id,
+    repository: value.repository,
+    tag: value.tag,
+    digest: value.digest
+  }));
+  const networks = (inventory?.networks ?? []).map(value => ({
+    id: value.id,
+    name: value.name,
+    driver: value.driver,
+    scope: value.scope,
+    project: value.project ?? ''
+  }));
+  const volumes = (inventory?.volumes ?? []).map(value => ({
+    name: value.name,
+    driver: value.driver,
+    project: value.project ?? ''
+  }));
+  const ordered = value => value
+    .map(record => JSON.stringify(record))
+    .sort()
+    .map(record => JSON.parse(record));
+  return JSON.stringify({
+    containers: ordered(containers),
+    images: ordered(images),
+    networks: ordered(networks),
+    volumes: ordered(volumes)
+  });
+}
+
+function validateCleanupResource(resource, project, nonce) {
+  if (!object(resource) || !['container', 'network', 'volume', 'image'].includes(resource.kind)) {
+    fail('captured cleanup resource is invalid');
+  }
+  if (resource.project !== project || resource.nonce !== nonce
+    || resource.labels?.['com.xpoint.p15c.ownership-nonce'] !== nonce) {
+    fail('captured cleanup resource ownership is invalid');
+  }
+  if (resource.kind === 'image' && !/^sha256:[0-9a-f]{64}$/.test(resource.id ?? '')) {
+    fail('captured image identity is invalid');
+  }
+  if (['container', 'network'].includes(resource.kind) && !/^[0-9a-f]{12,64}$/.test(resource.id ?? '')) {
+    fail(`captured ${resource.kind} identity is invalid`);
+  }
+  if (resource.kind === 'volume' && (!resource.name || resource.id !== resource.name)) {
+    fail('captured volume identity is invalid');
+  }
+}
+
+function resourceKey(resource) {
+  return `${resource.kind}:${resource.id}`;
+}
+
+function exactRemovalCommand(resource) {
+  if (resource.kind === 'container') return ['container', 'rm', '--force', resource.id];
+  if (resource.kind === 'network') return ['network', 'rm', resource.id];
+  if (resource.kind === 'volume') return ['volume', 'rm', resource.name];
+  return ['image', 'rm', resource.id];
+}
+
+export async function executeExactResourceCleanup({ project, nonce, captured, list, inspect, remove }) {
+  validateProjectName(project);
+  if (!/^[0-9a-f]{32}$/.test(nonce ?? '') || !Array.isArray(captured) || captured.length === 0) {
+    fail('cleanup authority must contain owned resource evidence');
+  }
+  for (const resource of captured) validateCleanupResource(resource, project, nonce);
+  const keys = captured.map(resourceKey);
+  if (new Set(keys).size !== keys.length) fail('cleanup authority contains duplicate resource identities');
+  const rank = { container: 0, network: 1, volume: 2, image: 3 };
+  const remaining = new Map(captured.map(resource => [resourceKey(resource), structuredClone(resource)]));
+  const ordered = [...captured].sort((left, right) => rank[left.kind] - rank[right.kind] || resourceKey(left).localeCompare(resourceKey(right)));
+  for (const resource of ordered) {
+    const currentInventory = await list();
+    const scoped = (currentInventory ?? []).filter(value => value?.project === project || value?.nonce === nonce);
+    if (scoped.length !== remaining.size || scoped.some(value => !remaining.has(resourceKey(value)))) {
+      fail('same-project or same-nonce cleanup membership changed after capture');
+    }
+    const current = await inspect(resource);
+    validateCleanupResource(current, project, nonce);
+    if (JSON.stringify(current) !== JSON.stringify(remaining.get(resourceKey(resource)))) {
+      fail('cleanup resource identity or ownership changed before removal');
+    }
+    await remove(resource, exactRemovalCommand(resource));
+    remaining.delete(resourceKey(resource));
+  }
+  const finalInventory = await list();
+  if ((finalInventory ?? []).some(value => value?.project === project || value?.nonce === nonce)) {
+    fail('owned or injected resources remain after exact cleanup');
+  }
+  return true;
+}
+
+function deepFreeze(value) {
+  if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const child of Object.values(value)) deepFreeze(child);
+  }
+  return value;
+}
+
+export async function loadValidatedReceiptOnce({ read, validate }) {
+  const bytes = await read();
+  if (!Buffer.isBuffer(bytes) && !(bytes instanceof Uint8Array)) fail('receipt reader must return canonical bytes');
+  return deepFreeze(await validate(bytes));
+}
+
+function normalizedPath(value) {
+  return String(value ?? '').replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase();
+}
+
+export async function publishOwnedOutput({ staged, destination, ownedRoot, destinationExists, validateParents, moveNoReplace }) {
+  const stagedPath = normalizedPath(staged);
+  const root = `${normalizedPath(ownedRoot)}\\`;
+  if (!stagedPath.startsWith(root) || stagedPath === normalizedPath(destination)) fail('staged output is outside the owned run tree');
+  for (let pass = 0; pass < 2; pass += 1) {
+    if (await validateParents(destination) !== true) fail('output parent validation failed closed');
+    if (await destinationExists(destination)) fail('output destination already exists');
+  }
+  await moveNoReplace(staged, destination);
   return true;
 }
 
@@ -411,9 +537,26 @@ export async function runCallsSignalingE2E(baseUrl) {
   const sender = `05${'1'.repeat(64)}`;
   const firstRecipient = `05${'2'.repeat(64)}`;
   const secondRecipient = `05${'3'.repeat(64)}`;
-  const post = body => fetchJsonExact(`${baseUrl}/api/calls/signal`, body.callId === 'p15c-malformed' ? 400 : 202, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-  const malformed = await post({ callId: 'p15c-malformed', conversationId: 'p15c-malformed' });
-  if (malformed.error !== 'invalid-request') fail('calls malformed-party rejection is invalid');
+  const post = (body, status = 202) => fetchJsonExact(`${baseUrl}/api/calls/signal`, status, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  const malformedParties = [
+    '', `04${'1'.repeat(64)}`, `05${'1'.repeat(63)}`,
+    `05${'1'.repeat(65)}`, `05${'g'.repeat(64)}`, `05${'A'.repeat(64)}`
+  ];
+  for (const party of malformedParties) {
+    for (const field of ['sender', 'recipient']) {
+      const candidate = {
+        callId: 'p15c-malformed',
+        conversationId: 'p15c-malformed',
+        sender: { value: sender },
+        recipient: { value: firstRecipient },
+        [field]: { value: party }
+      };
+      const malformed = await post(candidate, 400);
+      if (malformed.error !== 'invalid-request') fail('calls malformed-party rejection is invalid');
+    }
+    const malformedInbox = await fetchJsonExact(`${baseUrl}/api/calls/inbox/${encodeURIComponent(party)}`, 400);
+    if (malformedInbox.error !== 'invalid-request') fail('calls malformed inbox rejection is invalid');
+  }
   const first = { callId: 'p15c-call-first', conversationId: 'p15c-conversation', sender: { value: sender }, recipient: { value: firstRecipient } };
   const second = { callId: 'p15c-call-pending', conversationId: 'p15c-conversation', sender: { value: sender }, recipient: { value: secondRecipient } };
   for (const signal of [first, second]) {

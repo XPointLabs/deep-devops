@@ -16,6 +16,9 @@ export function validateSourceRecord(value) {
   if ((value.replaceRefs ?? []).length) fail('replace refs are prohibited');
   if ((value.alternates ?? []).length) fail('object alternates are prohibited');
   if (value.grafts) fail('grafts are prohibited');
+  if (value.infoAttributes) fail('repository-local info/attributes is prohibited');
+  if (String(value.coreAttributesFile ?? '').trim()) fail('core.attributesFile is prohibited');
+  if ((value.specialMetadata ?? []).length) fail('special Git metadata is prohibited');
   if ((value.indexFlags ?? []).length) fail('skip-worktree, assume-unchanged or nonstandard index flags are prohibited');
   if (value.trackedContentMatches !== true) fail('tracked worktree content differs from the exact index');
   if (value.sparse) fail('sparse checkout or sparse index is prohibited');
@@ -100,6 +103,7 @@ export function inspectSource({ path, sha, tree }) {
   const commonDir = resolve(canonicalPath, commonDirRaw);
   const alternatesPaths = [...new Set([join(commonDir, 'objects', 'info', 'alternates'), join(gitDir, 'objects', 'info', 'alternates')])];
   const graftsPaths = [...new Set([join(commonDir, 'info', 'grafts'), join(gitDir, 'info', 'grafts')])];
+  const attributePaths = [...new Set([join(commonDir, 'info', 'attributes'), join(gitDir, 'info', 'attributes')])];
   let alternates = [];
   for (const alternatesPath of alternatesPaths) { try { alternates.push(...readFileSync(alternatesPath, 'utf8').split(/\r?\n/).filter(Boolean)); } catch {} }
   const indexFlags = git(canonicalPath, ['ls-files', '-v']).split(/\r?\n/).filter(line => /^[a-zS]/.test(line));
@@ -107,6 +111,7 @@ export function inspectSource({ path, sha, tree }) {
   if (diffFiles.error || ![0, 1].includes(diffFiles.status)) fail('tracked content comparison failed');
   const sparse = gitOptional(canonicalPath, ['config', '--bool', 'core.sparseCheckout']) === 'true'
     || gitOptional(canonicalPath, ['config', '--bool', 'index.sparse']) === 'true';
+  const coreAttributesFile = gitOptional(canonicalPath, ['config', '--get', 'core.attributesFile']);
   const record = {
     expectedPath: path,
     canonicalPath,
@@ -121,6 +126,9 @@ export function inspectSource({ path, sha, tree }) {
     replaceRefs: git(canonicalPath, ['replace', '-l']).split(/\r?\n/).filter(Boolean),
     alternates,
     grafts: graftsPaths.some(graftsPath => { try { return lstatSync(graftsPath).isFile(); } catch { return false; } }),
+    infoAttributes: attributePaths.some(attributePath => { try { return lstatSync(attributePath).isFile(); } catch { return false; } }),
+    coreAttributesFile,
+    specialMetadata: [],
     indexFlags,
     trackedContentMatches: diffFiles.status === 0,
     sparse,

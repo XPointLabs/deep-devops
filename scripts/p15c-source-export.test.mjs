@@ -33,7 +33,7 @@ test('isolated export ignores a post-preflight info/attributes export-ignore rac
     const poisonedTar = join(owned, 'poisoned.tar');
     execFileSync('git', ['-C', source.root, 'archive', '--format=tar', `--output=${poisonedTar}`, source.sha]);
     const poisonedList = execFileSync('tar', ['-tf', poisonedTar], { encoding: 'utf8' });
-    assert.doesNotMatch(poisonedList, /kept\.txt/);
+    assert.doesNotMatch(poisonedList, /(?:^|\r?\n)kept\.txt(?:\r?\n|$)/);
 
     const result = exportExactCommit({ source: source.root, sha: source.sha, tree: source.tree, destination, ownedRoot: owned });
     assert.deepEqual(result, { sha: source.sha, tree: source.tree, entries: 2 });

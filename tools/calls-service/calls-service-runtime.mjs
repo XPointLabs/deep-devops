@@ -104,6 +104,10 @@ function sessionIdValue(value) {
   return '';
 }
 
+function isCanonicalSessionId(value) {
+  return /^05[0-9a-f]{64}$/.test(value);
+}
+
 function normalizeCallSignal(envelope) {
   if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)) {
     return null;
@@ -114,7 +118,7 @@ function normalizeCallSignal(envelope) {
   const sender = sessionIdValue(envelope.sender ?? envelope.Sender);
   const recipient = sessionIdValue(envelope.recipient ?? envelope.Recipient);
 
-  if (!callId || !conversationId || !sender || !recipient) {
+  if (!callId || !conversationId || !isCanonicalSessionId(sender) || !isCanonicalSessionId(recipient)) {
     return null;
   }
 
@@ -170,6 +174,13 @@ async function handleCalls(req, res, url) {
     incrementStat('callInbox');
 
     const recipient = decodeURIComponent(url.pathname.slice('/api/calls/inbox/'.length));
+    if (!isCanonicalSessionId(recipient)) {
+      json(res, 400, {
+        error: 'invalid-request',
+        message: 'recipient must be a canonical Session ID'
+      });
+      return true;
+    }
     const selected = [];
     const remaining = [];
     for (const signal of callSignals) {
