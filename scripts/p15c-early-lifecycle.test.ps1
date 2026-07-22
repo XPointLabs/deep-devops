@@ -71,7 +71,8 @@ function Test-ZeroOwnedEarlyFailureCleanup {
     [IO.File]::WriteAllText(
         $fakeSecretCleanup,
         "param([string]`$Action,[string]`$RunDirectory)`r`n" +
-        "[IO.Directory]::Delete(`$RunDirectory, `$true)`r`n"
+        "[IO.Directory]::Delete(`$RunDirectory, `$true)`r`n" +
+        "Write-Output 'P15C ephemeral secrets removed.'`r`n"
     )
     $script:zeroOwnedChecks = 0
     $script:foreignChecks = 0
