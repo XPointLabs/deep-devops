@@ -36,6 +36,7 @@ public static class FakeDockerProgress
     public static int Main(string[] args)
     {
         Console.Error.WriteLine("Dockerfile:7");
+        if (Array.IndexOf(args, "fail") >= 0) return 7;
         Console.Out.WriteLine("BuildKit progress");
         return 0;
     }
@@ -61,6 +62,17 @@ public static class FakeDockerProgress
         $log = [IO.File]::ReadAllText($logPath)
         if ($log -notmatch 'Dockerfile:7' -or $log -notmatch 'BuildKit progress') {
             throw 'P15C Docker log did not retain both native output streams.'
+        }
+        try {
+            Invoke-DockerQuiet @('fail') $logPath
+            throw 'P15C failing native Docker process was accepted.'
+        } catch {
+            if ($_.Exception.Message -match 'remains only in the owned run directory') {
+                throw 'RED: Docker failure message claims a log that successful cleanup deletes.'
+            }
+            if ($_.Exception.Message -ne 'P15C Docker operation failed.') {
+                throw
+            }
         }
     } finally {
         $env:PATH = $priorPath
@@ -100,11 +112,25 @@ function Test-EarlyImageNamesAreNotReceiptIds {
     }
 }
 
+function Test-MultistageBaseArgsAreGlobal {
+    $composePath = Join-Path (Split-Path $PSScriptRoot -Parent) `
+        'docker-compose.p15c-headless.yml'
+    $compose = Get-Content -LiteralPath $composePath -Raw
+    $globalDeclarations = [regex]::Matches(
+        $compose,
+        '(?m)^\s+ARG SDK_IMAGE\r?\n\s+ARG RUNTIME_IMAGE\r?\n\s+FROM \$\$\{SDK_IMAGE\} AS build$'
+    )
+    if ($globalDeclarations.Count -ne 3) {
+        throw 'RED: multi-stage runtime base ARGs are not globally declared before the first FROM.'
+    }
+}
+
 $failures = [Collections.Generic.List[Exception]]::new()
 foreach ($case in @(
     ${function:Test-DockerProgressIsNotTerminating},
     ${function:Test-BuildIsExplicitlyOffline},
-    ${function:Test-EarlyImageNamesAreNotReceiptIds}
+    ${function:Test-EarlyImageNamesAreNotReceiptIds},
+    ${function:Test-MultistageBaseArgsAreGlobal}
 )) {
     try { & $case }
     catch {
