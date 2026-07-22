@@ -83,9 +83,18 @@ only after scoped cleanup and foreign-inventory validation succeed. If resource
 cleanup is incomplete, the run directory, logs, secrets and receipt are retained
 for diagnosis and no final evidence is emitted.
 
-Passing P15C means only:
+Current status: **implemented / real lifecycle pending / no-go**. The following
+is the acceptance target only after both real lifecycle shapes pass and their
+review evidence is accepted by Mr. X:
 
 `P15C1-HEADLESS-HARNESS-GO / P14C2-LINUX-ARM64-EXECUTION-GO /
 LOCAL-EPHEMERAL-CONTRACT-DEPLOY-GO / SCOPED-LIFECYCLE-GO /
 P14-PROFILE-ACTIVATION-NOT-TESTED / VLESS-NO-GO / DEVICE-E2E-NO-GO /
 PRODUCT-RUNTIME-NO-GO`.
+
+PowerShell strings are immutable, so this harness does not claim that seed text
+held briefly by the PowerShell runtime can be proven overwritten. Mutable byte
+buffers are cleared on a best-effort basis and owned secret files are removed
+after successful resource cleanup. If finalization fails part-way through,
+already removed secrets cannot be restored; remaining owned diagnostics and the
+receipt are preserved where feasible and final PASS evidence is withheld.

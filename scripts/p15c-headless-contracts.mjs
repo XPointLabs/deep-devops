@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
 const exactRoles = Object.freeze([
@@ -12,6 +13,59 @@ function fail(message) { throw new Error(`P15C contract failure: ${message}`); }
 function object(value) { return value && typeof value === 'object' && !Array.isArray(value); }
 function same(left, right) {
   return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+function exactKeys(value, expected) {
+  return object(value) && same(Object.keys(value).sort(), [...expected].sort());
+}
+
+function parseJsonNoDuplicateKeys(text) {
+  let index = 0;
+  const whitespace = () => { while (/\s/.test(text[index] ?? '')) index += 1; };
+  const string = () => {
+    const start = index;
+    if (text[index++] !== '"') fail('JSON string is invalid');
+    while (index < text.length) {
+      if (text[index] === '\\') { index += 2; continue; }
+      if (text[index++] === '"') return JSON.parse(text.slice(start, index));
+    }
+    fail('JSON string is unterminated');
+  };
+  const value = () => {
+    whitespace();
+    if (text[index] === '{') return jsonObject();
+    if (text[index] === '[') return array();
+    if (text[index] === '"') { string(); return; }
+    const match = /^(?:true|false|null|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)/.exec(text.slice(index));
+    if (!match) fail('JSON value is invalid');
+    index += match[0].length;
+  };
+  const jsonObject = () => {
+    index += 1; whitespace(); const keys = new Set();
+    if (text[index] === '}') { index += 1; return; }
+    while (index < text.length) {
+      whitespace(); const key = string();
+      if (keys.has(key)) fail(`duplicate JSON key: ${key}`);
+      keys.add(key); whitespace();
+      if (text[index++] !== ':') fail('JSON object separator is invalid');
+      value(); whitespace();
+      if (text[index] === '}') { index += 1; return; }
+      if (text[index++] !== ',') fail('JSON object delimiter is invalid');
+    }
+    fail('JSON object is unterminated');
+  };
+  const array = () => {
+    index += 1; whitespace();
+    if (text[index] === ']') { index += 1; return; }
+    while (index < text.length) {
+      value(); whitespace();
+      if (text[index] === ']') { index += 1; return; }
+      if (text[index++] !== ',') fail('JSON array delimiter is invalid');
+    }
+    fail('JSON array is unterminated');
+  };
+  value(); whitespace();
+  if (index !== text.length) fail('JSON has trailing content');
+  return JSON.parse(text);
 }
 
 export function validateProjectName(value) {
@@ -118,22 +172,19 @@ export function validateKeepRunningGate({ allGatesPassed, requested }) {
 }
 
 export function validateOwnershipReceipt(receipt, expected) {
-  if (!object(receipt) || receipt.schema !== 'deep-p15c-ownership.v1') fail('ownership receipt schema is invalid');
+  if (!exactKeys(receipt, ['schema', 'project', 'nonce', 'composeSha256', 'manifestSha256', 'foreignSnapshotSha256', 'sources', 'images']) || receipt.schema !== 'deep-p15c-ownership.v1') fail('ownership receipt schema is invalid');
   validateProjectName(receipt.project);
-  if (receipt.project !== expected.project || receipt.nonce !== expected.nonce || !/^[0-9a-f]{32}$/.test(receipt.nonce ?? '') || receipt.composeSha256 !== expected.composeSha256 || !/^[0-9a-f]{64}$/.test(receipt.composeSha256 ?? '')) fail('ownership receipt binding is invalid');
+  if ((expected.project && receipt.project !== expected.project) || (expected.nonce && receipt.nonce !== expected.nonce) || !/^[0-9a-f]{32}$/.test(receipt.nonce ?? '') || (expected.composeSha256 && receipt.composeSha256 !== expected.composeSha256) || (expected.manifestSha256 && receipt.manifestSha256 !== expected.manifestSha256) || (expected.foreignSnapshotSha256 && receipt.foreignSnapshotSha256 !== expected.foreignSnapshotSha256) || ![receipt.composeSha256, receipt.manifestSha256, receipt.foreignSnapshotSha256].every(value => /^[0-9a-f]{64}$/.test(value ?? ''))) fail('ownership receipt binding is invalid');
   if (JSON.stringify(receipt.sources) !== JSON.stringify(expected.sources)) fail('ownership receipt source pins are invalid');
-  if (!Array.isArray(receipt.images) || receipt.images.length < 1 || receipt.images.some(image => !/^sha256:[0-9a-f]{64}$/.test(image?.id ?? '') || !image.role)) fail('ownership receipt image inventory is invalid');
-  assertNoForbiddenReceiptFields(receipt);
-  return true;
-}
-
-function assertNoForbiddenReceiptFields(value, key = '') {
-  if (Array.isArray(value)) return value.forEach(item => assertNoForbiddenReceiptFields(item, key));
-  if (!object(value)) return;
-  for (const [name, child] of Object.entries(value)) {
-    if (/(?:secret|key|seed|mnemonic|endpoint|url|path|identity)/i.test(name)) fail(`ownership receipt field ${name} is prohibited`);
-    assertNoForbiddenReceiptFields(child, name);
+  if (!Array.isArray(receipt.images) || receipt.images.length < 1 || receipt.images.some(image => !exactKeys(image, ['role', 'source', 'sha', 'tree', 'id']) || !/^sha256:[0-9a-f]{64}$/.test(image.id ?? '') || !/^[a-z0-9-]+$/.test(image.role ?? '') || !/^[A-Za-z][A-Za-z0-9]*$/.test(image.source ?? '') || !/^[0-9a-f]{40}$/.test(image.sha ?? '') || !/^[0-9a-f]{40}$/.test(image.tree ?? ''))) fail('ownership receipt image inventory is invalid');
+  const roles = receipt.images.map(image => image.role);
+  const ids = receipt.images.map(image => image.id);
+  if (new Set(roles).size !== roles.length || new Set(ids).size !== ids.length || (expected.roles && !same([...roles].sort(), [...expected.roles].sort()))) fail('ownership receipt image roles or ids are duplicated or unexpected');
+  for (const image of receipt.images) {
+    const source = receipt.sources[image.source];
+    if (!source || source.sha !== image.sha || source.tree !== image.tree) fail('ownership receipt image source binding is invalid');
   }
+  return true;
 }
 
 export function validateCleanupInventory(value) {
@@ -179,13 +230,13 @@ export async function executeWithGuaranteedCleanup(operation, cleanup) {
 }
 
 export function validateLifecycleOperationOrder(operations) {
-  const required = ['source-preflight', 'image-preflight', 'collision-check', 'foreign-snapshot', 'generate-secrets', 'compose-config', 'build', 'up-contracts', 'deploy-contracts', 'up-runtime', 'probe', 'e2e', 'labels', 'cleanup', 'evidence'];
+  const required = ['source-preflight', 'collision-check', 'foreign-snapshot', 'image-preflight', 'generate-secrets', 'source-export', 'compose-config', 'build', 'up-contracts', 'deploy-contracts', 'up-runtime', 'probe', 'e2e', 'labels', 'cleanup', 'evidence'];
   if (!Array.isArray(operations) || operations.length !== required.length || !same(operations, required)) fail('lifecycle operation order is invalid');
   return true;
 }
 
 export function validateLifecycleOperationPrefix(operations, { retained }) {
-  const common = ['source-preflight', 'image-preflight', 'collision-check', 'foreign-snapshot', 'generate-secrets', 'compose-config', 'build', 'up-contracts', 'deploy-contracts', 'up-runtime', 'probe', 'e2e', 'labels'];
+  const common = ['source-preflight', 'collision-check', 'foreign-snapshot', 'image-preflight', 'generate-secrets', 'source-export', 'compose-config', 'build', 'up-contracts', 'deploy-contracts', 'up-runtime', 'probe', 'e2e', 'labels'];
   const expected = retained ? [...common, 'receipt-retained'] : [...common, 'cleanup', 'evidence'];
   if (!Array.isArray(operations) || !same(operations, expected)) fail('observed lifecycle does not match its exact normal/retained plan');
   return true;
@@ -316,6 +367,74 @@ export function validateImageSourceBindings(bindings, sources) {
   return true;
 }
 
+export function validateOwnedProjectRuntimeInventory(inventory, expected) {
+  validateProjectName(expected.project);
+  if (!/^[0-9a-f]{32}$/.test(expected.nonce ?? '') || !exactKeys(inventory, ['containers', 'networks', 'volumes'])) fail('owned runtime inventory envelope is invalid');
+  const specifications = [
+    ['containers', 'service', expected.services],
+    ['networks', 'network', expected.networks],
+    ['volumes', 'volume', expected.volumes]
+  ];
+  for (const [kind, property, allowed] of specifications) {
+    const records = inventory[kind];
+    if (!Array.isArray(records) || !Array.isArray(allowed)) fail(`owned ${kind} inventory is incomplete`);
+    const names = [];
+    for (const record of records) {
+      const name = record?.[property];
+      if (record?.project !== expected.project || record?.nonce !== expected.nonce || record?.labels?.['com.xpoint.p15c.ownership-nonce'] !== expected.nonce || !allowed.includes(name)) fail(`foreign or injected same-project ${kind} resource exists`);
+      names.push(name);
+    }
+    if (new Set(names).size !== names.length) fail(`duplicate owned ${kind} resource exists`);
+    if (!expected.allowPartial && !same([...names].sort(), [...allowed].sort())) fail(`exact owned ${kind} topology is incomplete`);
+  }
+  return true;
+}
+
+export function canDeleteOwnedOutput(record, current) {
+  return record?.created === true
+    && typeof record.path === 'string'
+    && current?.kind === 'file'
+    && current.path === record.path
+    && /^[0-9a-f]{64}$/.test(record.expectedSha256 ?? '')
+    && current.sha256 === record.expectedSha256;
+}
+
+async function fetchJsonExact(url, expectedStatus, init) {
+  const response = await fetch(url, { ...init, signal: AbortSignal.timeout(5000) });
+  const body = await response.json();
+  if (response.status !== expectedStatus) fail(`calls signaling returned status ${response.status}, expected ${expectedStatus}`);
+  return body;
+}
+
+export async function runCallsSignalingE2E(baseUrl) {
+  if (!/^http:\/\/(?:calls|127\.0\.0\.1|localhost)(?::\d+)?$/.test(baseUrl ?? '')) fail('calls signaling base URL is invalid');
+  const sender = `05${'1'.repeat(64)}`;
+  const firstRecipient = `05${'2'.repeat(64)}`;
+  const secondRecipient = `05${'3'.repeat(64)}`;
+  const post = body => fetchJsonExact(`${baseUrl}/api/calls/signal`, body.callId === 'p15c-malformed' ? 400 : 202, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  const malformed = await post({ callId: 'p15c-malformed', conversationId: 'p15c-malformed' });
+  if (malformed.error !== 'invalid-request') fail('calls malformed-party rejection is invalid');
+  const first = { callId: 'p15c-call-first', conversationId: 'p15c-conversation', sender: { value: sender }, recipient: { value: firstRecipient } };
+  const second = { callId: 'p15c-call-pending', conversationId: 'p15c-conversation', sender: { value: sender }, recipient: { value: secondRecipient } };
+  for (const signal of [first, second]) {
+    const accepted = await post(signal);
+    if (accepted.accepted !== true || accepted.callId !== signal.callId) fail('calls signal acceptance is invalid');
+  }
+  const pendingBefore = await fetchJsonExact(`${baseUrl}/stats`, 200);
+  if (pendingBefore.inventory?.callSignals !== 2) fail('calls pending inventory did not retain both recipients');
+  const firstInbox = await fetchJsonExact(`${baseUrl}/api/calls/inbox/${encodeURIComponent(firstRecipient)}`, 200);
+  if (!Array.isArray(firstInbox) || firstInbox.length !== 1 || firstInbox[0].callId !== first.callId || firstInbox[0].sender?.value !== sender || firstInbox[0].recipient?.value !== firstRecipient) fail('calls recipient inbox delivery is invalid');
+  const pendingAfterFirst = await fetchJsonExact(`${baseUrl}/stats`, 200);
+  if (pendingAfterFirst.inventory?.callSignals !== 1) fail('calls unrelated recipient signal was not retained');
+  const drained = await fetchJsonExact(`${baseUrl}/api/calls/inbox/${encodeURIComponent(firstRecipient)}`, 200);
+  if (!Array.isArray(drained) || drained.length !== 0) fail('calls recipient inbox did not drain');
+  const secondInbox = await fetchJsonExact(`${baseUrl}/api/calls/inbox/${encodeURIComponent(secondRecipient)}`, 200);
+  if (!Array.isArray(secondInbox) || secondInbox.length !== 1 || secondInbox[0].callId !== second.callId) fail('calls pending recipient delivery is invalid');
+  const finalStats = await fetchJsonExact(`${baseUrl}/stats`, 200);
+  if (finalStats.inventory?.callSignals !== 0) fail('calls final pending inventory is not empty');
+  return { malformedRejected: true, firstDrained: true, unrelatedPending: true, finalPending: 0 };
+}
+
 async function main() {
   const [command, path, expectedJson] = process.argv.slice(2);
   if (command === 'validate-compose' && path && expectedJson) {
@@ -323,7 +442,24 @@ async function main() {
     return;
   }
   if (command === 'validate-receipt' && path && expectedJson) {
-    validateOwnershipReceipt(JSON.parse(await readFile(path, 'utf8')), JSON.parse(expectedJson));
+    validateOwnershipReceipt(parseJsonNoDuplicateKeys(await readFile(path, 'utf8')), JSON.parse(expectedJson));
+    return;
+  }
+  if (command === 'summarize-receipt' && path && expectedJson) {
+    const receipt = parseJsonNoDuplicateKeys(await readFile(path, 'utf8'));
+    validateOwnershipReceipt(receipt, JSON.parse(expectedJson));
+    process.stdout.write(JSON.stringify({ project: receipt.project, nonce: receipt.nonce, manifestSha256: receipt.manifestSha256, foreignSnapshotSha256: receipt.foreignSnapshotSha256 }));
+    return;
+  }
+  if (command === 'validate-runtime-inventory' && path && expectedJson) {
+    validateOwnedProjectRuntimeInventory(parseJsonNoDuplicateKeys(await readFile(path, 'utf8')), JSON.parse(expectedJson));
+    return;
+  }
+  if (command === 'test-client' && path) {
+    const child = spawnSync('npm', ['run', 'ci:full'], { stdio: 'inherit', shell: false });
+    if (child.status !== 0) fail('exact pinned E2E suite failed');
+    await runCallsSignalingE2E(path);
+    process.stdout.write('P15C semantic calls signaling E2E passed.\n');
     return;
   }
   throw new Error('P15C contract command is invalid');

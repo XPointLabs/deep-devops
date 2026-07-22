@@ -224,7 +224,7 @@ test('built image metadata is exact and non-product', () => {
 test('KeepRunning and receipt validation fail closed', () => {
   assert.equal(validateKeepRunningGate({ allGatesPassed: true, requested: true }), true);
   assert.throws(() => validateKeepRunningGate({ allGatesPassed: false, requested: true }));
-  const receipt = { schema: 'deep-p15c-ownership.v1', project, nonce, composeSha256: digest.slice(7), manifestSha256: '1'.repeat(64), foreignSnapshotSha256: '2'.repeat(64), sources: { devops: { sha, tree } }, images: [{ role: 'xnode', source: 'xnode', sha, tree, id: digest }] };
+  const receipt = { schema: 'deep-p15c-ownership.v1', project, nonce, composeSha256: digest.slice(7), manifestSha256: '1'.repeat(64), foreignSnapshotSha256: '2'.repeat(64), sources: { devops: { sha, tree } }, images: [{ role: 'xnode', source: 'devops', sha, tree, id: digest }] };
   const expected = { project, nonce, composeSha256: digest.slice(7), manifestSha256: receipt.manifestSha256, foreignSnapshotSha256: receipt.foreignSnapshotSha256, sources: receipt.sources, roles: ['xnode'] };
   assert.equal(validateOwnershipReceipt(receipt, expected), true);
   assert.throws(() => validateOwnershipReceipt({ ...receipt, nonce: 'e'.repeat(32) }, expected));

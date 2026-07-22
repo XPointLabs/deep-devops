@@ -29,7 +29,12 @@
     "dotnetRuntime": "mcr.microsoft.com/dotnet/aspnet@sha256:e3736b0d423db99c6988e1ddf5ea725c14b12579bb120024e5ff7ff204a14080",
     "node": "node@sha256:242549cd46785b480c832479a730f4f2a20865d61ea2e404fdb2a5c3d3b73ecf"
   },
-  "acceptance": [
+  "currentStatus": [
+    "IMPLEMENTED",
+    "REAL-LIFECYCLE-PENDING",
+    "NO-GO"
+  ],
+  "acceptanceTarget": [
     "P15C1-HEADLESS-HARNESS-GO",
     "P14C2-LINUX-ARM64-EXECUTION-GO",
     "LOCAL-EPHEMERAL-CONTRACT-DEPLOY-GO",

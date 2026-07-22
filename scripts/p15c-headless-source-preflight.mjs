@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { lstatSync, realpathSync, readFileSync } from 'node:fs';
 import { dirname, join, normalize, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -16,6 +16,10 @@ export function validateSourceRecord(value) {
   if ((value.replaceRefs ?? []).length) fail('replace refs are prohibited');
   if ((value.alternates ?? []).length) fail('object alternates are prohibited');
   if (value.grafts) fail('grafts are prohibited');
+  if ((value.indexFlags ?? []).length) fail('skip-worktree, assume-unchanged or nonstandard index flags are prohibited');
+  if (value.trackedContentMatches !== true) fail('tracked worktree content differs from the exact index');
+  if (value.sparse) fail('sparse checkout or sparse index is prohibited');
+  if ((value.ambientGitOverrides ?? []).length) fail('ambient GIT_* overrides are prohibited');
   return true;
 }
 
@@ -57,10 +61,6 @@ const acceptedPins = Object.freeze({
 });
 const prohibitedCarrierShas = new Set(['2a21902ff5a613242180fdd75233991da896f879']);
 const exactManifestNames = Object.freeze(['DevOps', 'XNode', 'E2E', 'Registry', 'Staking', 'Contracts']);
-const hazardousGitEnvironment = Object.freeze([
-  'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_OBJECT_DIRECTORY', 'GIT_COMMON_DIR',
-  'GIT_DIR', 'GIT_WORK_TREE', 'GIT_REPLACE_REF_BASE'
-]);
 
 export function validateSourcePinTable(pins) {
   const names = Object.keys(acceptedPins);
@@ -73,6 +73,12 @@ export function validateSourcePinTable(pins) {
 }
 
 function git(root, args) { return execFileSync('git', ['-C', root, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim(); }
+function gitOptional(root, args) {
+  const result = spawnSync('git', ['-C', root, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  if (result.status === 1) return '';
+  if (result.error || result.status !== 0) fail('optional Git query failed');
+  return result.stdout.trim();
+}
 
 function hasReparseComponent(path) {
   let current = resolve(path);
@@ -85,7 +91,7 @@ function hasReparseComponent(path) {
 }
 
 export function inspectSource({ path, sha, tree }) {
-  for (const name of hazardousGitEnvironment) if (String(process.env[name] ?? '').trim()) fail(`ambient ${name} override is prohibited`);
+  const ambientGitOverrides = Object.keys(process.env).filter(name => name.toUpperCase().startsWith('GIT_') && String(process.env[name] ?? '').trim()).sort();
   const canonicalPath = realpathSync.native(path);
   const gitRoot = git(canonicalPath, ['rev-parse', '--show-toplevel']);
   const gitDirRaw = git(canonicalPath, ['rev-parse', '--git-dir']);
@@ -96,6 +102,11 @@ export function inspectSource({ path, sha, tree }) {
   const graftsPaths = [...new Set([join(commonDir, 'info', 'grafts'), join(gitDir, 'info', 'grafts')])];
   let alternates = [];
   for (const alternatesPath of alternatesPaths) { try { alternates.push(...readFileSync(alternatesPath, 'utf8').split(/\r?\n/).filter(Boolean)); } catch {} }
+  const indexFlags = git(canonicalPath, ['ls-files', '-v']).split(/\r?\n/).filter(line => /^[a-zS]/.test(line));
+  const diffFiles = spawnSync('git', ['-C', canonicalPath, 'diff-files', '--quiet', '--ignore-submodules=none', '--'], { stdio: 'ignore' });
+  if (diffFiles.error || ![0, 1].includes(diffFiles.status)) fail('tracked content comparison failed');
+  const sparse = gitOptional(canonicalPath, ['config', '--bool', 'core.sparseCheckout']) === 'true'
+    || gitOptional(canonicalPath, ['config', '--bool', 'index.sparse']) === 'true';
   const record = {
     expectedPath: path,
     canonicalPath,
@@ -109,7 +120,11 @@ export function inspectSource({ path, sha, tree }) {
     shallow: git(canonicalPath, ['rev-parse', '--is-shallow-repository']) === 'true',
     replaceRefs: git(canonicalPath, ['replace', '-l']).split(/\r?\n/).filter(Boolean),
     alternates,
-    grafts: graftsPaths.some(graftsPath => { try { return lstatSync(graftsPath).isFile(); } catch { return false; } })
+    grafts: graftsPaths.some(graftsPath => { try { return lstatSync(graftsPath).isFile(); } catch { return false; } }),
+    indexFlags,
+    trackedContentMatches: diffFiles.status === 0,
+    sparse,
+    ambientGitOverrides
   };
   validateSourceRecord(record);
   return { sha: record.sha, tree: record.tree };

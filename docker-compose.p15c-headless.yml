@@ -28,10 +28,10 @@ x-xnode: &xnode
   <<: *service
   image: ${P15C_XNODE_IMAGE_NAME:?P15C_XNODE_IMAGE_NAME is required}
   build:
-    context: .
+    context: ${P15C_DEVOPS_CONTEXT:?P15C_DEVOPS_CONTEXT is required}
     pull: false
     additional_contexts:
-      xnode_source: ${P15C_XNODE_PATH:?P15C_XNODE_PATH is required}
+      xnode_source: ${P15C_XNODE_CONTEXT:?P15C_XNODE_CONTEXT is required}
     args:
       SDK_IMAGE: ${P15C_DOTNET_SDK_IMAGE:?P15C_DOTNET_SDK_IMAGE is required}
       RUNTIME_IMAGE: ${P15C_DOTNET_RUNTIME_IMAGE:?P15C_DOTNET_RUNTIME_IMAGE is required}
@@ -47,7 +47,6 @@ x-xnode: &xnode
       com.xpoint.product-runtime: "false"
       com.xpoint.p15c.ownership-nonce: ${P15C_OWNERSHIP_NONCE}
     dockerfile_inline: |
-      # syntax=docker/dockerfile:1.7
       ARG SDK_IMAGE
       FROM $${SDK_IMAGE} AS build
       WORKDIR /src
@@ -82,7 +81,7 @@ x-xnode: &xnode
     test: [CMD-SHELL, "test -r /proc/1/status"]
 
 x-compat-build: &compat-build
-  context: .
+  context: ${P15C_DEVOPS_CONTEXT:?P15C_DEVOPS_CONTEXT is required}
   pull: false
   args:
     NODE_IMAGE: ${P15C_NODE_IMAGE:?P15C_NODE_IMAGE is required}
@@ -90,7 +89,6 @@ x-compat-build: &compat-build
     SOURCE_TREE: ${P15C_DEVOPS_TREE}
     OWNERSHIP_NONCE: ${P15C_OWNERSHIP_NONCE}
   dockerfile_inline: |
-    # syntax=docker/dockerfile:1.7
     ARG NODE_IMAGE
     FROM $${NODE_IMAGE}
     ARG SOURCE_SHA SOURCE_TREE OWNERSHIP_NONCE ROLE
@@ -109,10 +107,10 @@ services:
     <<: *service
     image: ${P15C_CONTRACTS_IMAGE_NAME:?P15C_CONTRACTS_IMAGE_NAME is required}
     build:
-      context: .
+      context: ${P15C_DEVOPS_CONTEXT:?P15C_DEVOPS_CONTEXT is required}
       pull: false
       additional_contexts:
-        contracts_source: ${P15C_CONTRACTS_PATH:?P15C_CONTRACTS_PATH is required}
+        contracts_source: ${P15C_CONTRACTS_CONTEXT:?P15C_CONTRACTS_CONTEXT is required}
       args:
         NODE_IMAGE: ${P15C_NODE_IMAGE}
         SOURCE_SHA: ${P15C_CONTRACTS_SHA:?P15C_CONTRACTS_SHA is required}
@@ -127,7 +125,6 @@ services:
         com.xpoint.product-runtime: "false"
         com.xpoint.p15c.ownership-nonce: ${P15C_OWNERSHIP_NONCE}
       dockerfile_inline: |
-        # syntax=docker/dockerfile:1.7
         ARG NODE_IMAGE
         FROM $${NODE_IMAGE}
         ARG SOURCE_SHA SOURCE_TREE OWNERSHIP_NONCE
@@ -180,9 +177,9 @@ services:
     <<: *service
     image: ${P15C_REGISTRY_IMAGE_NAME:?P15C_REGISTRY_IMAGE_NAME is required}
     build:
-      context: .
+      context: ${P15C_DEVOPS_CONTEXT:?P15C_DEVOPS_CONTEXT is required}
       pull: false
-      additional_contexts: { registry_source: "${P15C_REGISTRY_PATH:?P15C_REGISTRY_PATH is required}" }
+      additional_contexts: { registry_source: "${P15C_REGISTRY_CONTEXT:?P15C_REGISTRY_CONTEXT is required}" }
       args: { SDK_IMAGE: "${P15C_DOTNET_SDK_IMAGE}", RUNTIME_IMAGE: "${P15C_DOTNET_RUNTIME_IMAGE}", SOURCE_SHA: "${P15C_REGISTRY_SHA:?P15C_REGISTRY_SHA is required}", SOURCE_TREE: "${P15C_REGISTRY_TREE:?P15C_REGISTRY_TREE is required}", OWNERSHIP_NONCE: "${P15C_OWNERSHIP_NONCE}" }
       labels: { org.opencontainers.image.revision: "${P15C_REGISTRY_SHA}", org.opencontainers.image.source-tree: "${P15C_REGISTRY_TREE}", org.opencontainers.image.source: deep-registry-api, com.xpoint.p15c.role: registry, com.xpoint.evidence-class: headless-harness, com.xpoint.product-runtime: "false", com.xpoint.p15c.ownership-nonce: "${P15C_OWNERSHIP_NONCE}" }
       dockerfile_inline: |
@@ -210,9 +207,9 @@ services:
     <<: *service
     image: ${P15C_STAKING_IMAGE_NAME:?P15C_STAKING_IMAGE_NAME is required}
     build:
-      context: .
+      context: ${P15C_DEVOPS_CONTEXT:?P15C_DEVOPS_CONTEXT is required}
       pull: false
-      additional_contexts: { staking_source: "${P15C_STAKING_PATH:?P15C_STAKING_PATH is required}" }
+      additional_contexts: { staking_source: "${P15C_STAKING_CONTEXT:?P15C_STAKING_CONTEXT is required}" }
       args: { SDK_IMAGE: "${P15C_DOTNET_SDK_IMAGE}", RUNTIME_IMAGE: "${P15C_DOTNET_RUNTIME_IMAGE}", SOURCE_SHA: "${P15C_STAKING_SHA:?P15C_STAKING_SHA is required}", SOURCE_TREE: "${P15C_STAKING_TREE:?P15C_STAKING_TREE is required}", OWNERSHIP_NONCE: "${P15C_OWNERSHIP_NONCE}" }
       labels: { org.opencontainers.image.revision: "${P15C_STAKING_SHA}", org.opencontainers.image.source-tree: "${P15C_STAKING_TREE}", org.opencontainers.image.source: xpoint-staking-backend, com.xpoint.p15c.role: staking-backend, com.xpoint.evidence-class: headless-harness, com.xpoint.product-runtime: "false", com.xpoint.p15c.ownership-nonce: "${P15C_OWNERSHIP_NONCE}" }
       dockerfile_inline: |
@@ -290,9 +287,9 @@ services:
     <<: *service
     image: ${P15C_TEST_IMAGE_NAME:?P15C_TEST_IMAGE_NAME is required}
     build:
-      context: .
+      context: ${P15C_DEVOPS_CONTEXT:?P15C_DEVOPS_CONTEXT is required}
       pull: false
-      additional_contexts: { e2e_source: "${P15C_E2E_PATH:?P15C_E2E_PATH is required}" }
+      additional_contexts: { e2e_source: "${P15C_E2E_CONTEXT:?P15C_E2E_CONTEXT is required}" }
       args: { NODE_IMAGE: "${P15C_NODE_IMAGE}", SOURCE_SHA: "${P15C_E2E_SHA:?P15C_E2E_SHA is required}", SOURCE_TREE: "${P15C_E2E_TREE:?P15C_E2E_TREE is required}", OWNERSHIP_NONCE: "${P15C_OWNERSHIP_NONCE}" }
       labels: { org.opencontainers.image.revision: "${P15C_E2E_SHA}", org.opencontainers.image.source-tree: "${P15C_E2E_TREE}", org.opencontainers.image.source: deep-tests-e2e, com.xpoint.p15c.role: test-client, com.xpoint.evidence-class: headless-harness, com.xpoint.product-runtime: "false", com.xpoint.p15c.ownership-nonce: "${P15C_OWNERSHIP_NONCE}" }
       dockerfile_inline: |
@@ -302,8 +299,9 @@ services:
         LABEL org.opencontainers.image.revision="$${SOURCE_SHA}" org.opencontainers.image.source-tree="$${SOURCE_TREE}" org.opencontainers.image.source="deep-tests-e2e" com.xpoint.p15c.role="test-client" com.xpoint.evidence-class="headless-harness" com.xpoint.product-runtime="false" com.xpoint.p15c.ownership-nonce="$${OWNERSHIP_NONCE}"
         WORKDIR /tests
         COPY --from=e2e_source . .
+        COPY --chown=node:node scripts/p15c-headless-contracts.mjs /p15c/p15c-headless-contracts.mjs
         USER node
-    command: [npm, run, ci:full]
+    command: [node, /p15c/p15c-headless-contracts.mjs, test-client, http://calls:8080]
     environment:
       HOME: /tmp
       NPM_CONFIG_CACHE: /tmp/npm-cache

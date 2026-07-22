@@ -27,12 +27,22 @@ export function validateLocalContractManifest(manifest, observation) {
   return true;
 }
 
-async function rpc(url, method, params = []) {
-  const response = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }), signal: AbortSignal.timeout(5000) });
+async function rpc(url, method, params = [], fetchImpl = fetch) {
+  const response = await fetchImpl(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }), signal: AbortSignal.timeout(5000) });
   if (!response.ok) fail('local RPC request failed');
   const value = await response.json();
   if (value.error) fail('local RPC returned an error');
   return value.result;
+}
+
+export async function observeAndValidateLocalContractManifest(manifest, rpcUrl, fetchImpl = fetch) {
+  const chainIdHex = await rpc(rpcUrl, 'eth_chainId', [], fetchImpl);
+  const code = {};
+  for (const address of addressesForCodeQuery(manifest)) {
+    if (/^0x[0-9a-fA-F]{40}$/.test(address ?? '')) code[address.toLowerCase()] = await rpc(rpcUrl, 'eth_getCode', [address, 'latest'], fetchImpl);
+  }
+  validateLocalContractManifest(manifest, { chainIdHex, code });
+  return true;
 }
 
 async function main() {
@@ -46,8 +56,8 @@ async function main() {
   const rpcUrl = command === 'normalize' ? maybeRpc : outputOrRpc;
   if (!['validate', 'normalize'].includes(command) || !manifestPath || !/^http:\/\/(?:127\.0\.0\.1|localhost):\d+$/.test(rpcUrl ?? '')) fail('command is invalid');
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-  const chainIdHex = await rpc(rpcUrl, 'eth_chainId');
   if (command === 'normalize') {
+    const chainIdHex = await rpc(rpcUrl, 'eth_chainId');
     const rawRequired = requiredContracts;
     const normalized = {
       schema: 'deep-p15c-local-contracts.v1', network: 'localhost', chainId: 31337,
@@ -61,9 +71,7 @@ async function main() {
     writeFileSync(outputOrRpc, `${JSON.stringify(normalized, null, 2)}\n`, { encoding: 'utf8', flag: 'wx' });
     return;
   }
-  const code = {};
-  for (const address of addressesForCodeQuery(manifest)) if (/^0x[0-9a-fA-F]{40}$/.test(address)) code[address.toLowerCase()] = await rpc(rpcUrl, 'eth_getCode', [address, 'latest']);
-  validateLocalContractManifest(manifest, { chainIdHex, code });
+  await observeAndValidateLocalContractManifest(manifest, rpcUrl);
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) main().catch(error => { console.error(error.message); process.exitCode = 1; });

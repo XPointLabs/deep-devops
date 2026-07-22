@@ -37,7 +37,7 @@ if ($text -notmatch 'Clear-P15CEnvironment') { throw 'driver must clear every P1
 if ($text -notmatch 'receipt-retained') { throw 'retained Run must use a distinct no-cleanup/no-evidence plan' }
 if ($driverText -match '\{\{\.Status\}\}') { throw 'foreign inventory must not use human-formatted Docker status' }
 foreach ($stableField in @('.State.Status','.State.Health.Status','.State.StartedAt','.State.FinishedAt','.RestartCount')) {
-    if (-not $driverText.Contains($stableField, [StringComparison]::Ordinal)) { throw "stable inspect-derived foreign inventory field is absent: $stableField" }
+    if ($driverText.IndexOf($stableField, [StringComparison]::Ordinal) -lt 0) { throw "stable inspect-derived foreign inventory field is absent: $stableField" }
 }
 if ($composeText -match '(?m)^\s*# syntax=docker/dockerfile:1\.7\s*$') { throw 'floating Dockerfile frontend is prohibited' }
 foreach ($contextName in @('XNODE','E2E','REGISTRY','STAKING','CONTRACTS')) {
