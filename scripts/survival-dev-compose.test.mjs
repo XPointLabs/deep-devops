@@ -126,7 +126,7 @@ test('development identities remain exact strings and Up proves host HTTP reacha
   assert.match(serviceBlock('registry'), /GET \/health\/live HTTP\/1\.1/);
   assert.doesNotMatch(serviceBlock('xnode-1'), /test -r \/proc\/1\/status/);
   assert.doesNotMatch(serviceBlock('registry'), /test -r \/proc\/1\/status/);
-  assert.match(launcher, /--force-recreate/);
+  assert.doesNotMatch(launcher, /--force-recreate/);
   assert.match(launcher, /Assert-SurvivalHostEndpoints/);
   for (const port of [41801, 41802, 41803, 41810, 41820, 41821, 41822, 41823, 41999]) {
     assert.match(launcher, new RegExp(String(port)));

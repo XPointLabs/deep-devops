@@ -129,7 +129,7 @@ switch ($Action) {
         Prepare-SurvivalBuildContexts -IncludeChain:$Chain
         $upArguments = @($baseArguments)
         if ($Chain) { $upArguments += @('--profile', 'chain') }
-        Invoke-SurvivalDocker ($upArguments + @('up', '-d', '--build', '--wait', '--force-recreate') + $Service)
+        Invoke-SurvivalDocker ($upArguments + @('up', '-d', '--build', '--wait') + $Service)
         Assert-SurvivalHostEndpoints $advertisedHost
         & node (Join-Path $PSScriptRoot 'survival-dev-seed.mjs') '--host' $advertisedHost
         if ($LASTEXITCODE -ne 0) { throw 'Survival relay contact seed failed.' }
