@@ -145,6 +145,39 @@ services:
     volumes: [xnode-3-state:/state]
     depends_on: { relay-bootstrap: { condition: service_healthy } }
 
+  xnode-4:
+    <<: *xnode
+    environment:
+      <<: *xnode-environment
+      Node__PublicHost: xnode-4
+      Node__RouterId: fd50b8e3b144ea244fbf7737f550bc8dd0c2650bbc1aada833ca17ff8dbf329b
+      Node__Ed25519PrivateKey: "0000000000000000000000000000000000000000000000000000000000000004"
+    ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41804:8080"]
+    volumes: [xnode-4-state:/state]
+    depends_on: { relay-bootstrap: { condition: service_healthy } }
+
+  xnode-5:
+    <<: *xnode
+    environment:
+      <<: *xnode-environment
+      Node__PublicHost: xnode-5
+      Node__RouterId: fde4fba030ad002f7c2f7d4c331f49d13fb0ec747eceebec634f1ff4cbca9def
+      Node__Ed25519PrivateKey: "0000000000000000000000000000000000000000000000000000000000000005"
+    ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41805:8080"]
+    volumes: [xnode-5-state:/state]
+    depends_on: { relay-bootstrap: { condition: service_healthy } }
+
+  xnode-6:
+    <<: *xnode
+    environment:
+      <<: *xnode-environment
+      Node__PublicHost: xnode-6
+      Node__RouterId: b4c92afb3ba57f3ab959ffe6d319c98484a2155a0f4c65b2c37011ffd197b075
+      Node__Ed25519PrivateKey: "0000000000000000000000000000000000000000000000000000000000000006"
+    ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41806:8080"]
+    volumes: [xnode-6-state:/state]
+    depends_on: { relay-bootstrap: { condition: service_healthy } }
+
   registry:
     <<: *service
     image: deep-survival/registry:dev
@@ -270,6 +303,9 @@ volumes:
   xnode-1-state:
   xnode-2-state:
   xnode-3-state:
+  xnode-4-state:
+  xnode-5-state:
+  xnode-6-state:
   registry-state:
   staking-state:
   storage-state:

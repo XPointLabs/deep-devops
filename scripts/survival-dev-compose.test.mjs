@@ -23,7 +23,7 @@ test('daily stack has a fixed isolated project and exact persistent service set'
   const services = [...servicesSection.matchAll(/^  ([a-z][a-z0-9-]*):$/gm)].map(match => match[1]).sort();
   assert.deepEqual(services, [
     'calls', 'contracts-devnet', 'file', 'push', 'registry', 'relay-bootstrap', 'staking-backend',
-    'storage', 'xnode-1', 'xnode-2', 'xnode-3'
+    'storage', 'xnode-1', 'xnode-2', 'xnode-3', 'xnode-4', 'xnode-5', 'xnode-6'
   ]);
   assert.match(compose, /^networks:\r?\n  runtime:\r?\n    driver: bridge$/m);
 });
@@ -35,7 +35,7 @@ test('shared images have one incremental build producer and persistent consumers
   assert.match(serviceBlock('storage'), /\n    build:/);
   for (const role of ['file', 'push', 'calls']) assert.doesNotMatch(serviceBlock(role), /\n    build:/);
   assert.match(compose, /^x-xnode: &xnode[\s\S]*?^  image: deep-survival\/xnode:dev$/m);
-  for (const role of ['xnode-1', 'xnode-2', 'xnode-3']) assert.match(serviceBlock(role), /<<: \*xnode/);
+  for (const role of ['xnode-1', 'xnode-2', 'xnode-3', 'xnode-4', 'xnode-5', 'xnode-6']) assert.match(serviceBlock(role), /<<: \*xnode/);
   for (const role of ['storage', 'file', 'push', 'calls']) assert.match(serviceBlock(role), /image: deep-survival\/compat:dev/);
   assert.doesNotMatch(compose, /--no-cache/);
 });
@@ -46,7 +46,7 @@ test('only local Hardhat and loopback host ports are configured', () => {
   assert.match(contracts, /eth_chainId/);
   assert.doesNotMatch(compose, /https?:\/\/(?!127\.0\.0\.1|0\.0\.0\.0|[a-z][a-z0-9-]*:)/i);
   const bindings = [...compose.matchAll(/"\$\{SURVIVAL_BIND_HOST:-127\.0\.0\.1\}:(\d+):(\d+)"/g)];
-  assert.equal(bindings.length, 10);
+  assert.equal(bindings.length, 13);
   assert.equal(new Set(bindings.map(match => match[1])).size, bindings.length);
 });
 
@@ -58,13 +58,14 @@ test('LAN opt-in binds only the supplied IPv4 address and documents exact device
   assert.match(launcher, /survival-dev-verify\.mjs'\) '--host' \$advertisedHost/);
   assert.match(seed, /isIP\(host\) !== 4/);
   assert.match(verify, /isIP\(host\) !== 4/);
-  assert.match(docs, /41801, 41802, 41803, 41810, 41821, 41822, 41823/);
+  assert.match(docs, /41801, 41802, 41803, 41804, 41805, 41806, 41810, 41821, 41822, 41823/);
   assert.match(docs, /41545, 41811/);
 });
 
 test('every stateful service uses a named volume and operator commands are documented', () => {
   for (const volume of [
     'contracts-deployments', 'xnode-1-state', 'xnode-2-state', 'xnode-3-state',
+    'xnode-4-state', 'xnode-5-state', 'xnode-6-state',
     'registry-state', 'staking-state', 'storage-state', 'file-state', 'push-state', 'calls-state'
   ]) assert.match(compose, new RegExp(`^  ${volume}:$`, 'm'));
   assert.match(docs, /survival-dev\.ps1 -Action Up/);
@@ -91,7 +92,10 @@ test('daily launcher always uses the fixed project without release-gate ceremony
   for (const routerId of [
     '4cb5abf6ad79fbf5abbccafcc269d85cd2651ed4b885b5869f241aedf0a5ba29',
     '7422b9887598068e32c4448a949adb290d0f4e35b9e01b0ee5f1a1e600fe2674',
-    'f381626e41e7027ea431bfe3009e94bdd25a746beec468948d6c3c7c5dc9a54b'
+    'f381626e41e7027ea431bfe3009e94bdd25a746beec468948d6c3c7c5dc9a54b',
+    'fd50b8e3b144ea244fbf7737f550bc8dd0c2650bbc1aada833ca17ff8dbf329b',
+    'fde4fba030ad002f7c2f7d4c331f49d13fb0ec747eceebec634f1ff4cbca9def',
+    'b4c92afb3ba57f3ab959ffe6d319c98484a2155a0f4c65b2c37011ffd197b075'
   ]) assert.match(launcher, new RegExp(routerId));
   assert.match(launcher, /survival-dev-seed\.mjs/);
   assert.match(launcher, /survival-dev-context-export\.mjs/);
@@ -113,7 +117,7 @@ test('daily launcher always uses the fixed project without release-gate ceremony
 });
 
 test('development identities remain exact strings and Up proves host HTTP reachability', () => {
-  for (const suffix of ['1', '2', '3']) {
+  for (const suffix of ['1', '2', '3', '4', '5', '6']) {
     assert.match(compose, new RegExp(`Node__Ed25519PrivateKey: "[0]{63}${suffix}"`));
   }
   assert.match(compose, /SURVIVAL_XNODE_BUILD_CONTEXT/);
@@ -128,7 +132,7 @@ test('development identities remain exact strings and Up proves host HTTP reacha
   assert.doesNotMatch(serviceBlock('registry'), /test -r \/proc\/1\/status/);
   assert.doesNotMatch(launcher, /--force-recreate/);
   assert.match(launcher, /Assert-SurvivalHostEndpoints/);
-  for (const port of [41801, 41802, 41803, 41810, 41820, 41821, 41822, 41823, 41999]) {
+  for (const port of [41801, 41802, 41803, 41804, 41805, 41806, 41810, 41820, 41821, 41822, 41823, 41999]) {
     assert.match(launcher, new RegExp(String(port)));
   }
 });

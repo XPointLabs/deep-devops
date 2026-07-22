@@ -20,7 +20,7 @@ development router ID. Debug HTTP does not use TLS pins. Use `adb reverse` for a
 physical Android Debug build without exposing the unauthenticated services:
 
 ```powershell
-41801, 41802, 41803, 41810, 41821, 41822, 41823 | ForEach-Object { adb reverse "tcp:$_" "tcp:$_" }
+41801, 41802, 41803, 41804, 41805, 41806, 41810, 41821, 41822, 41823 | ForEach-Object { adb reverse "tcp:$_" "tcp:$_" }
 ```
 
 If the incomplete chain profile is being inspected, also reverse its optional
@@ -37,7 +37,7 @@ never binds `0.0.0.0`.
 
 Raw `docker compose ... up` is not supported. The launcher creates filtered,
 fail-closed source contexts, exchanges signed relay contacts, restarts the
-XNodes, probes host HTTP endpoints, verifies all three contacts, and writes the
+XNodes, probes host HTTP endpoints, verifies all six contacts, and writes the
 client handoff files; a raw Compose invocation does not perform those steps.
 
 Regular builds reuse BuildKit and package layers. Rebuild only edited services
@@ -48,9 +48,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/survival-dev.ps1 -Ac
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/survival-dev.ps1 -Action Restart -Service xnode-1
 ```
 
-The launcher also exchanges the three fresh signed relay contacts through the
-local bootstrap sidecar and restarts the XNodes so routed storage can select hop
-indices `0`, `1`, and `2`.
+The launcher also exchanges the six fresh signed relay contacts through the
+local bootstrap sidecar and restarts the XNodes. Routed storage still requires
+exactly three signed, distinct hops. The other three pinned nodes provide one
+strictly disjoint fallback route for a classified pre-durable transport failure;
+this is a fixed development trust set, not dynamic discovery.
 
 Hardhat and staking are optional because messenger development does not require
 a chain. The chain profile is currently unsupported and incomplete: `-Chain`
@@ -82,7 +84,7 @@ An intentional full reset also deletes the named volumes:
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/survival-dev.ps1 -Action Down -Reset
 ```
 
-Default messenger host ports are XNodes `41801-41803`, registry `41810`,
+Default messenger host ports are XNodes `41801-41806`, registry `41810`,
 storage `41820`, file `41821`, push `41822`, and calls `41823`. The unsupported
 chain profile additionally uses Hardhat `41545` and staking `41811`. All traffic
 is Debug HTTP intended only for loopback or the exact trusted developer IPv4

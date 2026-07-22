@@ -12,7 +12,7 @@ function validContact(value) {
     /^[0-9a-f]{64}$/.test(value.routerId ?? '') &&
     /^[0-9a-f]{64}$/.test(value.x25519PublicKey ?? '') &&
     /^[0-9a-f]{128}$/.test(value.signature ?? '') &&
-    typeof value.rpcEndpoint === 'string' && /^http:\/\/xnode-[123]:8081\//.test(value.rpcEndpoint);
+    typeof value.rpcEndpoint === 'string' && /^http:\/\/xnode-[1-6]:8081\//.test(value.rpcEndpoint);
 }
 
 async function readContacts() {
@@ -48,7 +48,7 @@ createServer(async (request, response) => {
     if (request.method === 'GET' && request.url === '/api/relay-contacts') return send(response, 200, await readContacts());
     if (request.method === 'POST' && request.url === '/seed') {
       const contacts = await readRequest(request);
-      if (!Array.isArray(contacts) || contacts.length !== 3 || contacts.some(value => !validContact(value)) || new Set(contacts.map(value => value.routerId)).size !== 3) {
+      if (!Array.isArray(contacts) || contacts.length !== 6 || contacts.some(value => !validContact(value)) || new Set(contacts.map(value => value.routerId)).size !== 6) {
         return send(response, 400, { error: 'invalid-relay-contacts' });
       }
       await writeFile(temporaryPath, `${JSON.stringify(contacts)}\n`, { encoding: 'utf8', flag: 'w' });

@@ -7,7 +7,10 @@ if (isIP(host) !== 4) throw new Error('verification host must be an IPv4 address
 const expected = [
   '4cb5abf6ad79fbf5abbccafcc269d85cd2651ed4b885b5869f241aedf0a5ba29',
   '7422b9887598068e32c4448a949adb290d0f4e35b9e01b0ee5f1a1e600fe2674',
-  'f381626e41e7027ea431bfe3009e94bdd25a746beec468948d6c3c7c5dc9a54b'
+  'f381626e41e7027ea431bfe3009e94bdd25a746beec468948d6c3c7c5dc9a54b',
+  'fd50b8e3b144ea244fbf7737f550bc8dd0c2650bbc1aada833ca17ff8dbf329b',
+  'fde4fba030ad002f7c2f7d4c331f49d13fb0ec747eceebec634f1ff4cbca9def',
+  'b4c92afb3ba57f3ab959ffe6d319c98484a2155a0f4c65b2c37011ffd197b075'
 ].sort();
 
 async function rpc(port, method) {
@@ -22,15 +25,15 @@ async function rpc(port, method) {
   return body.result;
 }
 
-for (const port of [41801, 41802, 41803]) {
+for (const port of [41801, 41802, 41803, 41804, 41805, 41806]) {
   const registered = await rpc(port, 'fetch_rids');
   const contacts = await rpc(port, 'fetch_rcs');
   if (!Array.isArray(registered) || JSON.stringify([...registered].sort()) !== JSON.stringify(expected)) {
-    throw new Error(`xnode on ${port} does not have exactly three registered relay IDs`);
+    throw new Error(`xnode on ${port} does not have exactly six registered relay IDs`);
   }
   const contactIds = Array.isArray(contacts) ? contacts.map(value => value.routerId).sort() : [];
   if (JSON.stringify(contactIds) !== JSON.stringify(expected)) {
-    throw new Error(`xnode on ${port} does not have exactly three signed relay contacts`);
+    throw new Error(`xnode on ${port} does not have exactly six signed relay contacts`);
   }
 }
-process.stdout.write('All XNodes have the exact three registered signed relay contacts.\n');
+process.stdout.write('All XNodes have the exact six registered signed relay contacts.\n');

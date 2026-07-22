@@ -56,6 +56,9 @@ function Assert-SurvivalHostEndpoints([string]$HostName) {
         "http://$HostName`:41801/api/network/contact",
         "http://$HostName`:41802/api/network/contact",
         "http://$HostName`:41803/api/network/contact",
+        "http://$HostName`:41804/api/network/contact",
+        "http://$HostName`:41805/api/network/contact",
+        "http://$HostName`:41806/api/network/contact",
         "http://$HostName`:41810/health/live",
         "http://$HostName`:41820/health/ready",
         "http://$HostName`:41821/health/ready",
@@ -91,7 +94,10 @@ function Write-ClientEnvironment([string]$HostName,[switch]$IncludeChain) {
     $routerIds = @(
         '4cb5abf6ad79fbf5abbccafcc269d85cd2651ed4b885b5869f241aedf0a5ba29',
         '7422b9887598068e32c4448a949adb290d0f4e35b9e01b0ee5f1a1e600fe2674',
-        'f381626e41e7027ea431bfe3009e94bdd25a746beec468948d6c3c7c5dc9a54b'
+        'f381626e41e7027ea431bfe3009e94bdd25a746beec468948d6c3c7c5dc9a54b',
+        'fd50b8e3b144ea244fbf7737f550bc8dd0c2650bbc1aada833ca17ff8dbf329b',
+        'fde4fba030ad002f7c2f7d4c331f49d13fb0ec747eceebec634f1ff4cbca9def',
+        'b4c92afb3ba57f3ab959ffe6d319c98484a2155a0f4c65b2c37011ffd197b075'
     )
     foreach ($target in @(
         [pscustomobject]@{ Name = 'client.android.env'; Host = $HostName },
@@ -100,7 +106,7 @@ function Write-ClientEnvironment([string]$HostName,[switch]$IncludeChain) {
         $hostValue = $target.Host
         $values = @(
             'SURVIVAL_ENV=Development',
-            "XNODE_URLS=$($routerIds[0])|http://$hostValue`:41801;$($routerIds[1])|http://$hostValue`:41802;$($routerIds[2])|http://$hostValue`:41803",
+            "XNODE_URLS=$($routerIds[0])|http://$hostValue`:41801;$($routerIds[1])|http://$hostValue`:41802;$($routerIds[2])|http://$hostValue`:41803;$($routerIds[3])|http://$hostValue`:41804;$($routerIds[4])|http://$hostValue`:41805;$($routerIds[5])|http://$hostValue`:41806",
             "DEEP_REGISTRY_URL=http://$hostValue`:41810",
             "DEEP_FILE_URL=http://$hostValue`:41821",
             "DEEP_PUSH_URL=http://$hostValue`:41822",
@@ -133,8 +139,8 @@ switch ($Action) {
         Assert-SurvivalHostEndpoints $advertisedHost
         & node (Join-Path $PSScriptRoot 'survival-dev-seed.mjs') '--host' $advertisedHost
         if ($LASTEXITCODE -ne 0) { throw 'Survival relay contact seed failed.' }
-        Invoke-SurvivalDocker ($baseArguments + @('restart', 'xnode-1', 'xnode-2', 'xnode-3'))
-        Invoke-SurvivalDocker ($baseArguments + @('up', '-d', '--wait', 'xnode-1', 'xnode-2', 'xnode-3'))
+        Invoke-SurvivalDocker ($baseArguments + @('restart', 'xnode-1', 'xnode-2', 'xnode-3', 'xnode-4', 'xnode-5', 'xnode-6'))
+        Invoke-SurvivalDocker ($baseArguments + @('up', '-d', '--wait', 'xnode-1', 'xnode-2', 'xnode-3', 'xnode-4', 'xnode-5', 'xnode-6'))
         Assert-SurvivalHostEndpoints $advertisedHost
         & node (Join-Path $PSScriptRoot 'survival-dev-verify.mjs') '--host' $advertisedHost
         if ($LASTEXITCODE -ne 0) { throw 'Survival relay contact verification failed.' }
