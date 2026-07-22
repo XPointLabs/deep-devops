@@ -86,3 +86,14 @@ test('daily launcher always uses the fixed project without release-gate ceremony
   assert.match(compose, /RegistryBootstrap__BaseUrl: http:\/\/relay-bootstrap:8080/);
   assert.doesNotMatch(launcher, /nonce|evidence|receipt|P15C_/i);
 });
+
+test('development identities remain exact strings and Up proves host HTTP reachability', () => {
+  for (const suffix of ['1', '2', '3']) {
+    assert.match(compose, new RegExp(`Node__Ed25519PrivateKey: "[0]{63}${suffix}"`));
+  }
+  assert.match(launcher, /--force-recreate/);
+  assert.match(launcher, /Assert-SurvivalHostEndpoints/);
+  for (const port of [41801, 41802, 41803, 41810, 41820, 41821, 41822, 41823, 41999]) {
+    assert.match(launcher, new RegExp(String(port)));
+  }
+});
