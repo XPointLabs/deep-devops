@@ -4,6 +4,9 @@ x-service: &service
   platform: linux/arm64
   init: true
   restart: unless-stopped
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
   cap_drop: [ALL]
   security_opt: [no-new-privileges:true]
   networks: [runtime]
@@ -112,6 +115,7 @@ services:
     cap_add: [CHOWN]
     security_opt: [no-new-privileges:true]
     network_mode: none
+    read_only: true
     volumes:
       - membership-route-artifact:/out
       - ./tools/membership-artifact-init:/opt/deep-membership-init:ro
@@ -124,6 +128,7 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     network_mode: none
+    read_only: true
     volumes:
       - membership-route-artifact:/out
       - ./tools/membership-artifact-init:/opt/deep-membership-init:ro
@@ -138,6 +143,9 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     network_mode: none
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
     image: deep-survival/membership-fixture:dev
     build: *membership-fixture-build
     volumes: [membership-route-artifact:/out]
@@ -154,6 +162,7 @@ services:
     cap_add: [CHOWN]
     security_opt: [no-new-privileges:true]
     network_mode: none
+    read_only: true
     volumes:
       - contracts-deployments:/workspace/deployments
     command:
@@ -205,6 +214,9 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     network_mode: service:contracts-devnet
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
     labels:
       com.xpoint.survival.stack: dev
     image: deep-survival/contracts-devnet:dev
@@ -227,6 +239,9 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     network_mode: service:contracts-devnet
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
     labels:
       com.xpoint.survival.stack: dev
     image: deep-survival/contracts-devnet:dev

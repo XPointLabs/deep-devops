@@ -41,6 +41,14 @@ fail-closed source contexts, exchanges signed relay contacts, restarts the
 XNodes, probes host HTTP endpoints, verifies all six contacts, and writes the
 client handoff files; a raw Compose invocation does not perform those steps.
 
+All application root filesystems in this development stack are read-only. A
+service may write persistent state only to its explicitly named `/state` volume
+(or the designated one-shot artifact/deployment output volume). Every service
+that can require temporary runtime files receives only a bounded `/tmp` tmpfs
+with `noexec`, `nosuid`, and `nodev`; membership and contract artifacts remain
+read-only for consumers. This is Docker containment hardening for local
+development, not a substitute for application-level authorization.
+
 Each supported `Up` also removes and reruns the `membership-fixture` one-shot.
 It consumes only hash-pinned local `Deep.Protocol` and
 `Deep.Protocol.MembershipRoutes` packages and their complete locked offline

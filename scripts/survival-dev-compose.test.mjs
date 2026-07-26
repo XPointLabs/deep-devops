@@ -112,6 +112,33 @@ test('only local Hardhat and loopback host ports are configured', () => {
   assert.equal(new Set(bindings.map(match => match[1])).size, bindings.length);
 });
 
+test('runtime root filesystems are immutable and writable paths are explicitly bounded', () => {
+  const sharedRuntime = compose.match(/^x-service: &service\r?\n([\s\S]*?)(?=^x-health:)/m)?.[1] ?? '';
+  assert.match(sharedRuntime, /^  read_only: true$/m);
+  assert.match(sharedRuntime, /^  tmpfs:\r?\n    - \/tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777$/m);
+  assert.match(compose.match(/^x-xnode: &xnode\r?\n([\s\S]*?)(?=^x-membership-fixture-build:)/m)?.[1] ?? '', /<<: \*service/);
+  for (const role of ['registry', 'staking-backend', 'storage', 'file', 'push', 'calls', 'relay-bootstrap', 'contracts-devnet']) {
+    assert.match(serviceBlock(role), /<<: \*service/);
+    assert.doesNotMatch(serviceBlock(role), /read_only: false|tmpfs:\s*\[\s*\]/);
+  }
+  for (const role of ['xnode-1', 'xnode-2', 'xnode-3', 'xnode-4', 'xnode-5', 'xnode-6']) assert.match(serviceBlock(role), /<<: \*xnode/);
+
+  for (const role of ['membership-artifact-owner-init', 'membership-artifact-init', 'membership-fixture', 'contracts-deployments-init', 'contracts-deploy', 'contracts-smoke']) {
+    assert.match(serviceBlock(role), /\n    read_only: true/);
+  }
+  for (const role of ['membership-fixture', 'contracts-deploy', 'contracts-smoke']) {
+    assert.match(serviceBlock(role), /\n    tmpfs:\r?\n      - \/tmp:rw,noexec,nosuid,nodev,size=(?:32|64)m,mode=1777/);
+  }
+
+  for (const role of ['xnode-1', 'xnode-2', 'xnode-3', 'xnode-4', 'xnode-5', 'xnode-6', 'registry', 'staking-backend', 'storage', 'file', 'push', 'calls', 'relay-bootstrap']) {
+    const volumes = serviceBlock(role).match(/volumes: \[[^\]]+\]|volumes:\r?\n(?:      - [^\r\n]+\r?\n?)+/)?.[0] ?? '';
+    assert.match(volumes, /\/state/);
+    assert.doesNotMatch(volumes, /:(?:\/app|\/service|\/workspace)(?::|\s|$)/);
+  }
+  assert.match(serviceBlock('staking-backend'), /contracts-deployments:\/run\/deep-contracts:ro/);
+  assert.match(serviceBlock('contracts-smoke'), /contracts-deployments:\/workspace\/deployments:ro/);
+});
+
 test('LAN opt-in binds only the supplied IPv4 address and documents exact device forwarding', () => {
   assert.match(launcher, /\$env:SURVIVAL_BIND_HOST = \$advertisedHost/);
   assert.doesNotMatch(launcher, /SURVIVAL_BIND_HOST\s*=.*0\.0\.0\.0/);
