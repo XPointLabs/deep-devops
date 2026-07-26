@@ -293,7 +293,6 @@ switch ($Action) {
         & node (Join-Path $PSScriptRoot 'survival-dev-seed.mjs') '--host' $advertisedHost
         if ($LASTEXITCODE -ne 0) { throw 'Survival relay contact seed failed.' }
         Invoke-SurvivalDocker ($baseArguments + @('restart', 'xnode-1', 'xnode-2', 'xnode-3', 'xnode-4', 'xnode-5', 'xnode-6'))
-        Invoke-SurvivalDocker ($baseArguments + @('up', '-d', '--wait', 'xnode-1', 'xnode-2', 'xnode-3', 'xnode-4', 'xnode-5', 'xnode-6'))
         Assert-SurvivalHostEndpoints $advertisedHost -IncludeChain:$Chain
         & node (Join-Path $PSScriptRoot 'survival-dev-verify.mjs') '--host' $advertisedHost
         if ($LASTEXITCODE -ne 0) { throw 'Survival relay contact verification failed.' }

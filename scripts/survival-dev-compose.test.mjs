@@ -366,6 +366,33 @@ test('daily launcher always uses the fixed project without release-gate ceremony
   assert.match(contextExport, /prohibited source entries/i);
 });
 
+test('post-seed XNode restart cannot rerun membership one-shot dependencies or duplicate the pin', () => {
+  const upAction = launcher.match(/'Up' \{([\s\S]*?)\r?\n    \}\r?\n    'Down'/)?.[1] ?? '';
+  assert.notEqual(upAction, '', 'launcher Up action is missing');
+  assert.equal(
+    (upAction.match(/Reset-SurvivalMembershipFixture/g) ?? []).length,
+    1,
+    'supported Up must reset the membership fixture exactly once');
+  assert.equal(
+    (upAction.match(/Get-SurvivalVerifiedMembershipPin/g) ?? []).length,
+    1,
+    'supported Up must derive exactly one Sodium-verified pin');
+  const restart = upAction.match(
+    /Invoke-SurvivalDocker \(\$baseArguments \+ @\('restart', 'xnode-1', 'xnode-2', 'xnode-3', 'xnode-4', 'xnode-5', 'xnode-6'\)\)/);
+  assert.ok(restart, 'post-seed six-XNode restart is missing');
+  const afterRestart = upAction.slice((restart.index ?? 0) + restart[0].length);
+  assert.doesNotMatch(
+    afterRestart,
+    /Invoke-SurvivalDocker[\s\S]*?@\('up'[\s\S]*?'xnode-[1-6]'/,
+    'compose up after restart would rerun completed membership dependencies');
+  assert.match(
+    afterRestart,
+    /^\s*Assert-SurvivalHostEndpoints \$advertisedHost -IncludeChain:\$Chain/,
+    'bounded endpoint readiness must immediately follow Docker restart');
+  assert.match(afterRestart, /survival-dev-verify\.mjs/);
+  assert.match(afterRestart, /Get-SurvivalVerifiedMembershipPin/);
+});
+
 test('development identities remain exact strings and Up proves host HTTP reachability', () => {
   for (const suffix of ['1', '2', '3', '4', '5', '6']) {
     assert.match(compose, new RegExp(`Node__Ed25519PrivateKey: "[0]{63}${suffix}"`));
