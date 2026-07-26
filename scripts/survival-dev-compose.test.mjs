@@ -83,6 +83,7 @@ test('only local Hardhat and loopback host ports are configured', () => {
   assert.doesNotMatch(staking, /contracts-devnet: \{ condition: service_healthy \}/);
   assert.match(staking, /Contracts__DeploymentManifestPath: \/run\/deep-contracts\/localhost\.latest\.json/);
   assert.match(staking, /Contracts__ExpectedDeploymentNetwork: localhost/);
+  assert.match(staking, /Contracts__ExpectedDeploymentChainId: "31337"/);
   assert.match(staking, /contracts-deployments:\/run\/deep-contracts:ro/);
   assert.match(staking, /GET \/health\/ready HTTP\/1\.1/);
   assert.doesNotMatch(staking, /test -r \/proc\/1\/status/);

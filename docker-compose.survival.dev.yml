@@ -303,6 +303,7 @@ services:
       Contracts__EthereumRpcUrl: http://contracts-devnet:8545
       Contracts__DeploymentManifestPath: /run/deep-contracts/localhost.latest.json
       Contracts__ExpectedDeploymentNetwork: localhost
+      Contracts__ExpectedDeploymentChainId: "31337"
       Contracts__StatePath: /state/staking.json
       Registry__BaseUrl: http://registry:8080
       Price__EthereumRpcUrl: ""
