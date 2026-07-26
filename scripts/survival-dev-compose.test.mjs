@@ -320,6 +320,11 @@ test('membership catalog is a local-only one-shot with pinned packages and read-
   assert.match(productionNodeEnvironment, /^DEEP_STAKING_BACKEND_URL=https:\/\/staking-api\.deep\.example$/m);
   assert.doesNotMatch(productionCompose, /SURVIVAL_BIND_HOST|membership-fixture|DEV-LOCAL-ONLY/);
   assert.match(launcher, /Assert-SurvivalMembershipFixtureVerified/);
+  assert.match(
+    launcher,
+    /@baseArguments 'ps' '-q' '--all' 'membership-fixture'/,
+    'the verified one-shot must be resolved from exited Compose services'
+  );
   assert.match(launcher, /Get-SurvivalVerifiedMembershipPin/);
   assert.match(launcher, /survival-dev-membership-trust\.mjs/);
   assert.match(launcher, /'--expected-sha256' \$ExpectedSha256/);

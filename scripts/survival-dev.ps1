@@ -106,7 +106,9 @@ function Remove-SurvivalClientEnvironment() {
 }
 
 function Assert-SurvivalMembershipFixtureVerified() {
-    $containerId = (& docker @baseArguments 'ps' '-q' 'membership-fixture')
+    # One-shot success is an exited container. Current Compose excludes exited
+    # services from `ps -q` unless --all is explicit.
+    $containerId = (& docker @baseArguments 'ps' '-q' '--all' 'membership-fixture')
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($containerId)) {
         throw 'DEV-LOCAL-ONLY membership fixture container is missing.'
     }
