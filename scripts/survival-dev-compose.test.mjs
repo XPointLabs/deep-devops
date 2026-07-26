@@ -211,6 +211,8 @@ test('daily launcher always uses the fixed project without release-gate ceremony
   assert.match(compose, /RegistryBootstrap__BaseUrl: http:\/\/relay-bootstrap:8080/);
   assert.doesNotMatch(launcher, /nonce|evidence|receipt|P15C_/i);
   assert.match(contextExport, /git.*ls-files/si);
+  assert.match(contextExport, /safe\.directory=\$\{source\}/);
+  assert.doesNotMatch(contextExport, /config.*--global|safe\.directory=\*/si);
   assert.match(contextExport, /prohibited source entries/i);
 });
 

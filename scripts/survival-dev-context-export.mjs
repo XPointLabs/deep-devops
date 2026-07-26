@@ -65,7 +65,20 @@ function isProhibited(entry) {
 
 function gitVisibleFiles(source) {
   try {
-    const output = execFileSync('git', ['-C', source, 'ls-files', '-co', '--exclude-standard', '-z'], {
+    // The supported launcher can run under an isolated service account while
+    // the workspace is owned by the interactive developer. Trust only this
+    // already-canonical source for this one invocation; never mutate global
+    // Git configuration or accept a wildcard safe.directory.
+    const output = execFileSync('git', [
+      '-c',
+      `safe.directory=${source}`,
+      '-C',
+      source,
+      'ls-files',
+      '-co',
+      '--exclude-standard',
+      '-z'
+    ], {
       encoding: 'utf8',
       maxBuffer: 64 * 1024 * 1024,
       stdio: ['ignore', 'pipe', 'pipe']
