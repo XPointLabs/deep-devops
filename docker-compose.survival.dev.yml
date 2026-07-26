@@ -104,7 +104,7 @@ x-compat-build: &compat-build
     USER node
 
 services:
-  membership-artifact-init:
+  membership-artifact-owner-init:
     image: ${SURVIVAL_NODE_IMAGE:-node@sha256:242549cd46785b480c832479a730f4f2a20865d61ea2e404fdb2a5c3d3b73ecf}
     user: "0:0"
     restart: "no"
@@ -112,8 +112,24 @@ services:
     cap_add: [CHOWN]
     security_opt: [no-new-privileges:true]
     network_mode: none
-    volumes: [membership-route-artifact:/out]
-    command: [sh, -ec, "chown -R 65532:65532 /out"]
+    volumes:
+      - membership-route-artifact:/out
+      - ./tools/membership-artifact-init:/opt/deep-membership-init:ro
+    command: [node, /opt/deep-membership-init/membership-artifact-init.mjs, owner]
+
+  membership-artifact-init:
+    image: ${SURVIVAL_NODE_IMAGE:-node@sha256:242549cd46785b480c832479a730f4f2a20865d61ea2e404fdb2a5c3d3b73ecf}
+    user: "65532:65532"
+    restart: "no"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    network_mode: none
+    volumes:
+      - membership-route-artifact:/out
+      - ./tools/membership-artifact-init:/opt/deep-membership-init:ro
+    depends_on:
+      membership-artifact-owner-init: { condition: service_completed_successfully }
+    command: [node, /opt/deep-membership-init/membership-artifact-init.mjs, clear]
 
   membership-fixture:
     platform: linux/arm64

@@ -89,7 +89,11 @@ function Prepare-SurvivalBuildContexts([switch]$IncludeChain) {
 
 function Reset-SurvivalMembershipFixture() {
     # Force the local-only one-shot to republish a bounded fresh artifact on every supported Up.
-    Invoke-SurvivalDocker ($baseArguments + @('rm', '-sf', 'membership-fixture', 'membership-artifact-init'))
+    Invoke-SurvivalDocker ($baseArguments + @(
+        'rm', '-sf',
+        'membership-fixture',
+        'membership-artifact-init',
+        'membership-artifact-owner-init'))
 }
 
 function Remove-SurvivalClientEnvironment() {

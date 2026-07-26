@@ -17,6 +17,8 @@ const verify = readFileSync(new URL('./survival-dev-verify.mjs', import.meta.url
 const contextExport = readFileSync(new URL('./survival-dev-context-export.mjs', import.meta.url), 'utf8');
 const bootstrap = readFileSync(new URL('../tools/relay-bootstrap/relay-bootstrap.mjs', import.meta.url), 'utf8');
 const fixture = readFileSync(new URL('../tools/membership-fixture/Program.cs', import.meta.url), 'utf8');
+const artifactInit = readFileSync(new URL('../tools/membership-artifact-init/membership-artifact-init.mjs', import.meta.url), 'utf8');
+const membershipRepeat = readFileSync(new URL('./survival-dev-membership-fixture-repeat.ps1', import.meta.url), 'utf8');
 const membershipNuget = readFileSync(new URL('../tools/membership-fixture/NuGet.Config', import.meta.url), 'utf8');
 const membershipLock = JSON.parse(readFileSync(new URL('../tools/membership-fixture/packages.lock.json', import.meta.url), 'utf8'));
 
@@ -32,7 +34,7 @@ test('daily stack has a fixed isolated project, persistent services, and one cha
   const servicesSection = compose.match(/^services:\r?\n([\s\S]*?)(?=^networks:)/m)?.[1] ?? '';
   const services = [...servicesSection.matchAll(/^  ([a-z][a-z0-9-]*):$/gm)].map(match => match[1]).sort();
   assert.deepEqual(services, [
-    'calls', 'contracts-deploy', 'contracts-deployments-init', 'contracts-devnet', 'contracts-smoke', 'file', 'membership-artifact-init', 'membership-fixture', 'push', 'registry', 'relay-bootstrap', 'staking-backend',
+    'calls', 'contracts-deploy', 'contracts-deployments-init', 'contracts-devnet', 'contracts-smoke', 'file', 'membership-artifact-init', 'membership-artifact-owner-init', 'membership-fixture', 'push', 'registry', 'relay-bootstrap', 'staking-backend',
     'storage', 'xnode-1', 'xnode-2', 'xnode-3', 'xnode-4', 'xnode-5', 'xnode-6'
   ]);
   assert.match(compose, /^networks:\r?\n  runtime:\r?\n    driver: bridge$/m);
@@ -140,12 +142,22 @@ test('every stateful service uses a named volume and operator commands are docum
 });
 
 test('membership catalog is a local-only one-shot with pinned packages and read-only consumers', () => {
+  const ownerInit = serviceBlock('membership-artifact-owner-init');
   const init = serviceBlock('membership-artifact-init');
   const generator = serviceBlock('membership-fixture');
+  assert.match(ownerInit, /user: "0:0"/);
+  assert.match(ownerInit, /network_mode: none/);
+  assert.match(ownerInit, /cap_drop: \[ALL\]/);
+  assert.match(ownerInit, /cap_add: \[CHOWN\]/);
+  assert.doesNotMatch(ownerInit, /FOWNER|SETUID|SETGID/);
+  assert.match(ownerInit, /membership-artifact-init:\/opt\/deep-membership-init:ro/);
+  assert.match(ownerInit, /membership-artifact-init\.mjs, owner/);
+  assert.match(init, /user: "65532:65532"/);
   assert.match(init, /network_mode: none/);
-  assert.match(init, /cap_add: \[CHOWN\]/);
-  assert.doesNotMatch(init, /FOWNER|chmod/);
-  assert.match(init, /chown -R 65532:65532 \/out/);
+  assert.match(init, /cap_drop: \[ALL\]/);
+  assert.doesNotMatch(init, /cap_add|FOWNER|SETUID|SETGID/);
+  assert.match(init, /membership-artifact-owner-init: \{ condition: service_completed_successfully \}/);
+  assert.match(init, /membership-artifact-init\.mjs, clear/);
   assert.match(generator, /network_mode: none/);
   assert.match(generator, /restart: "no"/);
   assert.match(generator, /membership-artifact-init: \{ condition: service_completed_successfully \}/);
@@ -158,6 +170,20 @@ test('membership catalog is a local-only one-shot with pinned packages and read-
   }
   assert.match(launcher, /Prepare-SurvivalMembershipFixturePackages/);
   assert.match(launcher, /Reset-SurvivalMembershipFixture/);
+  assert.match(launcher, /'membership-artifact-owner-init'/);
+  assert.match(artifactInit, /lstatSync\(outputDirectory\)/);
+  assert.match(artifactInit, /state\.uid === runtimeUid && state\.gid === runtimeGid/);
+  assert.match(artifactInit, /state\.uid !== 0 \|\| state\.gid !== 0/);
+  assert.match(artifactInit, /chmodSync\(outputDirectory, privateDirectoryMode\)/);
+  assert.match(artifactInit, /chownSync\(outputDirectory, runtimeUid, runtimeGid\)/);
+  assert.match(artifactInit, /process\.getuid\?\.\(\) !== runtimeUid/);
+  assert.match(artifactInit, /unexpected entry/);
+  assert.match(artifactInit, /VerifiedPublishedArtifactSha256=/);
+  assert.doesNotMatch(artifactInit, /exec|spawn|setuid|setgid|rmSync|rmdirSync/);
+  assert.match(membershipRepeat, /foreach \(\$iteration in 1\.\.2\)/);
+  assert.match(membershipRepeat, /'up', '--no-build', 'membership-fixture'/);
+  assert.match(membershipRepeat, /'probe',\s+\$hash/s);
+  assert.match(membershipRepeat, /Same-volume membership fixture repeat passed/);
   const packageFunction = launcher.match(/function Prepare-SurvivalMembershipFixturePackages\(\) \{([\s\S]*?)\r?\n\}/)?.[1] ?? '';
   const packagePins = [...packageFunction.matchAll(
     /@\{ Name = '([^']+\.nupkg)'; Hash = '([0-9A-F]{64})'; Path = '([^']+)' \}/g)]

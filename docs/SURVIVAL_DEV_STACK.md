@@ -82,6 +82,23 @@ they are never in the artifact, runtime images, runtime volumes, client handoff,
 or logs. This is contract-fixture plumbing, not a production signer, membership
 authority, or client-activation claim.
 
+The persistent artifact volume is initialized by two privilege-separated,
+networkless one-shots. `membership-artifact-owner-init` runs as root with only
+`CHOWN`; it uses `lstat` without traversing the directory and either validates
+an existing `0700` UID/GID `65532:65532` directory or prepares a fresh
+root-owned volume. `membership-artifact-init` then runs directly as
+`65532:65532` with no capabilities and clears only the exact catalog filename
+or its bounded atomic-temporary pattern. Unknown owners, modes, entries,
+directories, or symlinks fail closed.
+
+The same-volume regression runs this complete init and Sodium fixture sequence
+twice without deleting the named volume, and verifies both container exit state
+and the exact published bytes, owner, and modes:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/survival-dev-membership-fixture-repeat.ps1
+```
+
 Regular builds reuse BuildKit and package layers. Rebuild only edited services
 when convenient:
 
