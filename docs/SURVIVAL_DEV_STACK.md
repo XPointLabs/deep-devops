@@ -54,17 +54,24 @@ exactly three signed, distinct hops. The other three pinned nodes provide one
 strictly disjoint fallback route for a classified pre-durable transport failure;
 this is a fixed development trust set, not dynamic discovery.
 
-After the client six-endpoint runtime is built, run the deterministic one-node
-failure matrix. It stops each XNode in turn, runs the routed Alice/Bob live
-acceptance (which asserts single delivery), restores the node in `finally`, and
-then verifies the exact six-contact topology again:
+Run the bounded chaos evidence lane after the shared transport tests have been
+built. It executes instrumented transport contract tests for: pre-dispatch
+ingress fallback, one retrieve fallback, and the fail-closed outcome-unknown
+behavior for ambiguous stores. It then stops and restores each local XNode and
+verifies the exact six-contact topology again:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/survival-dev-chaos.ps1
 ```
 
-The resulting `artifacts/survival-dev/six-node-chaos.json` is development
-evidence only. It does not claim dynamic membership or production anonymity.
+The resulting `artifacts/survival-dev/six-node-chaos.json` is machine-readable,
+development-only evidence. It explicitly does not claim dynamic membership,
+production anonymity, replicated storage, cross-node deduplication, persisted
+contacts without bootstrap, or write continuity through an arbitrary failed
+intermediate relay. The retrieve fallback is marked privacy-degraded because
+the current development protocol sends the first route's router identifiers as
+exclusions to the fallback ingress. Do not use it as a production anonymity
+claim.
 
 Hardhat and staking are optional because messenger development does not require
 a chain. The chain profile is currently unsupported and incomplete: `-Chain`
