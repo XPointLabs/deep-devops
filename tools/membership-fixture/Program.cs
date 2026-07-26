@@ -6,6 +6,7 @@ using Deep.Protocol.DeepExtension.MembershipRoutes;
 using Sodium;
 
 const string outputName = "membership-route-catalog.json";
+const ushort clientProtocol = 2;
 FixtureOptions options;
 try
 {
@@ -42,19 +43,19 @@ var networkId = SHA256.HashData("deep-survival-local-membership-v1"u8)[..Members
 var roots = Enumerable.Range(0, 5).Select(index => Signer(MembershipSignerRole.OfflineRoot, localOnlyDevSeeds[index])).OrderBy(Id).ToArray();
 var online = Enumerable.Range(5, 3).Select(index => Signer(MembershipSignerRole.Online, localOnlyDevSeeds[index])).OrderBy(Id).ToArray();
 var genesis = new NetworkGenesis {
-    NetworkId = networkId, GenesisSequence = 1, PolicyVersion = 1, MinimumProtocol = 1, MaximumProtocol = 1,
+    NetworkId = networkId, GenesisSequence = 1, PolicyVersion = 1, MinimumProtocol = clientProtocol, MaximumProtocol = clientProtocol,
     IssuedAtUnixSeconds = now, Policy = MembershipPolicy.Beta(roots.Select(x => x.Descriptor.SignerId).ToArray()), OfflineRoots = roots.Select(x => x.Descriptor).ToArray()
 };
 var genesisBytes = MembershipContractCodec.EncodeGenesis(genesis);
 var genesisLkg = new MembershipLastKnownGood { NetworkId = networkId, PolicyVersion = 1, Sequence = 1, CanonicalHash = MembershipContractHash.Sha256(genesisBytes) };
 var unsignedDelegation = new SignerDelegation {
     NetworkId = networkId, Sequence = 2, PreviousHash = genesisLkg.CanonicalHash, IssuedAtUnixSeconds = validFrom,
-    ValidFromUnixSeconds = validFrom, ValidUntilUnixSeconds = validUntil, MinimumProtocol = 1, MaximumProtocol = 1,
+    ValidFromUnixSeconds = validFrom, ValidUntilUnixSeconds = validUntil, MinimumProtocol = clientProtocol, MaximumProtocol = clientProtocol,
     PolicyVersion = 1, OnlineSigners = online.Select(x => x.Descriptor).ToArray(), Signatures = []
 };
 var delegationBytes = MembershipContractCodec.GetDelegationSigningBytes(unsignedDelegation);
 var delegation = unsignedDelegation with { Signatures = roots.Take(3).Select(root => Signature(root, MembershipSignatureDomain.OfflineDelegation, delegationBytes)).ToArray() };
-var verifiedDelegation = MembershipContractVerifier.VerifyDelegation(delegation, genesis, genesisLkg, now, 900, 1, verifier);
+var verifiedDelegation = MembershipContractVerifier.VerifyDelegation(delegation, genesis, genesisLkg, now, 900, clientProtocol, verifier);
 
 var routerIds = new[] {
     "4cb5abf6ad79fbf5abbccafcc269d85cd2651ed4b885b5869f241aedf0a5ba29", "7422b9887598068e32c4448a949adb290d0f4e35b9e01b0ee5f1a1e600fe2674",
@@ -78,7 +79,7 @@ if (primaryRoute.Count != 3 || fallbackRoute.Count != 3 || primaryRoute.Overlaps
     throw new InvalidOperationException("Catalog does not provide two disjoint three-hop development routes.");
 var statement = new NodeMembershipCommitment {
     NetworkId = networkId, Sequence = 3, PreviousHash = verifiedDelegation.CanonicalHash, IssuedAtUnixSeconds = validFrom,
-    ValidFromUnixSeconds = validFrom, ValidUntilUnixSeconds = validUntil, MinimumProtocol = 1, MaximumProtocol = 1, PolicyVersion = 1,
+    ValidFromUnixSeconds = validFrom, ValidUntilUnixSeconds = validUntil, MinimumProtocol = clientProtocol, MaximumProtocol = clientProtocol, PolicyVersion = 1,
     MemberCount = 6, MerkleRoot = MembershipRouteDescriptorCodec.ComputeRoot(descriptors)
 };
 var membershipBytes = MembershipContractCodec.GetMembershipSigningBytes(statement);
@@ -86,7 +87,7 @@ var signedMembership = new SignedMembershipCommitment { Statement = statement, S
 var context = new MembershipVerificationContext {
     Genesis = genesis, ActiveDelegation = delegation, AuthorityLastKnownGood = verifiedDelegation.NextAuthorityLastKnownGood,
     RevokedDelegationHashes = [], LastKnownGood = new MembershipLastKnownGood { NetworkId = networkId, PolicyVersion = 1, Sequence = 2, CanonicalHash = verifiedDelegation.CanonicalHash },
-    VerificationTimeUnixSeconds = now, AllowedClockSkewSeconds = 900, ClientProtocol = 1
+    VerificationTimeUnixSeconds = now, AllowedClockSkewSeconds = 900, ClientProtocol = clientProtocol
 };
 _ = MembershipContractVerifier.VerifyMembership(signedMembership, context, verifier);
 var proofs = MembershipRouteDescriptorCodec.BuildProofs(descriptors);

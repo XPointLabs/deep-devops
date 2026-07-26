@@ -305,6 +305,9 @@ test('membership catalog is a local-only one-shot with pinned packages and read-
     'whole-artifact pin must be emitted only after Sodium read-after-publication verification');
   assert.doesNotMatch(fixture, /LocalOnlyDeterministicVerifier|SignFramed/);
   assert.match(fixture, /MembershipPolicy\.Beta/);
+  assert.match(fixture, /const ushort clientProtocol = 2/);
+  assert.match(fixture, /MinimumProtocol = clientProtocol, MaximumProtocol = clientProtocol/);
+  assert.match(fixture, /ClientProtocol = clientProtocol/);
   assert.match(fixture, /roots\.Take\(3\)/);
   assert.match(fixture, /online\.Take\(2\)/);
   assert.match(fixture, /two disjoint three-hop development routes/);
