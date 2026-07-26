@@ -76,8 +76,29 @@ _ = MembershipContractVerifier.VerifyMembership(signedMembership, context, verif
 var proofs = MembershipRouteDescriptorCodec.BuildProofs(descriptors);
 if (descriptors.Length != 6 || descriptors.Zip(proofs).Any(pair => !MembershipRouteDescriptorCodec.VerifyInclusion(pair.First, pair.Second, statement.MerkleRoot.Span))) throw new InvalidOperationException("MRL1 catalog verification failed.");
 
+var canonicalGenesisSha256 = MembershipContractHash.Sha256(genesisBytes);
+var canonicalDelegation = MembershipContractCodec.EncodeSignedDelegation(delegation);
+var trustAnchor = new
+{
+    sequence = verifiedDelegation.NextAuthorityLastKnownGood.Sequence,
+    canonicalHash = Convert.ToBase64String(verifiedDelegation.CanonicalHash.Span)
+};
 var artifact = JsonSerializer.SerializeToUtf8Bytes(new {
     version = "deep-membership-route-catalog-v1",
+    trustBootstrap = new
+    {
+        version = "deep-membership-trust-bootstrap-v1",
+        scope = "DEV-LOCAL-ONLY",
+        opaqueProfileKey = "install:deep-survival-dev-v1",
+        canonicalGenesis = Convert.ToBase64String(genesisBytes),
+        expectedNetworkId = Convert.ToBase64String(networkId),
+        expectedCanonicalGenesisSha256 = Convert.ToBase64String(canonicalGenesisSha256),
+        signedDelegation = Convert.ToBase64String(canonicalDelegation),
+        // Content anchors pin the verified authority predecessor. The first
+        // bridge/MSM1 sequence 3 artifact is therefore a strict successor.
+        bridgeAnchor = trustAnchor,
+        membershipAnchor = trustAnchor
+    },
     signedMembership = Convert.ToBase64String(MembershipContractCodec.EncodeSignedMembership(signedMembership)),
     members = descriptors.Select((descriptor, index) => new { leaf = Convert.ToBase64String(MembershipRouteDescriptorCodec.Encode(descriptor)), leafIndex = proofs[index].LeafIndex, memberCount = proofs[index].MemberCount, siblingHashes = proofs[index].SiblingHashes.Select(x => Convert.ToBase64String(x.Span)).ToArray() }).ToArray()
 }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
@@ -86,10 +107,12 @@ var temporary = Path.Combine(outputDirectory, $".{outputName}.{Guid.NewGuid():N}
 File.WriteAllBytes(temporary, artifact);
 File.Move(temporary, target, true); // same-volume replace is the publication boundary.
 VerifyPublishedArtifact(target, genesis, genesisLkg, delegation, context, verifier);
+var publishedArtifactSha256 = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(target)));
 foreach (var signer in roots.Concat(online))
     CryptographicOperations.ZeroMemory(signer.PrivateKey);
 foreach (var seed in localOnlyDevSeeds)
     CryptographicOperations.ZeroMemory(seed);
+Console.WriteLine($"PublishedArtifactSha256={publishedArtifactSha256}");
 Console.WriteLine("Generated and Sodium-verified one DEV-LOCAL-ONLY 3-of-5 / 2-of-3 membership route catalog (no private material published).");
 
 static DevSigner Signer(MembershipSignerRole role, byte[] seed)
@@ -136,6 +159,58 @@ static void VerifyPublishedArtifact(
     var root = document.RootElement;
     if (root.GetProperty("version").GetString() != "deep-membership-route-catalog-v1")
         throw new InvalidOperationException("Published membership artifact version is invalid.");
+
+    var trust = root.GetProperty("trustBootstrap");
+    var expectedTrustProperties = new[]
+    {
+        "version", "scope", "opaqueProfileKey", "canonicalGenesis",
+        "expectedNetworkId", "expectedCanonicalGenesisSha256",
+        "signedDelegation", "bridgeAnchor", "membershipAnchor"
+    };
+    var actualTrustProperties = trust.EnumerateObject()
+        .Select(property => property.Name)
+        .OrderBy(name => name, StringComparer.Ordinal)
+        .ToArray();
+    if (!actualTrustProperties.SequenceEqual(expectedTrustProperties.OrderBy(name => name, StringComparer.Ordinal)) ||
+        trust.GetProperty("version").GetString() != "deep-membership-trust-bootstrap-v1" ||
+        trust.GetProperty("scope").GetString() != "DEV-LOCAL-ONLY" ||
+        trust.GetProperty("opaqueProfileKey").GetString() != "install:deep-survival-dev-v1")
+        throw new InvalidOperationException("Published development trust bootstrap framing is invalid.");
+
+    var publishedGenesis = Convert.FromBase64String(trust.GetProperty("canonicalGenesis").GetString()
+        ?? throw new InvalidOperationException("Published canonical genesis is missing."));
+    var publishedNetworkId = Convert.FromBase64String(trust.GetProperty("expectedNetworkId").GetString()
+        ?? throw new InvalidOperationException("Published expected network ID is missing."));
+    var publishedGenesisSha256 = Convert.FromBase64String(trust.GetProperty("expectedCanonicalGenesisSha256").GetString()
+        ?? throw new InvalidOperationException("Published canonical genesis pin is missing."));
+    var publishedDelegation = Convert.FromBase64String(trust.GetProperty("signedDelegation").GetString()
+        ?? throw new InvalidOperationException("Published signed delegation is missing."));
+    if (!publishedGenesis.AsSpan().SequenceEqual(MembershipContractCodec.EncodeGenesis(genesis)) ||
+        !publishedNetworkId.AsSpan().SequenceEqual(genesis.NetworkId.Span) ||
+        !publishedGenesisSha256.AsSpan().SequenceEqual(MembershipContractHash.Sha256(publishedGenesis)))
+        throw new InvalidOperationException("Published development genesis pins are inconsistent.");
+
+    var decodedPublishedDelegation = MembershipContractCodec.DecodeSignedDelegation(publishedDelegation);
+    if (!MembershipContractCodec.EncodeSignedDelegation(decodedPublishedDelegation).AsSpan().SequenceEqual(publishedDelegation))
+        throw new InvalidOperationException("Published development delegation is not canonical.");
+    var publishedVerifiedDelegation = MembershipContractVerifier.VerifyDelegation(
+        decodedPublishedDelegation, genesis, genesisLkg, context.VerificationTimeUnixSeconds,
+        context.AllowedClockSkewSeconds, context.ClientProtocol, verifier);
+    foreach (var anchorName in new[] { "bridgeAnchor", "membershipAnchor" })
+    {
+        var anchor = trust.GetProperty(anchorName);
+        var anchorProperties = anchor.EnumerateObject()
+            .Select(property => property.Name)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+        var expectedAnchorProperties = new[] { "canonicalHash", "sequence" };
+        if (!anchorProperties.SequenceEqual(expectedAnchorProperties) ||
+            anchor.GetProperty("sequence").GetUInt64() != publishedVerifiedDelegation.NextAuthorityLastKnownGood.Sequence ||
+            !Convert.FromBase64String(anchor.GetProperty("canonicalHash").GetString()
+                    ?? throw new InvalidOperationException($"Published {anchorName} hash is missing."))
+                .AsSpan().SequenceEqual(publishedVerifiedDelegation.CanonicalHash.Span))
+            throw new InvalidOperationException($"Published {anchorName} is not bound to the verified delegation LKG.");
+    }
 
     var signedBytes = Convert.FromBase64String(root.GetProperty("signedMembership").GetString()
         ?? throw new InvalidOperationException("Published membership statement is missing."));

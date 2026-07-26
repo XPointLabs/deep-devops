@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import {
+  assertDevLocalMembershipUrl,
+  sha256Hex,
+  validateDevMembershipArtifact,
+  verifyPinnedDevMembershipArtifact
+} from './survival-dev-membership-trust.mjs';
 
 const compose = readFileSync(new URL('../docker-compose.survival.dev.yml', import.meta.url), 'utf8');
 const docs = readFileSync(new URL('../docs/SURVIVAL_DEV_STACK.md', import.meta.url), 'utf8');
@@ -155,6 +162,16 @@ test('membership catalog is a local-only one-shot with pinned packages and read-
   assert.match(fixture, /PublicKeyAuth\.SignDetached\(framed, signer\.PrivateKey\)/);
   assert.match(fixture, /PublicKeyAuth\.VerifyDetached\(signature\.ToArray\(\), signingBytes\.ToArray\(\), publicKey\.ToArray\(\)\)/);
   assert.match(fixture, /VerifyPublishedArtifact\(target, genesis, genesisLkg, delegation, context, verifier\)/);
+  assert.match(fixture, /trustBootstrap = new/);
+  assert.match(fixture, /expectedCanonicalGenesisSha256/);
+  assert.match(fixture, /signedDelegation = Convert\.ToBase64String\(canonicalDelegation\)/);
+  assert.match(fixture, /bridgeAnchor = trustAnchor/);
+  assert.match(fixture, /membershipAnchor = trustAnchor/);
+  assert.match(fixture, /publishedVerifiedDelegation\.NextAuthorityLastKnownGood\.Sequence/);
+  assert.ok(
+    fixture.indexOf('VerifyPublishedArtifact(target') <
+      fixture.indexOf('PublishedArtifactSha256='),
+    'whole-artifact pin must be emitted only after Sodium read-after-publication verification');
   assert.doesNotMatch(fixture, /LocalOnlyDeterministicVerifier|SignFramed/);
   assert.match(fixture, /MembershipPolicy\.Beta/);
   assert.match(fixture, /roots\.Take\(3\)/);
@@ -166,7 +183,75 @@ test('membership catalog is a local-only one-shot with pinned packages and read-
   assert.match(verify, /MSM1/);
   assert.match(verify, /MRL1/);
   assert.match(docs, /DEV-LOCAL-ONLY/);
+  assert.match(docs, /TOFU, remote trust-root fallback, and production activation.*prohibited/is);
+  assert.match(launcher, /Assert-SurvivalMembershipFixtureVerified/);
+  assert.match(launcher, /Get-SurvivalVerifiedMembershipPin/);
+  assert.match(launcher, /survival-dev-membership-trust\.mjs/);
+  assert.match(launcher, /'--expected-sha256' \$ExpectedSha256/);
+  assert.match(launcher, /DEEP_DEV_LOCAL_MEMBERSHIP_TRUST_URL/);
+  assert.match(launcher, /DEEP_DEV_LOCAL_MEMBERSHIP_TRUST_SHA256/);
+  assert.ok(
+    launcher.indexOf('Assert-SurvivalMembershipFixtureVerified') <
+      launcher.lastIndexOf('$verifiedMembershipPin = Get-SurvivalVerifiedMembershipPin') &&
+    launcher.lastIndexOf('$verifiedMembershipPin = Get-SurvivalVerifiedMembershipPin') <
+      launcher.lastIndexOf('Write-ClientEnvironment $advertisedHost $membershipPin'),
+    'client pin must be written only after the one-shot Sodium verification check');
+  assert.ok(
+    launcher.lastIndexOf('Remove-SurvivalClientEnvironment') <
+      launcher.lastIndexOf('Reset-SurvivalMembershipFixture'),
+    'stale client pins must be removed before fixture regeneration');
   assert.doesNotMatch(launcher, /DEEP_MEMBERSHIP.*PRIVATE|MEMBERSHIP.*PRIVATE.*DEEP/i);
+});
+
+test('future DEV consumer contract rejects TOFU, pin mismatch, remote roots, and malformed trust', () => {
+  const genesis = Buffer.from('canonical-dev-genesis');
+  const hash = createHash('sha256').update(genesis).digest();
+  const anchor = { sequence: 2, canonicalHash: Buffer.alloc(32, 3).toString('base64') };
+  const document = {
+    version: 'deep-membership-route-catalog-v1',
+    trustBootstrap: {
+      version: 'deep-membership-trust-bootstrap-v1',
+      scope: 'DEV-LOCAL-ONLY',
+      opaqueProfileKey: 'install:deep-survival-dev-v1',
+      canonicalGenesis: genesis.toString('base64'),
+      expectedNetworkId: Buffer.alloc(16, 1).toString('base64'),
+      expectedCanonicalGenesisSha256: hash.toString('base64'),
+      signedDelegation: Buffer.from('signed-delegation').toString('base64'),
+      bridgeAnchor: anchor,
+      membershipAnchor: anchor
+    },
+    signedMembership: Buffer.from('signed-membership').toString('base64'),
+    members: Array.from({ length: 6 }, (_, leafIndex) => ({
+      leaf: Buffer.from(`leaf-${leafIndex}`).toString('base64'),
+      leafIndex,
+      memberCount: 6,
+      siblingHashes: [Buffer.alloc(32, leafIndex).toString('base64')]
+    }))
+  };
+  const bytes = Buffer.from(JSON.stringify(document));
+  const pin = sha256Hex(bytes);
+  assert.equal(validateDevMembershipArtifact(bytes).length, bytes.length);
+  assert.equal(verifyPinnedDevMembershipArtifact(bytes, pin).length, bytes.length);
+  assert.throws(() => verifyPinnedDevMembershipArtifact(bytes), /TOFU is prohibited/);
+  assert.throws(() => verifyPinnedDevMembershipArtifact(bytes, '0'.repeat(64)), /pin mismatches/);
+  assert.throws(
+    () => validateDevMembershipArtifact(Buffer.from(JSON.stringify({
+      ...document,
+      trustBootstrap: { ...document.trustBootstrap, privateSeed: 'forbidden' }
+    }))),
+    /unknown or missing fields|private-material/);
+  assert.equal(
+    assertDevLocalMembershipUrl('http://127.0.0.1:41810/api/network/membership-route-catalog').hostname,
+    '127.0.0.1');
+  assert.equal(
+    assertDevLocalMembershipUrl('http://192.168.1.45:41810/api/network/membership-route-catalog').hostname,
+    '192.168.1.45');
+  assert.throws(
+    () => assertDevLocalMembershipUrl('https://registry.example/api/network/membership-route-catalog'),
+    /DEV-LOCAL-ONLY HTTP IPv4/);
+  assert.throws(
+    () => assertDevLocalMembershipUrl('http://203.0.113.5:41810/api/network/membership-route-catalog'),
+    /DEV-LOCAL-ONLY HTTP IPv4/);
 });
 
 test('daily launcher always uses the fixed project without release-gate ceremony', () => {

@@ -13,7 +13,8 @@ From the `deep-devops` repository, start the loopback-only messenger stack:
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/survival-dev.ps1 -Action Up
 ```
 
-The launcher writes ignored, non-secret handoff files to
+Only after the complete stack and the one-shot membership fixture pass their
+checks, the launcher writes ignored, non-secret handoff files to
 `artifacts/survival-dev/client.android.env` and `client.windows.env`. Android
 and Windows receive `127.0.0.1` by default; each XNode URL is pinned inline to its exact
 development router ID. Debug HTTP does not use TLS pins. Use `adb reverse` for a
@@ -49,7 +50,30 @@ their `ingress|core|storage` roles, with proofs, a 3-of-5 offline-root delegatio
 and a 2-of-3 online MSM1 membership statement. Its sorted halves provide two
 disjoint three-hop development routes. The XNodes and Registry mount it
 read-only and publish it at `/api/network/membership-route-catalog`; the client
-handoff includes `DEEP_MEMBERSHIP_ROUTE_CATALOG_URL`. Deterministic signing seeds
+handoff includes `DEEP_MEMBERSHIP_ROUTE_CATALOG_URL`.
+
+The same bounded JSON artifact contains a `trustBootstrap` object with public
+canonical genesis bytes, the expected network ID, the canonical genesis
+SHA-256, the canonical 3-of-5 signed delegation, and bridge/membership anchors
+bound to the verified delegation LKG at sequence 2. It is explicitly marked
+`DEV-LOCAL-ONLY` and uses the profile key
+`install:deep-survival-dev-v1`. It contains no private signing material.
+The future Debug client consumer must require both of these handoff values:
+
+- `DEEP_DEV_LOCAL_MEMBERSHIP_TRUST_URL` — the exact IPv4 HTTP catalog endpoint;
+- `DEEP_DEV_LOCAL_MEMBERSHIP_TRUST_SHA256` — lowercase SHA-256 of the exact
+  published catalog bytes.
+
+The launcher deletes stale client handoff files before regeneration. It writes
+a new URL and pin only after the generator container exits successfully from
+its native Sodium read-after-publication verification. The generator then emits
+the SHA-256 of those verified volume bytes; the launcher requires the exact
+Registry HTTP response bytes to match that hash and pass bounded strict parsing.
+The HTTP response cannot become a TOFU source. A consumer must reject a missing or mismatched pin;
+TOFU, remote trust-root fallback, and production activation from this artifact
+are prohibited.
+
+Deterministic signing seeds
 are explicitly DEV-LOCAL-ONLY and exist only in the one-shot generator image:
 they are never in the artifact, runtime images, runtime volumes, client handoff,
 or logs. This is contract-fixture plumbing, not a production signer, membership

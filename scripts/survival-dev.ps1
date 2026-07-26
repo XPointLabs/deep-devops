@@ -89,6 +89,55 @@ function Reset-SurvivalMembershipFixture() {
     Invoke-SurvivalDocker ($baseArguments + @('rm', '-sf', 'membership-fixture', 'membership-artifact-init'))
 }
 
+function Remove-SurvivalClientEnvironment() {
+    # Never leave a prior catalog pin looking current while a new one-shot is
+    # being generated or if its Sodium read-after-publication check fails.
+    $outputDirectory = Join-Path $Root 'artifacts\survival-dev'
+    foreach ($name in @('client.android.env', 'client.windows.env')) {
+        Remove-Item -LiteralPath (Join-Path $outputDirectory $name) -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Assert-SurvivalMembershipFixtureVerified() {
+    $containerId = (& docker @baseArguments 'ps' '-q' 'membership-fixture')
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($containerId)) {
+        throw 'DEV-LOCAL-ONLY membership fixture container is missing.'
+    }
+    $state = (& docker 'inspect' '--format' '{{.State.Status}}|{{.State.ExitCode}}' $containerId)
+    if ($LASTEXITCODE -ne 0 -or ([string]$state).Trim() -ne 'exited|0') {
+        throw 'DEV-LOCAL-ONLY membership fixture did not complete its Sodium read-after-publication verification.'
+    }
+}
+
+function Get-SurvivalVerifiedMembershipPin() {
+    $logs = (& docker @baseArguments 'logs' '--no-color' '--no-log-prefix' 'membership-fixture')
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Unable to read the verified DEV-LOCAL-ONLY membership fixture result.'
+    }
+    $matches = [regex]::Matches(
+        ($logs -join "`n"),
+        '(?m)^PublishedArtifactSha256=([0-9a-f]{64})\r?$'
+    )
+    if ($matches.Count -ne 1) {
+        throw 'DEV-LOCAL-ONLY membership fixture did not publish exactly one verified artifact pin.'
+    }
+    return $matches[0].Groups[1].Value
+}
+
+function Get-SurvivalPublishedMembershipPin(
+    [string]$MembershipUrl,
+    [string]$ExpectedSha256
+) {
+    $pin = (& node `
+        (Join-Path $PSScriptRoot 'survival-dev-membership-trust.mjs') `
+        '--url' $MembershipUrl `
+        '--expected-sha256' $ExpectedSha256)
+    if ($LASTEXITCODE -ne 0 -or ([string]$pin).Trim() -notmatch '^[0-9a-f]{64}$') {
+        throw 'Published DEV-LOCAL-ONLY membership trust artifact validation failed.'
+    }
+    return ([string]$pin).Trim()
+}
+
 function Reset-SurvivalChainLifecycle() {
     # Hardhat node state is intentionally in-memory, while the deployment
     # manifest volume persists. Recreate these services for every supported
@@ -161,12 +210,19 @@ function Assert-SurvivalHostEndpoints([string]$HostName,[switch]$IncludeChain) {
     }
 }
 
-function Write-ClientEnvironment([string]$HostName,[switch]$IncludeChain) {
+function Write-ClientEnvironment(
+    [string]$HostName,
+    [string]$MembershipArtifactSha256,
+    [switch]$IncludeChain
+) {
     $address = $null
     if (-not [Net.IPAddress]::TryParse($HostName, [ref]$address) -or
         $address.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork -or
         $address.Equals([Net.IPAddress]::Any)) {
         throw 'LanHost must be an IPv4 address.'
+    }
+    if ($MembershipArtifactSha256 -notmatch '^[0-9a-f]{64}$') {
+        throw 'An exact lowercase DEV-LOCAL-ONLY membership artifact SHA-256 pin is required.'
     }
     $outputDirectory = Join-Path $Root 'artifacts\survival-dev'
     [void][IO.Directory]::CreateDirectory($outputDirectory)
@@ -188,6 +244,8 @@ function Write-ClientEnvironment([string]$HostName,[switch]$IncludeChain) {
             "XNODE_URLS=$($routerIds[0])|http://$hostValue`:41801;$($routerIds[1])|http://$hostValue`:41802;$($routerIds[2])|http://$hostValue`:41803;$($routerIds[3])|http://$hostValue`:41804;$($routerIds[4])|http://$hostValue`:41805;$($routerIds[5])|http://$hostValue`:41806",
             "DEEP_REGISTRY_URL=http://$hostValue`:41810",
             "DEEP_MEMBERSHIP_ROUTE_CATALOG_URL=http://$hostValue`:41810/api/network/membership-route-catalog",
+            "DEEP_DEV_LOCAL_MEMBERSHIP_TRUST_URL=http://$hostValue`:41810/api/network/membership-route-catalog",
+            "DEEP_DEV_LOCAL_MEMBERSHIP_TRUST_SHA256=$MembershipArtifactSha256",
             "DEEP_FILE_URL=http://$hostValue`:41821",
             "DEEP_PUSH_URL=http://$hostValue`:41822",
             "DEEP_CALL_SIGNALING_BASE_URL=http://$hostValue`:41823",
@@ -216,7 +274,7 @@ switch ($Action) {
             throw 'Chain lifecycle services can only be started with -Action Up -Chain.'
         }
         $advertisedHost = if ([string]::IsNullOrWhiteSpace($LanHost)) { '127.0.0.1' } else { $LanHost }
-        Write-ClientEnvironment $advertisedHost -IncludeChain:$Chain
+        Remove-SurvivalClientEnvironment
         $env:SURVIVAL_BIND_HOST = $advertisedHost
         Prepare-SurvivalBuildContexts -IncludeChain:$Chain
         Reset-SurvivalMembershipFixture
@@ -232,6 +290,11 @@ switch ($Action) {
         Assert-SurvivalHostEndpoints $advertisedHost -IncludeChain:$Chain
         & node (Join-Path $PSScriptRoot 'survival-dev-verify.mjs') '--host' $advertisedHost
         if ($LASTEXITCODE -ne 0) { throw 'Survival relay contact verification failed.' }
+        Assert-SurvivalMembershipFixtureVerified
+        $verifiedMembershipPin = Get-SurvivalVerifiedMembershipPin
+        $membershipUrl = "http://$advertisedHost`:41810/api/network/membership-route-catalog"
+        $membershipPin = Get-SurvivalPublishedMembershipPin $membershipUrl $verifiedMembershipPin
+        Write-ClientEnvironment $advertisedHost $membershipPin -IncludeChain:$Chain
     }
     'Down' {
         $arguments = $baseArguments + @('down')
