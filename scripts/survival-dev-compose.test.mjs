@@ -71,6 +71,7 @@ test('only local Hardhat and loopback host ports are configured', () => {
   assert.match(deploy, /contracts-devnet: \{ condition: service_healthy \}/);
   assert.match(deploy, /rm -f \/workspace\/deployments\/localhost\.latest\.json/);
   assert.match(deploy, /scripts\/deploy-local-devnet\.js --network localhost/);
+  assert.match(deploy, /chmod 0644 \/workspace\/deployments\/localhost\.latest\.json/);
   assert.match(smoke, /profiles: \[chain\]/);
   assert.match(smoke, /restart: "no"/);
   assert.match(smoke, /network_mode: service:contracts-devnet/);

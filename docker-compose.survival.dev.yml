@@ -198,7 +198,7 @@ services:
     depends_on:
       contracts-deployments-init: { condition: service_completed_successfully }
       contracts-devnet: { condition: service_healthy }
-    command: [sh, -ec, "rm -f /workspace/deployments/localhost.latest.json && exec pnpm exec hardhat run scripts/deploy-local-devnet.js --network localhost"]
+    command: [sh, -ec, "rm -f /workspace/deployments/localhost.latest.json && pnpm exec hardhat run scripts/deploy-local-devnet.js --network localhost && chmod 0644 /workspace/deployments/localhost.latest.json"]
 
   contracts-smoke:
     platform: linux/arm64
