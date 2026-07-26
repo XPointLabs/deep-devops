@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
-    [string]$ClientRepository = (Join-Path (Split-Path $PSScriptRoot -Parent) '..\deep-client-maui'),
-    [string]$EvidencePath = (Join-Path (Split-Path $PSScriptRoot -Parent) 'artifacts\survival-dev\six-node-chaos.json')
+    [string]$ClientRepository,
+    [string]$EvidencePath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -10,6 +10,12 @@ Set-StrictMode -Version Latest
 $Root = [IO.Path]::GetFullPath((Split-Path $PSScriptRoot -Parent))
 $ComposePath = Join-Path $Root 'docker-compose.survival.dev.yml'
 $EnvironmentPath = Join-Path $Root 'artifacts\survival-dev\client.windows.env'
+if ([string]::IsNullOrWhiteSpace($ClientRepository)) {
+    $ClientRepository = Join-Path $Root '..\deep-client-maui'
+}
+if ([string]::IsNullOrWhiteSpace($EvidencePath)) {
+    $EvidencePath = Join-Path $Root 'artifacts\survival-dev\six-node-chaos.json'
+}
 $ClientRepository = [IO.Path]::GetFullPath($ClientRepository)
 $TestProject = Join-Path $ClientRepository 'tests\Deep.Client.Maui.ViewModels.Tests\Deep.Client.Maui.ViewModels.Tests.csproj'
 $Nodes = 1..6 | ForEach-Object { "xnode-$_" }
@@ -96,4 +102,3 @@ $evidence = [pscustomobject]@{
     ($evidence | ConvertTo-Json -Depth 6) + "`n",
     [Text.UTF8Encoding]::new($false))
 Write-Output "Six-node chaos evidence: $([IO.Path]::GetFullPath($EvidencePath))"
-
