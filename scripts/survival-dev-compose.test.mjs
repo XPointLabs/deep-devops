@@ -47,6 +47,7 @@ test('daily stack has a fixed isolated project, persistent services, and one cha
 });
 
 test('shared images have one incremental build producer and persistent consumers', () => {
+  const xnodeBuild = compose.match(/^x-xnode-build: &xnode-build\r?\n([\s\S]*?)(?=^x-xnode:)/m)?.[1] ?? '';
   assert.match(serviceBlock('xnode-1'), /\n    build:/);
   assert.doesNotMatch(serviceBlock('xnode-2'), /\n    build:/);
   assert.doesNotMatch(serviceBlock('xnode-3'), /\n    build:/);
@@ -56,6 +57,11 @@ test('shared images have one incremental build producer and persistent consumers
   for (const role of ['xnode-1', 'xnode-2', 'xnode-3', 'xnode-4', 'xnode-5', 'xnode-6']) assert.match(serviceBlock(role), /<<: \*xnode/);
   for (const role of ['storage', 'file', 'push', 'calls']) assert.match(serviceBlock(role), /image: deep-survival\/compat:dev/);
   assert.doesNotMatch(compose, /--no-cache/);
+  assert.match(compose, /^x-service: &service\r?\n  platform: linux\/arm64$/m);
+  assert.match(
+    xnodeBuild,
+    /RUN dotnet publish src\/XNode\/XNode\.csproj -c Debug -o \/out --runtime linux-arm64 --self-contained false -p:UseAppHost=false/
+  );
 });
 
 test('only local Hardhat and loopback host ports are configured', () => {
