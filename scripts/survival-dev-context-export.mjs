@@ -5,6 +5,7 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   realpathSync,
   renameSync,
   rmSync
@@ -63,6 +64,69 @@ function isProhibited(entry) {
     || /\.(?:jks|key|keystore|p12|pfx|pem)$/.test(name);
 }
 
+function decodeXmlAttribute(value) {
+  return value
+    .replaceAll('&quot;', '"')
+    .replaceAll('&apos;', "'")
+    .replaceAll('&lt;', '<')
+    .replaceAll('&gt;', '>')
+    .replaceAll('&amp;', '&');
+}
+
+function sourceEntry(source, target) {
+  const relation = relative(source, target);
+  if (!relation || relation === '..' || relation.startsWith(`..${sep}`) || isAbsolute(relation)) {
+    fail('referenced restore input escapes the source');
+  }
+  return normalizeEntry(relation.split(sep).join('/'));
+}
+
+function resolveMsBuildPath(source, declaringEntry, value) {
+  const declaringDirectory = dirname(join(source, ...declaringEntry.split('/')));
+  let expanded = decodeXmlAttribute(value).trim();
+  expanded = expanded.replace(/^\$\(MSBuildThisFileDirectory\)/i, `${declaringDirectory}${sep}`);
+  if (/\$\([^)]+\)/.test(expanded) || /%[^%]+%/.test(expanded)) {
+    fail('referenced restore input uses an unsupported dynamic path');
+  }
+  return resolve(declaringDirectory, expanded.replaceAll('\\', sep).replaceAll('/', sep));
+}
+
+function referencedRestoreInputs(source, inventory, initiallySelected) {
+  const inventorySet = new Set(inventory);
+  const selected = new Set(initiallySelected);
+  const configs = new Set();
+
+  for (const entry of initiallySelected) {
+    if (!/\.(?:csproj|fsproj|vbproj|props|targets)$/i.test(entry)) continue;
+    const content = readFileSync(join(source, ...entry.split('/')), 'utf8');
+    for (const match of content.matchAll(/<RestoreConfigFile\b[^>]*>([\s\S]*?)<\/RestoreConfigFile>/gi)) {
+      const configEntry = sourceEntry(source, resolveMsBuildPath(source, entry, match[1]));
+      if (!inventorySet.has(configEntry)) fail('referenced restore config is absent from source inventory');
+      selected.add(configEntry);
+      configs.add(configEntry);
+    }
+  }
+
+  for (const configEntry of configs) {
+    const content = readFileSync(join(source, ...configEntry.split('/')), 'utf8');
+    const packageSources = /<packageSources\b[^>]*>([\s\S]*?)<\/packageSources>/i.exec(content)?.[1] ?? '';
+    for (const match of packageSources.matchAll(/<add\b([^>]*)\/?>/gi)) {
+      const value = /\bvalue\s*=\s*(["'])(.*?)\1/i.exec(match[1])?.[2];
+      if (!value) continue;
+      const decodedValue = decodeXmlAttribute(value).trim();
+      if (/^[a-z][a-z0-9+.-]*:\/\//i.test(decodedValue)) continue;
+      const localSource = resolveMsBuildPath(source, configEntry, decodedValue);
+      const localSourceEntry = sourceEntry(source, localSource);
+      const prefix = `${localSourceEntry}/`;
+      const packages = inventory.filter(entry => entry.startsWith(prefix));
+      if (packages.length === 0) fail('referenced local package source is absent from source inventory');
+      for (const packageEntry of packages) selected.add(packageEntry);
+    }
+  }
+
+  return [...selected];
+}
+
 function gitVisibleFiles(source) {
   try {
     // The supported launcher can run under an isolated service account while
@@ -105,7 +169,11 @@ export function exportDevelopmentContext({ kind, source, destination, ownedRoot 
   mkdirSync(fullOwnedRoot, { recursive: true });
   if (!isChild(fullOwnedRoot, fullDestination)) fail('destination must stay inside the owned context root');
 
-  const selected = gitVisibleFiles(fullSource).filter(entry => isSelected(kind, entry));
+  const inventory = gitVisibleFiles(fullSource);
+  const initiallySelected = inventory.filter(entry => isSelected(kind, entry));
+  const selected = kind === 'dotnet'
+    ? referencedRestoreInputs(fullSource, inventory, initiallySelected)
+    : initiallySelected;
   if (selected.length === 0) fail('source allowlist is empty');
   let prohibited = 0;
   for (const entry of selected) {

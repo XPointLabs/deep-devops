@@ -24,15 +24,47 @@ function fixture() {
   return { root, source, owned };
 }
 
-test('exports only the development build allowlist, including untracked source', () => {
+test('exports the dotnet allowlist and only project-referenced local restore inputs', () => {
   const item = fixture();
   try {
+    mkdirSync(path.join(item.source, 'eng'), { recursive: true });
+    mkdirSync(path.join(item.source, 'vendor', 'mailbox-client'), { recursive: true });
+    mkdirSync(path.join(item.source, 'vendor', 'unrelated'), { recursive: true });
+    writeFileSync(
+      path.join(item.source, 'eng', 'mailbox-client.NuGet.Config'),
+      [
+        '<configuration>',
+        '  <packageSources>',
+        '    <clear />',
+        '    <add key="mailbox-client" value="../vendor/mailbox-client" />',
+        '    <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />',
+        '  </packageSources>',
+        '</configuration>'
+      ].join('\n')
+    );
+    writeFileSync(path.join(item.source, 'vendor', 'mailbox-client', 'Deep.Protocol.1.2.3.nupkg'), 'protocol');
+    writeFileSync(path.join(item.source, 'vendor', 'mailbox-client', 'Deep.Protocol.Abstractions.1.2.3.nupkg'), 'abstractions');
+    writeFileSync(path.join(item.source, 'vendor', 'unrelated', 'NotRequired.1.0.0.nupkg'), 'not required');
+    writeFileSync(
+      path.join(item.source, 'src', 'App', 'App.csproj'),
+      [
+        '<Project>',
+        '  <PropertyGroup>',
+        '    <RestoreConfigFile>$(MSBuildThisFileDirectory)..\\..\\eng\\mailbox-client.NuGet.Config</RestoreConfigFile>',
+        '  </PropertyGroup>',
+        '</Project>'
+      ].join('\n')
+    );
     writeFileSync(path.join(item.source, '.env.local'), 'must-not-be-read-or-copied');
     const destination = path.join(item.owned, 'xnode');
     const result = exportDevelopmentContext({ kind: 'dotnet', source: item.source, destination, ownedRoot: item.owned });
-    assert.equal(result.fileCount, 2);
+    assert.equal(result.fileCount, 5);
     assert.ok(existsSync(path.join(destination, 'src', 'App', 'App.csproj')));
     assert.ok(existsSync(path.join(destination, 'src', 'App', 'Program.cs')));
+    assert.ok(existsSync(path.join(destination, 'eng', 'mailbox-client.NuGet.Config')));
+    assert.ok(existsSync(path.join(destination, 'vendor', 'mailbox-client', 'Deep.Protocol.1.2.3.nupkg')));
+    assert.ok(existsSync(path.join(destination, 'vendor', 'mailbox-client', 'Deep.Protocol.Abstractions.1.2.3.nupkg')));
+    assert.equal(existsSync(path.join(destination, 'vendor', 'unrelated', 'NotRequired.1.0.0.nupkg')), false);
     assert.equal(existsSync(path.join(destination, '.env.local')), false);
     assert.equal(existsSync(path.join(destination, 'README.md')), false);
   } finally {
