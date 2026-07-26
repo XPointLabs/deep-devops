@@ -188,15 +188,22 @@ services:
         WORKDIR /workspace
         COPY scripts/p15c-package-json-normalizer.mjs /survival/
         COPY --from=contracts_source package.json pnpm-lock.yaml ./
-        RUN node /survival/p15c-package-json-normalizer.mjs package.json && corepack enable && pnpm install --frozen-lockfile
+        RUN node /survival/p15c-package-json-normalizer.mjs package.json && mkdir -p /opt/corepack && COREPACK_HOME=/opt/corepack corepack prepare pnpm@9.1.3 --activate && corepack enable && COREPACK_HOME=/opt/corepack pnpm install --frozen-lockfile
         COPY --from=contracts_source . .
-        RUN node /survival/p15c-package-json-normalizer.mjs package.json && pnpm exec hardhat compile && chown -R node:node /workspace
+        RUN node /survival/p15c-package-json-normalizer.mjs package.json && COREPACK_HOME=/opt/corepack pnpm exec hardhat compile && cp -a /workspace/cache /opt/hardhat-cache && chown -R node:node /workspace /opt/corepack /opt/hardhat-cache
+        COPY --chmod=0555 scripts/survival-hardhat-entrypoint.sh /usr/local/bin/survival-hardhat-entrypoint
+        ENV COREPACK_HOME=/opt/corepack
+        ENV COREPACK_ENABLE_NETWORK=0
         USER node
+        ENTRYPOINT ["/usr/local/bin/survival-hardhat-entrypoint"]
     command: [pnpm, exec, hardhat, node, --hostname, 0.0.0.0]
     environment:
       CI: "true"
       HARDHAT_DISABLE_TELEMETRY: "true"
       HOME: /tmp
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
+      - /workspace/cache:rw,noexec,nosuid,nodev,size=64m,mode=1777
     ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41545:8545"]
     volumes:
       - contracts-deployments:/workspace/deployments
@@ -217,6 +224,7 @@ services:
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
+      - /workspace/cache:rw,noexec,nosuid,nodev,size=64m,mode=1777
     labels:
       com.xpoint.survival.stack: dev
     image: deep-survival/contracts-devnet:dev
@@ -229,7 +237,7 @@ services:
     depends_on:
       contracts-deployments-init: { condition: service_completed_successfully }
       contracts-devnet: { condition: service_healthy }
-    command: [sh, -ec, "rm -f /workspace/deployments/localhost.latest.json && pnpm exec hardhat run scripts/deploy-local-devnet.js --network localhost && chmod 0644 /workspace/deployments/localhost.latest.json"]
+    command: [sh, -ec, "rm -f /workspace/deployments/localhost.latest.json && pnpm exec hardhat run --no-compile scripts/deploy-local-devnet.js --network localhost && chmod 0644 /workspace/deployments/localhost.latest.json"]
 
   contracts-smoke:
     platform: linux/arm64
@@ -242,6 +250,7 @@ services:
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
+      - /workspace/cache:rw,noexec,nosuid,nodev,size=64m,mode=1777
     labels:
       com.xpoint.survival.stack: dev
     image: deep-survival/contracts-devnet:dev
@@ -253,7 +262,7 @@ services:
       - contracts-deployments:/workspace/deployments:ro
     depends_on:
       contracts-deploy: { condition: service_completed_successfully }
-    command: [pnpm, exec, hardhat, run, scripts/local-devnet-smoke.js, --network, localhost]
+    command: [pnpm, exec, hardhat, run, --no-compile, scripts/local-devnet-smoke.js, --network, localhost]
 
   xnode-1:
     <<: *xnode

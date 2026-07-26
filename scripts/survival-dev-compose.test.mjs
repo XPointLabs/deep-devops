@@ -23,6 +23,8 @@ const artifactInit = readFileSync(new URL('../tools/membership-artifact-init/mem
 const membershipRepeat = readFileSync(new URL('./survival-dev-membership-fixture-repeat.ps1', import.meta.url), 'utf8');
 const membershipNuget = readFileSync(new URL('../tools/membership-fixture/NuGet.Config', import.meta.url), 'utf8');
 const membershipLock = JSON.parse(readFileSync(new URL('../tools/membership-fixture/packages.lock.json', import.meta.url), 'utf8'));
+const hardhatEntrypoint = readFileSync(new URL('./survival-hardhat-entrypoint.sh', import.meta.url), 'utf8');
+const gitAttributes = readFileSync(new URL('../.gitattributes', import.meta.url), 'utf8');
 
 function serviceBlock(name) {
   const match = compose.match(new RegExp(`^  ${name}:\\r?\\n([\\s\\S]*?)(?=^  [a-z][a-z0-9-]*:\\r?$|^networks:|^volumes:)`, 'm'));
@@ -73,6 +75,11 @@ test('only local Hardhat and loopback host ports are configured', () => {
   assert.match(contracts, /command: \[pnpm, exec, hardhat, node, --hostname, 0\.0\.0\.0\]/);
   assert.match(contracts, /COPY --from=contracts_source package\.json pnpm-lock\.yaml \.\//);
   assert.match(contracts, /pnpm install --frozen-lockfile/);
+  assert.match(contracts, /COREPACK_HOME=\/opt\/corepack corepack prepare pnpm@9\.1\.3 --activate/);
+  assert.match(contracts, /ENV COREPACK_HOME=\/opt\/corepack/);
+  assert.match(contracts, /ENV COREPACK_ENABLE_NETWORK=0/);
+  assert.match(contracts, /cp -a \/workspace\/cache \/opt\/hardhat-cache/);
+  assert.match(contracts, /ENTRYPOINT \["\/usr\/local\/bin\/survival-hardhat-entrypoint"\]/);
   assert.match(contracts, /COPY --from=contracts_source \. \./);
   assert.match(contracts, /USER node/);
   assert.match(contracts, /restart: "no"/);
@@ -86,7 +93,7 @@ test('only local Hardhat and loopback host ports are configured', () => {
   assert.match(deploy, /contracts-deployments:\/workspace\/deployments/);
   assert.match(deploy, /contracts-devnet: \{ condition: service_healthy \}/);
   assert.match(deploy, /rm -f \/workspace\/deployments\/localhost\.latest\.json/);
-  assert.match(deploy, /scripts\/deploy-local-devnet\.js --network localhost/);
+  assert.match(deploy, /hardhat run --no-compile scripts\/deploy-local-devnet\.js --network localhost/);
   assert.match(deploy, /chmod 0644 \/workspace\/deployments\/localhost\.latest\.json/);
   assert.match(smoke, /profiles: \[chain\]/);
   assert.match(smoke, /restart: "no"/);
@@ -96,7 +103,7 @@ test('only local Hardhat and loopback host ports are configured', () => {
   assert.match(smoke, /no-new-privileges:true/);
   assert.match(smoke, /contracts-deployments:\/workspace\/deployments:ro/);
   assert.match(smoke, /contracts-deploy: \{ condition: service_completed_successfully \}/);
-  assert.match(smoke, /scripts\/local-devnet-smoke\.js/);
+  assert.match(smoke, /hardhat, run, --no-compile, scripts\/local-devnet-smoke\.js/);
   assert.match(staking, /contracts-smoke: \{ condition: service_completed_successfully \}/);
   assert.doesNotMatch(staking, /contracts-devnet: \{ condition: service_healthy \}/);
   assert.match(staking, /Contracts__DeploymentManifestPath: \/run\/deep-contracts\/localhost\.latest\.json/);
@@ -129,6 +136,13 @@ test('runtime root filesystems are immutable and writable paths are explicitly b
   for (const role of ['membership-fixture', 'contracts-deploy', 'contracts-smoke']) {
     assert.match(serviceBlock(role), /\n    tmpfs:\r?\n      - \/tmp:rw,noexec,nosuid,nodev,size=(?:32|64)m,mode=1777/);
   }
+  for (const role of ['contracts-devnet', 'contracts-deploy', 'contracts-smoke']) {
+    assert.match(serviceBlock(role), /\/workspace\/cache:rw,noexec,nosuid,nodev,size=64m,mode=1777/);
+  }
+  assert.match(hardhatEntrypoint, /cp -R \/opt\/hardhat-cache\/\. \/workspace\/cache\//);
+  assert.match(hardhatEntrypoint, /exec "\$@"/);
+  assert.doesNotMatch(hardhatEntrypoint, /curl|wget|pnpm|npm|corepack/);
+  assert.match(gitAttributes, /^scripts\/survival-hardhat-entrypoint\.sh text eol=lf$/m);
 
   for (const role of ['xnode-1', 'xnode-2', 'xnode-3', 'xnode-4', 'xnode-5', 'xnode-6', 'registry', 'staking-backend', 'storage', 'file', 'push', 'calls', 'relay-bootstrap']) {
     const volumes = serviceBlock(role).match(/volumes: \[[^\]]+\]|volumes:\r?\n(?:      - [^\r\n]+\r?\n?)+/)?.[0] ?? '';

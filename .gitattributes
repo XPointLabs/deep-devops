@@ -1,1 +1,2 @@
 release/**/*.json text eol=lf
+scripts/survival-hardhat-entrypoint.sh text eol=lf

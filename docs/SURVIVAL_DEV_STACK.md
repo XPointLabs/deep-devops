@@ -49,6 +49,26 @@ with `noexec`, `nosuid`, and `nodev`; membership and contract artifacts remain
 read-only for consumers. This is Docker containment hardening for local
 development, not a substitute for application-level authorization.
 
+The three Hardhat roles additionally receive a bounded, non-executable
+`/workspace/cache` tmpfs because Hardhat's validation plugin takes a lock and
+writes generated validation metadata there. The image prepares the exact
+`pnpm@9.1.3` package-manager release at build time and disables Corepack network
+access at runtime. The image also preserves the build-time compiler cache under
+`/opt/hardhat-cache`; its fixed entrypoint copies that cache into the fresh
+tmpfs, and deploy/smoke run with `--no-compile`. A read-only chain role therefore
+never downloads package-manager or Solidity compiler tooling on start.
+
+After rebuilding the contracts image, reproduce the containment contract
+without touching the running development project:
+
+```powershell
+node --test scripts/survival-dev-readonly-runtime.test.mjs
+```
+
+The test creates uniquely named temporary Docker resources, runs devnet, deploy,
+and smoke in a `network=none` namespace, and removes those resources in a
+`finally` cleanup.
+
 Each supported `Up` also removes and reruns the `membership-fixture` one-shot.
 It consumes only hash-pinned local `Deep.Protocol` and
 `Deep.Protocol.MembershipRoutes` packages and their complete locked offline
