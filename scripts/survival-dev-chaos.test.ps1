@@ -34,6 +34,13 @@ foreach ($required in @(
 if ($script -match 'ClientLiveAcceptanceTests|duplicateAssertion|two-disjoint-three-hop-attempts') {
     throw 'Chaos script retains an unsupported live delivery, deduplication, or disjoint-route claim.'
 }
+if ($script -match 'catch \[System\.Net\.Http\.HttpRequestException\]') {
+    throw 'Chaos script uses a typed HttpRequestException catch that Windows PowerShell 5.1 cannot always resolve.'
+}
+if ($script -notmatch 'catch \{' -or
+    $script -notmatch 'Unable to connect\|connection\|actively refused\|No connection') {
+    throw 'Chaos script does not have a PowerShell-version-compatible fail-closed unavailable-node assertion.'
+}
 if ($script -notmatch 'survival-dev-verify\.mjs' -or
     $script -notmatch 'productionDiscoveryClaimed = \$false') {
     throw 'Chaos evidence does not verify topology recovery or bound production claims.'

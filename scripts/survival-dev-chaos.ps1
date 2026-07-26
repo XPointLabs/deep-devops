@@ -59,15 +59,17 @@ function Assert-NodeUnavailable([int]$Index) {
     $uri = "http://127.0.0.1:$([int](41800 + $Index))/health/ready"
     try {
         $response = Invoke-WebRequest -UseBasicParsing -Uri $uri -TimeoutSec 2
-        throw "xnode-$Index unexpectedly returned HTTP $($response.StatusCode) after stop."
-    } catch [System.Net.WebException] {
-        return
-    } catch [System.Net.Http.HttpRequestException] {
-        return
     } catch {
-        if ($_.Exception.Message -match 'Unable to connect|connection|actively refused|No connection') { return }
+        $messages = @($_.Exception.Message)
+        if ($null -ne $_.Exception.InnerException) {
+            $messages += $_.Exception.InnerException.Message
+        }
+        $messages = $messages |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+        if (($messages -join ' ') -match 'Unable to connect|connection|actively refused|No connection') { return }
         throw
     }
+    throw "xnode-$Index unexpectedly returned HTTP $($response.StatusCode) after stop."
 }
 
 function Invoke-ContractEvidence([string]$Name, [string]$TestName, [string]$Claim, [string]$Limitation) {
