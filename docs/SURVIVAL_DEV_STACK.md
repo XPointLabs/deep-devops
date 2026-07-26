@@ -94,6 +94,11 @@ create a current deploy/smoke/backend sequence. Direct `docker compose` chain
 restarts are unsupported because Compose cannot guarantee rerunning a completed
 one-shot service after an in-memory node restart.
 
+The deploy and smoke containers share the `contracts-devnet` network namespace.
+This makes Hardhat's local-only `localhost:8545` target resolve to the running
+devnet without publishing another port or giving either one-shot container its
+own network attachment.
+
 The chain profile includes a one-shot `contracts-deployments-init` container.
 It runs as root only long enough to recursively set ownership of the isolated
 `contracts-deployments` volume to the standard Node UID/GID `1000:1000`, then
