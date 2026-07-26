@@ -17,6 +17,8 @@ const verify = readFileSync(new URL('./survival-dev-verify.mjs', import.meta.url
 const contextExport = readFileSync(new URL('./survival-dev-context-export.mjs', import.meta.url), 'utf8');
 const bootstrap = readFileSync(new URL('../tools/relay-bootstrap/relay-bootstrap.mjs', import.meta.url), 'utf8');
 const fixture = readFileSync(new URL('../tools/membership-fixture/Program.cs', import.meta.url), 'utf8');
+const membershipNuget = readFileSync(new URL('../tools/membership-fixture/NuGet.Config', import.meta.url), 'utf8');
+const membershipLock = JSON.parse(readFileSync(new URL('../tools/membership-fixture/packages.lock.json', import.meta.url), 'utf8'));
 
 function serviceBlock(name) {
   const match = compose.match(new RegExp(`^  ${name}:\\r?\\n([\\s\\S]*?)(?=^  [a-z][a-z0-9-]*:\\r?$|^networks:|^volumes:)`, 'm'));
@@ -142,6 +144,7 @@ test('membership catalog is a local-only one-shot with pinned packages and read-
   const generator = serviceBlock('membership-fixture');
   assert.match(init, /network_mode: none/);
   assert.match(init, /cap_add: \[CHOWN\]/);
+  assert.doesNotMatch(init, /FOWNER|chmod/);
   assert.match(init, /chown -R 65532:65532 \/out/);
   assert.match(generator, /network_mode: none/);
   assert.match(generator, /restart: "no"/);
@@ -155,9 +158,45 @@ test('membership catalog is a local-only one-shot with pinned packages and read-
   }
   assert.match(launcher, /Prepare-SurvivalMembershipFixturePackages/);
   assert.match(launcher, /Reset-SurvivalMembershipFixture/);
-  assert.match(launcher, /8EF4E70AD0B6C1CC0087F25C0313D6AB6A5387D16246679E4C10A3C00898A442/);
-  assert.match(launcher, /FE7B5E638C1AB5E7505F45BB7D5804048D2A4AD273C88DD75D7D46AE80DB641A/);
+  const packageFunction = launcher.match(/function Prepare-SurvivalMembershipFixturePackages\(\) \{([\s\S]*?)\r?\n\}/)?.[1] ?? '';
+  const packagePins = [...packageFunction.matchAll(
+    /@\{ Name = '([^']+\.nupkg)'; Hash = '([0-9A-F]{64})'; Path = '([^']+)' \}/g)]
+    .map(([, name, hash, path]) => ({ name, hash, path }));
+  assert.deepEqual(packagePins, [
+    { name: 'Deep.Protocol.0.3.0-p04.b887fa0.nupkg', hash: '8EF4E70AD0B6C1CC0087F25C0313D6AB6A5387D16246679E4C10A3C00898A442', path: 'vendor\\p14a2\\packages\\Deep.Protocol.0.3.0-p04.b887fa0.nupkg' },
+    { name: 'Deep.Protocol.Abstractions.0.3.0-p04.b887fa0.nupkg', hash: 'FC1212A6765F5778188FCB3866EF923023C2253C3EAD299A542271F4CC4F844F', path: 'vendor\\p14a2\\packages\\Deep.Protocol.Abstractions.0.3.0-p04.b887fa0.nupkg' },
+    { name: 'Deep.Protocol.Protobuf.0.3.0-p04.b887fa0.nupkg', hash: '755A027C58BE670151456CC0BCA4764731F7C493932D9EEDD00C02E704BAF818', path: 'vendor\\p14a2\\packages\\Deep.Protocol.Protobuf.0.3.0-p04.b887fa0.nupkg' },
+    { name: 'Deep.Protocol.MembershipRoutes.0.1.0-p15.local.nupkg', hash: 'FE7B5E638C1AB5E7505F45BB7D5804048D2A4AD273C88DD75D7D46AE80DB641A', path: 'vendor\\p15\\packages\\Deep.Protocol.MembershipRoutes.0.1.0-p15.local.nupkg' },
+    { name: 'Google.Protobuf.3.32.1.nupkg', hash: '02A4A40AD4B81AAE6652A4B163EB5622D1B3B3519CCA348B3CB79AC71D9B2CAB', path: 'vendor\\p14a2\\packages\\Google.Protobuf.3.32.1.nupkg' },
+    { name: 'Sodium.Core.1.4.1.nupkg', hash: 'DE0B567D19BD1C0B9974EE5D98FC4DA87045924B94FFA1B4378BB14E623A65B7', path: 'vendor\\p14a2\\packages\\Sodium.Core.1.4.1.nupkg' },
+    { name: 'libsodium.1.0.22.nupkg', hash: 'F66EAC31EA413C1D5D068B46ADE11D3295C86EC9D6CD29FF158BA58EF51DB51A', path: 'vendor\\p14a2\\packages\\libsodium.1.0.22.nupkg' }
+  ]);
+  assert.doesNotMatch(packageFunction, /Hash = ''|\$input\.Hash -and/);
+  const mappedPackages = [...membershipNuget.matchAll(/<package pattern="([^"]+)" \/>/g)]
+    .map(match => match[1]);
+  assert.deepEqual(mappedPackages, [
+    'Deep.Protocol',
+    'Deep.Protocol.Abstractions',
+    'Deep.Protocol.Protobuf',
+    'Deep.Protocol.MembershipRoutes',
+    'Google.Protobuf',
+    'Sodium.Core',
+    'libsodium'
+  ]);
+  assert.deepEqual(
+    Object.keys(membershipLock.dependencies['net10.0']).sort(),
+    [
+      'Deep.Protocol',
+      'Deep.Protocol.Abstractions',
+      'Deep.Protocol.MembershipRoutes',
+      'Deep.Protocol.Protobuf',
+      'Google.Protobuf',
+      'Sodium.Core',
+      'libsodium'
+    ].sort());
   assert.match(fixture, /DEV-LOCAL-ONLY/);
+  assert.match(fixture, /File\.SetUnixFileMode\(/);
+  assert.match(fixture, /UnixFileMode\.UserRead \| UnixFileMode\.UserWrite \| UnixFileMode\.UserExecute/);
   assert.match(fixture, /PublicKeyAuth\.GenerateKeyPair\(seed\)/);
   assert.match(fixture, /PublicKeyAuth\.SignDetached\(framed, signer\.PrivateKey\)/);
   assert.match(fixture, /PublicKeyAuth\.VerifyDetached\(signature\.ToArray\(\), signingBytes\.ToArray\(\), publicKey\.ToArray\(\)\)/);

@@ -55,9 +55,12 @@ function Prepare-SurvivalMembershipFixturePackages() {
     $destination = Join-Path $ContextRoot 'membership-packages'
     $inputs = @(
         @{ Name = 'Deep.Protocol.0.3.0-p04.b887fa0.nupkg'; Hash = '8EF4E70AD0B6C1CC0087F25C0313D6AB6A5387D16246679E4C10A3C00898A442'; Path = 'vendor\p14a2\packages\Deep.Protocol.0.3.0-p04.b887fa0.nupkg' },
+        @{ Name = 'Deep.Protocol.Abstractions.0.3.0-p04.b887fa0.nupkg'; Hash = 'FC1212A6765F5778188FCB3866EF923023C2253C3EAD299A542271F4CC4F844F'; Path = 'vendor\p14a2\packages\Deep.Protocol.Abstractions.0.3.0-p04.b887fa0.nupkg' },
+        @{ Name = 'Deep.Protocol.Protobuf.0.3.0-p04.b887fa0.nupkg'; Hash = '755A027C58BE670151456CC0BCA4764731F7C493932D9EEDD00C02E704BAF818'; Path = 'vendor\p14a2\packages\Deep.Protocol.Protobuf.0.3.0-p04.b887fa0.nupkg' },
         @{ Name = 'Deep.Protocol.MembershipRoutes.0.1.0-p15.local.nupkg'; Hash = 'FE7B5E638C1AB5E7505F45BB7D5804048D2A4AD273C88DD75D7D46AE80DB641A'; Path = 'vendor\p15\packages\Deep.Protocol.MembershipRoutes.0.1.0-p15.local.nupkg' },
-        @{ Name = 'Sodium.Core.1.4.1.nupkg'; Hash = ''; Path = 'vendor\p14a2\packages\Sodium.Core.1.4.1.nupkg' },
-        @{ Name = 'libsodium.1.0.22.nupkg'; Hash = ''; Path = 'vendor\p14a2\packages\libsodium.1.0.22.nupkg' }
+        @{ Name = 'Google.Protobuf.3.32.1.nupkg'; Hash = '02A4A40AD4B81AAE6652A4B163EB5622D1B3B3519CCA348B3CB79AC71D9B2CAB'; Path = 'vendor\p14a2\packages\Google.Protobuf.3.32.1.nupkg' },
+        @{ Name = 'Sodium.Core.1.4.1.nupkg'; Hash = 'DE0B567D19BD1C0B9974EE5D98FC4DA87045924B94FFA1B4378BB14E623A65B7'; Path = 'vendor\p14a2\packages\Sodium.Core.1.4.1.nupkg' },
+        @{ Name = 'libsodium.1.0.22.nupkg'; Hash = 'F66EAC31EA413C1D5D068B46ADE11D3295C86EC9D6CD29FF158BA58EF51DB51A'; Path = 'vendor\p14a2\packages\libsodium.1.0.22.nupkg' }
     )
     $stage = Join-Path $ContextRoot ('.membership-packages-' + [Guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $stage -Force | Out-Null
@@ -65,7 +68,7 @@ function Prepare-SurvivalMembershipFixturePackages() {
         foreach ($input in $inputs) {
             $path = Join-Path $source $input.Path
             if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Pinned membership package is missing: $($input.Name)" }
-            if ($input.Hash -and (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ne $input.Hash) { throw "Pinned membership package hash mismatch: $($input.Name)" }
+            if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ne $input.Hash) { throw "Pinned membership package hash mismatch: $($input.Name)" }
             Copy-Item -LiteralPath $path -Destination (Join-Path $stage $input.Name) -Force
         }
         Remove-Item -LiteralPath $destination -Recurse -Force -ErrorAction SilentlyContinue

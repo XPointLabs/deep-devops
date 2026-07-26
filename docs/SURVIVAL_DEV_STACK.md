@@ -43,7 +43,10 @@ client handoff files; a raw Compose invocation does not perform those steps.
 
 Each supported `Up` also removes and reruns the `membership-fixture` one-shot.
 It consumes only hash-pinned local `Deep.Protocol` and
-`Deep.Protocol.MembershipRoutes` packages, creates an atomic public artifact in
+`Deep.Protocol.MembershipRoutes` packages and their complete locked offline
+closure (`Deep.Protocol.Abstractions`, `Deep.Protocol.Protobuf`,
+`Google.Protobuf`, `Sodium.Core`, and `libsodium`). Every copied NUPKG has an
+exact SHA-256 gate and an exact local-only NuGet source mapping. It creates an atomic public artifact in
 the isolated `membership-route-artifact` volume, then exits. The public artifact
 is a full sorted six-leaf MRL1 catalog for the exact development XNode IDs and
 their `ingress|core|storage` roles, with proofs, a 3-of-5 offline-root delegation,

@@ -113,7 +113,7 @@ services:
     security_opt: [no-new-privileges:true]
     network_mode: none
     volumes: [membership-route-artifact:/out]
-    command: [sh, -ec, "chown -R 65532:65532 /out && chmod 700 /out"]
+    command: [sh, -ec, "chown -R 65532:65532 /out"]
 
   membership-fixture:
     platform: linux/arm64

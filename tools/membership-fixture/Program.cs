@@ -9,6 +9,12 @@ const string outputName = "membership-route-catalog.json";
 var outputDirectory = args.Length == 2 && args[0] == "--output" ? args[1] : "/out";
 if (args.Length is not (0 or 2)) throw new ArgumentException("Usage: MembershipFixture [--output DIRECTORY]");
 Directory.CreateDirectory(outputDirectory);
+if (!OperatingSystem.IsWindows())
+{
+    File.SetUnixFileMode(
+        outputDirectory,
+        UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+}
 
 // DEV-LOCAL-ONLY. These deterministic seeds never leave this one-shot container:
 // they are not mounted into XNode, Registry, clients, volumes, logs, or the artifact.
