@@ -17,6 +17,12 @@ $ComposePath = Join-Path $Root 'docker-compose.survival.dev.yml'
 $Project = 'deep-survival-dev'
 $baseArguments = @('compose', '-p', $Project, '-f', $ComposePath)
 $ContextRoot = Join-Path $Root 'artifacts\survival-dev\build-contexts'
+$ChainLifecycleServices = @(
+    'contracts-devnet',
+    'contracts-deploy',
+    'contracts-smoke',
+    'staking-backend'
+)
 
 function Invoke-SurvivalDocker([string[]]$Arguments) {
     & docker @Arguments
@@ -60,7 +66,7 @@ function Reset-SurvivalChainLifecycle() {
         'contracts-deploy', 'contracts-smoke', 'staking-backend'))
 }
 
-function Assert-SurvivalHostEndpoints([string]$HostName) {
+function Assert-SurvivalHostEndpoints([string]$HostName,[switch]$IncludeChain) {
     $targets = @(
         "http://$HostName`:41801/api/network/contact",
         "http://$HostName`:41802/api/network/contact",
@@ -75,6 +81,9 @@ function Assert-SurvivalHostEndpoints([string]$HostName) {
         "http://$HostName`:41823/health/ready",
         'http://127.0.0.1:41999/health/ready'
     )
+    if ($IncludeChain) {
+        $targets += "http://$HostName`:41811/health/ready"
+    }
     foreach ($target in $targets) {
         $ready = $false
         foreach ($attempt in 1..40) {
@@ -88,6 +97,33 @@ function Assert-SurvivalHostEndpoints([string]$HostName) {
             Start-Sleep -Milliseconds 500
         }
         if (-not $ready) { throw "Survival dev endpoint is unreachable: $target" }
+    }
+    if ($IncludeChain) {
+        $rpcResponse = Invoke-RestMethod `
+            -Uri "http://$HostName`:41545" `
+            -Method Post `
+            -ContentType 'application/json' `
+            -Body '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}' `
+            -TimeoutSec 3
+        if ($rpcResponse.result -ne '0x7a69') {
+            throw "Survival dev chain id mismatch: $($rpcResponse.result)"
+        }
+
+        $info = Invoke-RestMethod -Uri "http://$HostName`:41811/info" -TimeoutSec 3
+        if ($info.contracts.chainId -ne 31337 -or $info.contracts.networkName -ne 'localhost') {
+            throw 'Survival staking backend is not bound to the current localhost chain.'
+        }
+        foreach ($name in @(
+            'tokenAddress',
+            'serviceNodeRewardsAddress',
+            'serviceNodeContributionFactoryAddress',
+            'rewardRatePoolAddress'
+        )) {
+            $value = [string]$info.contracts.$name
+            if ($value -notmatch '^0x[0-9a-fA-F]{40}$') {
+                throw "Survival staking backend has an invalid $name."
+            }
+        }
     }
 }
 
@@ -138,6 +174,12 @@ function Write-ClientEnvironment([string]$HostName,[switch]$IncludeChain) {
 
 switch ($Action) {
     'Up' {
+        if ($Chain -and $Service.Count -gt 0) {
+            throw 'Up -Chain always recreates the complete chain lifecycle; do not combine it with -Service.'
+        }
+        if (-not $Chain -and @($Service | Where-Object { $ChainLifecycleServices -contains $_ }).Count -gt 0) {
+            throw 'Chain lifecycle services can only be started with -Action Up -Chain.'
+        }
         $advertisedHost = if ([string]::IsNullOrWhiteSpace($LanHost)) { '127.0.0.1' } else { $LanHost }
         Write-ClientEnvironment $advertisedHost -IncludeChain:$Chain
         $env:SURVIVAL_BIND_HOST = $advertisedHost
@@ -146,12 +188,12 @@ switch ($Action) {
         $upArguments = @($baseArguments)
         if ($Chain) { $upArguments += @('--profile', 'chain') }
         Invoke-SurvivalDocker ($upArguments + @('up', '-d', '--build', '--wait') + $Service)
-        Assert-SurvivalHostEndpoints $advertisedHost
+        Assert-SurvivalHostEndpoints $advertisedHost -IncludeChain:$Chain
         & node (Join-Path $PSScriptRoot 'survival-dev-seed.mjs') '--host' $advertisedHost
         if ($LASTEXITCODE -ne 0) { throw 'Survival relay contact seed failed.' }
         Invoke-SurvivalDocker ($baseArguments + @('restart', 'xnode-1', 'xnode-2', 'xnode-3', 'xnode-4', 'xnode-5', 'xnode-6'))
         Invoke-SurvivalDocker ($baseArguments + @('up', '-d', '--wait', 'xnode-1', 'xnode-2', 'xnode-3', 'xnode-4', 'xnode-5', 'xnode-6'))
-        Assert-SurvivalHostEndpoints $advertisedHost
+        Assert-SurvivalHostEndpoints $advertisedHost -IncludeChain:$Chain
         & node (Join-Path $PSScriptRoot 'survival-dev-verify.mjs') '--host' $advertisedHost
         if ($LASTEXITCODE -ne 0) { throw 'Survival relay contact verification failed.' }
     }
@@ -169,8 +211,8 @@ switch ($Action) {
     }
     'Restart' {
         if ($Service.Count -eq 0) { throw 'Restart requires at least one -Service.' }
-        if ($Service -contains 'contracts-devnet') {
-            throw 'Restarting contracts-devnet invalidates its in-memory chain. Use -Action Up -Chain so deployment, smoke, and staking backend are recreated in order.'
+        if (@($Service | Where-Object { $ChainLifecycleServices -contains $_ }).Count -gt 0) {
+            throw 'Chain lifecycle services cannot be restarted independently. Use -Action Up -Chain so devnet, deployment, smoke, and staking backend are recreated in order.'
         }
         Invoke-SurvivalDocker ($baseArguments + @('restart') + $Service)
     }

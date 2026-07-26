@@ -301,14 +301,20 @@ services:
       ASPNETCORE_URLS: http://0.0.0.0:8080
       Contracts__ChainId: "31337"
       Contracts__EthereumRpcUrl: http://contracts-devnet:8545
+      Contracts__DeploymentManifestPath: /run/deep-contracts/localhost.latest.json
+      Contracts__ExpectedDeploymentNetwork: localhost
       Contracts__StatePath: /state/staking.json
       Registry__BaseUrl: http://registry:8080
       Price__EthereumRpcUrl: ""
     ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41811:8080"]
-    volumes: [staking-state:/state]
+    volumes:
+      - staking-state:/state
+      - contracts-deployments:/run/deep-contracts:ro
     depends_on:
       contracts-smoke: { condition: service_completed_successfully }
-    healthcheck: { <<: *health, test: [CMD-SHELL, "test -r /proc/1/status"] }
+    healthcheck:
+      <<: *health
+      test: [CMD, bash, -c, 'exec 3<>/dev/tcp/127.0.0.1/8080; printf "GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3; read -r status <&3; case "$$status" in *" 200 "*) exit 0;; *) exit 1;; esac']
 
   storage:
     <<: *service

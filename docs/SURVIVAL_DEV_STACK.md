@@ -88,9 +88,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/survival-dev.ps1 -Ac
 The deployment manifest volume survives container removal, but the Hardhat
 chain does not. The lifecycle above deliberately regenerates the manifest on
 every `Up -Chain`, so an address from a previous node process cannot satisfy the
-backend dependency. `contracts-devnet` has no automatic restart policy: do not
-restart it directly (the launcher fails closed); rerun `-Action Up -Chain` to
-create a current deploy/smoke/backend sequence. Direct `docker compose` chain
+backend dependency. The staking backend mounts that manifest read-only, treats
+its contract addresses and staking parameters as authoritative configuration,
+and exposes `/health/ready` only after the manifest, chain ID, deployed bytecode,
+and persisted-state generation agree. Its ordinary `/health/live` remains only
+a process-liveness signal.
+
+All four chain lifecycle services (`contracts-devnet`, `contracts-deploy`,
+`contracts-smoke`, and `staking-backend`) are an indivisible generation.
+Do not pass `-Service` with `Up -Chain`, and do not restart any of those services
+independently; the launcher fails closed. Rerun `-Action Up -Chain` to create a
+current deploy/smoke/backend sequence. Direct `docker compose` chain
 restarts are unsupported because Compose cannot guarantee rerunning a completed
 one-shot service after an in-memory node restart.
 

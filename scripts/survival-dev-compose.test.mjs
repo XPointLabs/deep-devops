@@ -81,6 +81,11 @@ test('only local Hardhat and loopback host ports are configured', () => {
   assert.match(smoke, /scripts\/local-devnet-smoke\.js/);
   assert.match(staking, /contracts-smoke: \{ condition: service_completed_successfully \}/);
   assert.doesNotMatch(staking, /contracts-devnet: \{ condition: service_healthy \}/);
+  assert.match(staking, /Contracts__DeploymentManifestPath: \/run\/deep-contracts\/localhost\.latest\.json/);
+  assert.match(staking, /Contracts__ExpectedDeploymentNetwork: localhost/);
+  assert.match(staking, /contracts-deployments:\/run\/deep-contracts:ro/);
+  assert.match(staking, /GET \/health\/ready HTTP\/1\.1/);
+  assert.doesNotMatch(staking, /test -r \/proc\/1\/status/);
   assert.match(contracts, /eth_chainId/);
   assert.doesNotMatch(compose, /https?:\/\/(?!127\.0\.0\.1|0\.0\.0\.0|[a-z][a-z0-9-]*:)/i);
   const bindings = [...compose.matchAll(/"\$\{SURVIVAL_BIND_HOST:-127\.0\.0\.1\}:(\d+):(\d+)"/g)];
@@ -142,7 +147,11 @@ test('daily launcher always uses the fixed project without release-gate ceremony
   assert.match(launcher, /function Reset-SurvivalChainLifecycle/);
   assert.match(launcher, /'contracts-deploy', 'contracts-smoke', 'staking-backend'/);
   assert.match(launcher, /if \(\$Chain\) \{ Reset-SurvivalChainLifecycle \}/);
-  assert.match(launcher, /Restarting contracts-devnet invalidates its in-memory chain/);
+  assert.match(launcher, /Up -Chain always recreates the complete chain lifecycle/);
+  assert.match(launcher, /Chain lifecycle services cannot be restarted independently/);
+  assert.match(launcher, /41811\/health\/ready/);
+  assert.match(launcher, /eth_chainId/);
+  assert.match(launcher, /tokenAddress/);
   assert.doesNotMatch(launcher, /Up requires -LanHost/);
   assert.match(seed, /api\/network\/contact/);
   assert.match(seed, /relay-bootstrap/);
@@ -176,7 +185,7 @@ test('development identities remain exact strings and Up proves host HTTP reacha
   assert.doesNotMatch(serviceBlock('registry'), /test -r \/proc\/1\/status/);
   assert.doesNotMatch(launcher, /--force-recreate/);
   assert.match(launcher, /Assert-SurvivalHostEndpoints/);
-  for (const port of [41801, 41802, 41803, 41804, 41805, 41806, 41810, 41820, 41821, 41822, 41823, 41999]) {
+  for (const port of [41545, 41801, 41802, 41803, 41804, 41805, 41806, 41810, 41811, 41820, 41821, 41822, 41823, 41999]) {
     assert.match(launcher, new RegExp(String(port)));
   }
 });
