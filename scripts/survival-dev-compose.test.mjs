@@ -58,6 +58,9 @@ test('only local Hardhat and loopback host ports are configured', () => {
   assert.match(deploymentsInit, /chown -R 1000:1000 \/workspace\/deployments/);
   assert.doesNotMatch(deploymentsInit, /build:/);
   assert.match(contracts, /command: \[pnpm, exec, hardhat, node, --hostname, 0\.0\.0\.0\]/);
+  assert.match(contracts, /COPY --from=contracts_source package\.json pnpm-lock\.yaml \.\//);
+  assert.match(contracts, /pnpm install --frozen-lockfile/);
+  assert.match(contracts, /COPY --from=contracts_source \. \./);
   assert.match(contracts, /USER node/);
   assert.match(contracts, /restart: "no"/);
   assert.match(contracts, /contracts-deployments-init: \{ condition: service_completed_successfully \}/);

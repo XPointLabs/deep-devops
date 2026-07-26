@@ -160,9 +160,11 @@ services:
         ARG NODE_IMAGE
         FROM $${NODE_IMAGE}
         WORKDIR /workspace
-        COPY --from=contracts_source . .
         COPY scripts/p15c-package-json-normalizer.mjs /survival/
-        RUN node /survival/p15c-package-json-normalizer.mjs package.json && corepack enable && pnpm install --frozen-lockfile && pnpm exec hardhat compile && chown -R node:node /workspace
+        COPY --from=contracts_source package.json pnpm-lock.yaml ./
+        RUN node /survival/p15c-package-json-normalizer.mjs package.json && corepack enable && pnpm install --frozen-lockfile
+        COPY --from=contracts_source . .
+        RUN node /survival/p15c-package-json-normalizer.mjs package.json && pnpm exec hardhat compile && chown -R node:node /workspace
         USER node
     command: [pnpm, exec, hardhat, node, --hostname, 0.0.0.0]
     environment:
