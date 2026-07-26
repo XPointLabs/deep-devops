@@ -10,6 +10,8 @@ import {
 } from './survival-dev-membership-trust.mjs';
 
 const compose = readFileSync(new URL('../docker-compose.survival.dev.yml', import.meta.url), 'utf8');
+const productionCompose = readFileSync(new URL('../docker-compose.node.prod.yml', import.meta.url), 'utf8');
+const productionNodeEnvironment = readFileSync(new URL('../.env.node.prod.example', import.meta.url), 'utf8');
 const docs = readFileSync(new URL('../docs/SURVIVAL_DEV_STACK.md', import.meta.url), 'utf8');
 const launcher = readFileSync(new URL('./survival-dev.ps1', import.meta.url), 'utf8');
 const seed = readFileSync(new URL('./survival-dev-seed.mjs', import.meta.url), 'utf8');
@@ -161,6 +163,8 @@ test('membership catalog is a local-only one-shot with pinned packages and read-
   assert.match(generator, /network_mode: none/);
   assert.match(generator, /restart: "no"/);
   assert.match(generator, /membership-artifact-init: \{ condition: service_completed_successfully \}/);
+  assert.match(generator, /command: \[--advertised-host, "\$\{SURVIVAL_BIND_HOST:-127\.0\.0\.1\}"\]/);
+  assert.doesNotMatch(generator, /sh, -[ec]+|0\.0\.0\.0/);
   assert.match(compose, /SURVIVAL_MEMBERSHIP_PACKAGES_BUILD_CONTEXT/);
   assert.match(compose, /MembershipArtifact__ArtifactPath: \/run\/deep-membership\/membership-route-catalog\.json/);
   assert.match(serviceBlock('registry'), /Registry__MembershipRouteArtifactPath/);
@@ -181,6 +185,8 @@ test('membership catalog is a local-only one-shot with pinned packages and read-
   assert.match(artifactInit, /VerifiedPublishedArtifactSha256=/);
   assert.doesNotMatch(artifactInit, /exec|spawn|setuid|setgid|rmSync|rmdirSync/);
   assert.match(membershipRepeat, /foreach \(\$iteration in 1\.\.2\)/);
+  assert.match(membershipRepeat, /\[string\]\$AdvertisedHost = '127\.0\.0\.1'/);
+  assert.match(membershipRepeat, /\$env:SURVIVAL_BIND_HOST = \$AdvertisedHost/);
   assert.match(membershipRepeat, /'up', '--no-build', 'membership-fixture'/);
   assert.match(membershipRepeat, /'probe',\s+\$hash/s);
   assert.match(membershipRepeat, /Same-volume membership fixture repeat passed/);
@@ -221,12 +227,22 @@ test('membership catalog is a local-only one-shot with pinned packages and read-
       'libsodium'
     ].sort());
   assert.match(fixture, /DEV-LOCAL-ONLY/);
+  assert.match(fixture, /ParseOptions\(args\)/);
+  assert.match(fixture, /"--advertised-host"/);
+  assert.match(fixture, /octets\[0\] == 127/);
+  assert.match(fixture, /octets\[0\] == 192 && octets\[1\] == 168/);
+  assert.match(fixture, /octets\[0\] == 172 && octets\[1\] is >= 16 and <= 31/);
+  assert.match(fixture, /octets\[0\] == 169 && octets\[1\] == 254/);
+  assert.match(fixture, /RpcEndpoint = \$"http:\/\/\{advertisedHost\}:\{41801 \+ index\}\//);
+  assert.match(fixture, /Enumerable\.Range\(41801, 6\)/);
+  assert.match(fixture, /seenEndpoints\.SetEquals\(requiredEndpoints\)/);
+  assert.doesNotMatch(fixture, /xnode-\{index \+ 1\}|:8080|0\.0\.0\.0/);
   assert.match(fixture, /File\.SetUnixFileMode\(/);
   assert.match(fixture, /UnixFileMode\.UserRead \| UnixFileMode\.UserWrite \| UnixFileMode\.UserExecute/);
   assert.match(fixture, /PublicKeyAuth\.GenerateKeyPair\(seed\)/);
   assert.match(fixture, /PublicKeyAuth\.SignDetached\(framed, signer\.PrivateKey\)/);
   assert.match(fixture, /PublicKeyAuth\.VerifyDetached\(signature\.ToArray\(\), signingBytes\.ToArray\(\), publicKey\.ToArray\(\)\)/);
-  assert.match(fixture, /VerifyPublishedArtifact\(target, genesis, genesisLkg, delegation, context, verifier\)/);
+  assert.match(fixture, /VerifyPublishedArtifact\(target, genesis, genesisLkg, delegation, context, verifier, descriptors, advertisedHost\)/);
   assert.match(fixture, /trustBootstrap = new/);
   assert.match(fixture, /expectedCanonicalGenesisSha256/);
   assert.match(fixture, /signedDelegation = Convert\.ToBase64String\(canonicalDelegation\)/);
@@ -249,6 +265,10 @@ test('membership catalog is a local-only one-shot with pinned packages and read-
   assert.match(verify, /MRL1/);
   assert.match(docs, /DEV-LOCAL-ONLY/);
   assert.match(docs, /TOFU, remote trust-root fallback, and production activation.*prohibited/is);
+  assert.match(docs, /Docker-only\s+hostnames and container port `8080` are never signed/is);
+  assert.match(productionNodeEnvironment, /^DEEP_REGISTRY_URL=https:\/\/registry\.deep\.example$/m);
+  assert.match(productionNodeEnvironment, /^DEEP_STAKING_BACKEND_URL=https:\/\/staking-api\.deep\.example$/m);
+  assert.doesNotMatch(productionCompose, /SURVIVAL_BIND_HOST|membership-fixture|DEV-LOCAL-ONLY/);
   assert.match(launcher, /Assert-SurvivalMembershipFixtureVerified/);
   assert.match(launcher, /Get-SurvivalVerifiedMembershipPin/);
   assert.match(launcher, /survival-dev-membership-trust\.mjs/);

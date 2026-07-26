@@ -51,7 +51,12 @@ the isolated `membership-route-artifact` volume, then exits. The public artifact
 is a full sorted six-leaf MRL1 catalog for the exact development XNode IDs and
 their `ingress|core|storage` roles, with proofs, a 3-of-5 offline-root delegation,
 and a 2-of-3 online MSM1 membership statement. Its sorted halves provide two
-disjoint three-hop development routes. The XNodes and Registry mount it
+disjoint three-hop development routes. Each descriptor signs the exact selected
+client IPv4 address with host ports `41801` through `41806`; Docker-only
+hostnames and container port `8080` are never signed. The host must be canonical
+loopback, RFC1918, or IPv4 link-local; hostname, wildcard, and public IPv4 input
+fails closed. Because the advertised host and bounded issuance time are signed,
+the whole-artifact SHA-256 pin changes when either changes. The XNodes and Registry mount it
 read-only and publish it at `/api/network/membership-route-catalog`; the client
 handoff includes `DEEP_MEMBERSHIP_ROUTE_CATALOG_URL`.
 
@@ -96,7 +101,7 @@ twice without deleting the named volume, and verifies both container exit state
 and the exact published bytes, owner, and modes:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/survival-dev-membership-fixture-repeat.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/survival-dev-membership-fixture-repeat.ps1 -AdvertisedHost 127.0.0.1
 ```
 
 Regular builds reuse BuildKit and package layers. Rebuild only edited services

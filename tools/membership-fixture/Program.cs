@@ -6,8 +6,18 @@ using Deep.Protocol.DeepExtension.MembershipRoutes;
 using Sodium;
 
 const string outputName = "membership-route-catalog.json";
-var outputDirectory = args.Length == 2 && args[0] == "--output" ? args[1] : "/out";
-if (args.Length is not (0 or 2)) throw new ArgumentException("Usage: MembershipFixture [--output DIRECTORY]");
+FixtureOptions options;
+try
+{
+    options = ParseOptions(args);
+}
+catch (ArgumentException exception)
+{
+    Console.Error.WriteLine(exception.Message);
+    return 2;
+}
+var outputDirectory = options.OutputDirectory;
+var advertisedHost = options.AdvertisedHost;
 Directory.CreateDirectory(outputDirectory);
 if (!OperatingSystem.IsWindows())
 {
@@ -54,7 +64,7 @@ var routerIds = new[] {
 var descriptors = routerIds.Select((id, index) => new MembershipRouteDescriptor {
     RouterId = Convert.FromHexString(id), Ed25519PublicKey = Convert.FromHexString(id),
     X25519PublicKey = SHA256.HashData(ByteUtil.Combine("x25519-local-only"u8, Convert.FromHexString(id))),
-    RpcEndpoint = $"http://xnode-{index + 1}:8080/", Roles = MembershipRouteRole.Ingress | MembershipRouteRole.Core | MembershipRouteRole.Storage,
+    RpcEndpoint = $"http://{advertisedHost}:{41801 + index}/", Roles = MembershipRouteRole.Ingress | MembershipRouteRole.Core | MembershipRouteRole.Storage,
     Capabilities = MembershipRouteCapability.SessionRpc | MembershipRouteCapability.OnionV1 | MembershipRouteCapability.Storage,
     Epoch = 3, ValidFromUnixSeconds = validFrom, ValidUntilUnixSeconds = validUntil
 }).OrderBy(x => Convert.ToHexStringLower(x.RouterId.Span), StringComparer.Ordinal).ToArray();
@@ -112,7 +122,7 @@ var target = Path.Combine(outputDirectory, outputName);
 var temporary = Path.Combine(outputDirectory, $".{outputName}.{Guid.NewGuid():N}.tmp");
 File.WriteAllBytes(temporary, artifact);
 File.Move(temporary, target, true); // same-volume replace is the publication boundary.
-VerifyPublishedArtifact(target, genesis, genesisLkg, delegation, context, verifier);
+VerifyPublishedArtifact(target, genesis, genesisLkg, delegation, context, verifier, descriptors, advertisedHost);
 var publishedArtifactSha256 = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(target)));
 foreach (var signer in roots.Concat(online))
     CryptographicOperations.ZeroMemory(signer.PrivateKey);
@@ -120,6 +130,7 @@ foreach (var seed in localOnlyDevSeeds)
     CryptographicOperations.ZeroMemory(seed);
 Console.WriteLine($"PublishedArtifactSha256={publishedArtifactSha256}");
 Console.WriteLine("Generated and Sodium-verified one DEV-LOCAL-ONLY 3-of-5 / 2-of-3 membership route catalog (no private material published).");
+return 0;
 
 static DevSigner Signer(MembershipSignerRole role, byte[] seed)
 {
@@ -156,7 +167,9 @@ static void VerifyPublishedArtifact(
     MembershipLastKnownGood genesisLkg,
     SignerDelegation delegation,
     MembershipVerificationContext context,
-    IMembershipSignatureVerifier verifier)
+    IMembershipSignatureVerifier verifier,
+    IReadOnlyList<MembershipRouteDescriptor> expectedDescriptors,
+    string advertisedHost)
 {
     // This is deliberately a read-after-publication integration check.  It
     // validates the exact bytes mounted by the consumers, rather than merely
@@ -258,6 +271,11 @@ static void VerifyPublishedArtifact(
     if (members.GetArrayLength() != 6)
         throw new InvalidOperationException("Published route catalog does not contain six members.");
     var seenRouterIds = new HashSet<string>(StringComparer.Ordinal);
+    var seenEndpoints = new HashSet<string>(StringComparer.Ordinal);
+    var expectedEndpoints = expectedDescriptors.ToDictionary(
+        descriptor => Convert.ToHexString(descriptor.RouterId.Span),
+        descriptor => descriptor.RpcEndpoint,
+        StringComparer.Ordinal);
     foreach (var member in members.EnumerateArray())
     {
         var descriptor = MembershipRouteDescriptorCodec.Decode(Convert.FromBase64String(
@@ -271,13 +289,82 @@ static void VerifyPublishedArtifact(
                     ?? throw new InvalidOperationException("Route proof sibling is missing.")))
                 .ToArray()
         };
-        if (!seenRouterIds.Add(Convert.ToHexString(descriptor.RouterId.Span)) ||
+        var routerId = Convert.ToHexString(descriptor.RouterId.Span);
+        if (!seenRouterIds.Add(routerId) ||
+            !expectedEndpoints.TryGetValue(routerId, out var expectedEndpoint) ||
+            !string.Equals(descriptor.RpcEndpoint, expectedEndpoint, StringComparison.Ordinal) ||
+            !seenEndpoints.Add(descriptor.RpcEndpoint) ||
             !MembershipRouteDescriptorCodec.VerifyInclusion(descriptor, proof, signed.Statement.MerkleRoot.Span))
             throw new InvalidOperationException("Published MRL1 proof verification failed.");
     }
+    var requiredEndpoints = Enumerable.Range(41801, 6)
+        .Select(port => $"http://{advertisedHost}:{port}/")
+        .ToHashSet(StringComparer.Ordinal);
+    if (!seenEndpoints.SetEquals(requiredEndpoints))
+        throw new InvalidOperationException("Published MRL1 endpoints do not match the exact advertised development ports.");
 }
 
+static FixtureOptions ParseOptions(string[] arguments)
+{
+    string? advertisedHost = null;
+    var outputDirectory = "/out";
+    var seen = new HashSet<string>(StringComparer.Ordinal);
+    if (arguments.Length == 0 || arguments.Length % 2 != 0)
+        throw Usage();
+    for (var index = 0; index < arguments.Length; index += 2)
+    {
+        var name = arguments[index];
+        var value = arguments[index + 1];
+        if (!seen.Add(name) || string.IsNullOrWhiteSpace(value))
+            throw Usage();
+        switch (name)
+        {
+            case "--advertised-host":
+                advertisedHost = CanonicalDevLocalIpv4(value);
+                break;
+            case "--output":
+                outputDirectory = value;
+                break;
+            default:
+                throw Usage();
+        }
+    }
+    if (advertisedHost is null)
+        throw Usage();
+    return new FixtureOptions(outputDirectory, advertisedHost);
+}
+
+static string CanonicalDevLocalIpv4(string value)
+{
+    var parts = value.Split('.', StringSplitOptions.None);
+    if (parts.Length != 4)
+        throw new ArgumentException("Advertised host must be a canonical DEV-LOCAL-ONLY IPv4 address.");
+    var octets = new byte[4];
+    for (var index = 0; index < parts.Length; index++)
+    {
+        var part = parts[index];
+        if (part.Length is < 1 or > 3 ||
+            part.Any(character => character is < '0' or > '9') ||
+            !byte.TryParse(part, out octets[index]) ||
+            !string.Equals(octets[index].ToString(), part, StringComparison.Ordinal))
+            throw new ArgumentException("Advertised host must be a canonical DEV-LOCAL-ONLY IPv4 address.");
+    }
+    var allowed =
+        octets[0] == 10 ||
+        octets[0] == 127 ||
+        octets[0] == 169 && octets[1] == 254 ||
+        octets[0] == 172 && octets[1] is >= 16 and <= 31 ||
+        octets[0] == 192 && octets[1] == 168;
+    if (!allowed)
+        throw new ArgumentException("Advertised host must be loopback, RFC1918, or IPv4 link-local.");
+    return string.Join('.', octets);
+}
+
+static ArgumentException Usage() =>
+    new("Usage: MembershipFixture --advertised-host IPv4 [--output DIRECTORY]");
+
 sealed record DevSigner(MembershipSignerDescriptor Descriptor, byte[] PrivateKey);
+sealed record FixtureOptions(string OutputDirectory, string AdvertisedHost);
 
 static class ByteUtil {
     public static byte[] Combine(ReadOnlySpan<byte> left, ReadOnlySpan<byte> right) { var result = new byte[left.Length + right.Length]; left.CopyTo(result); right.CopyTo(result.AsSpan(left.Length)); return result; }

@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-    [switch]$Build
+    [switch]$Build,
+    [string]$AdvertisedHost = '127.0.0.1'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -9,6 +10,7 @@ Set-StrictMode -Version Latest
 $Root = [IO.Path]::GetFullPath((Split-Path $PSScriptRoot -Parent))
 $ComposePath = Join-Path $Root 'docker-compose.survival.dev.yml'
 $baseArguments = @('compose', '-p', 'deep-survival-dev', '-f', $ComposePath)
+$env:SURVIVAL_BIND_HOST = $AdvertisedHost
 $services = @(
     'membership-artifact-owner-init',
     'membership-artifact-init',

@@ -143,6 +143,7 @@ services:
     volumes: [membership-route-artifact:/out]
     depends_on:
       membership-artifact-init: { condition: service_completed_successfully }
+    command: [--advertised-host, "${SURVIVAL_BIND_HOST:-127.0.0.1}"]
 
   contracts-deployments-init:
     profiles: [chain]
