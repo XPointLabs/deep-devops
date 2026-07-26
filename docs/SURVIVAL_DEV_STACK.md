@@ -83,6 +83,14 @@ working chain environment until the next iteration completes that automation:
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/survival-dev.ps1 -Action Up -Chain
 ```
 
+The chain profile includes a one-shot `contracts-deployments-init` container.
+It runs as root only long enough to recursively set ownership of the isolated
+`contracts-deployments` volume to the standard Node UID/GID `1000:1000`, then
+exits successfully. `contracts-devnet` waits for that completion and continues
+to run as the unprivileged `node` user. The initializer has no network, no
+build context, `cap_drop: ALL`, and only `CHOWN` added for that exact volume
+path. It is local development plumbing, not a release deployment mechanism.
+
 Status and logs:
 
 ```powershell

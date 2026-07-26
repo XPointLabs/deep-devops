@@ -16,13 +16,13 @@ function serviceBlock(name) {
   return match[1];
 }
 
-test('daily stack has a fixed isolated project and exact persistent service set', () => {
+test('daily stack has a fixed isolated project, persistent services, and one chain volume initializer', () => {
   assert.match(compose, /^name: deep-survival-dev$/m);
   assert.doesNotMatch(compose, /P15C_|ownership-nonce|evidence|\buat\b|sepolia/i);
   const servicesSection = compose.match(/^services:\r?\n([\s\S]*?)(?=^networks:)/m)?.[1] ?? '';
   const services = [...servicesSection.matchAll(/^  ([a-z][a-z0-9-]*):$/gm)].map(match => match[1]).sort();
   assert.deepEqual(services, [
-    'calls', 'contracts-devnet', 'file', 'push', 'registry', 'relay-bootstrap', 'staking-backend',
+    'calls', 'contracts-deployments-init', 'contracts-devnet', 'file', 'push', 'registry', 'relay-bootstrap', 'staking-backend',
     'storage', 'xnode-1', 'xnode-2', 'xnode-3', 'xnode-4', 'xnode-5', 'xnode-6'
   ]);
   assert.match(compose, /^networks:\r?\n  runtime:\r?\n    driver: bridge$/m);
@@ -41,8 +41,21 @@ test('shared images have one incremental build producer and persistent consumers
 });
 
 test('only local Hardhat and loopback host ports are configured', () => {
+  const deploymentsInit = serviceBlock('contracts-deployments-init');
   const contracts = serviceBlock('contracts-devnet');
+  assert.match(deploymentsInit, /profiles: \[chain\]/);
+  assert.match(deploymentsInit, /user: "0:0"/);
+  assert.match(deploymentsInit, /restart: "no"/);
+  assert.match(deploymentsInit, /cap_drop: \[ALL\]/);
+  assert.match(deploymentsInit, /cap_add: \[CHOWN\]/);
+  assert.match(deploymentsInit, /no-new-privileges:true/);
+  assert.match(deploymentsInit, /network_mode: none/);
+  assert.match(deploymentsInit, /contracts-deployments:\/workspace\/deployments/);
+  assert.match(deploymentsInit, /chown -R 1000:1000 \/workspace\/deployments/);
+  assert.doesNotMatch(deploymentsInit, /build:/);
   assert.match(contracts, /command: \[pnpm, exec, hardhat, node, --hostname, 0\.0\.0\.0\]/);
+  assert.match(contracts, /USER node/);
+  assert.match(contracts, /contracts-deployments-init: \{ condition: service_completed_successfully \}/);
   assert.match(contracts, /eth_chainId/);
   assert.doesNotMatch(compose, /https?:\/\/(?!127\.0\.0\.1|0\.0\.0\.0|[a-z][a-z0-9-]*:)/i);
   const bindings = [...compose.matchAll(/"\$\{SURVIVAL_BIND_HOST:-127\.0\.0\.1\}:(\d+):(\d+)"/g)];
@@ -75,6 +88,7 @@ test('every stateful service uses a named volume and operator commands are docum
   assert.match(docs, /formal P15C release gate/i);
   assert.match(docs, /raw `docker compose .*up.*` is not supported/i);
   assert.match(docs, /chain.*unsupported|unsupported.*chain/i);
+  assert.match(docs, /contracts-deployments-init/);
   assert.doesNotMatch(docs, /вЂ|Ã|â|�/);
   assert.doesNotMatch(docs, /--no-cache/);
 });

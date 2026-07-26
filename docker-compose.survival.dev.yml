@@ -80,6 +80,22 @@ x-compat-build: &compat-build
     USER node
 
 services:
+  contracts-deployments-init:
+    profiles: [chain]
+    image: ${SURVIVAL_NODE_IMAGE:-node@sha256:242549cd46785b480c832479a730f4f2a20865d61ea2e404fdb2a5c3d3b73ecf}
+    user: "0:0"
+    restart: "no"
+    cap_drop: [ALL]
+    cap_add: [CHOWN]
+    security_opt: [no-new-privileges:true]
+    network_mode: none
+    volumes:
+      - contracts-deployments:/workspace/deployments
+    command:
+      - sh
+      - -ec
+      - chown -R 1000:1000 /workspace/deployments
+
   contracts-devnet:
     <<: *service
     profiles: [chain]
@@ -107,6 +123,8 @@ services:
     ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41545:8545"]
     volumes:
       - contracts-deployments:/workspace/deployments
+    depends_on:
+      contracts-deployments-init: { condition: service_completed_successfully }
     healthcheck:
       <<: *health
       test: [CMD, node, --eval, "fetch('http://127.0.0.1:8545',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'eth_chainId',params:[]})}).then(r=>r.json()).then(v=>process.exit(v.result==='0x7a69'?0:1)).catch(()=>process.exit(1))"]
