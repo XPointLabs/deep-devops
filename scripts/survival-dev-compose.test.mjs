@@ -151,6 +151,11 @@ test('membership catalog is a local-only one-shot with pinned packages and read-
   assert.match(launcher, /8EF4E70AD0B6C1CC0087F25C0313D6AB6A5387D16246679E4C10A3C00898A442/);
   assert.match(launcher, /FE7B5E638C1AB5E7505F45BB7D5804048D2A4AD273C88DD75D7D46AE80DB641A/);
   assert.match(fixture, /DEV-LOCAL-ONLY/);
+  assert.match(fixture, /PublicKeyAuth\.GenerateKeyPair\(seed\)/);
+  assert.match(fixture, /PublicKeyAuth\.SignDetached\(framed, signer\.PrivateKey\)/);
+  assert.match(fixture, /PublicKeyAuth\.VerifyDetached\(signature\.ToArray\(\), signingBytes\.ToArray\(\), publicKey\.ToArray\(\)\)/);
+  assert.match(fixture, /VerifyPublishedArtifact\(target, genesis, genesisLkg, delegation, context, verifier\)/);
+  assert.doesNotMatch(fixture, /LocalOnlyDeterministicVerifier|SignFramed/);
   assert.match(fixture, /MembershipPolicy\.Beta/);
   assert.match(fixture, /roots\.Take\(3\)/);
   assert.match(fixture, /online\.Take\(2\)/);

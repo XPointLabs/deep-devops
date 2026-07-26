@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Deep.Protocol.DeepExtension.Membership;
 using Deep.Protocol.DeepExtension.MembershipRoutes;
+using Sodium;
 
 const string outputName = "membership-route-catalog.json";
 var outputDirectory = args.Length == 2 && args[0] == "--output" ? args[1] : "/out";
@@ -12,7 +13,11 @@ Directory.CreateDirectory(outputDirectory);
 // DEV-LOCAL-ONLY. These deterministic seeds never leave this one-shot container:
 // they are not mounted into XNode, Registry, clients, volumes, logs, or the artifact.
 var localOnlyDevSeeds = Enumerable.Range(1, 8).Select(index => SHA256.HashData(Encoding.UTF8.GetBytes($"deep-survival-local-only-{index}"))).ToArray();
-var verifier = new LocalOnlyDeterministicVerifier();
+// This verifier deliberately has the same framing, length checks, and native
+// Ed25519 primitive as SodiumEd25519MembershipSignatureVerifier.  Keeping the
+// signing capability in this one-shot, network-isolated DEV fixture is what
+// lets the generated catalog exercise the real client verification contract.
+var verifier = new SodiumCompatibleEd25519Verifier();
 var now = checked((ulong)DateTimeOffset.UtcNow.ToUnixTimeSeconds());
 var validFrom = now - 300;
 var validUntil = now + 30UL * 24 * 60 * 60; // regenerated on every supported dev Up; bounded for persistent work.
@@ -22,17 +27,17 @@ var roots = Enumerable.Range(0, 5).Select(index => Signer(MembershipSignerRole.O
 var online = Enumerable.Range(5, 3).Select(index => Signer(MembershipSignerRole.Online, localOnlyDevSeeds[index])).OrderBy(Id).ToArray();
 var genesis = new NetworkGenesis {
     NetworkId = networkId, GenesisSequence = 1, PolicyVersion = 1, MinimumProtocol = 1, MaximumProtocol = 1,
-    IssuedAtUnixSeconds = now, Policy = MembershipPolicy.Beta(roots.Select(x => x.SignerId).ToArray()), OfflineRoots = roots
+    IssuedAtUnixSeconds = now, Policy = MembershipPolicy.Beta(roots.Select(x => x.Descriptor.SignerId).ToArray()), OfflineRoots = roots.Select(x => x.Descriptor).ToArray()
 };
 var genesisBytes = MembershipContractCodec.EncodeGenesis(genesis);
 var genesisLkg = new MembershipLastKnownGood { NetworkId = networkId, PolicyVersion = 1, Sequence = 1, CanonicalHash = MembershipContractHash.Sha256(genesisBytes) };
 var unsignedDelegation = new SignerDelegation {
     NetworkId = networkId, Sequence = 2, PreviousHash = genesisLkg.CanonicalHash, IssuedAtUnixSeconds = validFrom,
     ValidFromUnixSeconds = validFrom, ValidUntilUnixSeconds = validUntil, MinimumProtocol = 1, MaximumProtocol = 1,
-    PolicyVersion = 1, OnlineSigners = online, Signatures = []
+    PolicyVersion = 1, OnlineSigners = online.Select(x => x.Descriptor).ToArray(), Signatures = []
 };
 var delegationBytes = MembershipContractCodec.GetDelegationSigningBytes(unsignedDelegation);
-var delegation = unsignedDelegation with { Signatures = roots.Take(3).Select(root => Signature(root, MembershipSignatureDomain.OfflineDelegation, delegationBytes, verifier)).ToArray() };
+var delegation = unsignedDelegation with { Signatures = roots.Take(3).Select(root => Signature(root, MembershipSignatureDomain.OfflineDelegation, delegationBytes)).ToArray() };
 var verifiedDelegation = MembershipContractVerifier.VerifyDelegation(delegation, genesis, genesisLkg, now, 900, 1, verifier);
 
 var routerIds = new[] {
@@ -61,7 +66,7 @@ var statement = new NodeMembershipCommitment {
     MemberCount = 6, MerkleRoot = MembershipRouteDescriptorCodec.ComputeRoot(descriptors)
 };
 var membershipBytes = MembershipContractCodec.GetMembershipSigningBytes(statement);
-var signedMembership = new SignedMembershipCommitment { Statement = statement, Signatures = online.Take(2).Select(signer => Signature(signer, MembershipSignatureDomain.Membership, membershipBytes, verifier)).ToArray() };
+var signedMembership = new SignedMembershipCommitment { Statement = statement, Signatures = online.Take(2).Select(signer => Signature(signer, MembershipSignatureDomain.Membership, membershipBytes)).ToArray() };
 var context = new MembershipVerificationContext {
     Genesis = genesis, ActiveDelegation = delegation, AuthorityLastKnownGood = verifiedDelegation.NextAuthorityLastKnownGood,
     RevokedDelegationHashes = [], LastKnownGood = new MembershipLastKnownGood { NetworkId = networkId, PolicyVersion = 1, Sequence = 2, CanonicalHash = verifiedDelegation.CanonicalHash },
@@ -80,18 +85,139 @@ var target = Path.Combine(outputDirectory, outputName);
 var temporary = Path.Combine(outputDirectory, $".{outputName}.{Guid.NewGuid():N}.tmp");
 File.WriteAllBytes(temporary, artifact);
 File.Move(temporary, target, true); // same-volume replace is the publication boundary.
-Console.WriteLine("Generated and locally verified one DEV-LOCAL-ONLY 3-of-5 / 2-of-3 membership route catalog (no private material published).");
+VerifyPublishedArtifact(target, genesis, genesisLkg, delegation, context, verifier);
+foreach (var signer in roots.Concat(online))
+    CryptographicOperations.ZeroMemory(signer.PrivateKey);
+foreach (var seed in localOnlyDevSeeds)
+    CryptographicOperations.ZeroMemory(seed);
+Console.WriteLine("Generated and Sodium-verified one DEV-LOCAL-ONLY 3-of-5 / 2-of-3 membership route catalog (no private material published).");
 
-static MembershipSignerDescriptor Signer(MembershipSignerRole role, byte[] seed) => new() { SignerId = SHA256.HashData(ByteUtil.Combine("id"u8, seed))[..MembershipLimits.SignerIdLength], Role = role, PublicKey = SHA256.HashData(ByteUtil.Combine("public"u8, seed)) };
-static string Id(MembershipSignerDescriptor signer) => Convert.ToHexStringLower(signer.SignerId.Span);
-static MembershipSignature Signature(MembershipSignerDescriptor signer, MembershipSignatureDomain domain, byte[] bytes, LocalOnlyDeterministicVerifier verifier) => new() { SignerId = signer.SignerId.ToArray(), Domain = domain, Signature = verifier.Sign(signer.SignerId.Span, signer.PublicKey.Span, domain, bytes) };
+static DevSigner Signer(MembershipSignerRole role, byte[] seed)
+{
+    var pair = PublicKeyAuth.GenerateKeyPair(seed);
+    return new DevSigner(
+        new MembershipSignerDescriptor
+        {
+            SignerId = SHA256.HashData(ByteUtil.Combine("id"u8, pair.PublicKey))[..MembershipLimits.SignerIdLength],
+            Role = role,
+            PublicKey = pair.PublicKey
+        },
+        pair.PrivateKey);
+}
+
+static string Id(DevSigner signer) => Convert.ToHexStringLower(signer.Descriptor.SignerId.Span);
+
+static MembershipSignature Signature(DevSigner signer, MembershipSignatureDomain domain, ReadOnlySpan<byte> canonicalStatement)
+{
+    var framed = MembershipSigningDomains.Frame(domain, canonicalStatement);
+    var signature = PublicKeyAuth.SignDetached(framed, signer.PrivateKey);
+    if (signature.Length != 64)
+        throw new InvalidOperationException("libsodium did not produce an Ed25519 detached signature.");
+    return new MembershipSignature
+    {
+        SignerId = signer.Descriptor.SignerId.ToArray(),
+        Domain = domain,
+        Signature = signature
+    };
+}
+
+static void VerifyPublishedArtifact(
+    string target,
+    NetworkGenesis genesis,
+    MembershipLastKnownGood genesisLkg,
+    SignerDelegation delegation,
+    MembershipVerificationContext context,
+    IMembershipSignatureVerifier verifier)
+{
+    // This is deliberately a read-after-publication integration check.  It
+    // validates the exact bytes mounted by the consumers, rather than merely
+    // the pre-serialization objects used by the generator.
+    using var document = JsonDocument.Parse(File.ReadAllBytes(target));
+    var root = document.RootElement;
+    if (root.GetProperty("version").GetString() != "deep-membership-route-catalog-v1")
+        throw new InvalidOperationException("Published membership artifact version is invalid.");
+
+    var signedBytes = Convert.FromBase64String(root.GetProperty("signedMembership").GetString()
+        ?? throw new InvalidOperationException("Published membership statement is missing."));
+    var signed = MembershipContractCodec.DecodeSignedMembership(signedBytes);
+    if (!MembershipContractCodec.EncodeSignedMembership(signed).AsSpan().SequenceEqual(signedBytes) ||
+        signed.Signatures.Count != 2 || signed.Signatures.Any(signature => signature.Signature.Length != 64))
+        throw new InvalidOperationException("Published membership statement is not canonical 2-of-3 Ed25519.");
+
+    var canonicalDelegation = MembershipContractCodec.EncodeSignedDelegation(delegation);
+    var decodedDelegation = MembershipContractCodec.DecodeSignedDelegation(canonicalDelegation);
+    if (!MembershipContractCodec.EncodeSignedDelegation(decodedDelegation).AsSpan().SequenceEqual(canonicalDelegation) ||
+        decodedDelegation.Signatures.Count != 3 || decodedDelegation.Signatures.Any(signature => signature.Signature.Length != 64))
+        throw new InvalidOperationException("Development delegation is not canonical 3-of-5 Ed25519.");
+    var verifiedDelegation = MembershipContractVerifier.VerifyDelegation(
+        decodedDelegation, genesis, genesisLkg, context.VerificationTimeUnixSeconds,
+        context.AllowedClockSkewSeconds, context.ClientProtocol, verifier);
+    if (verifiedDelegation.NextAuthorityLastKnownGood.Sequence != 2 ||
+        !verifiedDelegation.NextAuthorityLastKnownGood.CanonicalHash.Span.SequenceEqual(verifiedDelegation.CanonicalHash.Span))
+        throw new InvalidOperationException("Development delegation LKG chain is invalid.");
+
+    var verifiedMembership = MembershipContractVerifier.VerifyMembership(
+        signed,
+        context with
+        {
+            ActiveDelegation = decodedDelegation,
+            AuthorityLastKnownGood = verifiedDelegation.NextAuthorityLastKnownGood,
+            LastKnownGood = new MembershipLastKnownGood
+            {
+                NetworkId = genesis.NetworkId.ToArray(), PolicyVersion = genesis.PolicyVersion,
+                Sequence = 2, CanonicalHash = verifiedDelegation.CanonicalHash
+            }
+        },
+        verifier);
+    if (verifiedMembership.NextLastKnownGood.Sequence != 3 ||
+        !verifiedMembership.NextLastKnownGood.CanonicalHash.Span.SequenceEqual(verifiedMembership.CanonicalHash.Span))
+        throw new InvalidOperationException("Published membership LKG chain is invalid.");
+
+    var members = root.GetProperty("members");
+    if (members.GetArrayLength() != 6)
+        throw new InvalidOperationException("Published route catalog does not contain six members.");
+    var seenRouterIds = new HashSet<string>(StringComparer.Ordinal);
+    foreach (var member in members.EnumerateArray())
+    {
+        var descriptor = MembershipRouteDescriptorCodec.Decode(Convert.FromBase64String(
+            member.GetProperty("leaf").GetString() ?? throw new InvalidOperationException("Route leaf is missing.")));
+        var proof = new MembershipRouteInclusionProof
+        {
+            LeafIndex = member.GetProperty("leafIndex").GetUInt32(),
+            MemberCount = member.GetProperty("memberCount").GetUInt32(),
+            SiblingHashes = member.GetProperty("siblingHashes").EnumerateArray()
+                .Select(value => (ReadOnlyMemory<byte>)Convert.FromBase64String(value.GetString()
+                    ?? throw new InvalidOperationException("Route proof sibling is missing.")))
+                .ToArray()
+        };
+        if (!seenRouterIds.Add(Convert.ToHexString(descriptor.RouterId.Span)) ||
+            !MembershipRouteDescriptorCodec.VerifyInclusion(descriptor, proof, signed.Statement.MerkleRoot.Span))
+            throw new InvalidOperationException("Published MRL1 proof verification failed.");
+    }
+}
+
+sealed record DevSigner(MembershipSignerDescriptor Descriptor, byte[] PrivateKey);
 
 static class ByteUtil {
     public static byte[] Combine(ReadOnlySpan<byte> left, ReadOnlySpan<byte> right) { var result = new byte[left.Length + right.Length]; left.CopyTo(result); right.CopyTo(result.AsSpan(left.Length)); return result; }
 }
 
-sealed class LocalOnlyDeterministicVerifier : IMembershipSignatureVerifier {
-    public bool Verify(ReadOnlySpan<byte> signerId, ReadOnlySpan<byte> publicKey, MembershipSignatureDomain domain, ReadOnlySpan<byte> signingBytes, ReadOnlySpan<byte> signature) => signature.SequenceEqual(SignFramed(signerId, publicKey, signingBytes));
-    public byte[] Sign(ReadOnlySpan<byte> signerId, ReadOnlySpan<byte> publicKey, MembershipSignatureDomain domain, ReadOnlySpan<byte> canonicalStatement) => SignFramed(signerId, publicKey, MembershipSigningDomains.Frame(domain, canonicalStatement));
-    private static byte[] SignFramed(ReadOnlySpan<byte> signerId, ReadOnlySpan<byte> publicKey, ReadOnlySpan<byte> bytes) => SHA256.HashData(ByteUtil.Combine(ByteUtil.Combine(signerId, publicKey), bytes));
+sealed class SodiumCompatibleEd25519Verifier : IMembershipSignatureVerifier {
+    public bool Verify(ReadOnlySpan<byte> signerId, ReadOnlySpan<byte> publicKey, MembershipSignatureDomain domain, ReadOnlySpan<byte> signingBytes, ReadOnlySpan<byte> signature)
+    {
+        if (signerId.Length != MembershipLimits.SignerIdLength || publicKey.Length != 32 ||
+            signature.Length != 64 || signingBytes.Length < MembershipSigningDomains.FixedTagLength)
+            return false;
+        try
+        {
+            if (!signingBytes[..MembershipSigningDomains.FixedTagLength]
+                    .SequenceEqual(MembershipSigningDomains.GetFixedTag(domain).Span))
+                return false;
+            return PublicKeyAuth.VerifyDetached(signature.ToArray(), signingBytes.ToArray(), publicKey.ToArray());
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            return false;
+        }
+    }
 }
