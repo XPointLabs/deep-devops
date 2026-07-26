@@ -47,8 +47,13 @@ test('Hardhat boots with an immutable rootfs, bounded cache, and no runtime netw
 test('deploy and smoke complete in an isolated network-none namespace with immutable rootfs', () => {
   const nonce = `${process.pid}-${Date.now()}`;
   const devnetName = `deep-survival-readonly-${nonce}`;
+  const initName = `${devnetName}-init`;
+  const deployName = `${devnetName}-deploy`;
+  const smokeName = `${devnetName}-smoke`;
   const deploymentVolume = `${devnetName}-deployments`;
-  const containment = [
+  const resourceLabel = `com.xpoint.survival.readonly-test=${nonce}`;
+  const ephemeralContainerNames = [initName, deployName, smokeName, devnetName];
+  const readOnlyRuntimeArgs = [
     '--read-only',
     '--tmpfs', '/tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777',
     '--tmpfs', '/workspace/cache:rw,noexec,nosuid,nodev,size=64m,mode=1777',
@@ -57,16 +62,18 @@ test('deploy and smoke complete in an isolated network-none namespace with immut
   ];
 
   try {
-    assertSucceeded(docker(['volume', 'create', deploymentVolume]), 'create isolated deployment volume');
+    assertSucceeded(docker(['volume', 'create', '--label', resourceLabel, deploymentVolume]), 'create isolated deployment volume');
     assertSucceeded(docker([
-      'run', '--rm', '--network', 'none', '--read-only', '--user', '0:0',
+      'run', '--rm', '--name', initName, '--label', resourceLabel,
+      '--network', 'none', '--read-only', '--user', '0:0',
       '--cap-drop', 'ALL', '--cap-add', 'CHOWN', '--entrypoint', 'sh',
       '--mount', `type=volume,src=${deploymentVolume},dst=/workspace/deployments`,
       image, '-ec', 'chown -R 1000:1000 /workspace/deployments'
     ]), 'initialize isolated deployment volume');
 
     const start = docker([
-      'run', '-d', '--name', devnetName, '--network', 'none', ...containment,
+      'run', '-d', '--name', devnetName, '--label', resourceLabel,
+      '--network', 'none', ...readOnlyRuntimeArgs,
       '--mount', `type=volume,src=${deploymentVolume},dst=/workspace/deployments`,
       image, 'pnpm', 'exec', 'hardhat', 'node', '--hostname', '127.0.0.1'
     ]);
@@ -87,7 +94,8 @@ test('deploy and smoke complete in an isolated network-none namespace with immut
     assert.equal(ready, true, 'isolated Hardhat devnet did not become ready');
 
     const deployOutput = assertSucceeded(docker([
-      'run', '--rm', '--network', `container:${devnetName}`, ...containment,
+      'run', '--rm', '--name', deployName, '--label', resourceLabel,
+      '--network', `container:${devnetName}`, ...readOnlyRuntimeArgs,
       '--mount', `type=volume,src=${deploymentVolume},dst=/workspace/deployments`,
       image, 'sh', '-ec',
       'rm -f /workspace/deployments/localhost.latest.json && pnpm exec hardhat run --no-compile scripts/deploy-local-devnet.js --network localhost && chmod 0644 /workspace/deployments/localhost.latest.json'
@@ -95,7 +103,8 @@ test('deploy and smoke complete in an isolated network-none namespace with immut
     assert.match(deployOutput, /localhost\.latest\.json|deployed|deployment/i);
 
     const smokeOutput = assertSucceeded(docker([
-      'run', '--rm', '--network', `container:${devnetName}`, ...containment,
+      'run', '--rm', '--name', smokeName, '--label', resourceLabel,
+      '--network', `container:${devnetName}`, ...readOnlyRuntimeArgs,
       '--mount', `type=volume,src=${deploymentVolume},dst=/workspace/deployments,readonly`,
       image, 'pnpm', 'exec', 'hardhat', 'run', '--no-compile',
       'scripts/local-devnet-smoke.js', '--network', 'localhost'
@@ -104,7 +113,13 @@ test('deploy and smoke complete in an isolated network-none namespace with immut
     assert.equal(smokeResult.ok, true);
     assert.equal(smokeResult.network, 'localhost');
   } finally {
-    docker(['rm', '-f', devnetName]);
+    for (const containerName of ephemeralContainerNames) docker(['rm', '-f', containerName]);
     docker(['volume', 'rm', '-f', deploymentVolume]);
+    const leftovers = [];
+    for (const containerName of ephemeralContainerNames) {
+      if (docker(['container', 'inspect', containerName]).status === 0) leftovers.push(`container:${containerName}`);
+    }
+    if (docker(['volume', 'inspect', deploymentVolume]).status === 0) leftovers.push(`volume:${deploymentVolume}`);
+    assert.deepEqual(leftovers, [], `ephemeral Docker resources leaked: ${leftovers.join(', ')}`);
   }
 });

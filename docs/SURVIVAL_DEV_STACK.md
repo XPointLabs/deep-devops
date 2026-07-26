@@ -53,10 +53,11 @@ The three Hardhat roles additionally receive a bounded, non-executable
 `/workspace/cache` tmpfs because Hardhat's validation plugin takes a lock and
 writes generated validation metadata there. The image prepares the exact
 `pnpm@9.1.3` package-manager release at build time and disables Corepack network
-access at runtime. The image also preserves the build-time compiler cache under
-`/opt/hardhat-cache`; its fixed entrypoint copies that cache into the fresh
-tmpfs, and deploy/smoke run with `--no-compile`. A read-only chain role therefore
-never downloads package-manager or Solidity compiler tooling on start.
+access at runtime. The image contains the precompiled contract artifacts and
+preserves Hardhat's build-time validation metadata under `/opt/hardhat-cache`;
+its fixed entrypoint copies that metadata into the fresh tmpfs, and deploy/smoke
+run with `--no-compile`. A read-only chain role therefore does not need a
+package-manager or Solidity compiler download on start.
 
 After rebuilding the contracts image, reproduce the containment contract
 without touching the running development project:
@@ -65,9 +66,12 @@ without touching the running development project:
 node --test scripts/survival-dev-readonly-runtime.test.mjs
 ```
 
-The test creates uniquely named temporary Docker resources, runs devnet, deploy,
-and smoke in a `network=none` namespace, and removes those resources in a
-`finally` cleanup.
+The regression test creates uniquely named and labelled temporary Docker
+resources, runs devnet, deploy, and smoke in a deliberately stronger
+`network=none` test namespace, and verifies their removal in a `finally`
+cleanup. The ordinary Compose chain roles still share the stack's `runtime`
+bridge; this regression is not a claim that the Compose stack has egress
+isolation.
 
 Each supported `Up` also removes and reruns the `membership-fixture` one-shot.
 It consumes only hash-pinned local `Deep.Protocol` and
