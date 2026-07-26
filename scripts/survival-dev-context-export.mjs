@@ -91,6 +91,38 @@ function resolveMsBuildPath(source, declaringEntry, value) {
   return resolve(declaringDirectory, expanded.replaceAll('\\', sep).replaceAll('/', sep));
 }
 
+function replaceDirectory(stage, destination) {
+  rmSync(destination, {
+    recursive: true,
+    force: true,
+    maxRetries: 10,
+    retryDelay: 50
+  });
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      renameSync(stage, destination);
+      return;
+    } catch (error) {
+      if (
+        attempt >= 20 ||
+        !['EACCES', 'EBUSY', 'ENOTEMPTY', 'EPERM'].includes(error?.code)
+      ) {
+        throw error;
+      }
+      // Windows may keep the removed directory name delete-pending briefly
+      // after BuildKit releases a context. Retry the same-volume publication
+      // without ever falling back to a partially copied destination.
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25 * (attempt + 1));
+      rmSync(destination, {
+        recursive: true,
+        force: true,
+        maxRetries: 3,
+        retryDelay: 25
+      });
+    }
+  }
+}
+
 function referencedRestoreInputs(source, inventory, initiallySelected) {
   const inventorySet = new Set(inventory);
   const selected = new Set(initiallySelected);
@@ -197,8 +229,7 @@ export function exportDevelopmentContext({ kind, source, destination, ownedRoot 
       mkdirSync(dirname(target), { recursive: true });
       copyFileSync(join(fullSource, ...entry.split('/')), target);
     }
-    rmSync(fullDestination, { recursive: true, force: true });
-    renameSync(stage, fullDestination);
+    replaceDirectory(stage, fullDestination);
   } catch {
     rmSync(stage, { recursive: true, force: true });
     fail('context materialization failed');

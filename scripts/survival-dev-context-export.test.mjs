@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -67,6 +67,20 @@ test('exports the dotnet allowlist and only project-referenced local restore inp
     assert.equal(existsSync(path.join(destination, 'vendor', 'unrelated', 'NotRequired.1.0.0.nupkg')), false);
     assert.equal(existsSync(path.join(destination, '.env.local')), false);
     assert.equal(existsSync(path.join(destination, 'README.md')), false);
+
+    writeFileSync(path.join(item.source, 'src', 'App', 'Program.cs'), 'class Program { static int Revision => 2; }\n');
+    const repeated = exportDevelopmentContext({
+      kind: 'dotnet',
+      source: item.source,
+      destination,
+      ownedRoot: item.owned
+    });
+    assert.equal(repeated.fileCount, 5);
+    assert.equal(
+      readFileSync(path.join(destination, 'src', 'App', 'Program.cs'), 'utf8'),
+      'class Program { static int Revision => 2; }\n'
+    );
+    assert.equal(existsSync(path.join(destination, 'vendor', 'unrelated', 'NotRequired.1.0.0.nupkg')), false);
   } finally {
     rmSync(item.root, { recursive: true, force: true });
   }
