@@ -41,6 +41,11 @@ if ($script -notmatch 'catch \{' -or
     $script -notmatch 'Unable to connect\|connection\|actively refused\|No connection') {
     throw 'Chaos script does not have a PowerShell-version-compatible fail-closed unavailable-node assertion.'
 }
+if ($script -notmatch '\[System\.Net\.WebExceptionStatus\]::Timeout' -or
+    $script -notmatch "'The operation has timed out\.'" -or
+    $script -notmatch "'The operation timed out\.'") {
+    throw 'Chaos script does not classify Docker proxy timeout as a bounded expected unavailable-node outcome.'
+}
 if ($script -notmatch 'survival-dev-verify\.mjs' -or
     $script -notmatch 'productionDiscoveryClaimed = \$false') {
     throw 'Chaos evidence does not verify topology recovery or bound production claims.'

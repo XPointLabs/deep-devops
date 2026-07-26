@@ -66,7 +66,12 @@ function Assert-NodeUnavailable([int]$Index) {
         }
         $messages = $messages |
             Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
-        if (($messages -join ' ') -match 'Unable to connect|connection|actively refused|No connection') { return }
+        $webException = $_.Exception -as [System.Net.WebException]
+        if ($null -ne $webException -and
+            $webException.Status -eq [System.Net.WebExceptionStatus]::Timeout) { return }
+        if ($messages -contains 'The operation has timed out.' -or
+            $messages -contains 'The operation timed out.' -or
+            ($messages -join ' ') -match 'Unable to connect|connection|actively refused|No connection') { return }
         throw
     }
     throw "xnode-$Index unexpectedly returned HTTP $($response.StatusCode) after stop."
