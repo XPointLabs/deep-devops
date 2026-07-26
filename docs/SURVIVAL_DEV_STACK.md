@@ -97,7 +97,13 @@ canonical genesis bytes, the expected network ID, the canonical genesis
 SHA-256, the canonical 3-of-5 signed delegation, and bridge/membership anchors
 bound to the verified delegation LKG at sequence 2. It is explicitly marked
 `DEV-LOCAL-ONLY` and uses the profile key
-`install:deep-survival-dev-v1`. It contains no private signing material.
+base `install:deep-survival-dev-v2`. The client never uses that shared base as
+the persistence key: only after exact whole-artifact pin verification it derives
+`install:deep-survival-dev-v2:<lowercase-64-hex-artifact-sha256>`. Therefore
+every regenerated fixture receives an isolated authority/membership LKG while
+existing account, session, conversation, attachment, and other local database
+state remains untouched. No trust or account database reset is part of rotation.
+The artifact contains no private signing material.
 The future Debug client consumer must require both of these handoff values:
 
 - `DEEP_DEV_LOCAL_MEMBERSHIP_TRUST_URL` — the exact IPv4 HTTP catalog endpoint;

@@ -105,7 +105,7 @@ var artifact = JsonSerializer.SerializeToUtf8Bytes(new {
     {
         version = "deep-membership-trust-bootstrap-v1",
         scope = "DEV-LOCAL-ONLY",
-        opaqueProfileKey = "install:deep-survival-dev-v1",
+        opaqueProfileKey = DevFixtureTrust.OpaqueProfileKeyBase,
         canonicalGenesis = Convert.ToBase64String(genesisBytes),
         expectedNetworkId = Convert.ToBase64String(networkId),
         expectedCanonicalGenesisSha256 = Convert.ToBase64String(canonicalGenesisSha256),
@@ -124,6 +124,7 @@ File.WriteAllBytes(temporary, artifact);
 File.Move(temporary, target, true); // same-volume replace is the publication boundary.
 VerifyPublishedArtifact(target, genesis, genesisLkg, delegation, context, verifier, descriptors, advertisedHost);
 var publishedArtifactSha256 = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(target)));
+DevFixtureTrust.ValidateDerivedProfileKey(publishedArtifactSha256);
 foreach (var signer in roots.Concat(online))
     CryptographicOperations.ZeroMemory(signer.PrivateKey);
 foreach (var seed in localOnlyDevSeeds)
@@ -193,7 +194,7 @@ static void VerifyPublishedArtifact(
     if (!actualTrustProperties.SequenceEqual(expectedTrustProperties.OrderBy(name => name, StringComparer.Ordinal)) ||
         trust.GetProperty("version").GetString() != "deep-membership-trust-bootstrap-v1" ||
         trust.GetProperty("scope").GetString() != "DEV-LOCAL-ONLY" ||
-        trust.GetProperty("opaqueProfileKey").GetString() != "install:deep-survival-dev-v1")
+        trust.GetProperty("opaqueProfileKey").GetString() != DevFixtureTrust.OpaqueProfileKeyBase)
         throw new InvalidOperationException("Published development trust bootstrap framing is invalid.");
 
     var publishedGenesis = Convert.FromBase64String(trust.GetProperty("canonicalGenesis").GetString()
@@ -365,6 +366,28 @@ static ArgumentException Usage() =>
 
 sealed record DevSigner(MembershipSignerDescriptor Descriptor, byte[] PrivateKey);
 sealed record FixtureOptions(string OutputDirectory, string AdvertisedHost);
+
+static class DevFixtureTrust
+{
+    public const string OpaqueProfileKeyBase = "install:deep-survival-dev-v2";
+    private const int Sha256HexLength = 64;
+    private const int MaximumProfileKeyLength = 128;
+
+    public static void ValidateDerivedProfileKey(string artifactSha256)
+    {
+        var derived = $"{OpaqueProfileKeyBase}:{artifactSha256}";
+        if (artifactSha256.Length != Sha256HexLength ||
+            artifactSha256.Any(character =>
+                character is not (>= '0' and <= '9') and
+                not (>= 'a' and <= 'f')) ||
+            derived.Length != OpaqueProfileKeyBase.Length + 1 + Sha256HexLength ||
+            derived.Length > MaximumProfileKeyLength)
+        {
+            throw new InvalidOperationException(
+                "Derived development membership profile key is invalid.");
+        }
+    }
+}
 
 static class ByteUtil {
     public static byte[] Combine(ReadOnlySpan<byte> left, ReadOnlySpan<byte> right) { var result = new byte[left.Length + right.Length]; left.CopyTo(result); right.CopyTo(result.AsSpan(left.Length)); return result; }

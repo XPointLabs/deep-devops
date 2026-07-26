@@ -3,6 +3,8 @@ import { isIP } from 'node:net';
 import { pathToFileURL } from 'node:url';
 
 export const MAX_MEMBERSHIP_ARTIFACT_BYTES = 128 * 1024;
+export const DEV_MEMBERSHIP_PROFILE_KEY_BASE = 'install:deep-survival-dev-v2';
+const MAX_MEMBERSHIP_PROFILE_KEY_LENGTH = 128;
 
 function fail(message) {
   throw new Error(`DEV-LOCAL-ONLY membership trust artifact rejected: ${message}`);
@@ -86,7 +88,7 @@ export function validateDevMembershipArtifact(encoded) {
   ], 'trustBootstrap');
   if (trust.version !== 'deep-membership-trust-bootstrap-v1' ||
       trust.scope !== 'DEV-LOCAL-ONLY' ||
-      trust.opaqueProfileKey !== 'install:deep-survival-dev-v1') {
+      trust.opaqueProfileKey !== DEV_MEMBERSHIP_PROFILE_KEY_BASE) {
     fail('trust bootstrap identity is invalid');
   }
 
@@ -138,11 +140,26 @@ export function sha256Hex(encoded) {
   return createHash('sha256').update(Buffer.from(encoded)).digest('hex');
 }
 
-export function verifyPinnedDevMembershipArtifact(encoded, expectedSha256) {
-  const bytes = validateDevMembershipArtifact(encoded);
+export function deriveDevMembershipOpaqueProfileKey(
+  expectedSha256,
+  profileKeyBase = DEV_MEMBERSHIP_PROFILE_KEY_BASE) {
+  if (profileKeyBase !== DEV_MEMBERSHIP_PROFILE_KEY_BASE) {
+    fail('development membership profile key base is invalid');
+  }
   if (typeof expectedSha256 !== 'string' || !/^[0-9a-f]{64}$/.test(expectedSha256)) {
     fail('an exact lowercase SHA-256 pin is mandatory; TOFU is prohibited');
   }
+  const derived = `${profileKeyBase}:${expectedSha256}`;
+  if (derived.length !== profileKeyBase.length + 65 ||
+      derived.length > MAX_MEMBERSHIP_PROFILE_KEY_LENGTH) {
+    fail('derived development membership profile key is invalid');
+  }
+  return derived;
+}
+
+export function verifyPinnedDevMembershipArtifact(encoded, expectedSha256) {
+  const bytes = validateDevMembershipArtifact(encoded);
+  deriveDevMembershipOpaqueProfileKey(expectedSha256);
   const actual = Buffer.from(sha256Hex(bytes), 'hex');
   const expected = Buffer.from(expectedSha256, 'hex');
   if (!timingSafeEqual(actual, expected)) fail('whole-artifact SHA-256 pin mismatches');

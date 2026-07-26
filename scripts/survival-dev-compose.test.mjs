@@ -4,6 +4,8 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
   assertDevLocalMembershipUrl,
+  deriveDevMembershipOpaqueProfileKey,
+  DEV_MEMBERSHIP_PROFILE_KEY_BASE,
   sha256Hex,
   validateDevMembershipArtifact,
   verifyPinnedDevMembershipArtifact
@@ -290,6 +292,7 @@ test('membership catalog is a local-only one-shot with pinned packages and read-
   assert.match(fixture, /bridgeAnchor = trustAnchor/);
   assert.match(fixture, /membershipAnchor = trustAnchor/);
   assert.match(fixture, /publishedVerifiedDelegation\.NextAuthorityLastKnownGood\.Sequence/);
+  assert.match(fixture, /DevFixtureTrust\.ValidateDerivedProfileKey\(publishedArtifactSha256\)/);
   assert.ok(
     fixture.indexOf('VerifyPublishedArtifact(target') <
       fixture.indexOf('PublishedArtifactSha256='),
@@ -338,7 +341,7 @@ test('future DEV consumer contract rejects TOFU, pin mismatch, remote roots, and
     trustBootstrap: {
       version: 'deep-membership-trust-bootstrap-v1',
       scope: 'DEV-LOCAL-ONLY',
-      opaqueProfileKey: 'install:deep-survival-dev-v1',
+      opaqueProfileKey: 'install:deep-survival-dev-v2',
       canonicalGenesis: genesis.toString('base64'),
       expectedNetworkId: Buffer.alloc(16, 1).toString('base64'),
       expectedCanonicalGenesisSha256: hash.toString('base64'),
@@ -356,10 +359,23 @@ test('future DEV consumer contract rejects TOFU, pin mismatch, remote roots, and
   };
   const bytes = Buffer.from(JSON.stringify(document));
   const pin = sha256Hex(bytes);
+  const secondPin = sha256Hex(Buffer.concat([bytes, Buffer.from('\n')]));
   assert.equal(validateDevMembershipArtifact(bytes).length, bytes.length);
   assert.equal(verifyPinnedDevMembershipArtifact(bytes, pin).length, bytes.length);
+  assert.equal(
+    deriveDevMembershipOpaqueProfileKey(pin),
+    `${DEV_MEMBERSHIP_PROFILE_KEY_BASE}:${pin}`);
+  assert.notEqual(
+    deriveDevMembershipOpaqueProfileKey(pin),
+    deriveDevMembershipOpaqueProfileKey(secondPin));
   assert.throws(() => verifyPinnedDevMembershipArtifact(bytes), /TOFU is prohibited/);
   assert.throws(() => verifyPinnedDevMembershipArtifact(bytes, '0'.repeat(64)), /pin mismatches/);
+  assert.throws(
+    () => deriveDevMembershipOpaqueProfileKey(pin.toUpperCase()),
+    /lowercase SHA-256 pin/);
+  assert.throws(
+    () => deriveDevMembershipOpaqueProfileKey(pin, 'install:deep-survival-dev-v1'),
+    /profile key base is invalid/);
   assert.throws(
     () => validateDevMembershipArtifact(Buffer.from(JSON.stringify({
       ...document,
