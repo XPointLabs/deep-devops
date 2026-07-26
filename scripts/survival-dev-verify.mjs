@@ -36,4 +36,24 @@ for (const port of [41801, 41802, 41803, 41804, 41805, 41806]) {
     throw new Error(`xnode on ${port} does not have exactly six signed relay contacts`);
   }
 }
-process.stdout.write('All XNodes have the exact six registered signed relay contacts.\n');
+
+async function artifact(port) {
+  const response = await fetch(`http://${host}:${port}/api/network/membership-route-catalog`);
+  if (!response.ok) throw new Error(`membership artifact endpoint on ${port} returned ${response.status}`);
+  const body = await response.json();
+  if (body.version !== 'deep-membership-route-catalog-v1' || !Array.isArray(body.members) || body.members.length !== 6) {
+    throw new Error(`membership artifact endpoint on ${port} has invalid framing`);
+  }
+  const signed = Buffer.from(body.signedMembership, 'base64');
+  if (signed.subarray(0, 4).toString('ascii') !== 'MSM1') throw new Error(`membership artifact endpoint on ${port} lacks MSM1`);
+  const leaves = body.members.map(member => Buffer.from(member.leaf, 'base64'));
+  if (leaves.some(leaf => leaf.subarray(0, 4).toString('ascii') !== 'MRL1')) throw new Error(`membership artifact endpoint on ${port} lacks MRL1 leaves`);
+  const ids = leaves.map(leaf => leaf.subarray(10, 42).toString('hex'));
+  if (JSON.stringify(ids) !== JSON.stringify([...ids].sort())) throw new Error(`membership artifact endpoint on ${port} is not sorted`);
+  return JSON.stringify(body);
+}
+
+const registryArtifact = await artifact(41810);
+const ingressArtifact = await artifact(41801);
+if (registryArtifact !== ingressArtifact) throw new Error('registry and ingress publish different membership artifacts');
+process.stdout.write('All XNodes have the exact six registered signed relay contacts and a shared six-leaf MRL1/MSM1 artifact.\n');

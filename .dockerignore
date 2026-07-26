@@ -23,3 +23,8 @@
 !tools/calls-service/calls-service-runtime.mjs
 !tools/relay-bootstrap/
 !tools/relay-bootstrap/relay-bootstrap.mjs
+!tools/membership-fixture/
+!tools/membership-fixture/MembershipFixture.csproj
+!tools/membership-fixture/NuGet.Config
+!tools/membership-fixture/Program.cs
+!tools/membership-fixture/packages.lock.json

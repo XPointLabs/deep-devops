@@ -9,6 +9,7 @@ const seed = readFileSync(new URL('./survival-dev-seed.mjs', import.meta.url), '
 const verify = readFileSync(new URL('./survival-dev-verify.mjs', import.meta.url), 'utf8');
 const contextExport = readFileSync(new URL('./survival-dev-context-export.mjs', import.meta.url), 'utf8');
 const bootstrap = readFileSync(new URL('../tools/relay-bootstrap/relay-bootstrap.mjs', import.meta.url), 'utf8');
+const fixture = readFileSync(new URL('../tools/membership-fixture/Program.cs', import.meta.url), 'utf8');
 
 function serviceBlock(name) {
   const match = compose.match(new RegExp(`^  ${name}:\\r?\\n([\\s\\S]*?)(?=^  [a-z][a-z0-9-]*:\\r?$|^networks:|^volumes:)`, 'm'));
@@ -22,7 +23,7 @@ test('daily stack has a fixed isolated project, persistent services, and one cha
   const servicesSection = compose.match(/^services:\r?\n([\s\S]*?)(?=^networks:)/m)?.[1] ?? '';
   const services = [...servicesSection.matchAll(/^  ([a-z][a-z0-9-]*):$/gm)].map(match => match[1]).sort();
   assert.deepEqual(services, [
-    'calls', 'contracts-deploy', 'contracts-deployments-init', 'contracts-devnet', 'contracts-smoke', 'file', 'push', 'registry', 'relay-bootstrap', 'staking-backend',
+    'calls', 'contracts-deploy', 'contracts-deployments-init', 'contracts-devnet', 'contracts-smoke', 'file', 'membership-artifact-init', 'membership-fixture', 'push', 'registry', 'relay-bootstrap', 'staking-backend',
     'storage', 'xnode-1', 'xnode-2', 'xnode-3', 'xnode-4', 'xnode-5', 'xnode-6'
   ]);
   assert.match(compose, /^networks:\r?\n  runtime:\r?\n    driver: bridge$/m);
@@ -110,7 +111,7 @@ test('every stateful service uses a named volume and operator commands are docum
   for (const volume of [
     'contracts-deployments', 'xnode-1-state', 'xnode-2-state', 'xnode-3-state',
     'xnode-4-state', 'xnode-5-state', 'xnode-6-state',
-    'registry-state', 'staking-state', 'storage-state', 'file-state', 'push-state', 'calls-state'
+    'registry-state', 'staking-state', 'storage-state', 'file-state', 'push-state', 'calls-state', 'membership-route-artifact'
   ]) assert.match(compose, new RegExp(`^  ${volume}:$`, 'm'));
   assert.match(docs, /survival-dev\.ps1 -Action Up/);
   assert.match(docs, /docker compose -f docker-compose\.survival\.dev\.yml ps/);
@@ -123,6 +124,40 @@ test('every stateful service uses a named volume and operator commands are docum
   assert.match(docs, /contracts-deployments-init/);
   assert.doesNotMatch(docs, /вЂ|Ã|â|�/);
   assert.doesNotMatch(docs, /--no-cache/);
+});
+
+test('membership catalog is a local-only one-shot with pinned packages and read-only consumers', () => {
+  const init = serviceBlock('membership-artifact-init');
+  const generator = serviceBlock('membership-fixture');
+  assert.match(init, /network_mode: none/);
+  assert.match(init, /cap_add: \[CHOWN\]/);
+  assert.match(init, /chown -R 65532:65532 \/out/);
+  assert.match(generator, /network_mode: none/);
+  assert.match(generator, /restart: "no"/);
+  assert.match(generator, /membership-artifact-init: \{ condition: service_completed_successfully \}/);
+  assert.match(compose, /SURVIVAL_MEMBERSHIP_PACKAGES_BUILD_CONTEXT/);
+  assert.match(compose, /MembershipArtifact__ArtifactPath: \/run\/deep-membership\/membership-route-catalog\.json/);
+  assert.match(serviceBlock('registry'), /Registry__MembershipRouteArtifactPath/);
+  for (const role of ['xnode-1', 'xnode-2', 'xnode-3', 'xnode-4', 'xnode-5', 'xnode-6', 'registry']) {
+    assert.match(serviceBlock(role), /membership-route-artifact:\/run\/deep-membership:ro/);
+    assert.match(serviceBlock(role), /membership-fixture: \{ condition: service_completed_successfully \}/);
+  }
+  assert.match(launcher, /Prepare-SurvivalMembershipFixturePackages/);
+  assert.match(launcher, /Reset-SurvivalMembershipFixture/);
+  assert.match(launcher, /8EF4E70AD0B6C1CC0087F25C0313D6AB6A5387D16246679E4C10A3C00898A442/);
+  assert.match(launcher, /FE7B5E638C1AB5E7505F45BB7D5804048D2A4AD273C88DD75D7D46AE80DB641A/);
+  assert.match(fixture, /DEV-LOCAL-ONLY/);
+  assert.match(fixture, /MembershipPolicy\.Beta/);
+  assert.match(fixture, /roots\.Take\(3\)/);
+  assert.match(fixture, /online\.Take\(2\)/);
+  assert.match(fixture, /two disjoint three-hop development routes/);
+  assert.match(fixture, /MembershipRouteDescriptorCodec\.BuildProofs/);
+  assert.match(fixture, /File\.Move\(temporary, target, true\)/);
+  assert.match(readFileSync(new URL('../tools/membership-fixture/MembershipFixture.csproj', import.meta.url), 'utf8'), /RestoreLockedMode>true/);
+  assert.match(verify, /MSM1/);
+  assert.match(verify, /MRL1/);
+  assert.match(docs, /DEV-LOCAL-ONLY/);
+  assert.doesNotMatch(launcher, /DEEP_MEMBERSHIP.*PRIVATE|MEMBERSHIP.*PRIVATE.*DEEP/i);
 });
 
 test('daily launcher always uses the fixed project without release-gate ceremony', () => {

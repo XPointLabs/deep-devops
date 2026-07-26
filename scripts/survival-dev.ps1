@@ -48,13 +48,45 @@ function Export-SurvivalContext([string]$Kind,[string]$Source,[string]$Name,[str
     Set-Item -Path "Env:$EnvironmentName" -Value $destination
 }
 
+function Prepare-SurvivalMembershipFixturePackages() {
+    # Only public, pinned NuGet inputs cross into the one-shot generator build context.
+    # DEV-LOCAL-ONLY deterministic seeds remain compiled in that one-shot tool and are never copied here.
+    $source = Resolve-SurvivalSource 'SURVIVAL_CLIENT_SHARED_PATH' '..\deep-client-shared'
+    $destination = Join-Path $ContextRoot 'membership-packages'
+    $inputs = @(
+        @{ Name = 'Deep.Protocol.0.3.0-p04.b887fa0.nupkg'; Hash = '8EF4E70AD0B6C1CC0087F25C0313D6AB6A5387D16246679E4C10A3C00898A442'; Path = 'vendor\p14a2\packages\Deep.Protocol.0.3.0-p04.b887fa0.nupkg' },
+        @{ Name = 'Deep.Protocol.MembershipRoutes.0.1.0-p15.local.nupkg'; Hash = 'FE7B5E638C1AB5E7505F45BB7D5804048D2A4AD273C88DD75D7D46AE80DB641A'; Path = 'vendor\p15\packages\Deep.Protocol.MembershipRoutes.0.1.0-p15.local.nupkg' },
+        @{ Name = 'Sodium.Core.1.4.1.nupkg'; Hash = ''; Path = 'vendor\p14a2\packages\Sodium.Core.1.4.1.nupkg' },
+        @{ Name = 'libsodium.1.0.22.nupkg'; Hash = ''; Path = 'vendor\p14a2\packages\libsodium.1.0.22.nupkg' }
+    )
+    $stage = Join-Path $ContextRoot ('.membership-packages-' + [Guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $stage -Force | Out-Null
+    try {
+        foreach ($input in $inputs) {
+            $path = Join-Path $source $input.Path
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Pinned membership package is missing: $($input.Name)" }
+            if ($input.Hash -and (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ne $input.Hash) { throw "Pinned membership package hash mismatch: $($input.Name)" }
+            Copy-Item -LiteralPath $path -Destination (Join-Path $stage $input.Name) -Force
+        }
+        Remove-Item -LiteralPath $destination -Recurse -Force -ErrorAction SilentlyContinue
+        Move-Item -LiteralPath $stage -Destination $destination
+    } catch { Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue; throw }
+    Set-Item -Path 'Env:SURVIVAL_MEMBERSHIP_PACKAGES_BUILD_CONTEXT' -Value $destination
+}
+
 function Prepare-SurvivalBuildContexts([switch]$IncludeChain) {
     Export-SurvivalContext 'dotnet' (Resolve-SurvivalSource 'SURVIVAL_XNODE_PATH' '..\xnode') 'xnode' 'SURVIVAL_XNODE_BUILD_CONTEXT'
     Export-SurvivalContext 'dotnet' (Resolve-SurvivalSource 'SURVIVAL_REGISTRY_PATH' '..\deep-registry-api') 'registry' 'SURVIVAL_REGISTRY_BUILD_CONTEXT'
+    Prepare-SurvivalMembershipFixturePackages
     if ($IncludeChain) {
         Export-SurvivalContext 'dotnet' (Resolve-SurvivalSource 'SURVIVAL_STAKING_PATH' '..\xpoint-staking-backend') 'staking' 'SURVIVAL_STAKING_BUILD_CONTEXT'
         Export-SurvivalContext 'contracts' (Resolve-SurvivalSource 'SURVIVAL_CONTRACTS_PATH' '..\xpoint-staking-contracts') 'contracts' 'SURVIVAL_CONTRACTS_BUILD_CONTEXT'
     }
+}
+
+function Reset-SurvivalMembershipFixture() {
+    # Force the local-only one-shot to republish a bounded fresh artifact on every supported Up.
+    Invoke-SurvivalDocker ($baseArguments + @('rm', '-sf', 'membership-fixture', 'membership-artifact-init'))
 }
 
 function Reset-SurvivalChainLifecycle() {
@@ -75,6 +107,8 @@ function Assert-SurvivalHostEndpoints([string]$HostName,[switch]$IncludeChain) {
         "http://$HostName`:41805/api/network/contact",
         "http://$HostName`:41806/api/network/contact",
         "http://$HostName`:41810/health/live",
+        "http://$HostName`:41810/api/network/membership-route-catalog",
+        "http://$HostName`:41801/api/network/membership-route-catalog",
         "http://$HostName`:41820/health/ready",
         "http://$HostName`:41821/health/ready",
         "http://$HostName`:41822/health/ready",
@@ -153,6 +187,7 @@ function Write-ClientEnvironment([string]$HostName,[switch]$IncludeChain) {
             'SURVIVAL_ENV=Development',
             "XNODE_URLS=$($routerIds[0])|http://$hostValue`:41801;$($routerIds[1])|http://$hostValue`:41802;$($routerIds[2])|http://$hostValue`:41803;$($routerIds[3])|http://$hostValue`:41804;$($routerIds[4])|http://$hostValue`:41805;$($routerIds[5])|http://$hostValue`:41806",
             "DEEP_REGISTRY_URL=http://$hostValue`:41810",
+            "DEEP_MEMBERSHIP_ROUTE_CATALOG_URL=http://$hostValue`:41810/api/network/membership-route-catalog",
             "DEEP_FILE_URL=http://$hostValue`:41821",
             "DEEP_PUSH_URL=http://$hostValue`:41822",
             "DEEP_CALL_SIGNALING_BASE_URL=http://$hostValue`:41823",
@@ -184,6 +219,7 @@ switch ($Action) {
         Write-ClientEnvironment $advertisedHost -IncludeChain:$Chain
         $env:SURVIVAL_BIND_HOST = $advertisedHost
         Prepare-SurvivalBuildContexts -IncludeChain:$Chain
+        Reset-SurvivalMembershipFixture
         if ($Chain) { Reset-SurvivalChainLifecycle }
         $upArguments = @($baseArguments)
         if ($Chain) { $upArguments += @('--profile', 'chain') }

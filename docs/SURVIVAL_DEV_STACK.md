@@ -40,6 +40,21 @@ fail-closed source contexts, exchanges signed relay contacts, restarts the
 XNodes, probes host HTTP endpoints, verifies all six contacts, and writes the
 client handoff files; a raw Compose invocation does not perform those steps.
 
+Each supported `Up` also removes and reruns the `membership-fixture` one-shot.
+It consumes only hash-pinned local `Deep.Protocol` and
+`Deep.Protocol.MembershipRoutes` packages, creates an atomic public artifact in
+the isolated `membership-route-artifact` volume, then exits. The public artifact
+is a full sorted six-leaf MRL1 catalog for the exact development XNode IDs and
+their `ingress|core|storage` roles, with proofs, a 3-of-5 offline-root delegation,
+and a 2-of-3 online MSM1 membership statement. Its sorted halves provide two
+disjoint three-hop development routes. The XNodes and Registry mount it
+read-only and publish it at `/api/network/membership-route-catalog`; the client
+handoff includes `DEEP_MEMBERSHIP_ROUTE_CATALOG_URL`. Deterministic signing seeds
+are explicitly DEV-LOCAL-ONLY and exist only in the one-shot generator image:
+they are never in the artifact, runtime images, runtime volumes, client handoff,
+or logs. This is contract-fixture plumbing, not a production signer, membership
+authority, or client-activation claim.
+
 Regular builds reuse BuildKit and package layers. Rebuild only edited services
 when convenient:
 
