@@ -51,6 +51,15 @@ function Prepare-SurvivalBuildContexts([switch]$IncludeChain) {
     }
 }
 
+function Reset-SurvivalChainLifecycle() {
+    # Hardhat node state is intentionally in-memory, while the deployment
+    # manifest volume persists. Recreate these services for every supported
+    # Up -Chain so a stale manifest can never release the staking backend.
+    Invoke-SurvivalDocker ($baseArguments + @(
+        '--profile', 'chain', 'rm', '-sf',
+        'contracts-deploy', 'contracts-smoke', 'staking-backend'))
+}
+
 function Assert-SurvivalHostEndpoints([string]$HostName) {
     $targets = @(
         "http://$HostName`:41801/api/network/contact",
@@ -133,6 +142,7 @@ switch ($Action) {
         Write-ClientEnvironment $advertisedHost -IncludeChain:$Chain
         $env:SURVIVAL_BIND_HOST = $advertisedHost
         Prepare-SurvivalBuildContexts -IncludeChain:$Chain
+        if ($Chain) { Reset-SurvivalChainLifecycle }
         $upArguments = @($baseArguments)
         if ($Chain) { $upArguments += @('--profile', 'chain') }
         Invoke-SurvivalDocker ($upArguments + @('up', '-d', '--build', '--wait') + $Service)
@@ -159,6 +169,9 @@ switch ($Action) {
     }
     'Restart' {
         if ($Service.Count -eq 0) { throw 'Restart requires at least one -Service.' }
+        if ($Service -contains 'contracts-devnet') {
+            throw 'Restarting contracts-devnet invalidates its in-memory chain. Use -Action Up -Chain so deployment, smoke, and staking backend are recreated in order.'
+        }
         Invoke-SurvivalDocker ($baseArguments + @('restart') + $Service)
     }
 }

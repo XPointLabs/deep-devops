@@ -22,7 +22,7 @@ test('daily stack has a fixed isolated project, persistent services, and one cha
   const servicesSection = compose.match(/^services:\r?\n([\s\S]*?)(?=^networks:)/m)?.[1] ?? '';
   const services = [...servicesSection.matchAll(/^  ([a-z][a-z0-9-]*):$/gm)].map(match => match[1]).sort();
   assert.deepEqual(services, [
-    'calls', 'contracts-deployments-init', 'contracts-devnet', 'file', 'push', 'registry', 'relay-bootstrap', 'staking-backend',
+    'calls', 'contracts-deploy', 'contracts-deployments-init', 'contracts-devnet', 'contracts-smoke', 'file', 'push', 'registry', 'relay-bootstrap', 'staking-backend',
     'storage', 'xnode-1', 'xnode-2', 'xnode-3', 'xnode-4', 'xnode-5', 'xnode-6'
   ]);
   assert.match(compose, /^networks:\r?\n  runtime:\r?\n    driver: bridge$/m);
@@ -43,6 +43,9 @@ test('shared images have one incremental build producer and persistent consumers
 test('only local Hardhat and loopback host ports are configured', () => {
   const deploymentsInit = serviceBlock('contracts-deployments-init');
   const contracts = serviceBlock('contracts-devnet');
+  const deploy = serviceBlock('contracts-deploy');
+  const smoke = serviceBlock('contracts-smoke');
+  const staking = serviceBlock('staking-backend');
   assert.match(deploymentsInit, /profiles: \[chain\]/);
   assert.match(deploymentsInit, /user: "0:0"/);
   assert.match(deploymentsInit, /restart: "no"/);
@@ -55,7 +58,21 @@ test('only local Hardhat and loopback host ports are configured', () => {
   assert.doesNotMatch(deploymentsInit, /build:/);
   assert.match(contracts, /command: \[pnpm, exec, hardhat, node, --hostname, 0\.0\.0\.0\]/);
   assert.match(contracts, /USER node/);
+  assert.match(contracts, /restart: "no"/);
   assert.match(contracts, /contracts-deployments-init: \{ condition: service_completed_successfully \}/);
+  assert.match(deploy, /profiles: \[chain\]/);
+  assert.match(deploy, /restart: "no"/);
+  assert.match(deploy, /contracts-deployments:\/workspace\/deployments/);
+  assert.match(deploy, /contracts-devnet: \{ condition: service_healthy \}/);
+  assert.match(deploy, /rm -f \/workspace\/deployments\/localhost\.latest\.json/);
+  assert.match(deploy, /scripts\/deploy-local-devnet\.js --network localhost/);
+  assert.match(smoke, /profiles: \[chain\]/);
+  assert.match(smoke, /restart: "no"/);
+  assert.match(smoke, /contracts-deployments:\/workspace\/deployments:ro/);
+  assert.match(smoke, /contracts-deploy: \{ condition: service_completed_successfully \}/);
+  assert.match(smoke, /scripts\/local-devnet-smoke\.js/);
+  assert.match(staking, /contracts-smoke: \{ condition: service_completed_successfully \}/);
+  assert.doesNotMatch(staking, /contracts-devnet: \{ condition: service_healthy \}/);
   assert.match(contracts, /eth_chainId/);
   assert.doesNotMatch(compose, /https?:\/\/(?!127\.0\.0\.1|0\.0\.0\.0|[a-z][a-z0-9-]*:)/i);
   const bindings = [...compose.matchAll(/"\$\{SURVIVAL_BIND_HOST:-127\.0\.0\.1\}:(\d+):(\d+)"/g)];
@@ -87,7 +104,8 @@ test('every stateful service uses a named volume and operator commands are docum
   assert.match(docs, /docker compose -f docker-compose\.survival\.dev\.yml down/);
   assert.match(docs, /formal P15C release gate/i);
   assert.match(docs, /raw `docker compose .*up.*` is not supported/i);
-  assert.match(docs, /chain.*unsupported|unsupported.*chain/i);
+  assert.doesNotMatch(docs, /The chain profile is currently unsupported/i);
+  assert.match(docs, /Direct `docker compose` chain\s+restarts are unsupported/i);
   assert.match(docs, /contracts-deployments-init/);
   assert.doesNotMatch(docs, /вЂ|Ã|â|�/);
   assert.doesNotMatch(docs, /--no-cache/);
@@ -113,6 +131,10 @@ test('daily launcher always uses the fixed project without release-gate ceremony
   ]) assert.match(launcher, new RegExp(routerId));
   assert.match(launcher, /survival-dev-seed\.mjs/);
   assert.match(launcher, /survival-dev-context-export\.mjs/);
+  assert.match(launcher, /function Reset-SurvivalChainLifecycle/);
+  assert.match(launcher, /'contracts-deploy', 'contracts-smoke', 'staking-backend'/);
+  assert.match(launcher, /if \(\$Chain\) \{ Reset-SurvivalChainLifecycle \}/);
+  assert.match(launcher, /Restarting contracts-devnet invalidates its in-memory chain/);
   assert.doesNotMatch(launcher, /Up requires -LanHost/);
   assert.match(seed, /api\/network\/contact/);
   assert.match(seed, /relay-bootstrap/);

@@ -99,6 +99,7 @@ services:
   contracts-devnet:
     <<: *service
     profiles: [chain]
+    restart: "no"
     image: deep-survival/contracts-devnet:dev
     build:
       context: .
@@ -128,6 +129,37 @@ services:
     healthcheck:
       <<: *health
       test: [CMD, node, --eval, "fetch('http://127.0.0.1:8545',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'eth_chainId',params:[]})}).then(r=>r.json()).then(v=>process.exit(v.result==='0x7a69'?0:1)).catch(()=>process.exit(1))"]
+
+  contracts-deploy:
+    <<: *service
+    profiles: [chain]
+    restart: "no"
+    image: deep-survival/contracts-devnet:dev
+    environment:
+      CI: "true"
+      HARDHAT_DISABLE_TELEMETRY: "true"
+      HOME: /tmp
+    volumes:
+      - contracts-deployments:/workspace/deployments
+    depends_on:
+      contracts-deployments-init: { condition: service_completed_successfully }
+      contracts-devnet: { condition: service_healthy }
+    command: [sh, -ec, "rm -f /workspace/deployments/localhost.latest.json && exec pnpm exec hardhat run scripts/deploy-local-devnet.js --network localhost"]
+
+  contracts-smoke:
+    <<: *service
+    profiles: [chain]
+    restart: "no"
+    image: deep-survival/contracts-devnet:dev
+    environment:
+      CI: "true"
+      HARDHAT_DISABLE_TELEMETRY: "true"
+      HOME: /tmp
+    volumes:
+      - contracts-deployments:/workspace/deployments:ro
+    depends_on:
+      contracts-deploy: { condition: service_completed_successfully }
+    command: [pnpm, exec, hardhat, run, scripts/local-devnet-smoke.js, --network, localhost]
 
   xnode-1:
     <<: *xnode
@@ -263,7 +295,7 @@ services:
     ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41811:8080"]
     volumes: [staking-state:/state]
     depends_on:
-      contracts-devnet: { condition: service_healthy }
+      contracts-smoke: { condition: service_completed_successfully }
     healthcheck: { <<: *health, test: [CMD-SHELL, "test -r /proc/1/status"] }
 
   storage:

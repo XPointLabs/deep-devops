@@ -23,7 +23,7 @@ physical Android Debug build without exposing the unauthenticated services:
 41801, 41802, 41803, 41804, 41805, 41806, 41810, 41821, 41822, 41823 | ForEach-Object { adb reverse "tcp:$_" "tcp:$_" }
 ```
 
-If the incomplete chain profile is being inspected, also reverse its optional
+If the local chain profile is enabled, also reverse its optional
 ports:
 
 ```powershell
@@ -74,14 +74,25 @@ exclusions to the fallback ingress. Do not use it as a production anonymity
 claim.
 
 Hardhat and staking are optional because messenger development does not require
-a chain. The chain profile is currently unsupported and incomplete: `-Chain`
-can start its containers for implementation work, but contract deployment and
-generated backend configuration are not automated yet. Do not treat it as a
-working chain environment until the next iteration completes that automation:
+a chain. The `-Chain` profile is a local deterministic development environment,
+not a UAT or release deployment. Every supported `Up -Chain` removes the prior
+one-shot deployment/smoke containers and the staking backend, starts the
+in-memory Hardhat node, removes any old `localhost.latest.json`, deploys the
+current contracts with Hardhat's deterministic local accounts, runs the contract
+smoke, and only then starts the staking backend:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/survival-dev.ps1 -Action Up -Chain
 ```
+
+The deployment manifest volume survives container removal, but the Hardhat
+chain does not. The lifecycle above deliberately regenerates the manifest on
+every `Up -Chain`, so an address from a previous node process cannot satisfy the
+backend dependency. `contracts-devnet` has no automatic restart policy: do not
+restart it directly (the launcher fails closed); rerun `-Action Up -Chain` to
+create a current deploy/smoke/backend sequence. Direct `docker compose` chain
+restarts are unsupported because Compose cannot guarantee rerunning a completed
+one-shot service after an in-memory node restart.
 
 The chain profile includes a one-shot `contracts-deployments-init` container.
 It runs as root only long enough to recursively set ownership of the isolated
@@ -112,7 +123,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/survival-dev.ps1 -Ac
 ```
 
 Default messenger host ports are XNodes `41801-41806`, registry `41810`,
-storage `41820`, file `41821`, push `41822`, and calls `41823`. The unsupported
+storage `41820`, file `41821`, push `41822`, and calls `41823`. The local-only
 chain profile additionally uses Hardhat `41545` and staking `41811`. All traffic
 is Debug HTTP intended only for loopback or the exact trusted developer IPv4
 interface selected with `-LanHost`.
