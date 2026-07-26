@@ -289,6 +289,9 @@ test('membership catalog is a local-only one-shot with pinned packages and read-
   assert.match(fixture, /File\.SetUnixFileMode\(/);
   assert.match(fixture, /UnixFileMode\.UserRead \| UnixFileMode\.UserWrite \| UnixFileMode\.UserExecute/);
   assert.match(fixture, /PublicKeyAuth\.GenerateKeyPair\(seed\)/);
+  assert.match(fixture, /ConvertEd25519PublicKeyToCurve25519PublicKey\(pair\.PublicKey\)/);
+  assert.match(fixture, /Development node seed does not match its configured router id/);
+  assert.doesNotMatch(fixture, /x25519-local-only/);
   assert.match(fixture, /PublicKeyAuth\.SignDetached\(framed, signer\.PrivateKey\)/);
   assert.match(fixture, /PublicKeyAuth\.VerifyDetached\(signature\.ToArray\(\), signingBytes\.ToArray\(\), publicKey\.ToArray\(\)\)/);
   assert.match(fixture, /VerifyPublishedArtifact\(target, genesis, genesisLkg, delegation, context, verifier, descriptors, advertisedHost\)/);

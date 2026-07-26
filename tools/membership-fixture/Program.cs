@@ -62,9 +62,29 @@ var routerIds = new[] {
     "f381626e41e7027ea431bfe3009e94bdd25a746beec468948d6c3c7c5dc9a54b", "fd50b8e3b144ea244fbf7737f550bc8dd0c2650bbc1aada833ca17ff8dbf329b",
     "fde4fba030ad002f7c2f7d4c331f49d13fb0ec747eceebec634f1ff4cbca9def", "b4c92afb3ba57f3ab959ffe6d319c98484a2155a0f4c65b2c37011ffd197b075"
 };
+var devNodeSeeds = Enumerable.Range(1, routerIds.Length).Select(index =>
+{
+    var seed = new byte[32];
+    seed[^1] = checked((byte)index);
+    return seed;
+}).ToArray();
+var x25519PublicKeys = routerIds.Zip(devNodeSeeds, (routerId, seed) =>
+{
+    var pair = PublicKeyAuth.GenerateKeyPair(seed);
+    try
+    {
+        if (!Convert.ToHexStringLower(pair.PublicKey).Equals(routerId, StringComparison.Ordinal))
+            throw new InvalidOperationException("Development node seed does not match its configured router id.");
+        return PublicKeyAuth.ConvertEd25519PublicKeyToCurve25519PublicKey(pair.PublicKey);
+    }
+    finally
+    {
+        CryptographicOperations.ZeroMemory(pair.PrivateKey);
+    }
+}).ToArray();
 var descriptors = routerIds.Select((id, index) => new MembershipRouteDescriptor {
     RouterId = Convert.FromHexString(id), Ed25519PublicKey = Convert.FromHexString(id),
-    X25519PublicKey = SHA256.HashData(ByteUtil.Combine("x25519-local-only"u8, Convert.FromHexString(id))),
+    X25519PublicKey = x25519PublicKeys[index],
     RpcEndpoint = $"http://{advertisedHost}:{41801 + index}/", Roles = MembershipRouteRole.Ingress | MembershipRouteRole.Core | MembershipRouteRole.Storage,
     Capabilities = MembershipRouteCapability.SessionRpc | MembershipRouteCapability.OnionV1 | MembershipRouteCapability.Storage,
     Epoch = 3, ValidFromUnixSeconds = validFrom, ValidUntilUnixSeconds = validUntil
@@ -129,6 +149,8 @@ DevFixtureTrust.ValidateDerivedProfileKey(publishedArtifactSha256);
 foreach (var signer in roots.Concat(online))
     CryptographicOperations.ZeroMemory(signer.PrivateKey);
 foreach (var seed in localOnlyDevSeeds)
+    CryptographicOperations.ZeroMemory(seed);
+foreach (var seed in devNodeSeeds)
     CryptographicOperations.ZeroMemory(seed);
 Console.WriteLine($"PublishedArtifactSha256={publishedArtifactSha256}");
 Console.WriteLine("Generated and Sodium-verified one DEV-LOCAL-ONLY 3-of-5 / 2-of-3 membership route catalog (no private material published).");
