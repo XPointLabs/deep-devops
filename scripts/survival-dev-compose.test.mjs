@@ -24,6 +24,7 @@ const fixture = readFileSync(new URL('../tools/membership-fixture/Program.cs', i
 const artifactInit = readFileSync(new URL('../tools/membership-artifact-init/membership-artifact-init.mjs', import.meta.url), 'utf8');
 const membershipRepeat = readFileSync(new URL('./survival-dev-membership-fixture-repeat.ps1', import.meta.url), 'utf8');
 const mailboxIntegration = readFileSync(new URL('./survival-dev-mailbox.integration.test.ps1', import.meta.url), 'utf8');
+const mailboxDriver = readFileSync(new URL('../tools/survival-mailbox-driver/Program.cs', import.meta.url), 'utf8');
 const membershipNuget = readFileSync(new URL('../tools/membership-fixture/NuGet.Config', import.meta.url), 'utf8');
 const membershipLock = JSON.parse(readFileSync(new URL('../tools/membership-fixture/packages.lock.json', import.meta.url), 'utf8'));
 const hardhatEntrypoint = readFileSync(new URL('./survival-hardhat-entrypoint.sh', import.meta.url), 'utf8');
@@ -41,7 +42,7 @@ test('daily stack has a fixed isolated project, persistent services, and one cha
   const servicesSection = compose.match(/^services:\r?\n([\s\S]*?)(?=^networks:)/m)?.[1] ?? '';
   const services = [...servicesSection.matchAll(/^  ([a-z][a-z0-9-]*):$/gm)].map(match => match[1]).sort();
   assert.deepEqual(services, [
-    'calls', 'contracts-deploy', 'contracts-deployments-init', 'contracts-devnet', 'contracts-smoke', 'file', 'membership-artifact-init', 'membership-artifact-owner-init', 'membership-fixture', 'push', 'registry', 'relay-bootstrap', 'staking-backend',
+    'calls', 'contracts-deploy', 'contracts-deployments-init', 'contracts-devnet', 'contracts-smoke', 'file', 'mailbox-driver', 'mailbox-driver-state-init', 'membership-artifact-init', 'membership-artifact-owner-init', 'membership-fixture', 'push', 'registry', 'relay-bootstrap', 'staking-backend',
     'storage', 'xnode-1', 'xnode-2', 'xnode-3', 'xnode-4', 'xnode-5', 'xnode-6'
   ]);
   assert.match(compose, /^networks:\r?\n  runtime:\r?\n    driver: bridge$/m);
@@ -49,6 +50,8 @@ test('daily stack has a fixed isolated project, persistent services, and one cha
 
 test('shared images have one incremental build producer and persistent consumers', () => {
   const xnodeBuild = compose.match(/^x-xnode-build: &xnode-build\r?\n([\s\S]*?)(?=^x-xnode:)/m)?.[1] ?? '';
+  const driverBuild = compose.match(/^x-mailbox-driver-build: &mailbox-driver-build\r?\n([\s\S]*?)(?=^x-membership-fixture-build:)/m)?.[1] ?? '';
+  const membershipBuild = compose.match(/^x-membership-fixture-build: &membership-fixture-build\r?\n([\s\S]*?)(?=^x-compat-build:)/m)?.[1] ?? '';
   assert.match(serviceBlock('xnode-1'), /\n    build:/);
   assert.doesNotMatch(serviceBlock('xnode-2'), /\n    build:/);
   assert.doesNotMatch(serviceBlock('xnode-3'), /\n    build:/);
@@ -63,6 +66,14 @@ test('shared images have one incremental build producer and persistent consumers
     xnodeBuild,
     /RUN dotnet publish src\/XNode\/XNode\.csproj -c Debug -o \/out --runtime linux-arm64 --self-contained false -p:UseAppHost=false/
   );
+  for (const build of [xnodeBuild, driverBuild]) {
+    assert.match(build, /XNODE_REVISION: [0-9a-f]{40}/);
+    assert.match(build, /XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: [0-9a-f]{64}/);
+    assert.match(build, /sha256sum -c -/);
+    assert.match(build, /LABEL org\.opencontainers\.image\.revision/);
+    assert.match(build, /com\.xpoint\.source-context\.manifest-sha256/);
+  }
+  assert.doesNotMatch(membershipBuild, /XNODE_REVISION|source-context\.manifest-sha256/);
 });
 
 test('only local Hardhat and loopback host ports are configured', () => {
@@ -178,7 +189,7 @@ test('every stateful service uses a named volume and operator commands are docum
   for (const volume of [
     'contracts-deployments', 'xnode-1-state', 'xnode-2-state', 'xnode-3-state',
     'xnode-4-state', 'xnode-5-state', 'xnode-6-state',
-    'registry-state', 'staking-state', 'storage-state', 'file-state', 'push-state', 'calls-state', 'membership-route-artifact'
+    'registry-state', 'staking-state', 'storage-state', 'file-state', 'push-state', 'calls-state', 'membership-route-artifact', 'mailbox-rehearsal-state'
   ]) assert.match(compose, new RegExp(`^  ${volume}:$`, 'm'));
   assert.match(docs, /survival-dev\.ps1 -Action Up/);
   assert.match(docs, /docker compose -f docker-compose\.survival\.dev\.yml ps/);
@@ -416,7 +427,7 @@ test('future DEV consumer contract rejects TOFU, pin mismatch, remote roots, and
 
 test('daily launcher always uses the fixed project without release-gate ceremony', () => {
   assert.match(launcher, /'deep-survival-dev'/);
-  assert.match(launcher, /ValidateSet\('Up','Down','Status','Logs','Build','Restart'\)/);
+  assert.match(launcher, /ValidateSet\('Prepare','Up','Down','Status','Logs','Build','Restart'\)/);
   assert.match(launcher, /'compose', '-p', \$Project, '-f', \$ComposePath/);
   assert.match(launcher, /\[string\]\$LanHost/);
   assert.match(launcher, /SURVIVAL_BIND_HOST/);
@@ -488,7 +499,7 @@ test('post-seed XNode restart cannot rerun membership one-shot dependencies or d
   assert.match(afterRestart, /Get-SurvivalVerifiedMembershipPin/);
 });
 
-test('P10C uses file-only six-node identities, bounded peer authority, and dormant client ingress', () => {
+test('P10E uses real current/next MIP1/RIP1 authority, bounded client ingress, a live driver, and pinned image provenance', () => {
   assert.doesNotMatch(compose, /Node__Ed25519PrivateKey:/);
   assert.match(compose, /Node__Ed25519PrivateKeyPath: \/run\/secrets\/xnode-ed25519\.seed/);
   assert.match(compose, /Mailbox__Enabled: "true"/);
@@ -496,8 +507,13 @@ test('P10C uses file-only six-node identities, bounded peer authority, and dorma
   assert.match(compose, /Mailbox__ReplicationFactor: "2"/);
   assert.match(compose, /Mailbox__WriteQuorum: "2"/);
   assert.match(compose, /Mailbox__AllowInsecureHttpPeerTransport: "true"/);
-  assert.match(compose, /MailboxClient__Enabled: "false"/);
   assert.match(compose, /SURVIVAL_MAILBOX_AUTHORITY_ENV/);
+  assert.match(serviceBlock('xnode-1'), /SURVIVAL_MAILBOX_CLIENT_AUTHORITY_ENV/);
+  assert.match(serviceBlock('xnode-1'), /Node__PublicHost: \$\{SURVIVAL_BIND_HOST:-127\.0\.0\.1\}/);
+  assert.match(serviceBlock('xnode-1'), /Node__PublicPort: "41801"/);
+  for (const index of [2, 3, 4, 5, 6]) {
+    assert.doesNotMatch(serviceBlock(`xnode-${index}`), /SURVIVAL_MAILBOX_CLIENT_AUTHORITY_ENV/);
+  }
   assert.doesNotMatch(compose, /:4180[1-6]:8081/);
   for (const index of [1, 2, 3, 4, 5, 6]) {
     assert.match(serviceBlock(`xnode-${index}`), new RegExp(`Node__PublicPeerRpcEndpoint: http:\\/\\/xnode-${index}:8081`));
@@ -505,19 +521,88 @@ test('P10C uses file-only six-node identities, bounded peer authority, and dorma
     assert.match(serviceBlock(`xnode-${index}`), /target: xnode-ed25519\.seed/);
     assert.match(compose, new RegExp(`xnode-${index}-ed25519: \\{ file: \\.\\/.secrets\\/survival-dev\\/xnode-${index}-ed25519\\.seed \\}`));
   }
-  assert.match(launcher, /\$SurvivalXNodeCommit = '37a8412653daac89dda967ae8bd81ab29cf8aa93'/);
+  assert.match(launcher, /\$SurvivalXNodeCommit = '132fae59ec834e2986703103ccc233a8d51352ea'/);
   assert.match(launcher, /Prepare-SurvivalXNodeIdentitySecrets/);
   assert.match(launcher, /Prepare-SurvivalMailboxPeerAuthority/);
-  assert.match(launcher, /MailboxPeerAuthority__PlacementSelections/);
-  assert.match(launcher, /\$selection -ne 15/);
+  assert.match(launcher, /mailbox-client-xnode-1\.env/);
+  assert.match(launcher, /'Prepare' \{/);
+  assert.match(launcher, /survival-mailbox-driver\\SurvivalMailboxDriver\.csproj/);
+  assert.doesNotMatch(launcher, /deep-survival-dev-p10c-mip1-rip1-v1/);
+  assert.match(compose, /profiles: \[mailbox-rehearsal\]/);
+  assert.match(serviceBlock('mailbox-driver'), /networks: \[runtime\]|<<: \*service/);
+  assert.match(serviceBlock('mailbox-driver'), /mailbox-rehearsal-state:\/state/);
+  assert.match(serviceBlock('mailbox-driver'), /SURVIVAL_MAILBOX_PUBLIC_AUTHORITY[\s\S]*?:\/run\/survival\/mailbox-peer-authority\.public\.json:ro/);
+  assert.match(serviceBlock('mailbox-driver'), /source: xnode-1-ed25519/);
+  assert.doesNotMatch(serviceBlock('mailbox-driver'), /source: xnode-[2-6]-ed25519/);
+  assert.match(serviceBlock('mailbox-driver-state-init'), /network_mode: none/);
+  assert.match(compose, /XNODE_REVISION: 132fae59ec834e2986703103ccc233a8d51352ea/);
+  assert.match(compose, /XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: [0-9a-f]{64}/);
+  assert.match(compose, /org\.opencontainers\.image\.revision/);
+  assert.match(compose, /com\.xpoint\.source-context\.manifest-sha256/);
+  assert.match(compose, /sha256sum -c -/);
+  assert.match(launcher, /\$SurvivalXNodeContextManifestSha256 = '[0-9a-f]{64}'/);
+  const revisions = [
+    ...compose.matchAll(/XNODE_REVISION: ([0-9a-f]{40})/g),
+    ...launcher.matchAll(/\$SurvivalXNodeCommit = '([0-9a-f]{40})'/g),
+    ...mailboxIntegration.matchAll(/\$expectedCommit = '([0-9a-f]{40})'/g),
+    ...docs.matchAll(/`([0-9a-f]{40})`/g)
+  ].map(match => match[1]);
+  const manifests = [
+    ...compose.matchAll(/XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: ([0-9a-f]{64})/g),
+    ...launcher.matchAll(/\$SurvivalXNodeContextManifestSha256 = '([0-9a-f]{64})'/g),
+    ...mailboxIntegration.matchAll(/\$expectedManifest = '([0-9a-f]{64})'/g),
+    ...docs.matchAll(/`([0-9a-f]{64})`/g)
+  ].map(match => match[1]);
+  assert.equal(new Set(revisions).size, 1);
+  assert.equal(new Set(manifests).size, 1);
   assert.match(contextExport, /assertExactCleanGitSource/);
+  assert.match(contextExport, /\.survival-source-manifest\.json/);
+  assert.match(contextExport, /SourceContextManifestSha256=/);
   assert.match(contextExport, /status', '--porcelain=v1', '--untracked-files=all'/);
   assert.match(contextExport, /source is not the required clean pinned revision/);
   assert.match(mailboxIntegration, /ReplicatedMailboxTests/);
   assert.match(mailboxIntegration, /ReplicatedMailboxIntegrationTests/);
-  assert.match(mailboxIntegration, /2-of-2/);
-  assert.match(mailboxIntegration, /dormant-unmapped/);
-  assert.match(mailboxIntegration, /oneNodeLoss/);
+  assert.match(mailboxIntegration, /DurableMailboxCapabilityReplayJournalTests/);
+  assert.match(mailboxIntegration, /MailboxClientActivatedEndToEndTests/);
+  assert.match(mailboxIntegration, /mailbox-driver/);
+  assert.match(mailboxIntegration, /MQR3|mqr3/);
+  assert.match(mailboxIntegration, /selected-peer-loss/);
+  assert.match(mailboxIntegration, /client-lifecycle/);
+  assert.match(mailboxIntegration, /client-loss/);
+  assert.match(mailboxIntegration, /client-retry-loss/);
+  assert.match(mailboxIntegration, /retention-gc/);
+  assert.match(mailboxDriver, /MembershipRouteDescriptorCodec\.ComputeRoot/);
+  assert.match(mailboxDriver, /MembershipRouteDescriptorCodec\.BuildProofs/);
+  assert.match(mailboxDriver, /MailboxPeerWireV2Codec\.Encode/);
+  assert.match(mailboxDriver, /MailboxReceiptV2Codec|MRR2/);
+  assert.match(mailboxDriver, /MailboxReplicationCoordinator/);
+  assert.match(mailboxDriver, /PartialFailure/);
+  assert.match(mailboxDriver, /CryptographicOperations\.FixedTimeEquals/);
+  assert.match(mailboxDriver, /The only mounted sender seed does not match xnode-1/);
+  assert.match(mailboxDriver, /restricted to the xnode-1 sender identity/);
+  assert.match(mailboxDriver, /schemaVersion = 2/);
+  assert.match(mailboxDriver, /P10E\/MCP2\/MAU2\/MIP1\/RIP1\/PRQ2/);
+  assert.match(mailboxDriver, /MailboxClient__Enabled=false/);
+  assert.match(mailboxDriver, /MailboxClient__Enabled=true/);
+  assert.match(mailboxDriver, /MailboxClientAdapter__Enabled=true/);
+  assert.match(mailboxDriver, /CurrentLocalMembershipProof/);
+  assert.match(mailboxDriver, /NextLocalMembershipProof/);
+  assert.match(mailboxDriver, /MailboxAuthenticatedRequestTranscript\.ForStore/);
+  assert.match(mailboxDriver, /MailboxAuthenticatedRequestTranscript\.ForRetrieve/);
+  assert.match(mailboxDriver, /MailboxAuthenticatedRequestTranscript\.ForAck/);
+  assert.match(mailboxDriver, /MailboxAuthenticatedCapabilityCodec\.EncodePresentation/);
+  assert.match(mailboxDriver, /MailboxClientCodec\.EncodeStore/);
+  assert.match(mailboxDriver, /MailboxClientCodec\.EncodeRetrieve/);
+  assert.match(mailboxDriver, /MailboxClientCodec\.EncodeAck/);
+  assert.match(mailboxDriver, /requireNonLoopbackCoordinator/);
+  assert.match(mailboxDriver, /now \+ 1800 > currentAuthority\.ExpiresAtUnixSeconds/);
+  assert.match(mailboxDriver, /boundedEpochWindows = true/);
+  assert.match(mailboxDriver, /RetentionAfterValidity = TimeSpan\.FromDays\(7\)|var retention = TimeSpan\.FromDays\(7\)/);
+  assert.match(mailboxDriver, /journal\.CollectExpired\(retainUntil \+ 1\)/);
+  assert.match(mailboxDriver, /capacityRecovered = true/);
+  assert.doesNotMatch(mailboxDriver, /2_145_000_000|2_145_916_800/);
+  assert.match(mailboxIntegration, /BindHost = '192\.168\.1\.44'/);
+  assert.match(mailboxIntegration, /--require-non-loopback-coordinator/);
 });
 
 test('development identities remain exact strings and Up proves host HTTP reachability', () => {
@@ -527,7 +612,8 @@ test('development identities remain exact strings and Up proves host HTTP reacha
   assert.match(compose, /SURVIVAL_CONTRACTS_BUILD_CONTEXT/);
   assert.doesNotMatch(compose, /additional_contexts:[\s\S]*?SURVIVAL_(?:XNODE|REGISTRY|STAKING|CONTRACTS)_PATH/);
   assert.match(compose, /health\/live/);
-  assert.match(compose, /^x-xnode:[\s\S]*?GET \/health\/live HTTP\/1\.1[\s\S]*?^x-compat-build:/m);
+  assert.match(compose, /^x-xnode:[\s\S]*?GET \/health\/ready HTTP\/1\.1[\s\S]*?^x-mailbox-driver-build:/m);
+  assert.doesNotMatch(compose.match(/^x-xnode:[\s\S]*?^x-mailbox-driver-build:/m)?.[0] ?? '', /GET \/health\/live/);
   assert.match(serviceBlock('registry'), /GET \/health\/live HTTP\/1\.1/);
   assert.doesNotMatch(serviceBlock('xnode-1'), /test -r \/proc\/1\/status/);
   assert.doesNotMatch(serviceBlock('registry'), /test -r \/proc\/1\/status/);

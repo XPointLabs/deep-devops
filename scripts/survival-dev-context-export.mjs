@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   copyFileSync,
   existsSync,
@@ -8,7 +9,8 @@ import {
   readFileSync,
   realpathSync,
   renameSync,
-  rmSync
+  rmSync,
+  writeFileSync
 } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -242,18 +244,35 @@ export function exportDevelopmentContext({ kind, source, destination, ownedRoot,
   if (prohibited !== 0) fail(`prohibited source entries detected (${prohibited})`);
 
   const stage = mkdtempSync(join(fullOwnedRoot, `.${basename(fullDestination)}-`));
+  let manifestSha256 = '';
   try {
-    for (const entry of selected) {
+    const files = [];
+    for (const entry of [...selected].sort()) {
+      const sourcePath = join(fullSource, ...entry.split('/'));
+      const bytes = readFileSync(sourcePath);
       const target = join(stage, ...entry.split('/'));
       mkdirSync(dirname(target), { recursive: true });
-      copyFileSync(join(fullSource, ...entry.split('/')), target);
+      copyFileSync(sourcePath, target);
+      files.push({
+        path: entry,
+        bytes: bytes.length,
+        sha256: createHash('sha256').update(bytes).digest('hex')
+      });
     }
+    const manifest = `${JSON.stringify({
+      schemaVersion: 1,
+      kind,
+      sourceCommit: expectedCommit ?? null,
+      files
+    }, null, 2)}\n`;
+    writeFileSync(join(stage, '.survival-source-manifest.json'), manifest, { encoding: 'utf8' });
+    manifestSha256 = createHash('sha256').update(manifest, 'utf8').digest('hex');
     replaceDirectory(stage, fullDestination);
   } catch {
     rmSync(stage, { recursive: true, force: true });
     fail('context materialization failed');
   }
-  return { kind, fileCount: selected.length, expectedCommit };
+  return { kind, fileCount: selected.length, expectedCommit, manifestSha256 };
 }
 
 function main() {
@@ -261,6 +280,7 @@ function main() {
   if (!ownedRoot) fail('kind, source, destination and owned root are required');
   const result = exportDevelopmentContext({ kind, source, destination, ownedRoot, expectedCommit });
   process.stdout.write(`Prepared filtered ${result.kind} build context (${result.fileCount} files).\n`);
+  process.stdout.write(`SourceContextManifestSha256=${result.manifestSha256}\n`);
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {

@@ -28,3 +28,6 @@
 !tools/membership-fixture/NuGet.Config
 !tools/membership-fixture/Program.cs
 !tools/membership-fixture/packages.lock.json
+!tools/survival-mailbox-driver/
+!tools/survival-mailbox-driver/SurvivalMailboxDriver.csproj
+!tools/survival-mailbox-driver/Program.cs

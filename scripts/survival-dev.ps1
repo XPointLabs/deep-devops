@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)]
-    [ValidateSet('Up','Down','Status','Logs','Build','Restart')]
+    [ValidateSet('Prepare','Up','Down','Status','Logs','Build','Restart')]
     [string]$Action,
     [string[]]$Service = @(),
     [string]$LanHost,
@@ -17,7 +17,8 @@ $ComposePath = Join-Path $Root 'docker-compose.survival.dev.yml'
 $Project = 'deep-survival-dev'
 $baseArguments = @('compose', '-p', $Project, '-f', $ComposePath)
 $ContextRoot = Join-Path $Root 'artifacts\survival-dev\build-contexts'
-$SurvivalXNodeCommit = '37a8412653daac89dda967ae8bd81ab29cf8aa93'
+$SurvivalXNodeCommit = '132fae59ec834e2986703103ccc233a8d51352ea'
+$SurvivalXNodeContextManifestSha256 = 'd32fa4d17ee9cd4d2c4ddec5167feed30d710113680db5342795ec2df93a5b38'
 $ChainLifecycleServices = @(
     'contracts-devnet',
     'contracts-deploy',
@@ -46,8 +47,17 @@ function Export-SurvivalContext([string]$Kind,[string]$Source,[string]$Name,[str
     $destination = Join-Path $ContextRoot $Name
     $arguments = @((Join-Path $PSScriptRoot 'survival-dev-context-export.mjs'), $Kind, $Source, $destination, $ContextRoot)
     if (-not [string]::IsNullOrWhiteSpace($ExpectedCommit)) { $arguments += $ExpectedCommit }
-    & node @arguments
+    $output = @(& node @arguments)
     if ($LASTEXITCODE -ne 0) { throw "Survival $Name build context export failed." }
+    $output | Write-Output
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedCommit)) {
+        $pins = @($output | Where-Object { $_ -match '^SourceContextManifestSha256=([0-9a-f]{64})$' })
+        $manifestHash = if ($pins.Count -eq 1 -and $pins[0] -match '^SourceContextManifestSha256=([0-9a-f]{64})$') { $Matches[1] } else { '' }
+        if ($manifestHash -ne $SurvivalXNodeContextManifestSha256) {
+            throw 'Pinned XNode filtered source-context manifest hash mismatch.'
+        }
+        $env:SURVIVAL_XNODE_CONTEXT_MANIFEST_SHA256 = $manifestHash
+    }
     Set-Item -Path "Env:$EnvironmentName" -Value $destination
 }
 
@@ -91,46 +101,30 @@ function Prepare-SurvivalBuildContexts([switch]$IncludeChain) {
 }
 
 function Prepare-SurvivalMailboxPeerAuthority() {
-    # DEV-LOCAL-ONLY deterministic peer authority. This is not an issuer, client
-    # placement authority, or public ingress fixture. It only admits the exact
-    # six local peer identities and 15 unordered 2-of-2 replica pairs.
+    # Generate the real MIP1 Merkle commitment, canonical RIP1 proofs and exact
+    # 15-pair placement allowlist through the pinned XNode/Deep.Protocol code.
     $outputDirectory = Join-Path $Root 'artifacts\survival-dev'
     [void][IO.Directory]::CreateDirectory($outputDirectory)
-    $ids = @(
-        '4cb5abf6ad79fbf5abbccafcc269d85cd2651ed4b885b5869f241aedf0a5ba29',
-        '7422b9887598068e32c4448a949adb290d0f4e35b9e01b0ee5f1a1e600fe2674',
-        'f381626e41e7027ea431bfe3009e94bdd25a746beec468948d6c3c7c5dc9a54b',
-        'fd50b8e3b144ea244fbf7737f550bc8dd0c2650bbc1aada833ca17ff8dbf329b',
-        'fde4fba030ad002f7c2f7d4c331f49d13fb0ec747eceebec634f1ff4cbca9def',
-        'b4c92afb3ba57f3ab959ffe6d319c98484a2155a0f4c65b2c37011ffd197b075'
-    )
-    $sha256 = [Security.Cryptography.SHA256]::Create()
-    try {
-        $membership = $sha256.ComputeHash([Text.Encoding]::UTF8.GetBytes(('deep-survival-dev-p10c-mip1-rip1-v1|' + ($ids -join '|'))))
-    $lines = [Collections.Generic.List[string]]::new()
-    $lines.Add('MailboxPeerAuthority__CurrentEpoch=1')
-    $lines.Add(('MailboxPeerAuthority__CurrentMembershipCommitment=' + [BitConverter]::ToString($membership).Replace('-', '').ToLowerInvariant()))
-    $lines.Add('MailboxPeerAuthority__CurrentEpochExpiresAtUnixSeconds=2145916800')
-    $selection = 0
-    for ($first = 0; $first -lt $ids.Count; $first++) {
-        for ($second = $first + 1; $second -lt $ids.Count; $second++) {
-            $pair = "$($ids[$first])|$($ids[$second])"
-            $placement = $sha256.ComputeHash([Text.Encoding]::UTF8.GetBytes(('deep-survival-dev-p10c-placement-v1|' + $pair)))
-            $prefix = "MailboxPeerAuthority__PlacementSelections__$selection"
-            $lines.Add("${prefix}__Epoch=1")
-            $lines.Add("${prefix}__PlacementCommitment=$([BitConverter]::ToString($placement).Replace('-', '').ToLowerInvariant())")
-            $lines.Add("${prefix}__FirstRouterId=$($ids[$first])")
-            $lines.Add("${prefix}__SecondRouterId=$($ids[$second])")
-            $selection++
-        }
-    }
-    if ($selection -ne 15) { throw 'DEV-LOCAL-ONLY mailbox authority must contain exactly fifteen pairs.' }
+    $xnodeSource = Resolve-SurvivalSource 'SURVIVAL_XNODE_PATH' '..\xnode'
     $authorityPath = Join-Path $outputDirectory 'mailbox-peer-authority.env'
-    [IO.File]::WriteAllText($authorityPath, (($lines -join "`n") + "`n"), [Text.UTF8Encoding]::new($false))
+    $clientAuthorityPath = Join-Path $outputDirectory 'mailbox-client-xnode-1.env'
+    $publicPath = Join-Path $outputDirectory 'mailbox-peer-authority.public.json'
+    $coordinatorHost = [Environment]::GetEnvironmentVariable('SURVIVAL_BIND_HOST')
+    if ([string]::IsNullOrWhiteSpace($coordinatorHost)) { $coordinatorHost = '127.0.0.1' }
+    & dotnet run `
+        --project (Join-Path $Root 'tools\survival-mailbox-driver\SurvivalMailboxDriver.csproj') `
+        "-p:XNodeSource=$xnodeSource" `
+        -- `
+        authority `
+        --secrets-dir (Join-Path $Root '.secrets\survival-dev') `
+        --output-env $authorityPath `
+        --output-client-env $clientAuthorityPath `
+        --coordinator-url "http://$coordinatorHost`:41801" `
+        --output-public $publicPath
+    if ($LASTEXITCODE -ne 0) { throw 'Real DEV-LOCAL-ONLY mailbox peer authority generation failed.' }
     Set-Item -Path 'Env:SURVIVAL_MAILBOX_AUTHORITY_ENV' -Value $authorityPath
-    } finally {
-        $sha256.Dispose()
-    }
+    Set-Item -Path 'Env:SURVIVAL_MAILBOX_CLIENT_AUTHORITY_ENV' -Value $clientAuthorityPath
+    Set-Item -Path 'Env:SURVIVAL_MAILBOX_PUBLIC_AUTHORITY' -Value $publicPath
 }
 
 function Prepare-SurvivalXNodeIdentitySecrets() {
@@ -144,6 +138,15 @@ function Prepare-SurvivalXNodeIdentitySecrets() {
         } else {
             [IO.File]::WriteAllText($path, $seed + "`n", [Text.UTF8Encoding]::new($false))
         }
+    }
+    $issuerPath = Join-Path $directory 'mailbox-client-issuer.seed'
+    $issuerSeed = ('{0:x64}' -f 1001)
+    if (Test-Path -LiteralPath $issuerPath -PathType Leaf) {
+        if (([IO.File]::ReadAllText($issuerPath).Trim()) -ne $issuerSeed) {
+            throw 'Existing DEV-LOCAL-ONLY mailbox issuer secret does not match the pinned fixture identity.'
+        }
+    } else {
+        [IO.File]::WriteAllText($issuerPath, $issuerSeed + "`n", [Text.UTF8Encoding]::new($false))
     }
 }
 
@@ -335,6 +338,16 @@ function Write-ClientEnvironment(
 }
 
 switch ($Action) {
+    'Prepare' {
+        if ($Chain -or $Service.Count -gt 0 -or $Reset) {
+            throw 'Prepare does not accept -Chain, -Service, or -Reset.'
+        }
+        $advertisedHost = if ([string]::IsNullOrWhiteSpace($LanHost)) { '127.0.0.1' } else { $LanHost }
+        $env:SURVIVAL_BIND_HOST = $advertisedHost
+        Prepare-SurvivalBuildContexts
+        Prepare-SurvivalXNodeIdentitySecrets
+        Prepare-SurvivalMailboxPeerAuthority
+    }
     'Up' {
         if ($Chain -and $Service.Count -gt 0) {
             throw 'Up -Chain always recreates the complete chain lifecycle; do not combine it with -Service.'
@@ -378,7 +391,9 @@ switch ($Action) {
         Prepare-SurvivalBuildContexts -IncludeChain:$includeChainContexts
         Prepare-SurvivalXNodeIdentitySecrets
         Prepare-SurvivalMailboxPeerAuthority
-        Invoke-SurvivalDocker ($baseArguments + @('build') + $Service)
+        $arguments = @($baseArguments)
+        if ($Service -contains 'mailbox-driver') { $arguments += @('--profile', 'mailbox-rehearsal') }
+        Invoke-SurvivalDocker ($arguments + @('build') + $Service)
     }
     'Restart' {
         if ($Service.Count -eq 0) { throw 'Restart requires at least one -Service.' }

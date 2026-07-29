@@ -27,14 +27,23 @@ x-xnode-build: &xnode-build
   args:
     SDK_IMAGE: ${SURVIVAL_DOTNET_SDK_IMAGE:-mcr.microsoft.com/dotnet/sdk@sha256:7e964ea8bc6c1e18ea9fbc76ed403da41c9b19aeee2aab6bf9c845f25e891380}
     RUNTIME_IMAGE: ${SURVIVAL_DOTNET_RUNTIME_IMAGE:-mcr.microsoft.com/dotnet/aspnet@sha256:e3736b0d423db99c6988e1ddf5ea725c14b12579bb120024e5ff7ff204a14080}
+    XNODE_REVISION: 132fae59ec834e2986703103ccc233a8d51352ea
+    XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: d32fa4d17ee9cd4d2c4ddec5167feed30d710113680db5342795ec2df93a5b38
   dockerfile_inline: |
     ARG SDK_IMAGE
     ARG RUNTIME_IMAGE
     FROM $${SDK_IMAGE} AS build
+    ARG XNODE_REVISION
+    ARG XNODE_SOURCE_CONTEXT_MANIFEST_SHA256
     WORKDIR /src
     COPY --from=xnode_source . .
+    RUN printf '%s  %s\n' "$${XNODE_SOURCE_CONTEXT_MANIFEST_SHA256}" .survival-source-manifest.json | sha256sum -c -
     RUN dotnet publish src/XNode/XNode.csproj -c Debug -o /out --runtime linux-arm64 --self-contained false -p:UseAppHost=false
     FROM $${RUNTIME_IMAGE}
+    ARG XNODE_REVISION
+    ARG XNODE_SOURCE_CONTEXT_MANIFEST_SHA256
+    LABEL org.opencontainers.image.revision=$${XNODE_REVISION} \
+          com.xpoint.source-context.manifest-sha256=$${XNODE_SOURCE_CONTEXT_MANIFEST_SHA256}
     WORKDIR /app
     COPY --from=build /out .
     RUN mkdir /state && chown 65532:65532 /state
@@ -67,8 +76,9 @@ x-xnode: &xnode
     Vless__Enabled: "false"
     MembershipArtifact__ArtifactPath: /run/deep-membership/membership-route-catalog.json
     MembershipArtifact__MaximumBytes: "2097152"
-    # P10C is peer-only. The peer listener remains Docker-network-only on 8081;
-    # public client mailbox routes remain deliberately unmapped by XNode.
+    # The peer listener remains Docker-network-only on 8081. The generated common
+    # authority env keeps client ingress dormant except on xnode-1, whose second
+    # env file enables the bounded DEV-LOCAL-ONLY P10E client fixture.
     Mailbox__Enabled: "true"
     Mailbox__DirectoryName: mailbox-p10c
     Mailbox__PeerReplayDirectoryName: mailbox-peer-replay-p10c
@@ -77,10 +87,39 @@ x-xnode: &xnode
     Mailbox__WriteQuorum: "2"
     Mailbox__PeerTimeout: "00:00:15"
     Mailbox__AllowInsecureHttpPeerTransport: "true"
-    MailboxClient__Enabled: "false"
   healthcheck:
     <<: *health
-    test: [CMD, bash, -c, 'exec 3<>/dev/tcp/127.0.0.1/8080; printf "GET /health/live HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3; read -r status <&3; case "$$status" in *" 200 "*) exit 0;; *) exit 1;; esac']
+    test: [CMD, bash, -c, 'exec 3<>/dev/tcp/127.0.0.1/8080; printf "GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3; read -r status <&3; case "$$status" in *" 200 "*) exit 0;; *) exit 1;; esac']
+
+x-mailbox-driver-build: &mailbox-driver-build
+  context: .
+  pull: false
+  additional_contexts:
+    xnode_source: ${SURVIVAL_XNODE_BUILD_CONTEXT:-./artifacts/survival-dev/build-contexts/xnode}
+  args:
+    SDK_IMAGE: ${SURVIVAL_DOTNET_SDK_IMAGE:-mcr.microsoft.com/dotnet/sdk@sha256:7e964ea8bc6c1e18ea9fbc76ed403da41c9b19aeee2aab6bf9c845f25e891380}
+    RUNTIME_IMAGE: ${SURVIVAL_DOTNET_RUNTIME_IMAGE:-mcr.microsoft.com/dotnet/aspnet@sha256:e3736b0d423db99c6988e1ddf5ea725c14b12579bb120024e5ff7ff204a14080}
+    XNODE_REVISION: 132fae59ec834e2986703103ccc233a8d51352ea
+    XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: d32fa4d17ee9cd4d2c4ddec5167feed30d710113680db5342795ec2df93a5b38
+  dockerfile_inline: |
+    ARG SDK_IMAGE
+    ARG RUNTIME_IMAGE
+    FROM $${SDK_IMAGE} AS build
+    ARG XNODE_SOURCE_CONTEXT_MANIFEST_SHA256
+    WORKDIR /work
+    COPY --from=xnode_source . /src
+    COPY tools/survival-mailbox-driver ./driver
+    RUN printf '%s  %s\n' "$${XNODE_SOURCE_CONTEXT_MANIFEST_SHA256}" /src/.survival-source-manifest.json | sha256sum -c -
+    RUN dotnet publish driver/SurvivalMailboxDriver.csproj -c Release -o /out --runtime linux-arm64 --self-contained false -p:UseAppHost=false -p:XNodeSource=/src
+    FROM $${RUNTIME_IMAGE}
+    ARG XNODE_REVISION
+    ARG XNODE_SOURCE_CONTEXT_MANIFEST_SHA256
+    LABEL org.opencontainers.image.revision=$${XNODE_REVISION} \
+          com.xpoint.source-context.manifest-sha256=$${XNODE_SOURCE_CONTEXT_MANIFEST_SHA256}
+    WORKDIR /app
+    COPY --from=build /out .
+    USER 65532:65532
+    ENTRYPOINT ["dotnet","SurvivalMailboxDriver.dll"]
 
 x-membership-fixture-build: &membership-fixture-build
   context: .
@@ -123,6 +162,35 @@ x-compat-build: &compat-build
     USER node
 
 services:
+  mailbox-driver-state-init:
+    profiles: [mailbox-rehearsal]
+    image: ${SURVIVAL_DOTNET_RUNTIME_IMAGE:-mcr.microsoft.com/dotnet/aspnet@sha256:e3736b0d423db99c6988e1ddf5ea725c14b12579bb120024e5ff7ff204a14080}
+    user: "0:0"
+    restart: "no"
+    cap_drop: [ALL]
+    cap_add: [CHOWN]
+    security_opt: [no-new-privileges:true]
+    network_mode: none
+    read_only: true
+    volumes: [mailbox-rehearsal-state:/state]
+    command: [sh, -ec, "mkdir -p /state/driver && chown 65532:65532 /state/driver"]
+
+  mailbox-driver:
+    <<: *service
+    profiles: [mailbox-rehearsal]
+    restart: "no"
+    image: deep-survival/mailbox-driver:dev
+    build: *mailbox-driver-build
+    volumes:
+      - mailbox-rehearsal-state:/state
+      - ${SURVIVAL_MAILBOX_PUBLIC_AUTHORITY:-./artifacts/survival-dev/mailbox-peer-authority.public.json}:/run/survival/mailbox-peer-authority.public.json:ro
+    secrets:
+      - { source: xnode-1-ed25519, target: xnode-1-ed25519.seed }
+      - { source: mailbox-client-issuer, target: mailbox-client-issuer.seed }
+    depends_on:
+      mailbox-driver-state-init: { condition: service_completed_successfully }
+    command: [reset]
+
   membership-artifact-owner-init:
     image: ${SURVIVAL_NODE_IMAGE:-node@sha256:242549cd46785b480c832479a730f4f2a20865d61ea2e404fdb2a5c3d3b73ecf}
     user: "0:0"
@@ -283,9 +351,13 @@ services:
   xnode-1:
     <<: *xnode
     build: *xnode-build
+    env_file:
+      - ${SURVIVAL_MAILBOX_AUTHORITY_ENV:-./artifacts/survival-dev/mailbox-peer-authority.env}
+      - ${SURVIVAL_MAILBOX_CLIENT_AUTHORITY_ENV:-./artifacts/survival-dev/mailbox-client-xnode-1.env}
     environment:
       <<: *xnode-environment
-      Node__PublicHost: xnode-1
+      Node__PublicHost: ${SURVIVAL_BIND_HOST:-127.0.0.1}
+      Node__PublicPort: "41801"
       Node__PublicPeerRpcEndpoint: http://xnode-1:8081
       Node__RouterId: 4cb5abf6ad79fbf5abbccafcc269d85cd2651ed4b885b5869f241aedf0a5ba29
       Node__Ed25519PrivateKeyPath: /run/secrets/xnode-ed25519.seed
@@ -530,6 +602,7 @@ volumes:
   push-state:
   calls-state:
   relay-bootstrap-state:
+  mailbox-rehearsal-state:
 
 secrets:
   xnode-1-ed25519: { file: ./.secrets/survival-dev/xnode-1-ed25519.seed }
@@ -538,3 +611,4 @@ secrets:
   xnode-4-ed25519: { file: ./.secrets/survival-dev/xnode-4-ed25519.seed }
   xnode-5-ed25519: { file: ./.secrets/survival-dev/xnode-5-ed25519.seed }
   xnode-6-ed25519: { file: ./.secrets/survival-dev/xnode-6-ed25519.seed }
+  mailbox-client-issuer: { file: ./.secrets/survival-dev/mailbox-client-issuer.seed }

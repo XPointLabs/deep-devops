@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -67,6 +68,10 @@ test('exports the dotnet allowlist and only project-referenced local restore inp
     assert.equal(existsSync(path.join(destination, 'vendor', 'unrelated', 'NotRequired.1.0.0.nupkg')), false);
     assert.equal(existsSync(path.join(destination, '.env.local')), false);
     assert.equal(existsSync(path.join(destination, 'README.md')), false);
+    const firstManifest = readFileSync(path.join(destination, '.survival-source-manifest.json'), 'utf8');
+    assert.match(result.manifestSha256, /^[0-9a-f]{64}$/);
+    assert.equal(createHash('sha256').update(firstManifest).digest('hex'), result.manifestSha256);
+    assert.equal(JSON.parse(firstManifest).files.length, 5);
 
     writeFileSync(path.join(item.source, 'src', 'App', 'Program.cs'), 'class Program { static int Revision => 2; }\n');
     const repeated = exportDevelopmentContext({
@@ -76,11 +81,19 @@ test('exports the dotnet allowlist and only project-referenced local restore inp
       ownedRoot: item.owned
     });
     assert.equal(repeated.fileCount, 5);
+    assert.notEqual(repeated.manifestSha256, result.manifestSha256);
     assert.equal(
       readFileSync(path.join(destination, 'src', 'App', 'Program.cs'), 'utf8'),
       'class Program { static int Revision => 2; }\n'
     );
     assert.equal(existsSync(path.join(destination, 'vendor', 'unrelated', 'NotRequired.1.0.0.nupkg')), false);
+    const stable = exportDevelopmentContext({
+      kind: 'dotnet',
+      source: item.source,
+      destination,
+      ownedRoot: item.owned
+    });
+    assert.equal(stable.manifestSha256, repeated.manifestSha256);
   } finally {
     rmSync(item.root, { recursive: true, force: true });
   }
@@ -108,7 +121,10 @@ test('expected commit requires the exact clean source revision before export', (
     git(item.source, '-c', 'user.email=survival@example.invalid', '-c', 'user.name=Survival', 'commit', '--quiet', '-m', 'fixture');
     const expected = git(item.source, 'rev-parse', 'HEAD').trim();
     const destination = path.join(item.owned, 'xnode');
-    exportDevelopmentContext({ kind: 'dotnet', source: item.source, destination, ownedRoot: item.owned, expectedCommit: expected });
+    const result = exportDevelopmentContext({ kind: 'dotnet', source: item.source, destination, ownedRoot: item.owned, expectedCommit: expected });
+    const manifest = JSON.parse(readFileSync(path.join(destination, '.survival-source-manifest.json'), 'utf8'));
+    assert.equal(manifest.sourceCommit, expected);
+    assert.equal(createHash('sha256').update(readFileSync(path.join(destination, '.survival-source-manifest.json'))).digest('hex'), result.manifestSha256);
     writeFileSync(path.join(item.source, 'src', 'App', 'Program.cs'), 'class Dirty {}\n');
     assert.throws(
       () => exportDevelopmentContext({ kind: 'dotnet', source: item.source, destination, ownedRoot: item.owned, expectedCommit: expected }),

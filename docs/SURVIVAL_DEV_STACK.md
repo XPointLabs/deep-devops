@@ -150,44 +150,110 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/survival-dev.ps1 -Ac
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/survival-dev.ps1 -Action Restart -Service xnode-1
 ```
 
-## P10C peer mailbox rehearsal
+## P10E mailbox client and peer rehearsal
 
 The survival stack pins its filtered XNode context to accepted source
-`37a8412653daac89dda967ae8bd81ab29cf8aa93`; a dirty checkout or another revision
-fails closed before its context is exported. The six XNodes build the shared image once,
-retain their separate named `/state` volumes, and keep P10C mailbox blobs, replay journals,
+`132fae59ec834e2986703103ccc233a8d51352ea`; a dirty checkout, another revision,
+or a filtered-source manifest other than
+`d32fa4d17ee9cd4d2c4ddec5167feed30d710113680db5342795ec2df93a5b38`
+fails closed before build. The source exporter writes a deterministic
+`.survival-source-manifest.json`, and the shared XNode image carries both the exact
+revision and manifest SHA-256 as OCI labels. The live rehearsal requires all six
+containers to use the exact same labelled image ID. The six XNodes build the shared image once,
+retain their separate named `/state` volumes, and keep P10E mailbox blobs, replay journals,
 and tombstone mutations below those volumes. Their deterministic development identity seeds
 are generated only into ignored `.secrets/survival-dev` files and mounted as read-only Docker
 secrets; no private seed is in Compose, an artifact, or a client handoff.
 
-P10C's canonical Store/Tombstone listener is Docker-network-only on each node's `8081`
+P10E's canonical peer Store/Tombstone listener is Docker-network-only on each node's `8081`
 peer endpoint. It has the protocol's 15-second maximum request deadline and pre-auth
-host/global plus per-operation admission controls. The launcher writes a public,
-DEV-LOCAL-ONLY authority environment file containing one fixed membership commitment and all
-15 unordered two-node placement pairs across the six fixed router/signing identities and
-`http://xnode-N:8081` endpoints. It contains no issuer material and is not a client fixture.
+host/global plus per-operation admission controls. The launcher runs the pinned protocol
+implementation to write a public, DEV-LOCAL-ONLY authority environment file containing the
+real current/next six-leaf MIP1 Merkle commitments, canonical MIP1/RIP1 proofs, and all
+30 epoch/pair selections across the six fixed router/signing identities and
+`http://xnode-N:8081` endpoints. A second generated environment enables the bounded
+DEV-LOCAL-ONLY client fixture only on `xnode-1`: MAU2 issuer trust, E/E+1 placement and
+membership authority, and canonical MST1/MRT1/MAK1 ingress. `xnode-2` through `xnode-6`
+remain peer-only and report `dormant-unmapped`.
 
-`MailboxClient__Enabled` remains false. XNode reports the peer runtime as ready only after
-durable mailbox/replay/corruption startup checks pass, while status truthfully reports the
-client issuer, placement and ingress as dormant/reject-all. No public client mailbox path is
-mapped or published by this stack.
+The generator rounds its anchor down to the current minute and creates a genuinely
+rotating overlap: current E is valid from anchor minus five minutes through anchor plus
+one hour; E+1 is valid from anchor minus one minute through anchor plus two hours. The
+runtime loader rejects an old fixture unless at least 30 minutes remain in E. This keeps
+replay retention tied to bounded epoch validity rather than an issuer-lifetime or
+year-2038 sentinel.
 
-The focused source-contract evidence covers the canonical 2-of-2 Store/Tombstone path,
-exact replay after restart, corruption-at-startup rejection, and a one-peer-loss partial
-failure that never becomes quorum. Run it after context export:
+The deterministic issuer seed is an ignored Docker secret mounted only into the rehearsal
+driver; XNode receives only its public key. XNode reports ready only after durable
+peer, operation-ledger, and authenticated replay initialization passes. Use the no-Docker
+preparation action to export exact contexts and regenerate these ignored fixtures:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/survival-dev.ps1 -Action Prepare
+```
+
+For the physical Android rehearsal, regenerate with the advertised LAN origin
+`http://192.168.1.44:41801`:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/survival-dev.ps1 -Action Prepare -LanHost 192.168.1.44
+```
+
+The xnode-1 activation guard binds that exact public host and port, while the
+containerized driver uses `http://xnode-1:8080` only as its private transport.
+It verifies that the authority still names the LAN origin and rejects a loopback
+coordinator whenever the physical lane is selected.
+
+The focused source-contract tests remain useful regressions for Store/Tombstone,
+replay, corruption rejection, and partial failure:
 
 ```powershell
 dotnet test ..\xnode\tests\XNode.Tests\XNode.Tests.csproj --no-restore --filter FullyQualifiedName~ReplicatedMailboxTests
 dotnet test ..\xnode\tests\XNode.IntegrationTests\XNode.IntegrationTests.csproj --no-restore --filter FullyQualifiedName~ReplicatedMailboxIntegrationTests
 ```
 
-For the combined source-contract and live-runtime evidence, including the 2-of-2
-store/tombstone/restart/corruption/one-node-loss assertions and the public-listener
-reject-all check, run:
+The development-only Docker rehearsal is the live wire proof. Its driver runs inside
+the same private `runtime` network as the XNodes and uses XNode Core's real sender
+coordinator, durable journals, Sodium signatures, and exact P10E codecs. It requires:
+
+- authenticated canonical public Store/Retrieve/ACK through xnode-1, native
+  MQR3/MRP1/MAR1 responses, exact Store replay, and an empty retrieval after ACK;
+- the real durable replay journal retaining a completed E scope through epoch
+  expiry plus the fixed seven-day retention, then collecting it one logical
+  second later, recovering bounded capacity, and admitting an E+1 scope;
+- public Store with selected xnode-2 stopped to fail dependency-unavailable without
+  claiming quorum, followed by exact MST1 retry and native MQR3 after restart;
+- canonical PRQ2 Store to a selected live peer and native MRR2/MQR3 2-of-2;
+- exact MRR2 and MQR3 replay after force-recreating that peer with its named volume;
+- a stopped selected peer to produce only one durable replica, `PartialFailure`, and no MQR3;
+- retry of that exact PRQ2 after peer restart to produce native 2-of-2 MQR3;
+- canonical Tombstone plus exact replay to produce native MRR2/MQR3;
+- all six `/health/ready` checks, ready client ingress only on xnode-1,
+  dormant-unmapped ingress on xnode-2 through xnode-6, and the exact shared image
+  provenance binding.
+
+Run:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/survival-dev-mailbox.integration.test.ps1
 ```
+
+The driver has its own named sender-state volume so it does not contend with a running
+XNode's exclusive journals. At runtime it mounts only the xnode-1 sender seed, the
+DEV-LOCAL-ONLY client issuer seed, and the generated public authority fixture; it never
+receives any selected recipient's private key. The issuer seed can mint only the explicitly
+pinned development client capabilities; it cannot sign a peer receipt. The driver therefore
+cannot synthesize a recipient MRR2 or substitute a quorum: every remote
+signature must arrive in an HTTP response from the actual `xnode-N:8081` listener and pass
+XNode Core verification. The launcher reads all six ignored development seeds only in its
+host-side authority-generation step to derive the public descriptors and canonical proofs;
+no recipient seed enters the driver image, container, state, output, or evidence.
+Its ignored state may contain protocol
+wire material; the checked evidence records only statuses, byte counts, image provenance,
+and booleans. The script is bounded and restores all six XNodes to readiness in `finally`
+without deleting their named volumes. The public ingress and issuer are deterministic,
+bounded DEV-LOCAL-ONLY fixtures; this is not production authority, production durability,
+or a production-readiness claim.
 
 Rollback is volume-preserving: recreate only the six `xnode-*` services from the previous
 local image or restore the prior clean DevOps commit, then verify `/health/ready` and
