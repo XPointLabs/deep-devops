@@ -103,8 +103,10 @@ function Assert-Runtime() {
 
 function Get-ImageBinding() {
     $imageId = (& docker image inspect deep-survival/xnode:dev --format '{{.Id}}').Trim()
-    $revision = (& docker image inspect deep-survival/xnode:dev --format '{{index .Config.Labels "org.opencontainers.image.revision"}}').Trim()
-    $manifest = (& docker image inspect deep-survival/xnode:dev --format '{{index .Config.Labels "com.xpoint.source-context.manifest-sha256"}}').Trim()
+    # Windows PowerShell removes the quotes required by Go's index expression
+    # before invoking a native executable. Preserve them for docker.exe.
+    $revision = (& docker image inspect deep-survival/xnode:dev --format '{{index .Config.Labels \"org.opencontainers.image.revision\"}}').Trim()
+    $manifest = (& docker image inspect deep-survival/xnode:dev --format '{{index .Config.Labels \"com.xpoint.source-context.manifest-sha256\"}}').Trim()
     if ($LASTEXITCODE -ne 0 -or $revision -ne $expectedCommit -or $manifest -ne $expectedManifest -or $imageId -notmatch '^sha256:[0-9a-f]{64}$') {
         throw 'The live XNode image is not bound to the exact accepted source revision and context manifest.'
     }
@@ -213,7 +215,5 @@ try {
 finally {
     # Restore the selected peer and converge all XNodes to healthy without
     # deleting or recreating any named state volume.
-    & docker @base start xnode-2 xnode-3 2>$null | Out-Null
-    $restoreArguments = $base + @('up', '-d', '--no-deps', '--wait', '--wait-timeout', '180') + $nodes
-    & docker @restoreArguments 2>$null | Out-Null
+    Invoke-Docker (@('up', '-d', '--no-deps', '--wait', '--wait-timeout', '180') + $nodes)
 }
