@@ -8,6 +8,24 @@ using XNode.Core.Mailbox;
 using XNode.Core.Mailbox.Client;
 
 var arguments = Arguments.Parse(args);
+if (arguments.Command == "provision")
+{
+    var provisioned = MailboxGrantProvisioner.Provision(arguments);
+    Result("provision", new
+    {
+        schemaVersion = 1,
+        developmentOnly = true,
+        bundles = provisioned.BundleNames,
+        outputHashes = provisioned.OutputHashes
+    });
+    return;
+}
+if (arguments.Command == "verify-provision")
+{
+    MailboxGrantProvisioner.Verify(arguments);
+    Result("verify-provision", new { schemaVersion = 1, verified = true });
+    return;
+}
 var fixture = arguments.Command == "authority"
     ? Fixture.CreateAuthority(Enumerable.Range(1, 6)
         .Select(index => File.ReadAllText(
@@ -1587,7 +1605,17 @@ sealed record Arguments(
     string? RunId,
     string? OutputEnvironment,
     string? OutputClientEnvironment,
-    string? OutputPublic)
+    string? OutputPublic,
+    string? AndroidHolderPublicKey,
+    string? WindowsHolderPublicKey,
+    string? IssuerSeedPath,
+    string? OutputDirectory,
+    string? MailboxSecretDirectory,
+    bool DevelopmentOnly,
+    bool AllowHttp,
+    bool PhysicalDev,
+    string? AndroidBundle,
+    string? WindowsBundle)
 {
     public static Arguments Parse(string[] values)
     {
@@ -1615,6 +1643,16 @@ sealed record Arguments(
             Optional("--run-id"),
             Optional("--output-env"),
             Optional("--output-client-env"),
-            Optional("--output-public"));
+            Optional("--output-public"),
+            Optional("--android-holder-public-key"),
+            Optional("--windows-holder-public-key"),
+            Optional("--issuer-seed-path"),
+            Optional("--output-directory"),
+            Optional("--mailbox-secret-directory"),
+            values.Contains("--development-only", StringComparer.Ordinal),
+            values.Contains("--allow-http", StringComparer.Ordinal),
+            values.Contains("--physical-dev", StringComparer.Ordinal),
+            Optional("--android-bundle"),
+            Optional("--windows-bundle"));
     }
 }
