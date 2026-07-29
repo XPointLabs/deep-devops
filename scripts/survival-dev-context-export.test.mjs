@@ -100,3 +100,21 @@ test('fails closed on selected secret-like paths without disclosing their names'
     rmSync(item.root, { recursive: true, force: true });
   }
 });
+
+test('expected commit requires the exact clean source revision before export', () => {
+  const item = fixture();
+  try {
+    git(item.source, 'add', '.');
+    git(item.source, '-c', 'user.email=survival@example.invalid', '-c', 'user.name=Survival', 'commit', '--quiet', '-m', 'fixture');
+    const expected = git(item.source, 'rev-parse', 'HEAD').trim();
+    const destination = path.join(item.owned, 'xnode');
+    exportDevelopmentContext({ kind: 'dotnet', source: item.source, destination, ownedRoot: item.owned, expectedCommit: expected });
+    writeFileSync(path.join(item.source, 'src', 'App', 'Program.cs'), 'class Dirty {}\n');
+    assert.throws(
+      () => exportDevelopmentContext({ kind: 'dotnet', source: item.source, destination, ownedRoot: item.owned, expectedCommit: expected }),
+      /required clean pinned revision/i
+    );
+  } finally {
+    rmSync(item.root, { recursive: true, force: true });
+  }
+});

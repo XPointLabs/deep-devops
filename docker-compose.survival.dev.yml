@@ -44,6 +44,11 @@ x-xnode-build: &xnode-build
 x-xnode: &xnode
   <<: *service
   image: deep-survival/xnode:dev
+  # This file is generated locally by the supported launcher from the pinned
+  # XNode source. It carries only DEV-LOCAL-ONLY public MIP1/RIP1 authority
+  # material and the exact placement-pair allowlist; it is not client authority.
+  env_file:
+    - ${SURVIVAL_MAILBOX_AUTHORITY_ENV:-./artifacts/survival-dev/mailbox-peer-authority.env}
   environment: &xnode-environment
     ASPNETCORE_ENVIRONMENT: Development
     ASPNETCORE_URLS: http://0.0.0.0:8080
@@ -62,6 +67,17 @@ x-xnode: &xnode
     Vless__Enabled: "false"
     MembershipArtifact__ArtifactPath: /run/deep-membership/membership-route-catalog.json
     MembershipArtifact__MaximumBytes: "2097152"
+    # P10C is peer-only. The peer listener remains Docker-network-only on 8081;
+    # public client mailbox routes remain deliberately unmapped by XNode.
+    Mailbox__Enabled: "true"
+    Mailbox__DirectoryName: mailbox-p10c
+    Mailbox__PeerReplayDirectoryName: mailbox-peer-replay-p10c
+    Mailbox__PeerMutationDirectoryName: mailbox-peer-mutations-p10c
+    Mailbox__ReplicationFactor: "2"
+    Mailbox__WriteQuorum: "2"
+    Mailbox__PeerTimeout: "00:00:15"
+    Mailbox__AllowInsecureHttpPeerTransport: "true"
+    MailboxClient__Enabled: "false"
   healthcheck:
     <<: *health
     test: [CMD, bash, -c, 'exec 3<>/dev/tcp/127.0.0.1/8080; printf "GET /health/live HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3; read -r status <&3; case "$$status" in *" 200 "*) exit 0;; *) exit 1;; esac']
@@ -270,10 +286,14 @@ services:
     environment:
       <<: *xnode-environment
       Node__PublicHost: xnode-1
+      Node__PublicPeerRpcEndpoint: http://xnode-1:8081
       Node__RouterId: 4cb5abf6ad79fbf5abbccafcc269d85cd2651ed4b885b5869f241aedf0a5ba29
-      Node__Ed25519PrivateKey: "0000000000000000000000000000000000000000000000000000000000000001"
+      Node__Ed25519PrivateKeyPath: /run/secrets/xnode-ed25519.seed
     ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41801:8080"]
     volumes: [xnode-1-state:/state, membership-route-artifact:/run/deep-membership:ro]
+    secrets:
+      - source: xnode-1-ed25519
+        target: xnode-ed25519.seed
     depends_on:
       relay-bootstrap: { condition: service_healthy }
       membership-fixture: { condition: service_completed_successfully }
@@ -283,10 +303,14 @@ services:
     environment:
       <<: *xnode-environment
       Node__PublicHost: xnode-2
+      Node__PublicPeerRpcEndpoint: http://xnode-2:8081
       Node__RouterId: 7422b9887598068e32c4448a949adb290d0f4e35b9e01b0ee5f1a1e600fe2674
-      Node__Ed25519PrivateKey: "0000000000000000000000000000000000000000000000000000000000000002"
+      Node__Ed25519PrivateKeyPath: /run/secrets/xnode-ed25519.seed
     ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41802:8080"]
     volumes: [xnode-2-state:/state, membership-route-artifact:/run/deep-membership:ro]
+    secrets:
+      - source: xnode-2-ed25519
+        target: xnode-ed25519.seed
     depends_on:
       relay-bootstrap: { condition: service_healthy }
       membership-fixture: { condition: service_completed_successfully }
@@ -296,10 +320,14 @@ services:
     environment:
       <<: *xnode-environment
       Node__PublicHost: xnode-3
+      Node__PublicPeerRpcEndpoint: http://xnode-3:8081
       Node__RouterId: f381626e41e7027ea431bfe3009e94bdd25a746beec468948d6c3c7c5dc9a54b
-      Node__Ed25519PrivateKey: "0000000000000000000000000000000000000000000000000000000000000003"
+      Node__Ed25519PrivateKeyPath: /run/secrets/xnode-ed25519.seed
     ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41803:8080"]
     volumes: [xnode-3-state:/state, membership-route-artifact:/run/deep-membership:ro]
+    secrets:
+      - source: xnode-3-ed25519
+        target: xnode-ed25519.seed
     depends_on:
       relay-bootstrap: { condition: service_healthy }
       membership-fixture: { condition: service_completed_successfully }
@@ -309,10 +337,14 @@ services:
     environment:
       <<: *xnode-environment
       Node__PublicHost: xnode-4
+      Node__PublicPeerRpcEndpoint: http://xnode-4:8081
       Node__RouterId: fd50b8e3b144ea244fbf7737f550bc8dd0c2650bbc1aada833ca17ff8dbf329b
-      Node__Ed25519PrivateKey: "0000000000000000000000000000000000000000000000000000000000000004"
+      Node__Ed25519PrivateKeyPath: /run/secrets/xnode-ed25519.seed
     ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41804:8080"]
     volumes: [xnode-4-state:/state, membership-route-artifact:/run/deep-membership:ro]
+    secrets:
+      - source: xnode-4-ed25519
+        target: xnode-ed25519.seed
     depends_on:
       relay-bootstrap: { condition: service_healthy }
       membership-fixture: { condition: service_completed_successfully }
@@ -322,10 +354,14 @@ services:
     environment:
       <<: *xnode-environment
       Node__PublicHost: xnode-5
+      Node__PublicPeerRpcEndpoint: http://xnode-5:8081
       Node__RouterId: fde4fba030ad002f7c2f7d4c331f49d13fb0ec747eceebec634f1ff4cbca9def
-      Node__Ed25519PrivateKey: "0000000000000000000000000000000000000000000000000000000000000005"
+      Node__Ed25519PrivateKeyPath: /run/secrets/xnode-ed25519.seed
     ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41805:8080"]
     volumes: [xnode-5-state:/state, membership-route-artifact:/run/deep-membership:ro]
+    secrets:
+      - source: xnode-5-ed25519
+        target: xnode-ed25519.seed
     depends_on:
       relay-bootstrap: { condition: service_healthy }
       membership-fixture: { condition: service_completed_successfully }
@@ -335,10 +371,14 @@ services:
     environment:
       <<: *xnode-environment
       Node__PublicHost: xnode-6
+      Node__PublicPeerRpcEndpoint: http://xnode-6:8081
       Node__RouterId: b4c92afb3ba57f3ab959ffe6d319c98484a2155a0f4c65b2c37011ffd197b075
-      Node__Ed25519PrivateKey: "0000000000000000000000000000000000000000000000000000000000000006"
+      Node__Ed25519PrivateKeyPath: /run/secrets/xnode-ed25519.seed
     ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41806:8080"]
     volumes: [xnode-6-state:/state, membership-route-artifact:/run/deep-membership:ro]
+    secrets:
+      - source: xnode-6-ed25519
+        target: xnode-ed25519.seed
     depends_on:
       relay-bootstrap: { condition: service_healthy }
       membership-fixture: { condition: service_completed_successfully }
@@ -490,3 +530,11 @@ volumes:
   push-state:
   calls-state:
   relay-bootstrap-state:
+
+secrets:
+  xnode-1-ed25519: { file: ./.secrets/survival-dev/xnode-1-ed25519.seed }
+  xnode-2-ed25519: { file: ./.secrets/survival-dev/xnode-2-ed25519.seed }
+  xnode-3-ed25519: { file: ./.secrets/survival-dev/xnode-3-ed25519.seed }
+  xnode-4-ed25519: { file: ./.secrets/survival-dev/xnode-4-ed25519.seed }
+  xnode-5-ed25519: { file: ./.secrets/survival-dev/xnode-5-ed25519.seed }
+  xnode-6-ed25519: { file: ./.secrets/survival-dev/xnode-6-ed25519.seed }

@@ -150,6 +150,50 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/survival-dev.ps1 -Ac
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/survival-dev.ps1 -Action Restart -Service xnode-1
 ```
 
+## P10C peer mailbox rehearsal
+
+The survival stack pins its filtered XNode context to accepted source
+`37a8412653daac89dda967ae8bd81ab29cf8aa93`; a dirty checkout or another revision
+fails closed before its context is exported. The six XNodes build the shared image once,
+retain their separate named `/state` volumes, and keep P10C mailbox blobs, replay journals,
+and tombstone mutations below those volumes. Their deterministic development identity seeds
+are generated only into ignored `.secrets/survival-dev` files and mounted as read-only Docker
+secrets; no private seed is in Compose, an artifact, or a client handoff.
+
+P10C's canonical Store/Tombstone listener is Docker-network-only on each node's `8081`
+peer endpoint. It has the protocol's 15-second maximum request deadline and pre-auth
+host/global plus per-operation admission controls. The launcher writes a public,
+DEV-LOCAL-ONLY authority environment file containing one fixed membership commitment and all
+15 unordered two-node placement pairs across the six fixed router/signing identities and
+`http://xnode-N:8081` endpoints. It contains no issuer material and is not a client fixture.
+
+`MailboxClient__Enabled` remains false. XNode reports the peer runtime as ready only after
+durable mailbox/replay/corruption startup checks pass, while status truthfully reports the
+client issuer, placement and ingress as dormant/reject-all. No public client mailbox path is
+mapped or published by this stack.
+
+The focused source-contract evidence covers the canonical 2-of-2 Store/Tombstone path,
+exact replay after restart, corruption-at-startup rejection, and a one-peer-loss partial
+failure that never becomes quorum. Run it after context export:
+
+```powershell
+dotnet test ..\xnode\tests\XNode.Tests\XNode.Tests.csproj --no-restore --filter FullyQualifiedName~ReplicatedMailboxTests
+dotnet test ..\xnode\tests\XNode.IntegrationTests\XNode.IntegrationTests.csproj --no-restore --filter FullyQualifiedName~ReplicatedMailboxIntegrationTests
+```
+
+For the combined source-contract and live-runtime evidence, including the 2-of-2
+store/tombstone/restart/corruption/one-node-loss assertions and the public-listener
+reject-all check, run:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/survival-dev-mailbox.integration.test.ps1
+```
+
+Rollback is volume-preserving: recreate only the six `xnode-*` services from the previous
+local image or restore the prior clean DevOps commit, then verify `/health/ready` and
+`/status`. Do not delete an `xnode-N-state` volume during a rollback drill; corrupt state is
+intentionally a readiness failure, not a state-reset signal.
+
 The launcher also exchanges the six fresh signed relay contacts through the
 local bootstrap sidecar and restarts the XNodes. Routed storage still requires
 exactly three signed, distinct hops. The other three pinned nodes provide one

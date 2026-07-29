@@ -185,7 +185,25 @@ function gitVisibleFiles(source) {
   }
 }
 
-export function exportDevelopmentContext({ kind, source, destination, ownedRoot }) {
+function assertExactCleanGitSource(source, expectedCommit) {
+  if (!/^[0-9a-f]{40}$/.test(expectedCommit ?? '')) {
+    fail('expected source commit must be exact lowercase SHA-1');
+  }
+  try {
+    const commit = execFileSync('git', [
+      '-c', `safe.directory=${source}`, '-C', source, 'rev-parse', 'HEAD'
+    ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    const dirty = execFileSync('git', [
+      '-c', `safe.directory=${source}`, '-C', source, 'status', '--porcelain=v1', '--untracked-files=all'
+    ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    if (commit !== expectedCommit || dirty) fail('source is not the required clean pinned revision');
+  } catch (error) {
+    if (error?.message?.startsWith('Survival development context export failed closed:')) throw error;
+    fail('source revision preflight is unavailable');
+  }
+}
+
+export function exportDevelopmentContext({ kind, source, destination, ownedRoot, expectedCommit }) {
   const fullSource = resolve(source);
   const fullOwnedRoot = resolve(ownedRoot);
   const fullDestination = resolve(destination);
@@ -200,6 +218,7 @@ export function exportDevelopmentContext({ kind, source, destination, ownedRoot 
   }
   mkdirSync(fullOwnedRoot, { recursive: true });
   if (!isChild(fullOwnedRoot, fullDestination)) fail('destination must stay inside the owned context root');
+  if (expectedCommit !== undefined) assertExactCleanGitSource(fullSource, expectedCommit);
 
   const inventory = gitVisibleFiles(fullSource);
   const initiallySelected = inventory.filter(entry => isSelected(kind, entry));
@@ -234,13 +253,13 @@ export function exportDevelopmentContext({ kind, source, destination, ownedRoot 
     rmSync(stage, { recursive: true, force: true });
     fail('context materialization failed');
   }
-  return { kind, fileCount: selected.length };
+  return { kind, fileCount: selected.length, expectedCommit };
 }
 
 function main() {
-  const [kind, source, destination, ownedRoot] = process.argv.slice(2);
+  const [kind, source, destination, ownedRoot, expectedCommit] = process.argv.slice(2);
   if (!ownedRoot) fail('kind, source, destination and owned root are required');
-  const result = exportDevelopmentContext({ kind, source, destination, ownedRoot });
+  const result = exportDevelopmentContext({ kind, source, destination, ownedRoot, expectedCommit });
   process.stdout.write(`Prepared filtered ${result.kind} build context (${result.fileCount} files).\n`);
 }
 

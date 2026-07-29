@@ -23,6 +23,7 @@ const bootstrap = readFileSync(new URL('../tools/relay-bootstrap/relay-bootstrap
 const fixture = readFileSync(new URL('../tools/membership-fixture/Program.cs', import.meta.url), 'utf8');
 const artifactInit = readFileSync(new URL('../tools/membership-artifact-init/membership-artifact-init.mjs', import.meta.url), 'utf8');
 const membershipRepeat = readFileSync(new URL('./survival-dev-membership-fixture-repeat.ps1', import.meta.url), 'utf8');
+const mailboxIntegration = readFileSync(new URL('./survival-dev-mailbox.integration.test.ps1', import.meta.url), 'utf8');
 const membershipNuget = readFileSync(new URL('../tools/membership-fixture/NuGet.Config', import.meta.url), 'utf8');
 const membershipLock = JSON.parse(readFileSync(new URL('../tools/membership-fixture/packages.lock.json', import.meta.url), 'utf8'));
 const hardhatEntrypoint = readFileSync(new URL('./survival-hardhat-entrypoint.sh', import.meta.url), 'utf8');
@@ -487,10 +488,39 @@ test('post-seed XNode restart cannot rerun membership one-shot dependencies or d
   assert.match(afterRestart, /Get-SurvivalVerifiedMembershipPin/);
 });
 
-test('development identities remain exact strings and Up proves host HTTP reachability', () => {
-  for (const suffix of ['1', '2', '3', '4', '5', '6']) {
-    assert.match(compose, new RegExp(`Node__Ed25519PrivateKey: "[0]{63}${suffix}"`));
+test('P10C uses file-only six-node identities, bounded peer authority, and dormant client ingress', () => {
+  assert.doesNotMatch(compose, /Node__Ed25519PrivateKey:/);
+  assert.match(compose, /Node__Ed25519PrivateKeyPath: \/run\/secrets\/xnode-ed25519\.seed/);
+  assert.match(compose, /Mailbox__Enabled: "true"/);
+  assert.match(compose, /Mailbox__PeerTimeout: "00:00:15"/);
+  assert.match(compose, /Mailbox__ReplicationFactor: "2"/);
+  assert.match(compose, /Mailbox__WriteQuorum: "2"/);
+  assert.match(compose, /Mailbox__AllowInsecureHttpPeerTransport: "true"/);
+  assert.match(compose, /MailboxClient__Enabled: "false"/);
+  assert.match(compose, /SURVIVAL_MAILBOX_AUTHORITY_ENV/);
+  assert.doesNotMatch(compose, /:4180[1-6]:8081/);
+  for (const index of [1, 2, 3, 4, 5, 6]) {
+    assert.match(serviceBlock(`xnode-${index}`), new RegExp(`Node__PublicPeerRpcEndpoint: http:\\/\\/xnode-${index}:8081`));
+    assert.match(serviceBlock(`xnode-${index}`), new RegExp(`source: xnode-${index}-ed25519`));
+    assert.match(serviceBlock(`xnode-${index}`), /target: xnode-ed25519\.seed/);
+    assert.match(compose, new RegExp(`xnode-${index}-ed25519: \\{ file: \\.\\/.secrets\\/survival-dev\\/xnode-${index}-ed25519\\.seed \\}`));
   }
+  assert.match(launcher, /\$SurvivalXNodeCommit = '37a8412653daac89dda967ae8bd81ab29cf8aa93'/);
+  assert.match(launcher, /Prepare-SurvivalXNodeIdentitySecrets/);
+  assert.match(launcher, /Prepare-SurvivalMailboxPeerAuthority/);
+  assert.match(launcher, /MailboxPeerAuthority__PlacementSelections/);
+  assert.match(launcher, /\$selection -ne 15/);
+  assert.match(contextExport, /assertExactCleanGitSource/);
+  assert.match(contextExport, /status', '--porcelain=v1', '--untracked-files=all'/);
+  assert.match(contextExport, /source is not the required clean pinned revision/);
+  assert.match(mailboxIntegration, /ReplicatedMailboxTests/);
+  assert.match(mailboxIntegration, /ReplicatedMailboxIntegrationTests/);
+  assert.match(mailboxIntegration, /2-of-2/);
+  assert.match(mailboxIntegration, /dormant-unmapped/);
+  assert.match(mailboxIntegration, /oneNodeLoss/);
+});
+
+test('development identities remain exact strings and Up proves host HTTP reachability', () => {
   assert.match(compose, /SURVIVAL_XNODE_BUILD_CONTEXT/);
   assert.match(compose, /SURVIVAL_REGISTRY_BUILD_CONTEXT/);
   assert.match(compose, /SURVIVAL_STAKING_BUILD_CONTEXT/);
