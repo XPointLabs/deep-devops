@@ -173,7 +173,7 @@ services:
     network_mode: none
     read_only: true
     volumes: [mailbox-rehearsal-state:/state]
-    command: [sh, -ec, "mkdir -p /state/driver && chown 65532:65532 /state/driver"]
+    command: [sh, -ec, "mkdir -p /state/driver && chown 65532:65532 /state /state/driver"]
 
   mailbox-driver:
     <<: *service

@@ -534,7 +534,14 @@ test('P10E uses real current/next MIP1/RIP1 authority, bounded client ingress, a
   assert.match(serviceBlock('mailbox-driver'), /SURVIVAL_MAILBOX_PUBLIC_AUTHORITY[\s\S]*?:\/run\/survival\/mailbox-peer-authority\.public\.json:ro/);
   assert.match(serviceBlock('mailbox-driver'), /source: xnode-1-ed25519/);
   assert.doesNotMatch(serviceBlock('mailbox-driver'), /source: xnode-[2-6]-ed25519/);
-  assert.match(serviceBlock('mailbox-driver-state-init'), /network_mode: none/);
+  const mailboxDriverStateInit = serviceBlock('mailbox-driver-state-init');
+  assert.match(mailboxDriverStateInit, /network_mode: none/);
+  assert.match(mailboxDriverStateInit, /user: "0:0"/);
+  assert.match(mailboxDriverStateInit, /cap_add: \[CHOWN\]/);
+  assert.match(
+    mailboxDriverStateInit,
+    /chown 65532:65532 \/state \/state\/driver/);
+  assert.doesNotMatch(mailboxDriverStateInit, /chmod|777|DAC_OVERRIDE/);
   assert.match(compose, /XNODE_REVISION: f2bdb1178a52b6258f5664e72629a5659b44e518/);
   assert.match(compose, /XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: [0-9a-f]{64}/);
   assert.match(compose, /org\.opencontainers\.image\.revision/);
