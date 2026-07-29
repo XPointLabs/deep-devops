@@ -1619,7 +1619,8 @@ sealed record Arguments(
     string? ExpectedIssuerPublicKey,
     string? PairDirectory,
     bool FailAfterStage,
-    bool FailAfterPromotion)
+    bool FailAfterPromotion,
+    string? FailAfterDurabilityBarrier)
 {
     public static Arguments Parse(string[] values)
     {
@@ -1660,6 +1661,7 @@ sealed record Arguments(
             Optional("--expected-issuer-public-key"),
             Optional("--pair-directory"),
             values.Contains("--fail-after-stage", StringComparer.Ordinal),
-            values.Contains("--fail-after-promotion", StringComparer.Ordinal));
+            values.Contains("--fail-after-promotion", StringComparer.Ordinal),
+            Optional("--fail-after-durability-barrier"));
     }
 }

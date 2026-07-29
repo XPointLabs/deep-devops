@@ -18,8 +18,8 @@ $EvidencePath = [IO.Path]::GetFullPath($EvidencePath)
 $ComposePath = Join-Path $Root 'docker-compose.survival.dev.yml'
 $Launcher = Join-Path $PSScriptRoot 'survival-dev.ps1'
 $Project = 'deep-survival-dev'
-$expectedCommit = '132fae59ec834e2986703103ccc233a8d51352ea'
-$expectedManifest = 'd32fa4d17ee9cd4d2c4ddec5167feed30d710113680db5342795ec2df93a5b38'
+$expectedCommit = 'f2bdb1178a52b6258f5664e72629a5659b44e518'
+$expectedManifest = '0ae0a297f1e7a6b494198c52964a46727e2c802d828335ba702313bc810868e8'
 $base = @('compose', '-p', $Project, '-f', $ComposePath)
 $nodes = 1..6 | ForEach-Object { "xnode-$_" }
 

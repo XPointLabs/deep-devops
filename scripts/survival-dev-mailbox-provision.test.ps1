@@ -6,6 +6,8 @@ $xnode = Join-Path $root 'artifacts\survival-dev\build-contexts\xnode'
 $sourceManifest = Join-Path $xnode '.survival-source-manifest.json'
 $temporary = Join-Path ([IO.Path]::GetTempPath()) ('deep-mailbox-provision-' + [Guid]::NewGuid().ToString('N'))
 $script:ExpectedFailures = 0
+$script:BuildInputFailures = 0
+. (Join-Path $PSScriptRoot 'survival-dev-mailbox-build-inputs.ps1')
 
 function Get-LowerSha256([string]$Path) {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -13,20 +15,88 @@ function Get-LowerSha256([string]$Path) {
 
 function New-ProtectedDirectory([string]$Path) {
     New-Item -ItemType Directory -Path $Path -Force | Out-Null
-    if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT -and
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+        Set-WindowsExclusiveAcl $Path $true
+    } elseif (
         (Get-Command chmod -ErrorAction SilentlyContinue)) {
         & chmod 700 $Path
         if ($LASTEXITCODE -ne 0) { throw "Unable to protect test directory: $Path" }
     }
 }
 
+function Set-WindowsExclusiveAcl([string]$Path, [bool]$IsDirectory) {
+    $current = [Security.Principal.WindowsIdentity]::GetCurrent().User
+    $system = [Security.Principal.SecurityIdentifier]::new('S-1-5-18')
+    $administrators = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
+    $security = if ($IsDirectory) {
+        [Security.AccessControl.DirectorySecurity]::new()
+    } else {
+        [Security.AccessControl.FileSecurity]::new()
+    }
+    $security.SetOwner($current)
+    $security.SetAccessRuleProtection($true, $false)
+    foreach ($identity in @($current, $system, $administrators)) {
+        $inheritance = if ($IsDirectory) {
+            [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
+                [Security.AccessControl.InheritanceFlags]::ObjectInherit
+        } else {
+            [Security.AccessControl.InheritanceFlags]::None
+        }
+        $security.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
+            $identity,
+            [Security.AccessControl.FileSystemRights]::FullControl,
+            $inheritance,
+            [Security.AccessControl.PropagationFlags]::None,
+            [Security.AccessControl.AccessControlType]::Allow))
+    }
+    if ($IsDirectory) {
+        ([IO.DirectoryInfo](Get-Item -Force -LiteralPath $Path)).SetAccessControl($security)
+    } else {
+        ([IO.FileInfo](Get-Item -Force -LiteralPath $Path)).SetAccessControl($security)
+    }
+}
+
+function Protect-TestSecret([string]$Path) {
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+        Set-WindowsExclusiveAcl $Path $false
+    } elseif (Get-Command chmod -ErrorAction SilentlyContinue) {
+        & chmod 600 $Path
+        if ($LASTEXITCODE -ne 0) { throw "Unable to protect test secret: $Path" }
+    }
+}
+
+function Add-WindowsAclRule(
+    [string]$Path,
+    [string]$Sid,
+    [Security.AccessControl.FileSystemRights]$Rights) {
+    $security = ([IO.DirectoryInfo](Get-Item -Force -LiteralPath $Path)).GetAccessControl()
+    $security.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
+        [Security.Principal.SecurityIdentifier]::new($Sid),
+        $Rights,
+        [Security.AccessControl.AccessControlType]::Allow))
+    ([IO.DirectoryInfo](Get-Item -Force -LiteralPath $Path)).SetAccessControl($security)
+}
+
+function Assert-BuildInputFailure([scriptblock]$Action) {
+    try {
+        & $Action
+    } catch {
+        $script:BuildInputFailures++
+        return
+    }
+    throw 'Expected immutable mailbox build-input materialization to fail.'
+}
+
 function Invoke-Driver([string[]]$DriverArguments, [switch]$ExpectFailure) {
     $project = Join-Path $root 'tools\survival-mailbox-driver\SurvivalMailboxDriver.csproj'
+    $driverArtifacts = Join-Path $temporary 'driver-build-artifacts'
     if ($ExpectFailure) {
         $savedPreference = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
         try {
-            $ignored = @(& dotnet run --project $project "-p:XNodeSource=$xnode" -- @DriverArguments 2>&1)
+            $ignored = @(& dotnet run --project $project `
+                --artifacts-path $driverArtifacts `
+                "-p:XNodeSource=$xnode" -- @DriverArguments 2>&1)
             $exitCode = $LASTEXITCODE
         } finally {
             $ErrorActionPreference = $savedPreference
@@ -35,7 +105,9 @@ function Invoke-Driver([string[]]$DriverArguments, [switch]$ExpectFailure) {
         $script:ExpectedFailures++
         return
     }
-    & dotnet run --project $project "-p:XNodeSource=$xnode" -- @DriverArguments
+    & dotnet run --project $project `
+        --artifacts-path $driverArtifacts `
+        "-p:XNodeSource=$xnode" -- @DriverArguments
     if ($LASTEXITCODE -ne 0) { throw 'Mailbox provision command failed.' }
 }
 
@@ -56,9 +128,9 @@ try {
         throw 'Pinned exported XNode source snapshot is missing.'
     }
     $source = Get-Content -Raw -LiteralPath $sourceManifest | ConvertFrom-Json
-    if ($source.sourceCommit -ne '132fae59ec834e2986703103ccc233a8d51352ea' -or
+    if ($source.sourceCommit -ne 'f2bdb1178a52b6258f5664e72629a5659b44e518' -or
         (Get-FileHash -LiteralPath $sourceManifest -Algorithm SHA256).Hash -ne
-            'D32FA4D17EE9CD4D2C4DDEC5167FEED30D710113680DB5342795EC2DF93A5B38') {
+            '0AE0A297F1E7A6B494198C52964A46727E2C802D828335BA702313BC810868E8') {
         throw 'Tests require the exact clean exported XNode source snapshot.'
     }
     foreach ($file in $source.files) {
@@ -71,15 +143,86 @@ try {
         }
     }
 
+    $driverSource = Join-Path $root 'tools\survival-mailbox-driver'
+    $driverHashes = @{}
+    foreach ($name in @(
+        'MailboxGrantProvisioner.cs',
+        'Program.cs',
+        'SurvivalMailboxDriver.csproj')) {
+        $driverHashes[$name] = (Get-FileHash -LiteralPath (
+            Join-Path $driverSource $name) -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+    $materialize = {
+        param([string]$Source, [string]$Driver, [string]$Destination)
+        New-SurvivalMailboxIsolatedSource `
+            -XNodeSource $Source `
+            -DriverSource $Driver `
+            -Destination $Destination `
+            -ExpectedCommit 'f2bdb1178a52b6258f5664e72629a5659b44e518' `
+            -ExpectedManifestSha256 `
+                '0ae0a297f1e7a6b494198c52964a46727e2c802d828335ba702313bc810868e8' `
+            -ExpectedDriverSha256 $driverHashes
+    }
+
+    foreach ($extra in @(
+        @{ Name = 'extra-cs'; Path = 'src\XNode.Core\Injected.cs'; Content = 'class Injected {}' },
+        @{ Name = 'extra-targets'; Path = 'Directory.Build.targets'; Content = '<Project />' })) {
+        $tamperedSource = Join-Path $temporary $extra.Name
+        Copy-Item -LiteralPath $xnode -Destination $tamperedSource -Recurse
+        $extraPath = Join-Path $tamperedSource $extra.Path
+        [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($extraPath))
+        [IO.File]::WriteAllText($extraPath, $extra.Content)
+        Assert-BuildInputFailure {
+            & $materialize $tamperedSource $driverSource (
+                Join-Path $temporary "$($extra.Name)-isolated")
+        }
+    }
+
+    $tamperedDriver = Join-Path $temporary 'same-name-driver-mutation'
+    New-Item -ItemType Directory -Path $tamperedDriver | Out-Null
+    foreach ($name in $driverHashes.Keys) {
+        Copy-Item -LiteralPath (Join-Path $driverSource $name) -Destination (
+            Join-Path $tamperedDriver $name)
+    }
+    Add-Content -LiteralPath (Join-Path $tamperedDriver 'Program.cs') -Value '// mutation'
+    Assert-BuildInputFailure {
+        & $materialize $xnode $tamperedDriver (
+            Join-Path $temporary 'same-name-driver-isolated')
+    }
+
+    $lockedSourcePath = Join-Path $temporary 'locked-isolated'
+    $lockedSource = & $materialize $xnode $driverSource $lockedSourcePath
+    Set-MailboxTreeReadOnly $lockedSourcePath
+    $lockedHandles = Open-MailboxTreeReadLocks $lockedSourcePath
+    try {
+        Assert-BuildInputFailure {
+            [IO.File]::WriteAllText(
+                (Join-Path $lockedSourcePath 'driver\Program.cs'),
+                '// replacement')
+        }
+        Assert-BuildInputFailure {
+            [IO.File]::WriteAllText(
+                (Join-Path $lockedSourcePath 'driver\Directory.Build.targets'),
+                '<Project />')
+        }
+        Assert-SurvivalMailboxIsolatedSource $lockedSource
+    } finally {
+        foreach ($lock in $lockedHandles) { $lock.Dispose() }
+        Set-MailboxTreeWritable $lockedSourcePath
+        Remove-Item -LiteralPath $lockedSourcePath -Recurse -Force
+    }
+
     New-ProtectedDirectory $temporary
     $secrets = Join-Path $temporary 'authority-secrets'
     New-ProtectedDirectory $secrets
     foreach ($index in 1..6) {
-        [IO.File]::WriteAllText((Join-Path $secrets "xnode-$index-ed25519.seed"),
-            ('{0:x64}' -f $index) + "`n")
+        $seedPath = Join-Path $secrets "xnode-$index-ed25519.seed"
+        [IO.File]::WriteAllText($seedPath, ('{0:x64}' -f $index) + "`n")
+        Protect-TestSecret $seedPath
     }
     $issuer = Join-Path $secrets 'mailbox-client-issuer.seed'
     [IO.File]::WriteAllText($issuer, ('{0:x64}' -f 1001) + "`n")
+    Protect-TestSecret $issuer
     $authority = Join-Path $temporary 'authority.json'
     Invoke-Driver @(
         'authority', '--secrets-dir', $secrets,
@@ -113,6 +256,48 @@ try {
         '--mailbox-secret-directory', $hostSecrets)
     $verify = @('verify-provision') + $common + @('--pair-directory', $output)
 
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+        foreach ($aclCase in @(
+            @{ Name = 'users-read'; Sid = 'S-1-5-32-545' },
+            @{ Name = 'everyone-read'; Sid = 'S-1-1-0' },
+            @{ Name = 'arbitrary-read'; Sid = 'S-1-5-21-111111111-222222222-333333333-4444' })) {
+            $aclRoot = Join-Path $temporary ("acl-" + $aclCase.Name)
+            $aclSecrets = Join-Path $temporary ("acl-secrets-" + $aclCase.Name)
+            New-ProtectedDirectory $aclRoot
+            New-ProtectedDirectory $aclSecrets
+            Add-WindowsAclRule `
+                $aclRoot `
+                $aclCase.Sid `
+                ([Security.AccessControl.FileSystemRights]::ReadAndExecute)
+            Invoke-Driver (@('provision') + $common + @(
+                '--issuer-seed-path', $issuer,
+                '--output-directory', $aclRoot,
+                '--mailbox-secret-directory', $aclSecrets)) -ExpectFailure
+        }
+
+        $inheritedParent = Join-Path $temporary 'acl-inherited-parent'
+        $inheritedSecrets = Join-Path $temporary 'acl-inherited-secrets'
+        New-ProtectedDirectory $inheritedParent
+        New-ProtectedDirectory $inheritedSecrets
+        $parentDirectory = [IO.DirectoryInfo](
+            Get-Item -Force -LiteralPath $inheritedParent)
+        $parentSecurity = $parentDirectory.GetAccessControl()
+        $parentSecurity.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
+            [Security.Principal.SecurityIdentifier]::new('S-1-5-32-545'),
+            [Security.AccessControl.FileSystemRights]::ReadAndExecute,
+            [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
+                [Security.AccessControl.InheritanceFlags]::ObjectInherit,
+            [Security.AccessControl.PropagationFlags]::None,
+            [Security.AccessControl.AccessControlType]::Allow))
+        $parentDirectory.SetAccessControl($parentSecurity)
+        $inheritedRoot = Join-Path $inheritedParent 'child'
+        New-Item -ItemType Directory -Path $inheritedRoot | Out-Null
+        Invoke-Driver (@('provision') + $common + @(
+            '--issuer-seed-path', $issuer,
+            '--output-directory', $inheritedRoot,
+            '--mailbox-secret-directory', $inheritedSecrets)) -ExpectFailure
+    }
+
     Invoke-Driver $provision
     Invoke-Driver $verify
     $first = Get-CurrentPair $output
@@ -132,6 +317,17 @@ try {
     if ($androidJson.ownMailbox.retrieveAndAcknowledgeGrants[0].canonicalGrant -eq
         $windowsJson.ownMailbox.retrieveAndAcknowledgeGrants[0].canonicalGrant) {
         throw 'Android must not receive the Windows retrieve grant.'
+    }
+    foreach ($bundle in @($androidJson, $windowsJson)) {
+        if (@($bundle.ownMailbox.depositGrants).Count -ne 2 -or
+            @($bundle.ownMailbox.retrieveAndAcknowledgeGrants).Count -ne 2 -or
+            @($bundle.peerMailboxRoute.depositGrants).Count -ne 2 -or
+            $bundle.ownMailbox.depositGrants[0].canonicalGrant -eq
+                $bundle.peerMailboxRoute.depositGrants[0].canonicalGrant -or
+            $bundle.ownMailbox.depositGrants[0].canonicalGrant -eq
+                $bundle.ownMailbox.retrieveAndAcknowledgeGrants[0].canonicalGrant) {
+            throw 'Each client must receive distinct E/E+1 own-copy deposit, retrieve, and peer deposit grants.'
+        }
     }
     $issuerText = (Get-Content -Raw -LiteralPath $issuer).Trim()
     foreach ($file in @($first.Android, $first.Windows, $first.Manifest,
@@ -247,6 +443,24 @@ try {
         throw 'Failure after promotion changed the advertised generation.'
     }
     Invoke-Driver (@('verify-provision') + $common + @('--pair-directory', $atomicRoot))
+    foreach ($barrier in @('stage', 'generation-parent', 'pointer-temp-parent')) {
+        Invoke-Driver ($atomicNew + @(
+            '--fail-after-durability-barrier', $barrier)) -ExpectFailure
+        if ((Get-CurrentPair $atomicRoot).Generation -ne $oldGeneration) {
+            throw "Failure after $barrier durability barrier changed the advertised generation."
+        }
+        Invoke-Driver (@('verify-provision') + $common + @('--pair-directory', $atomicRoot))
+    }
+    Invoke-Driver ($atomicNew + @(
+        '--fail-after-durability-barrier', 'pointer-parent')) -ExpectFailure
+    $committedAfterPointerBarrier = Get-CurrentPair $atomicRoot
+    if ($committedAfterPointerBarrier.Generation -eq $oldGeneration) {
+        throw 'The pointer-parent barrier fault did not occur after atomic pointer publication.'
+    }
+    Invoke-Driver (@('verify-provision') + $trust + @(
+        '--android-holder-public-key', $androidTwo,
+        '--windows-holder-public-key', $windowsTwo,
+        '--pair-directory', $atomicRoot))
 
     # Whole-pair substitution with valid signatures but unexpected holders fails.
     $substituteRoot = Join-Path $temporary 'substitute-output'
@@ -269,6 +483,29 @@ try {
     $tamperedBundle.holderPublicKey = $windows
     $tamperedBundle | ConvertTo-Json -Depth 14 | Set-Content -NoNewline $pairTamper.Android
     Invoke-Driver (@('verify-provision') + $common + @('--pair-directory', $pairTamperRoot)) -ExpectFailure
+
+    # A cryptographically valid own-copy deposit grant for the other holder
+    # cannot be substituted even after all unauthenticated pair hashes change.
+    $ownDepositTamperRoot = Join-Path $temporary 'own-deposit-tamper'
+    Copy-Item -LiteralPath $output -Destination $ownDepositTamperRoot -Recurse
+    $ownDepositPair = Get-CurrentPair $ownDepositTamperRoot
+    $ownDepositAndroid = Get-Content -Raw -LiteralPath $ownDepositPair.Android | ConvertFrom-Json
+    $ownDepositWindows = Get-Content -Raw -LiteralPath $ownDepositPair.Windows | ConvertFrom-Json
+    $ownDepositAndroid.ownMailbox.depositGrants =
+        $ownDepositWindows.ownMailbox.depositGrants
+    $ownDepositAndroid | ConvertTo-Json -Depth 14 | Set-Content -NoNewline (
+        $ownDepositPair.Android)
+    $ownDepositManifest = Get-Content -Raw -LiteralPath $ownDepositPair.Manifest | ConvertFrom-Json
+    $ownDepositManifest.files.android = Get-LowerSha256 $ownDepositPair.Android
+    $ownDepositManifest | ConvertTo-Json -Depth 14 | Set-Content -NoNewline (
+        $ownDepositPair.Manifest)
+    $ownDepositPointerPath = Join-Path $ownDepositTamperRoot 'current-generation.json'
+    $ownDepositPointer = Get-Content -Raw -LiteralPath $ownDepositPointerPath | ConvertFrom-Json
+    $ownDepositPointer.pairManifestSha256 = Get-LowerSha256 $ownDepositPair.Manifest
+    $ownDepositPointer | ConvertTo-Json -Depth 14 | Set-Content -NoNewline (
+        $ownDepositPointerPath)
+    Invoke-Driver (@('verify-provision') + $common + @(
+        '--pair-directory', $ownDepositTamperRoot)) -ExpectFailure
 
     # Even after recomputing the unauthenticated pair hashes, signed epoch and
     # placement mutations fail against the trusted issuer and authority.
@@ -302,11 +539,40 @@ try {
             '--pair-directory', $grantTamperRoot)) -ExpectFailure
     }
 
-    if ($script:ExpectedFailures -ne 9) {
-        throw "Expected nine negative paths, executed $script:ExpectedFailures."
+    # Exercise the operator wrapper itself: exact source+driver materialization,
+    # protected publish, and both secret-bearing commands use only locked bytes.
+    $wrapperOutput = Join-Path $temporary 'wrapper-output'
+    $wrapperSecrets = Join-Path $temporary 'wrapper-secrets'
+    New-ProtectedDirectory $wrapperOutput
+    New-ProtectedDirectory $wrapperSecrets
+    & powershell -ExecutionPolicy Bypass -File (
+        Join-Path $PSScriptRoot 'survival-dev-mailbox-provision.ps1') `
+        -AndroidHolderPublicKey $android `
+        -WindowsHolderPublicKey $windows `
+        -AuthoritySha256 $authorityHash `
+        -ExpectedIssuerPublicKey $issuerPublicKey `
+        -AuthorityPublic $authority `
+        -IssuerSeedPath $issuer `
+        -OutputDirectory $wrapperOutput `
+        -MailboxSecretDirectory $wrapperSecrets `
+        -CoordinatorUrl 'http://192.168.1.44:41801'
+    if ($LASTEXITCODE -ne 0) {
+        throw 'The immutable operator wrapper smoke failed.'
     }
-    Write-Output 'survival-dev mailbox MAUI grant provision tests passed; expected-failures=9.'
+
+    $expectedDriverFailures = if (
+        [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) { 18 } else { 14 }
+    if ($script:ExpectedFailures -ne $expectedDriverFailures) {
+        throw "Expected $expectedDriverFailures driver negative paths, executed $script:ExpectedFailures."
+    }
+    if ($script:BuildInputFailures -ne 5) {
+        throw "Expected five immutable build-input failures, executed $script:BuildInputFailures."
+    }
+    Write-Output (
+        "survival-dev mailbox MAUI grant provision tests passed; " +
+        "driver-expected-failures=$expectedDriverFailures; build-input-failures=5.")
 }
 finally {
+    Set-MailboxTreeWritable $temporary
     Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction SilentlyContinue
 }

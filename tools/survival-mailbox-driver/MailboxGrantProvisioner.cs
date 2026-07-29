@@ -1,7 +1,13 @@
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
+using System.Security.AccessControl;
 using System.Security.Cryptography;
+using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
 using Deep.Protocol.DeepExtension.MailboxCapabilities;
+using Microsoft.Win32.SafeHandles;
 using XNode.Core;
 
 /// <summary>
@@ -258,13 +264,32 @@ static class MailboxGrantProvisioner
     private static Bundle BuildBundle(string identity, byte[] holder, byte[] peerHolder,
         byte[] mailbox, byte[] peerMailbox, byte[] issuerSeed, StrictAuthority authority)
     {
-        var own = Grants(identity, "retrieve", holder, mailbox, issuerSeed, authority);
-        var deposit = Grants(identity, "deposit-peer", holder, peerMailbox, issuerSeed, authority);
-        return new Bundle(identity, holder, peerHolder, mailbox, peerMailbox, authority, own, deposit);
+        var ownRetrieve = Grants(identity, "retrieve", MailboxCapabilityDomain.Retrieve,
+            holder, mailbox, issuerSeed, authority);
+        var ownDeposit = Grants(identity, "deposit-own", MailboxCapabilityDomain.Deposit,
+            holder, mailbox, issuerSeed, authority);
+        var peerDeposit = Grants(identity, "deposit-peer", MailboxCapabilityDomain.Deposit,
+            holder, peerMailbox, issuerSeed, authority);
+        return new Bundle(
+            identity,
+            holder,
+            peerHolder,
+            mailbox,
+            peerMailbox,
+            authority,
+            ownRetrieve,
+            ownDeposit,
+            peerDeposit);
     }
 
-    private static GrantSet Grants(string identity, string role, byte[] holder, byte[] mailbox,
-        byte[] issuerSeed, StrictAuthority authority)
+    private static GrantSet Grants(
+        string identity,
+        string role,
+        MailboxCapabilityDomain domain,
+        byte[] holder,
+        byte[] mailbox,
+        byte[] issuerSeed,
+        StrictAuthority authority)
     {
         var crypto = new SodiumMailboxCapabilityCrypto();
         Grant Grant(Epoch epoch, MailboxCapabilityDomain domain)
@@ -297,7 +322,6 @@ static class MailboxGrantProvisioner
                 CryptographicOperations.ZeroMemory(serial);
             }
         }
-        var domain = role == "retrieve" ? MailboxCapabilityDomain.Retrieve : MailboxCapabilityDomain.Deposit;
         return new GrantSet(Grant(authority.Current, domain), Grant(authority.Next, domain));
     }
 
@@ -320,13 +344,14 @@ static class MailboxGrantProvisioner
             ownMailbox = new
             {
                 blindedMailboxId = Lower(bundle.Mailbox),
-                retrieveAndAcknowledgeGrants = GrantJson(bundle.Own)
+                retrieveAndAcknowledgeGrants = GrantJson(bundle.OwnRetrieve),
+                depositGrants = GrantJson(bundle.OwnDeposit)
             },
             peerMailboxRoute = new
             {
                 holderPublicKey = Lower(bundle.PeerHolder),
                 blindedMailboxId = Lower(bundle.PeerMailbox),
-                depositGrants = GrantJson(bundle.Deposit)
+                depositGrants = GrantJson(bundle.PeerDeposit)
             },
             hashes = new { mailboxRouteSha256 = Sha256(bundle.Mailbox) }
         };
@@ -365,13 +390,14 @@ static class MailboxGrantProvisioner
         Directory.CreateDirectory(generations);
         AssertNoReparseTraversal(generations);
         var stage = Path.Combine(generations, ".stage-" + Guid.NewGuid().ToString("N"));
+        string? pointerTemp = null;
         Directory.CreateDirectory(stage);
         try
         {
             WriteDurableNewFile(Path.Combine(stage, "android.mailbox-credentials.v1.json"), androidBytes);
             WriteDurableNewFile(Path.Combine(stage, "windows.mailbox-credentials.v1.json"), windowsBytes);
             WriteDurableNewFile(Path.Combine(stage, "pair-manifest.v1.json"), manifestBytes);
-            TrySyncDirectory(stage);
+            SyncDirectory(stage, "stage", arguments);
             if (arguments.FailAfterStage)
                 throw new InjectedProvisionFailure("Injected failure after complete pair staging.");
 
@@ -379,7 +405,7 @@ static class MailboxGrantProvisioner
             if (!Directory.Exists(final))
             {
                 Directory.Move(stage, final);
-                TrySyncDirectory(generations);
+                SyncDirectory(generations, "generation-parent", arguments);
             }
             else
             {
@@ -390,6 +416,7 @@ static class MailboxGrantProvisioner
                         "windows.mailbox-credentials.v1.json"))) == windowsHash,
                     "Existing immutable generation does not match this pair.");
                 Directory.Delete(stage, recursive: true);
+                SyncDirectory(generations, "generation-parent", arguments);
             }
             if (arguments.FailAfterPromotion)
                 throw new InjectedProvisionFailure("Injected failure after pair promotion.");
@@ -401,10 +428,13 @@ static class MailboxGrantProvisioner
                 generation,
                 pairManifestSha256 = manifestHash
             }) + "\n");
-            var pointerTemp = Path.Combine(outputRoot, ".current-" + Guid.NewGuid().ToString("N") + ".json");
+            pointerTemp = Path.Combine(
+                outputRoot,
+                ".current-" + Guid.NewGuid().ToString("N") + ".json");
             WriteDurableNewFile(pointerTemp, pointerBytes);
+            SyncDirectory(outputRoot, "pointer-temp-parent", arguments);
             File.Move(pointerTemp, Path.Combine(outputRoot, "current-generation.json"), overwrite: true);
-            TrySyncDirectory(outputRoot);
+            SyncDirectory(outputRoot, "pointer-parent", arguments);
             return new ProvisionedBundles(
                 ["android.mailbox-credentials.v1.json", "windows.mailbox-credentials.v1.json"],
                 new Dictionary<string, string>(StringComparer.Ordinal)
@@ -421,6 +451,12 @@ static class MailboxGrantProvisioner
             {
                 AssertNoReparseTraversal(stage);
                 Directory.Delete(stage, recursive: true);
+            }
+            if (pointerTemp is not null && File.Exists(pointerTemp))
+            {
+                AssertNoReparseTraversal(pointerTemp);
+                File.Delete(pointerTemp);
+                SyncDirectory(outputRoot, "pointer-cleanup-parent", arguments);
             }
             throw;
         }
@@ -454,13 +490,25 @@ static class MailboxGrantProvisioner
                 == peer.GetProperty("holderPublicKey").GetString()
             && peer.GetProperty("identity").GetString() == peerIdentity,
             "Peer route is not the exact counterpart public mailbox.");
-        VerifyGrantSet(bundle.GetProperty("ownMailbox").GetProperty("retrieveAndAcknowledgeGrants"),
+        var ownRetrieveSerials = VerifyGrantSet(
+            bundle.GetProperty("ownMailbox").GetProperty("retrieveAndAcknowledgeGrants"),
             MailboxCapabilityDomain.Retrieve, expectedHolder, authority, "retrieve grant");
-        VerifyGrantSet(bundle.GetProperty("peerMailboxRoute").GetProperty("depositGrants"),
+        var ownDepositSerials = VerifyGrantSet(
+            bundle.GetProperty("ownMailbox").GetProperty("depositGrants"),
+            MailboxCapabilityDomain.Deposit, expectedHolder, authority, "own deposit grant");
+        var peerDepositSerials = VerifyGrantSet(
+            bundle.GetProperty("peerMailboxRoute").GetProperty("depositGrants"),
             MailboxCapabilityDomain.Deposit, expectedHolder, authority, "deposit grant");
+        for (var index = 0; index < 2; index++)
+        {
+            Require(ownRetrieveSerials[index] != ownDepositSerials[index]
+                && ownRetrieveSerials[index] != peerDepositSerials[index]
+                && ownDepositSerials[index] != peerDepositSerials[index],
+                "Retrieve, own-copy deposit, and peer deposit grants must use distinct serials.");
+        }
     }
 
-    private static void VerifyGrantSet(JsonElement grants, MailboxCapabilityDomain domain,
+    private static string[] VerifyGrantSet(JsonElement grants, MailboxCapabilityDomain domain,
         byte[] holder, StrictAuthority authority, string label)
     {
         Require(grants.ValueKind == JsonValueKind.Array && grants.GetArrayLength() == 2,
@@ -469,6 +517,7 @@ static class MailboxGrantProvisioner
         var network = Hex(authority.NetworkId, 16, "network id");
         try
         {
+            var serials = new List<string>(2);
             var index = 0;
             foreach (var item in grants.EnumerateArray())
             {
@@ -499,7 +548,9 @@ static class MailboxGrantProvisioner
                     $"{label} is not cryptographically bound to its trusted holder, domain, or epoch.");
                 Require(item.GetProperty("sha256").GetString() == Sha256(encoded),
                     $"{label} hash is invalid.");
+                serials.Add(Lower(grant.Serial.Span));
             }
+            return serials.ToArray();
         }
         finally
         {
@@ -581,19 +632,56 @@ static class MailboxGrantProvisioner
         AssertNoReparseTraversal(path);
     }
 
-    private static void TrySyncDirectory(string path)
+    private static void SyncDirectory(string path, string barrier, Arguments arguments)
     {
         if (OperatingSystem.IsWindows())
-            return; // Windows file Flush(true) + same-volume rename is used; see runbook residual.
-        try
         {
-            using var handle = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-            RandomAccess.FlushToDisk(handle);
+            using var handle = NativeMethods.CreateFile(
+                path,
+                NativeMethods.GenericWrite,
+                FileShare.ReadWrite | FileShare.Delete,
+                IntPtr.Zero,
+                FileMode.Open,
+                NativeMethods.FileFlagBackupSemantics,
+                IntPtr.Zero);
+            if (handle.IsInvalid)
+            {
+                throw new InvalidDataException(
+                    "Required Windows directory durability handle is unavailable.",
+                    new Win32Exception(Marshal.GetLastWin32Error()));
+            }
+            if (!NativeMethods.FlushFileBuffers(handle))
+            {
+                throw new InvalidDataException(
+                    "Required Windows directory durability barrier failed.",
+                    new Win32Exception(Marshal.GetLastWin32Error()));
+            }
         }
-        catch (UnauthorizedAccessException)
+        else
         {
-            throw new InvalidDataException("Directory fsync is required but unavailable.");
+            try
+            {
+                using var handle = File.OpenHandle(
+                    path,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.ReadWrite | FileShare.Delete);
+                RandomAccess.FlushToDisk(handle);
+            }
+            catch (UnauthorizedAccessException exception)
+            {
+                throw new InvalidDataException(
+                    "Directory fsync is required but unavailable.",
+                    exception);
+            }
         }
+
+        if (string.Equals(
+                arguments.FailAfterDurabilityBarrier,
+                barrier,
+                StringComparison.Ordinal))
+            throw new InjectedProvisionFailure(
+                $"Injected failure after durability barrier {barrier}.");
     }
 
     private static string RequireProtectedRoot(string? value, string label)
@@ -618,7 +706,9 @@ static class MailboxGrantProvisioner
 
     private static void RestrictSecretFile(string path)
     {
-        if (!OperatingSystem.IsWindows())
+        if (OperatingSystem.IsWindows())
+            SetExclusiveWindowsAcl(path, isDirectory: false);
+        else
             File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
     }
 
@@ -643,23 +733,87 @@ static class MailboxGrantProvisioner
             "Operator root/secret permissions must be directory 0700 and file 0600.");
     }
 
+    [SupportedOSPlatform("windows")]
     private static void AssertWindowsAcl(string path)
     {
-        using var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+        var current = WindowsIdentity.GetCurrent().User
+            ?? throw new InvalidDataException("The current Windows identity has no SID.");
+        var isDirectory = Directory.Exists(path);
+        var system = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
+        var administrators = new SecurityIdentifier(
+            WellKnownSidType.BuiltinAdministratorsSid,
+            null);
+        var security = isDirectory
+            ? (FileSystemSecurity)new DirectoryInfo(path).GetAccessControl(
+                AccessControlSections.Access | AccessControlSections.Owner)
+            : new FileInfo(path).GetAccessControl(
+                AccessControlSections.Access | AccessControlSections.Owner);
+        var owner = security.GetOwner(typeof(SecurityIdentifier)) as SecurityIdentifier
+            ?? throw new InvalidDataException("Operator root/secret owner SID is unavailable.");
+        Require(owner.Equals(current),
+            "Operator root/secret owner must be the exact current Windows identity SID.");
+        Require(security.AreAccessRulesProtected && security.AreAccessRulesCanonical,
+            "Operator root/secret DACL must be protected from inheritance and canonical.");
+
+        var allowed = new Dictionary<string, FileSystemRights>(StringComparer.Ordinal)
         {
-            FileName = "icacls",
-            Arguments = "\"" + path.Replace("\"", "\"\"") + "\"",
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true
-        }) ?? throw new InvalidDataException("Unable to inspect the Windows ACL.");
-        var acl = process.StandardOutput.ReadToEnd();
-        process.WaitForExit();
-        Require(process.ExitCode == 0
-            && !System.Text.RegularExpressions.Regex.IsMatch(acl,
-                @"(?im)^(?=.*(?:Everyone|BUILTIN\\Users|Authenticated Users))(?=.*\((?:F|M|W|WD)\)).*$"),
-            "Operator root/secret ACL permits broad write access.");
+            [current.Value] = 0,
+            [system.Value] = 0,
+            [administrators.Value] = 0
+        };
+        foreach (FileSystemAccessRule rule in security.GetAccessRules(
+                     includeExplicit: true,
+                     includeInherited: true,
+                     targetType: typeof(SecurityIdentifier)))
+        {
+            var sid = (SecurityIdentifier)rule.IdentityReference;
+            var expectedInheritance = isDirectory
+                ? InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit
+                : InheritanceFlags.None;
+            Require(!rule.IsInherited
+                && rule.AccessControlType == AccessControlType.Allow
+                && allowed.ContainsKey(sid.Value)
+                && rule.InheritanceFlags == expectedInheritance
+                && rule.PropagationFlags == PropagationFlags.None,
+                "Operator root/secret DACL contains an inherited, denied, or non-allowlisted SID.");
+            allowed[sid.Value] |= rule.FileSystemRights;
+        }
+        Require(allowed.Values.All(rights =>
+                (rights & FileSystemRights.FullControl) == FileSystemRights.FullControl),
+            "Current identity, SYSTEM, and Administrators must have exact protected control.");
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static void SetExclusiveWindowsAcl(string path, bool isDirectory)
+    {
+        var current = WindowsIdentity.GetCurrent().User
+            ?? throw new InvalidDataException("The current Windows identity has no SID.");
+        var system = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
+        var administrators = new SecurityIdentifier(
+            WellKnownSidType.BuiltinAdministratorsSid,
+            null);
+        FileSystemSecurity security = isDirectory
+            ? new DirectorySecurity()
+            : new FileSecurity();
+        security.SetOwner(current);
+        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        foreach (var sid in new[] { current, system, administrators })
+        {
+            var inheritance = isDirectory
+                ? InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit
+                : InheritanceFlags.None;
+            security.AddAccessRule(new FileSystemAccessRule(
+                sid,
+                FileSystemRights.FullControl,
+                inheritance,
+                PropagationFlags.None,
+                AccessControlType.Allow));
+        }
+        if (isDirectory)
+            new DirectoryInfo(path).SetAccessControl((DirectorySecurity)security);
+        else
+            new FileInfo(path).SetAccessControl((FileSecurity)security);
+        AssertWindowsAcl(path);
     }
 
     private static void AssertNoReparseTraversal(string path)
@@ -733,8 +887,40 @@ static class MailboxGrantProvisioner
         Uri Coordinator, Epoch Current, Epoch Next, Replica[] Replicas);
     private sealed record Grant(ulong Epoch, string CanonicalGrant, string Hash);
     private sealed record GrantSet(Grant Current, Grant Next);
-    private sealed record Bundle(string Identity, byte[] Holder, byte[] PeerHolder,
-        byte[] Mailbox, byte[] PeerMailbox, StrictAuthority Authority, GrantSet Own, GrantSet Deposit);
+    private sealed record Bundle(
+        string Identity,
+        byte[] Holder,
+        byte[] PeerHolder,
+        byte[] Mailbox,
+        byte[] PeerMailbox,
+        StrictAuthority Authority,
+        GrantSet OwnRetrieve,
+        GrantSet OwnDeposit,
+        GrantSet PeerDeposit);
+
+    private static class NativeMethods
+    {
+        internal const uint GenericWrite = 0x40000000;
+        internal const uint FileFlagBackupSemantics = 0x02000000;
+
+        [DllImport(
+            "kernel32.dll",
+            EntryPoint = "CreateFileW",
+            CharSet = CharSet.Unicode,
+            SetLastError = true)]
+        internal static extern SafeFileHandle CreateFile(
+            string fileName,
+            uint desiredAccess,
+            FileShare shareMode,
+            IntPtr securityAttributes,
+            FileMode creationDisposition,
+            uint flagsAndAttributes,
+            IntPtr templateFile);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool FlushFileBuffers(SafeFileHandle handle);
+    }
 }
 
 sealed class InjectedProvisionFailure(string message) : Exception(message);

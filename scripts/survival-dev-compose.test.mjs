@@ -521,7 +521,7 @@ test('P10E uses real current/next MIP1/RIP1 authority, bounded client ingress, a
     assert.match(serviceBlock(`xnode-${index}`), /target: xnode-ed25519\.seed/);
     assert.match(compose, new RegExp(`xnode-${index}-ed25519: \\{ file: \\.\\/.secrets\\/survival-dev\\/xnode-${index}-ed25519\\.seed \\}`));
   }
-  assert.match(launcher, /\$SurvivalXNodeCommit = '132fae59ec834e2986703103ccc233a8d51352ea'/);
+  assert.match(launcher, /\$SurvivalXNodeCommit = 'f2bdb1178a52b6258f5664e72629a5659b44e518'/);
   assert.match(launcher, /Prepare-SurvivalXNodeIdentitySecrets/);
   assert.match(launcher, /Prepare-SurvivalMailboxPeerAuthority/);
   assert.match(launcher, /mailbox-client-xnode-1\.env/);
@@ -535,7 +535,7 @@ test('P10E uses real current/next MIP1/RIP1 authority, bounded client ingress, a
   assert.match(serviceBlock('mailbox-driver'), /source: xnode-1-ed25519/);
   assert.doesNotMatch(serviceBlock('mailbox-driver'), /source: xnode-[2-6]-ed25519/);
   assert.match(serviceBlock('mailbox-driver-state-init'), /network_mode: none/);
-  assert.match(compose, /XNODE_REVISION: 132fae59ec834e2986703103ccc233a8d51352ea/);
+  assert.match(compose, /XNODE_REVISION: f2bdb1178a52b6258f5664e72629a5659b44e518/);
   assert.match(compose, /XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: [0-9a-f]{64}/);
   assert.match(compose, /org\.opencontainers\.image\.revision/);
   assert.match(compose, /com\.xpoint\.source-context\.manifest-sha256/);
