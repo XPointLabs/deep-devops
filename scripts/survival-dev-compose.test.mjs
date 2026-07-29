@@ -588,6 +588,9 @@ test('P10E uses real current/next MIP1/RIP1 authority, bounded client ingress, a
   assert.match(mailboxDriver, /The only mounted sender seed does not match xnode-1/);
   assert.match(mailboxDriver, /restricted to the xnode-1 sender identity/);
   assert.match(mailboxDriver, /schemaVersion = 2/);
+  assert.match(mailboxIntegration, /schemaVersion = 3/);
+  assert.match(mailboxIntegration, /stateVolumes = \$volumeBindingsAfter/);
+  assert.match(mailboxIntegration, /Get-StateVolumeBindings/);
   assert.match(mailboxDriver, /P10E\/MCP2\/MAU2\/MIP1\/RIP1\/PRQ2/);
   assert.match(mailboxDriver, /MailboxClient__Enabled=false/);
   assert.match(mailboxDriver, /MailboxClient__Enabled=true/);

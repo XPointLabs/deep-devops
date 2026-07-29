@@ -120,6 +120,38 @@ function Get-ImageBinding() {
     return [pscustomobject]@{ imageId = $imageId; revision = $revision; sourceContextManifestSha256 = $manifest; allSixExact = $true }
 }
 
+function Get-StateVolumeBindings() {
+    $bindings = @()
+    foreach ($node in $nodes) {
+        $container = "$Project-$node-1"
+        $containerDocument = @((& docker inspect $container) | ConvertFrom-Json)
+        if ($LASTEXITCODE -ne 0 -or $containerDocument.Count -ne 1) {
+            throw "Unable to inspect $container state volume."
+        }
+
+        $stateMount = @($containerDocument[0].Mounts | Where-Object {
+            $_.Type -eq 'volume' -and $_.Destination -eq '/state'
+        })
+        $expectedName = "${Project}_${node}-state"
+        if ($stateMount.Count -ne 1 -or $stateMount[0].Name -cne $expectedName) {
+            throw "$container does not use the exact expected named state volume."
+        }
+
+        $volumeDocument = @((& docker volume inspect $stateMount[0].Name) | ConvertFrom-Json)
+        if ($LASTEXITCODE -ne 0 -or $volumeDocument.Count -ne 1) {
+            throw "Unable to inspect $($stateMount[0].Name)."
+        }
+
+        $bindings += [pscustomobject]@{
+            node = $node
+            name = $stateMount[0].Name
+            createdAt = $volumeDocument[0].CreatedAt
+            driver = $volumeDocument[0].Driver
+        }
+    }
+    return $bindings
+}
+
 $commit = (& git -C $XNodeRepository rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0 -or $commit -ne $expectedCommit) {
     throw 'P10E live rehearsal requires the accepted XNode revision.'
@@ -138,6 +170,7 @@ $env:SURVIVAL_BIND_HOST = $BindHost
 $env:SURVIVAL_XNODE_PATH = $XNodeRepository
 $phases = @()
 $runId = [Guid]::NewGuid().ToString('N')
+$volumeBindingsBefore = Get-StateVolumeBindings
 try {
     # Retain source regressions, then build both consumers from the same exact
     # filtered context. The runtime proof below is independent and live.
@@ -177,43 +210,55 @@ try {
     $phases += Invoke-Driver 'retry-loss'
     $phases += Invoke-Driver 'tombstone'
 
-    $runtime = Assert-Runtime
-    $binding = Get-ImageBinding
+    [void](Assert-Runtime)
+    [void](Get-ImageBinding)
     Invoke-Checked node @((Join-Path $PSScriptRoot 'survival-dev-verify.mjs'), '--host', $BindHost)
-
-    $evidence = [pscustomobject]@{
-        schemaVersion = 2
-        generatedAt = [DateTimeOffset]::UtcNow
-        scope = 'development-only-live-docker-public-client-and-peer-rehearsal'
-        passed = $true
-        imageBinding = $binding
-        protocol = 'P10E/MCP2/MAU2/MST1/MRT1/MRP1/MAK1/MAR1/MIP1/RIP1/PRQ2/MRR2/MQR3'
-        phases = $phases
-        runtime = $runtime
-        assertions = [pscustomobject]@{
-            realPeerNetwork = $true
-            publicStoreRetrieveAck = $true
-            publicStoreExactReplay = $true
-            publicSelectedPeerLossNeverQuorum = $true
-            publicSelectedPeerRestartExactRetryQuorum = $true
-            boundedReplayRetirementGcSourceRegression = $true
-            boundedReplayRetirementGcDriver = $true
-            storeTwoOfTwo = $true
-            exactReplayAfterRecipientRecreate = $true
-            selectedPeerLossNeverQuorum = $true
-            selectedPeerRestartRetryQuorum = $true
-            tombstoneTwoOfTwoAndReplay = $true
-            namedVolumesPreserved = $true
-            publicClientMailbox = 'xnode-1-bounded-development-fixture-only'
-        }
-        limitations = 'The public client ingress and issuer are deterministic DEV-LOCAL-ONLY fixtures; this is not production authority, production durability, or a production-readiness claim.'
-    }
-    [void][IO.Directory]::CreateDirectory((Split-Path $EvidencePath -Parent))
-    [IO.File]::WriteAllText($EvidencePath, (($evidence | ConvertTo-Json -Depth 8) + "`n"), [Text.UTF8Encoding]::new($false))
-    Write-Output "Live P10E mailbox rehearsal evidence: $EvidencePath"
 }
 finally {
     # Restore the selected peer and converge all XNodes to healthy without
     # deleting or recreating any named state volume.
     Invoke-Docker (@('up', '-d', '--no-deps', '--wait', '--wait-timeout', '180') + $nodes)
 }
+
+# Evidence is published only after checked restoration and a second live
+# validation. A failed finally block therefore cannot leave a new green file.
+$runtime = Assert-Runtime
+$binding = Get-ImageBinding
+$volumeBindingsAfter = Get-StateVolumeBindings
+if (($volumeBindingsBefore | ConvertTo-Json -Compress) -cne
+    ($volumeBindingsAfter | ConvertTo-Json -Compress)) {
+    throw 'One or more XNode state volumes changed during the live rehearsal.'
+}
+Invoke-Checked node @((Join-Path $PSScriptRoot 'survival-dev-verify.mjs'), '--host', $BindHost)
+
+$evidence = [pscustomobject]@{
+    schemaVersion = 3
+    generatedAt = [DateTimeOffset]::UtcNow
+    scope = 'development-only-live-docker-public-client-and-peer-rehearsal'
+    passed = $true
+    imageBinding = $binding
+    stateVolumes = $volumeBindingsAfter
+    protocol = 'P10E/MCP2/MAU2/MST1/MRT1/MRP1/MAK1/MAR1/MIP1/RIP1/PRQ2/MRR2/MQR3'
+    phases = $phases
+    runtime = $runtime
+    assertions = [pscustomobject]@{
+        realPeerNetwork = $true
+        publicStoreRetrieveAck = $true
+        publicStoreExactReplay = $true
+        publicSelectedPeerLossNeverQuorum = $true
+        publicSelectedPeerRestartExactRetryQuorum = $true
+        boundedReplayRetirementGcSourceRegression = $true
+        boundedReplayRetirementGcDriver = $true
+        storeTwoOfTwo = $true
+        exactReplayAfterRecipientRecreate = $true
+        selectedPeerLossNeverQuorum = $true
+        selectedPeerRestartRetryQuorum = $true
+        tombstoneTwoOfTwoAndReplay = $true
+        namedVolumesPreserved = $true
+        publicClientMailbox = 'xnode-1-bounded-development-fixture-only'
+    }
+    limitations = 'The public client ingress and issuer are deterministic DEV-LOCAL-ONLY fixtures; this is not production authority, production durability, or a production-readiness claim.'
+}
+[void][IO.Directory]::CreateDirectory((Split-Path $EvidencePath -Parent))
+[IO.File]::WriteAllText($EvidencePath, (($evidence | ConvertTo-Json -Depth 8) + "`n"), [Text.UTF8Encoding]::new($false))
+Write-Output "Live P10E mailbox rehearsal evidence: $EvidencePath"
