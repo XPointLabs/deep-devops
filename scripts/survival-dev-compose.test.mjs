@@ -461,6 +461,8 @@ test('daily launcher always uses the fixed project without release-gate ceremony
   assert.doesNotMatch(verify, /params:/);
   assert.match(bootstrap, /api\/relay-contacts/);
   assert.match(bootstrap, /\/seed/);
+  assert.match(bootstrap, /\^http:\\\/\\\/xnode-\[1-6\]:8081\$/);
+  assert.doesNotMatch(bootstrap, /8081\\\//);
   assert.match(serviceBlock('contracts-devnet'), /profiles: \[chain\]/);
   assert.match(serviceBlock('staking-backend'), /profiles: \[chain\]/);
   assert.match(compose, /Runtime__BootstrapFromStorage: "true"/);

@@ -12,7 +12,7 @@ function validContact(value) {
     /^[0-9a-f]{64}$/.test(value.routerId ?? '') &&
     /^[0-9a-f]{64}$/.test(value.x25519PublicKey ?? '') &&
     /^[0-9a-f]{128}$/.test(value.signature ?? '') &&
-    typeof value.rpcEndpoint === 'string' && /^http:\/\/xnode-[1-6]:8081\//.test(value.rpcEndpoint);
+    typeof value.rpcEndpoint === 'string' && /^http:\/\/xnode-[1-6]:8081$/.test(value.rpcEndpoint);
 }
 
 async function readContacts() {
