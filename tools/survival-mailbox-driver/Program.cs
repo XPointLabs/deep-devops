@@ -453,80 +453,70 @@ static void RunRetentionGc(Fixture fixture, Arguments arguments)
             MaximumScopes = 1,
             RetentionAfterValidity = retention
         });
-    var claim = GcClaim(0x41, 0x51);
-    var retainUntil = journal.RetainUntilUnixSeconds(fixture.CurrentExpiresAt);
+    using var outcomes = new MailboxClientCanonicalOutcomeStore(
+        directory,
+        new MailboxClientCanonicalOutcomeStoreOptions
+        {
+            DirectoryName = "bounded-p10e-outcomes",
+            MaximumEntries = 1,
+            MaximumBytes = 4096
+        });
+    var runtime = new MailboxAuthenticatedCapabilityRuntime(
+        fixture.CreateRuntimeAuthority(),
+        fixture.CreateRuntimeRevocations(),
+        journal,
+        outcomes);
+    var now = checked((ulong)DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+    var canonicalMau2 = fixture.NewRuntimeStore("retention-gc", "current", now);
+    var reservation = runtime.Verify(canonicalMau2);
+    if (!runtime.TryAcquireExecution(reservation))
+    {
+        throw new InvalidOperationException("Retention rehearsal did not own its real MAU2 execution.");
+    }
+    runtime.ReserveOutcomeCapacity(reservation, 64);
+    runtime.PersistTerminal(
+        reservation,
+        MailboxClientTerminalOutcome.DurableStateRejected);
+    var retainUntil = reservation.RetainUntilUnixSeconds;
     var retentionSeconds = checked((ulong)retention.TotalSeconds);
     if (retainUntil != fixture.CurrentExpiresAt + retentionSeconds)
     {
         throw new InvalidOperationException(
-            "Replay retention is not bound to epoch expiry plus fixed retention.");
+            "Replay retention is not bound to authority epoch expiry plus fixed retention.");
     }
-    var reserved = journal.EvaluateAndReserve(
-        claim,
-        fixture.CurrentExpiresAt,
-        retainUntil);
-    if (reserved.State != MailboxCapabilityAtomicReplayState.NewReserved)
-    {
-        throw new InvalidOperationException(
-            "Bounded replay rehearsal could not reserve its first scope.");
-    }
-    journal.CompleteAtomically(claim, SHA256.HashData("p10e-gc-outcome"u8));
-    var before = journal.Diagnostics;
-    var atBoundary = journal.CollectExpired(retainUntil);
-    var afterBoundary = journal.Diagnostics;
-    var collected = journal.CollectExpired(retainUntil + 1);
-    var after = journal.Diagnostics;
-    if (before.ScopeCount != 1
-        || before.CompletedCount != 1
+    var beforeReplay = journal.Diagnostics;
+    var beforeOutcomes = outcomes.Diagnostics;
+    var atBoundary = runtime.CollectExpired(retainUntil, 1);
+    var afterBoundaryReplay = journal.Diagnostics;
+    var afterBoundaryOutcomes = outcomes.Diagnostics;
+    var collected = runtime.CollectExpired(retainUntil + 1, 1);
+    var afterReplay = journal.Diagnostics;
+    var afterOutcomes = outcomes.Diagnostics;
+    if (beforeReplay.ScopeCount != 1
+        || beforeReplay.CompletedCount != 1
+        || beforeOutcomes.EntryCount != 1
         || atBoundary != 0
-        || afterBoundary.ScopeCount != 1
+        || afterBoundaryReplay.ScopeCount != 1
+        || afterBoundaryOutcomes.EntryCount != 1
         || collected != 1
-        || after.ScopeCount != 0
-        || after.CapacityRemaining != 1)
+        || afterReplay.ScopeCount != 0
+        || afterOutcomes.EntryCount != 0
+        || afterReplay.CapacityRemaining != 1
+        || afterOutcomes.EntryCapacityRemaining != 1)
     {
         throw new InvalidOperationException(
-            "Replay retirement did not retain through its bound then recover capacity.");
+            "Coordinated replay/outcome retirement did not retain through its bound then recover capacity.");
     }
-    var replacement = GcClaim(0x42, 0x52) with
-    {
-        Epoch = ProtocolFixture.NextEpoch,
-        Generation = ProtocolFixture.NextEpoch
-    };
-    var replacementResult = journal.EvaluateAndReserve(
-        replacement,
-        retainUntil + 1,
-        journal.RetainUntilUnixSeconds(fixture.NextExpiresAt));
-    if (replacementResult.State != MailboxCapabilityAtomicReplayState.NewReserved
-        || journal.Diagnostics.ScopeCount != 1)
-    {
-        throw new InvalidOperationException(
-            "Replay retirement did not make capacity available to E+1.");
-    }
-    journal.AbortAtomically(replacement);
     Result("retention-gc", new
     {
         authorityBound = "epoch-expiry-plus-fixed-retention",
         retentionSeconds,
         retainedAtBoundary = true,
         collectedAfterBoundary = collected,
-        capacityRecovered = true,
-        ePlusOneReservation = true
+        replayOutcomeCoordinated = true,
+        capacityRecovered = true
     });
 }
-
-static MailboxCapabilityAtomicReplayClaim GcClaim(byte claimByte, byte serialByte) =>
-    new()
-    {
-        ClaimDigest = Enumerable.Repeat(claimByte, 32).ToArray(),
-        IssuerPublicKey = Enumerable.Repeat((byte)0x61, 32).ToArray(),
-        Serial = Enumerable.Repeat(serialByte, 16).ToArray(),
-        Epoch = ProtocolFixture.Epoch,
-        Generation = ProtocolFixture.Epoch,
-        Operation = MailboxAuthenticatedOperation.Store,
-        OperationId = Enumerable.Repeat((byte)0x71, 16).ToArray(),
-        ReplayCounter = 1,
-        RequestDigest = Enumerable.Repeat((byte)0x81, 32).ToArray()
-    };
 
 static async Task<MailboxPeerQuorumResult> ExecuteCoordinatorAsync(
     Fixture fixture,
@@ -1096,6 +1086,67 @@ sealed class Fixture
             "");
     }
 
+    public byte[] NewRuntimeStore(
+        string runId,
+        string name,
+        ulong now,
+        ulong epoch = ProtocolFixture.Epoch)
+    {
+        var next = epoch == ProtocolFixture.NextEpoch;
+        if (epoch is not (ProtocolFixture.Epoch or ProtocolFixture.NextEpoch))
+        {
+            throw new ArgumentOutOfRangeException(nameof(epoch));
+        }
+        var material = Material(runId, name);
+        var envelope = new MailboxEncryptedEnvelope
+        {
+            Epoch = epoch,
+            MailboxId = new BlindedMailboxId(material),
+            PlacementId = (next ? NextPlacements : Placements)[0, 1],
+            OperationId = material[..16],
+            DeduplicationDigest = SHA256.HashData(material.Concat("runtime-gc-dedup"u8.ToArray()).ToArray()),
+            CreatedAtUnixSeconds = now,
+            ExpiresAtUnixSeconds = Math.Min(now + 1800, next ? NextExpiresAt : CurrentExpiresAt),
+            Ciphertext = SHA256.HashData(material.Concat("runtime-gc-ciphertext"u8.ToArray()).ToArray())
+        };
+        var binding = MailboxAuthenticatedRequestTranscript.ForStore(envelope);
+        var crypto = new SodiumMailboxCapabilityCrypto();
+        var holderSeed = Material(runId, "client-holder");
+        var notBefore = Math.Max(now - Math.Min(now, 60), next ? NextNotBefore : CurrentNotBefore);
+        var grant = crypto.SignGrant(
+            new MailboxAuthenticatedGrant
+            {
+                Domain = MailboxCapabilityDomain.Deposit,
+                Lifecycle = MailboxCapabilityLifecycle.Active,
+                NetworkId = NetworkId(),
+                Epoch = epoch,
+                Generation = epoch,
+                Serial = Material(runId, $"{name}-grant")[..16],
+                NotBeforeUnixSeconds = notBefore,
+                ExpiresAtUnixSeconds = next ? NextExpiresAt : CurrentExpiresAt,
+                OverlapUntilUnixSeconds = 0,
+                PlacementCommitment = MailboxPlacementCommitment.Compute(envelope.PlacementId),
+                MembershipCommitment = next ? NextRoot : Root,
+                IssuerPublicKey = crypto.GetPublicKey(IssuerSeed),
+                HolderPublicKey = crypto.GetPublicKey(holderSeed),
+                IssuerSignature = new byte[MailboxAuthenticatedCapabilityLimits.SignatureLength]
+            },
+            IssuerSeed);
+        var presentation = crypto.SignPresentation(grant, binding, 1, holderSeed);
+        return MailboxAuthenticatedClientRequestCodec.Encode(
+            new MailboxAuthenticatedClientRequest
+            {
+                Binding = binding,
+                Presentation = presentation
+            });
+    }
+
+    public IMailboxCapabilityAuthoritySource CreateRuntimeAuthority() =>
+        new RuntimeAuthority(this);
+
+    public IMailboxCapabilityRevocationPolicy CreateRuntimeRevocations() =>
+        new RuntimeRevocations();
+
     public ClientStoreFixture NewClientStore(
         string runId,
         string name,
@@ -1324,7 +1375,76 @@ sealed class Fixture
     private static byte[] NetworkId() =>
         SHA256.HashData(
             System.Text.Encoding.UTF8.GetBytes(
-                "deep-survival-dev-p10e-network-v1"))[..16];
+                 "deep-survival-dev-p10e-network-v1"))[..16];
+
+    private sealed class RuntimeAuthority(Fixture fixture)
+        : IMailboxCapabilityAuthoritySource
+    {
+        private readonly byte[] _network = NetworkId();
+        private readonly byte[] _issuer = new SodiumMailboxCapabilityCrypto().GetPublicKey(fixture.IssuerSeed);
+
+        public bool IsConfigured => true;
+
+        public ulong ReplayValidityEndsAt(
+            MailboxCapabilityAuthorityQuery query,
+            MailboxAuthenticatedGrant grant) =>
+            query.Epoch == ProtocolFixture.NextEpoch
+                ? fixture.NextExpiresAt
+                : fixture.CurrentExpiresAt;
+
+        public bool TryResolve(
+            MailboxCapabilityAuthorityQuery query,
+            out MailboxAuthenticatedVerificationPolicy? policy)
+        {
+            var next = query.Epoch == ProtocolFixture.NextEpoch;
+            var placement = next ? fixture.NextPlacements[0, 1] : fixture.Placements[0, 1];
+            var membership = next ? fixture.NextRoot : fixture.Root;
+            if (query.Operation != MailboxAuthenticatedOperation.Store
+                || query.Domain != MailboxCapabilityDomain.Deposit
+                || query.Lifecycle != MailboxCapabilityLifecycle.Active
+                || query.Generation != query.Epoch
+                || query.Epoch is not (ProtocolFixture.Epoch or ProtocolFixture.NextEpoch)
+                || !CryptographicOperations.FixedTimeEquals(query.NetworkId.Span, _network)
+                || !CryptographicOperations.FixedTimeEquals(query.IssuerPublicKey.Span, _issuer)
+                || !CryptographicOperations.FixedTimeEquals(
+                    query.PlacementCommitment.Span,
+                    MailboxPlacementCommitment.Compute(placement))
+                || !CryptographicOperations.FixedTimeEquals(query.MembershipCommitment.Span, membership))
+            {
+                policy = null;
+                return false;
+            }
+            policy = new MailboxAuthenticatedVerificationPolicy
+            {
+                NetworkId = _network.ToArray(),
+                Epoch = query.Epoch,
+                PlacementCommitment = query.PlacementCommitment.ToArray(),
+                MembershipCommitment = query.MembershipCommitment.ToArray(),
+                NowUnixSeconds = 0,
+                MinimumGeneration = ProtocolFixture.Epoch,
+                TrustedIssuers =
+                [
+                    new MailboxCapabilityIssuerAuthority
+                    {
+                        PublicKey = _issuer.ToArray(),
+                        Domain = MailboxCapabilityDomain.Deposit,
+                        AllowedLifecycle = MailboxCapabilityLifecycle.Active,
+                        MinimumGeneration = ProtocolFixture.Epoch,
+                        MaximumGeneration = ProtocolFixture.NextEpoch,
+                        ValidFromUnixSeconds = fixture.CurrentNotBefore,
+                        ValidUntilUnixSeconds = fixture.NextExpiresAt
+                    }
+                ]
+            };
+            return true;
+        }
+    }
+
+    private sealed class RuntimeRevocations : IMailboxCapabilityRevocationPolicy
+    {
+        public bool IsConfigured => true;
+        public bool IsRevoked(MailboxCapabilityRevocationQuery query) => false;
+    }
 
     internal static BlindedPlacementId[,] BuildPlacements(string generation)
     {

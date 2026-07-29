@@ -24,6 +24,7 @@ const fixture = readFileSync(new URL('../tools/membership-fixture/Program.cs', i
 const artifactInit = readFileSync(new URL('../tools/membership-artifact-init/membership-artifact-init.mjs', import.meta.url), 'utf8');
 const membershipRepeat = readFileSync(new URL('./survival-dev-membership-fixture-repeat.ps1', import.meta.url), 'utf8');
 const mailboxIntegration = readFileSync(new URL('./survival-dev-mailbox.integration.test.ps1', import.meta.url), 'utf8');
+const mailboxEvidenceTest = readFileSync(new URL('./survival-dev-mailbox-evidence.test.ps1', import.meta.url), 'utf8');
 const mailboxDriver = readFileSync(new URL('../tools/survival-mailbox-driver/Program.cs', import.meta.url), 'utf8');
 const membershipNuget = readFileSync(new URL('../tools/membership-fixture/NuGet.Config', import.meta.url), 'utf8');
 const membershipLock = JSON.parse(readFileSync(new URL('../tools/membership-fixture/packages.lock.json', import.meta.url), 'utf8'));
@@ -521,7 +522,7 @@ test('P10E uses real current/next MIP1/RIP1 authority, bounded client ingress, a
     assert.match(serviceBlock(`xnode-${index}`), /target: xnode-ed25519\.seed/);
     assert.match(compose, new RegExp(`xnode-${index}-ed25519: \\{ file: \\.\\/.secrets\\/survival-dev\\/xnode-${index}-ed25519\\.seed \\}`));
   }
-  assert.match(launcher, /\$SurvivalXNodeCommit = 'a5318f6ea5091e0e8ab2e4ac6e2cd47135857524'/);
+  assert.match(launcher, /\$SurvivalXNodeCommit = '5b38cab30f35a57a0b4dc40c3ed3981bc2fa5ec7'/);
   assert.match(launcher, /Prepare-SurvivalXNodeIdentitySecrets/);
   assert.match(launcher, /Prepare-SurvivalMailboxPeerAuthority/);
   assert.match(launcher, /mailbox-client-xnode-1\.env/);
@@ -542,7 +543,7 @@ test('P10E uses real current/next MIP1/RIP1 authority, bounded client ingress, a
     mailboxDriverStateInit,
     /chown 65532:65532 \/state \/state\/driver/);
   assert.doesNotMatch(mailboxDriverStateInit, /chmod|777|DAC_OVERRIDE/);
-  assert.match(compose, /XNODE_REVISION: a5318f6ea5091e0e8ab2e4ac6e2cd47135857524/);
+  assert.match(compose, /XNODE_REVISION: 5b38cab30f35a57a0b4dc40c3ed3981bc2fa5ec7/);
   assert.match(compose, /XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: [0-9a-f]{64}/);
   assert.match(compose, /org\.opencontainers\.image\.revision/);
   assert.match(compose, /com\.xpoint\.source-context\.manifest-sha256/);
@@ -570,14 +571,20 @@ test('P10E uses real current/next MIP1/RIP1 authority, bounded client ingress, a
   assert.match(mailboxIntegration, /ReplicatedMailboxTests/);
   assert.match(mailboxIntegration, /ReplicatedMailboxIntegrationTests/);
   assert.match(mailboxIntegration, /DurableMailboxCapabilityReplayJournalTests/);
+  assert.match(mailboxIntegration, /MailboxNativeMau2BusinessInvariantTests/);
+  assert.match(mailboxIntegration, /survival-dev-mailbox-driver\.test\.ps1/);
   assert.match(mailboxIntegration, /MailboxClientActivatedEndToEndTests/);
+  assert.match(mailboxIntegration, /Remove-Item -LiteralPath \$EvidencePath -Force/);
+  assert.match(mailboxIntegration, /failed rehearsal must never leave stale passed:true evidence/i);
+  assert.match(mailboxEvidenceTest, /`"passed`":true/);
+  assert.match(mailboxEvidenceTest, /missing-xnode/);
+  assert.match(mailboxEvidenceTest, /Test-Path -LiteralPath \$evidence/);
   assert.match(mailboxIntegration, /mailbox-driver/);
   assert.match(mailboxIntegration, /MQR3|mqr3/);
   assert.match(mailboxIntegration, /selected-peer-loss/);
   assert.match(mailboxIntegration, /client-lifecycle/);
   assert.match(mailboxIntegration, /client-loss/);
   assert.match(mailboxIntegration, /client-retry-loss/);
-  assert.match(mailboxIntegration, /retention-gc/);
   assert.match(mailboxDriver, /MembershipRouteDescriptorCodec\.ComputeRoot/);
   assert.match(mailboxDriver, /MembershipRouteDescriptorCodec\.BuildProofs/);
   assert.match(mailboxDriver, /MailboxPeerWireV2Codec\.Encode/);
@@ -607,9 +614,13 @@ test('P10E uses real current/next MIP1/RIP1 authority, bounded client ingress, a
   assert.match(mailboxDriver, /requireNonLoopbackCoordinator/);
   assert.match(mailboxDriver, /now \+ 1800 > currentAuthority\.ExpiresAtUnixSeconds/);
   assert.match(mailboxDriver, /boundedEpochWindows = true/);
-  assert.match(mailboxDriver, /RetentionAfterValidity = TimeSpan\.FromDays\(7\)|var retention = TimeSpan\.FromDays\(7\)/);
-  assert.match(mailboxDriver, /journal\.CollectExpired\(retainUntil \+ 1\)/);
-  assert.match(mailboxDriver, /capacityRecovered = true/);
+  assert.match(mailboxDriver, /MailboxAuthenticatedCapabilityRuntime/);
+  assert.match(mailboxDriver, /runtime\.CollectExpired\(retainUntil \+ 1, 1\)/);
+  assert.match(mailboxDriver, /MailboxClientCanonicalOutcomeStore/);
+  assert.match(mailboxDriver, /MailboxClientTerminalOutcome\.DurableStateRejected/);
+  assert.match(mailboxDriver, /replayOutcomeCoordinated = true/);
+  assert.doesNotMatch(mailboxDriver, /journal\.CollectExpired\(/);
+  assert.doesNotMatch(mailboxDriver, /ePlusOneReservation/);
   assert.doesNotMatch(mailboxDriver, /2_145_000_000|2_145_916_800/);
   assert.match(mailboxIntegration, /BindHost = '192\.168\.1\.44'/);
   assert.match(mailboxIntegration, /--require-non-loopback-coordinator/);

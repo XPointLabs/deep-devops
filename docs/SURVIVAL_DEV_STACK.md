@@ -153,9 +153,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/survival-dev.ps1 -Ac
 ## P10E mailbox client and peer rehearsal
 
 The survival stack pins its filtered XNode context to accepted source
-`a5318f6ea5091e0e8ab2e4ac6e2cd47135857524`; a dirty checkout, another revision,
+`5b38cab30f35a57a0b4dc40c3ed3981bc2fa5ec7`; a dirty checkout, another revision,
 or a filtered-source manifest other than
-`0411615b8e6c04b975fc655088d3294aaa2eb89dae2f93dfd7367fcae64feaae`
+`55a424d8094a066a111fe0dbaed8367a14c4ebee2de8b2d979af77de55e312ff`
 fails closed before build. The source exporter writes a deterministic
 `.survival-source-manifest.json`, and the shared XNode image carries both the exact
 revision and manifest SHA-256 as OCI labels. The live rehearsal requires all six
@@ -210,6 +210,7 @@ replay, corruption rejection, and partial failure:
 ```powershell
 dotnet test ..\xnode\tests\XNode.Tests\XNode.Tests.csproj --no-restore --filter FullyQualifiedName~ReplicatedMailboxTests
 dotnet test ..\xnode\tests\XNode.IntegrationTests\XNode.IntegrationTests.csproj --no-restore --filter FullyQualifiedName~ReplicatedMailboxIntegrationTests
+dotnet test ..\xnode\tests\XNode.Tests\XNode.Tests.csproj --no-restore --filter FullyQualifiedName~MailboxNativeMau2BusinessInvariantTests
 ```
 
 The development-only Docker rehearsal is the live wire proof. Its driver runs inside
@@ -218,9 +219,10 @@ coordinator, durable journals, Sodium signatures, and exact P10E codecs. It requ
 
 - authenticated canonical public Store/Retrieve/ACK through xnode-1, native
   MQR3/MRP1/MAR1 responses, exact Store replay, and an empty retrieval after ACK;
-- the real durable replay journal retaining a completed E scope through epoch
-  expiry plus the fixed seven-day retention, then collecting it one logical
-  second later, recovering bounded capacity, and admitting an E+1 scope;
+- the host-only driver regression and source-level native MAU2 business-invariant
+  suite prove coordinated replay/outcome expiry: they mark replay state expired,
+  delete only the exact canonical terminal outcome, and then remove the replay
+  marker as a retryable batch;
 - public Store with selected xnode-2 stopped to fail dependency-unavailable without
   claiming quorum, followed by exact MST1 retry and native MQR3 after restart;
 - canonical PRQ2 Store to a selected live peer and native MRR2/MQR3 2-of-2;

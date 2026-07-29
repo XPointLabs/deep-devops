@@ -15,11 +15,21 @@ if ([string]::IsNullOrWhiteSpace($EvidencePath)) {
 }
 $XNodeRepository = [IO.Path]::GetFullPath($XNodeRepository)
 $EvidencePath = [IO.Path]::GetFullPath($EvidencePath)
+$ArtifactsRoot = [IO.Path]::GetFullPath((Join-Path $Root 'artifacts'))
+$ArtifactsPrefix = $ArtifactsRoot.TrimEnd(
+    [IO.Path]::DirectorySeparatorChar,
+    [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+if (-not $EvidencePath.StartsWith($ArtifactsPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'Mailbox integration evidence path must stay inside the DevOps artifacts directory.'
+}
+# Invalidate prior success before the first source, runtime, or Docker gate. A
+# failed rehearsal must never leave stale passed:true evidence discoverable.
+Remove-Item -LiteralPath $EvidencePath -Force -ErrorAction SilentlyContinue
 $ComposePath = Join-Path $Root 'docker-compose.survival.dev.yml'
 $Launcher = Join-Path $PSScriptRoot 'survival-dev.ps1'
 $Project = 'deep-survival-dev'
-$expectedCommit = 'a5318f6ea5091e0e8ab2e4ac6e2cd47135857524'
-$expectedManifest = '0411615b8e6c04b975fc655088d3294aaa2eb89dae2f93dfd7367fcae64feaae'
+$expectedCommit = '5b38cab30f35a57a0b4dc40c3ed3981bc2fa5ec7'
+$expectedManifest = '55a424d8094a066a111fe0dbaed8367a14c4ebee2de8b2d979af77de55e312ff'
 $base = @('compose', '-p', $Project, '-f', $ComposePath)
 $nodes = 1..6 | ForEach-Object { "xnode-$_" }
 
@@ -176,6 +186,8 @@ try {
     # filtered context. The runtime proof below is independent and live.
     Invoke-Checked dotnet @('test', (Join-Path $XNodeRepository 'tests\XNode.Tests\XNode.Tests.csproj'), '--no-restore', '--filter', 'FullyQualifiedName~ReplicatedMailboxTests', '--logger', 'console;verbosity=minimal')
     Invoke-Checked dotnet @('test', (Join-Path $XNodeRepository 'tests\XNode.Tests\XNode.Tests.csproj'), '--no-restore', '--filter', 'FullyQualifiedName~DurableMailboxCapabilityReplayJournalTests', '--logger', 'console;verbosity=minimal')
+    Invoke-Checked dotnet @('test', (Join-Path $XNodeRepository 'tests\XNode.Tests\XNode.Tests.csproj'), '--no-restore', '--filter', 'FullyQualifiedName~MailboxNativeMau2BusinessInvariantTests', '--logger', 'console;verbosity=minimal')
+    Invoke-Checked powershell @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $PSScriptRoot 'survival-dev-mailbox-driver.test.ps1'))
     Invoke-Checked dotnet @('test', (Join-Path $XNodeRepository 'tests\XNode.IntegrationTests\XNode.IntegrationTests.csproj'), '--no-restore', '--filter', 'FullyQualifiedName~ReplicatedMailboxIntegrationTests', '--logger', 'console;verbosity=minimal')
     Invoke-Checked dotnet @('test', (Join-Path $XNodeRepository 'tests\XNode.IntegrationTests\XNode.IntegrationTests.csproj'), '--no-restore', '--filter', 'FullyQualifiedName~MailboxClientActivatedEndToEndTests', '--logger', 'console;verbosity=minimal')
     & $Launcher -Action Build -Service @('xnode-1', 'mailbox-driver')

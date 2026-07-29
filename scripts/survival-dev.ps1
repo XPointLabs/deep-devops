@@ -17,8 +17,8 @@ $ComposePath = Join-Path $Root 'docker-compose.survival.dev.yml'
 $Project = 'deep-survival-dev'
 $baseArguments = @('compose', '-p', $Project, '-f', $ComposePath)
 $ContextRoot = Join-Path $Root 'artifacts\survival-dev\build-contexts'
-$SurvivalXNodeCommit = 'a5318f6ea5091e0e8ab2e4ac6e2cd47135857524'
-$SurvivalXNodeContextManifestSha256 = '0411615b8e6c04b975fc655088d3294aaa2eb89dae2f93dfd7367fcae64feaae'
+$SurvivalXNodeCommit = '5b38cab30f35a57a0b4dc40c3ed3981bc2fa5ec7'
+$SurvivalXNodeContextManifestSha256 = '55a424d8094a066a111fe0dbaed8367a14c4ebee2de8b2d979af77de55e312ff'
 $ChainLifecycleServices = @(
     'contracts-devnet',
     'contracts-deploy',
