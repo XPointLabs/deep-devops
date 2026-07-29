@@ -15,6 +15,7 @@ if (arguments.Command == "provision")
     {
         schemaVersion = 1,
         developmentOnly = true,
+        generation = provisioned.Generation,
         bundles = provisioned.BundleNames,
         outputHashes = provisioned.OutputHashes
     });
@@ -1325,7 +1326,7 @@ sealed class Fixture
             System.Text.Encoding.UTF8.GetBytes(
                 "deep-survival-dev-p10e-network-v1"))[..16];
 
-    private static BlindedPlacementId[,] BuildPlacements(string generation)
+    internal static BlindedPlacementId[,] BuildPlacements(string generation)
     {
         var placements = new BlindedPlacementId[6, 6];
         for (var first = 0; first < 6; first++)
@@ -1370,7 +1371,7 @@ sealed class Fixture
     private static string Lower(ReadOnlySpan<byte> value) =>
         Convert.ToHexString(value).ToLowerInvariant();
 
-    private static ParsedPublicEpoch ParsePublicEpoch(
+    internal static ParsedPublicEpoch ParsePublicEpoch(
         PublicEpochAuthority authority,
         ulong expectedEpoch,
         ulong expectedNotBefore,
@@ -1614,8 +1615,11 @@ sealed record Arguments(
     bool DevelopmentOnly,
     bool AllowHttp,
     bool PhysicalDev,
-    string? AndroidBundle,
-    string? WindowsBundle)
+    string? ExpectedAuthoritySha256,
+    string? ExpectedIssuerPublicKey,
+    string? PairDirectory,
+    bool FailAfterStage,
+    bool FailAfterPromotion)
 {
     public static Arguments Parse(string[] values)
     {
@@ -1652,7 +1656,10 @@ sealed record Arguments(
             values.Contains("--development-only", StringComparer.Ordinal),
             values.Contains("--allow-http", StringComparer.Ordinal),
             values.Contains("--physical-dev", StringComparer.Ordinal),
-            Optional("--android-bundle"),
-            Optional("--windows-bundle"));
+            Optional("--expected-authority-sha256"),
+            Optional("--expected-issuer-public-key"),
+            Optional("--pair-directory"),
+            values.Contains("--fail-after-stage", StringComparer.Ordinal),
+            values.Contains("--fail-after-promotion", StringComparer.Ordinal));
     }
 }
