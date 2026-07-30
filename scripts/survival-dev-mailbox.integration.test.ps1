@@ -87,10 +87,10 @@ function Assert-Runtime() {
             if ($ready.mailboxClient.reason -ne 'ready' -or
                 $status.mailboxClient.enabled -ne $true -or
                 $status.mailboxClient.clientRoutesMapped -ne $true -or
-                $status.mailboxClient.clientIngress -ne 'canonical-mst1-mrt1-mak1') {
+                $status.mailboxClient.clientIngress -ne 'native-mau2-meo1-mbr2-mba2') {
                 throw 'xnode-1 does not truthfully report ready canonical client ingress.'
             }
-            $clientIngress = 'canonical-mst1-mrt1-mak1'
+            $clientIngress = 'native-mau2-meo1-mbr2-mba2'
         } else {
             if ($status.mailboxClient.enabled -ne $false -or
                 $status.mailboxClient.clientIngress -ne 'dormant-unmapped') {
@@ -206,7 +206,7 @@ try {
     $phases += Invoke-Driver 'replay'
 
     # Public client Store must never claim quorum while its selected xnode-2
-    # peer is unavailable. Retry the exact persisted MST1 after recovery.
+    # peer is unavailable. Retry the exact persisted MAU2 after recovery.
     Invoke-Docker @('stop', '-t', '10', 'xnode-2')
     $phases += Invoke-Driver 'client-loss' $runId
     Invoke-Docker @('start', 'xnode-2')
@@ -250,7 +250,7 @@ $evidence = [pscustomobject]@{
     passed = $true
     imageBinding = $binding
     stateVolumes = $volumeBindingsAfter
-    protocol = 'P10E/MCP2/MAU2/MST1/MRT1/MRP1/MAK1/MAR1/MIP1/RIP1/PRQ2/MRR2/MQR3'
+    protocol = 'P10J/MCP2/MAU2/MEO1/MBR2/MBA2/MRP1/MAR1/MIP1/RIP1/PRQ2/MRR2/MQR3'
     phases = $phases
     runtime = $runtime
     assertions = [pscustomobject]@{

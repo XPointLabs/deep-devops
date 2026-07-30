@@ -25,6 +25,7 @@ const artifactInit = readFileSync(new URL('../tools/membership-artifact-init/mem
 const membershipRepeat = readFileSync(new URL('./survival-dev-membership-fixture-repeat.ps1', import.meta.url), 'utf8');
 const mailboxIntegration = readFileSync(new URL('./survival-dev-mailbox.integration.test.ps1', import.meta.url), 'utf8');
 const mailboxEvidenceTest = readFileSync(new URL('./survival-dev-mailbox-evidence.test.ps1', import.meta.url), 'utf8');
+const chaos = readFileSync(new URL('./survival-dev-chaos.ps1', import.meta.url), 'utf8');
 const mailboxDriver = readFileSync(new URL('../tools/survival-mailbox-driver/Program.cs', import.meta.url), 'utf8');
 const membershipNuget = readFileSync(new URL('../tools/membership-fixture/NuGet.Config', import.meta.url), 'utf8');
 const membershipLock = JSON.parse(readFileSync(new URL('../tools/membership-fixture/packages.lock.json', import.meta.url), 'utf8'));
@@ -459,10 +460,13 @@ test('daily launcher always uses the fixed project without release-gate ceremony
   assert.match(seed, /relay-bootstrap/);
   assert.match(verify, /JSON\.stringify\(\{ id: `survival-\$\{method\}`, method, payload: \{\} \}\)/);
   assert.doesNotMatch(verify, /params:/);
+  assert.match(verify, /api\/peer\/onion/);
+  assert.match(verify, /non-canonical onion peer endpoint/);
   assert.match(bootstrap, /api\/relay-contacts/);
   assert.match(bootstrap, /\/seed/);
-  assert.match(bootstrap, /\^http:\\\/\\\/xnode-\[1-6\]:8081\$/);
-  assert.doesNotMatch(bootstrap, /8081\\\//);
+  assert.match(
+    bootstrap,
+    /\^http:\\\/\\\/xnode-\[1-6\]:8081\\\/api\\\/peer\\\/onion\$/);
   assert.match(serviceBlock('contracts-devnet'), /profiles: \[chain\]/);
   assert.match(serviceBlock('staking-backend'), /profiles: \[chain\]/);
   assert.match(compose, /Runtime__BootstrapFromStorage: "true"/);
@@ -519,7 +523,10 @@ test('P10E uses real current/next MIP1/RIP1 authority, bounded client ingress, a
   }
   assert.doesNotMatch(compose, /:4180[1-6]:8081/);
   for (const index of [1, 2, 3, 4, 5, 6]) {
-    assert.match(serviceBlock(`xnode-${index}`), new RegExp(`Node__PublicPeerRpcEndpoint: http:\\/\\/xnode-${index}:8081`));
+    assert.match(
+      serviceBlock(`xnode-${index}`),
+      new RegExp(
+        `Node__PublicPeerRpcEndpoint: http:\\/\\/xnode-${index}:8081\\/api\\/peer\\/onion`));
     assert.match(serviceBlock(`xnode-${index}`), new RegExp(`source: xnode-${index}-ed25519`));
     assert.match(serviceBlock(`xnode-${index}`), /target: xnode-ed25519\.seed/);
     assert.match(compose, new RegExp(`xnode-${index}-ed25519: \\{ file: \\.\\/.secrets\\/survival-dev\\/xnode-${index}-ed25519\\.seed \\}`));
@@ -601,6 +608,8 @@ test('P10E uses real current/next MIP1/RIP1 authority, bounded client ingress, a
   assert.match(mailboxIntegration, /stateVolumes = \$volumeBindingsAfter/);
   assert.match(mailboxIntegration, /Get-StateVolumeBindings/);
   assert.match(mailboxDriver, /P10E\/MCP2\/MAU2\/MIP1\/RIP1\/PRQ2/);
+  assert.match(mailboxDriver, /MailboxAuthenticatedClientRequestCodec\.Encode/);
+  assert.doesNotMatch(mailboxDriver, /(?:mst1|mrt1|mak1)(?:Bytes|")/i);
   assert.match(mailboxDriver, /MailboxClient__Enabled=false/);
   assert.match(mailboxDriver, /MailboxClient__Enabled=true/);
   assert.match(mailboxDriver, /MailboxClientAdapter__Enabled=true/);
@@ -609,10 +618,9 @@ test('P10E uses real current/next MIP1/RIP1 authority, bounded client ingress, a
   assert.match(mailboxDriver, /MailboxAuthenticatedRequestTranscript\.ForStore/);
   assert.match(mailboxDriver, /MailboxAuthenticatedRequestTranscript\.ForRetrieve/);
   assert.match(mailboxDriver, /MailboxAuthenticatedRequestTranscript\.ForAck/);
-  assert.match(mailboxDriver, /MailboxAuthenticatedCapabilityCodec\.EncodePresentation/);
-  assert.match(mailboxDriver, /MailboxClientCodec\.EncodeStore/);
-  assert.match(mailboxDriver, /MailboxClientCodec\.EncodeRetrieve/);
-  assert.match(mailboxDriver, /MailboxClientCodec\.EncodeAck/);
+  assert.match(mailboxDriver, /crypto\.SignPresentation/);
+  assert.match(mailboxDriver, /MailboxClientCodec\.DecodeRetrievePage/);
+  assert.match(mailboxDriver, /MailboxAggregateAckCodec\.DecodeMqr3/);
   assert.match(mailboxDriver, /requireNonLoopbackCoordinator/);
   assert.match(mailboxDriver, /now \+ 1800 > currentAuthority\.ExpiresAtUnixSeconds/);
   assert.match(mailboxDriver, /boundedEpochWindows = true/);
@@ -645,4 +653,13 @@ test('development identities remain exact strings and Up proves host HTTP reacha
   for (const port of [41545, 41801, 41802, 41803, 41804, 41805, 41806, 41810, 41811, 41820, 41821, 41822, 41823, 41999]) {
     assert.match(launcher, new RegExp(String(port)));
   }
+});
+
+test('chaos rehearsal follows the exported LAN host and invalidates stale evidence', () => {
+  assert.match(chaos, /\$env:XNODE_URLS/);
+  assert.match(chaos, /\$RuntimeHost = \$runtimeHosts\[0\]/);
+  assert.match(chaos, /\$env:SURVIVAL_BIND_HOST = \$RuntimeHost/);
+  assert.match(chaos, /survival-dev-verify\.mjs'\), '--host', \$RuntimeHost/);
+  assert.match(chaos, /Remove-Item -LiteralPath \$EvidencePath -Force/);
+  assert.doesNotMatch(chaos, /survival-dev-verify\.mjs'\), '--host', '127\.0\.0\.1'/);
 });

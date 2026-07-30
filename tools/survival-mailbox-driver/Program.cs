@@ -377,11 +377,11 @@ static async Task RunClientLifecycleAsync(Fixture fixture, Arguments arguments)
         ackTombstoneQuorums = aggregate.TombstoneQuorums.Count,
         retrieveAfterAckItems = emptyPage.Items.Count,
         exactStoreReplay = true,
-        mst1Bytes = store.CanonicalRequest.Length,
+        mau2StoreBytes = store.CanonicalRequest.Length,
         mqr3Bytes = firstStore.Length,
-        mrt1Bytes = retrieve.Length,
+        mau2RetrieveBytes = retrieve.Length,
         mrp1Bytes = pageBytes.Length,
-        mak1Bytes = ack.Length,
+        mau2AckBytes = ack.Length,
         mar1Bytes = ackBytes.Length
     });
 }
@@ -396,7 +396,7 @@ static async Task RunClientLossAsync(Fixture fixture, Arguments arguments)
     var store = fixture.NewClientStore(arguments.RunId, "client-loss", now);
     Directory.CreateDirectory(arguments.StateDirectory);
     await File.WriteAllBytesAsync(
-        Path.Combine(arguments.StateDirectory, "client-loss.mst1"),
+        Path.Combine(arguments.StateDirectory, "client-loss.mau2"),
         store.CanonicalRequest);
     await new ExactHttpClient(arguments.ClientUrl).SendFailureAsync(
         MailboxWireHttpContract.Store,
@@ -406,14 +406,14 @@ static async Task RunClientLossAsync(Fixture fixture, Arguments arguments)
     {
         status = "dependency-unavailable",
         exactRetryPersisted = true,
-        mst1Bytes = store.CanonicalRequest.Length
+        mau2StoreBytes = store.CanonicalRequest.Length
     });
 }
 
 static async Task RunClientRetryLossAsync(Arguments arguments)
 {
     var canonical = await File.ReadAllBytesAsync(
-        Path.Combine(arguments.StateDirectory, "client-loss.mst1"));
+        Path.Combine(arguments.StateDirectory, "client-loss.mau2"));
     var response = await new ExactHttpClient(arguments.ClientUrl).SendSuccessAsync(
         MailboxWireHttpContract.Store,
         canonical);
@@ -431,7 +431,7 @@ static async Task RunClientRetryLossAsync(Arguments arguments)
         status = "durable",
         nativeMqr3 = true,
         exactReplay = true,
-        mst1Bytes = canonical.Length,
+        mau2StoreBytes = canonical.Length,
         mqr3Bytes = response.Length
     });
 }
@@ -1169,7 +1169,7 @@ sealed class Fixture
                 material.Concat("client-store-ciphertext"u8.ToArray()).ToArray())
         };
         var binding = MailboxAuthenticatedRequestTranscript.ForStore(envelope);
-        var capability = AuthenticatedCapability(
+        var canonicalMau2 = AuthenticatedRequest(
             runId,
             name,
             MailboxCapabilityDomain.Deposit,
@@ -1177,14 +1177,7 @@ sealed class Fixture
             now,
             replayCounter: 1);
         return new ClientStoreFixture(
-            MailboxClientCodec.EncodeStore(new MailboxStoreRequest
-            {
-                Epoch = ProtocolFixture.Epoch,
-                OperationId = envelope.OperationId.ToArray(),
-                MixedVersion = MailboxMixedVersionMarker.StrictV1,
-                DepositCapability = capability,
-                Envelope = envelope
-            }),
+            canonicalMau2,
             envelope);
     }
 
@@ -1204,24 +1197,13 @@ sealed class Fixture
             afterCursor: 0,
             maximumItems: 10,
             continuationToken: []);
-        return MailboxClientCodec.EncodeRetrieve(new MailboxRetrieveRequest
-        {
-            Epoch = ProtocolFixture.Epoch,
-            OperationId = operationId,
-            MixedVersion = MailboxMixedVersionMarker.StrictV1,
-            RetrieveCapability = AuthenticatedCapability(
-                runId,
-                name,
-                MailboxCapabilityDomain.Retrieve,
-                binding,
-                now,
-                replayCounter),
-            MailboxId = envelope.MailboxId,
-            PlacementId = envelope.PlacementId,
-            AfterCursor = 0,
-            MaximumItems = 10,
-            ContinuationToken = ReadOnlyMemory<byte>.Empty
-        });
+        return AuthenticatedRequest(
+            runId,
+            name,
+            MailboxCapabilityDomain.Retrieve,
+            binding,
+            now,
+            replayCounter);
     }
 
     public byte[] NewClientAck(
@@ -1241,24 +1223,13 @@ sealed class Fixture
             isFinalPage: true,
             continuationToken: [],
             acknowledgements);
-        return MailboxClientCodec.EncodeAck(new MailboxAckRequest
-        {
-            Epoch = ProtocolFixture.Epoch,
-            OperationId = operationId,
-            MixedVersion = MailboxMixedVersionMarker.StrictV1,
-            RetrieveCapability = AuthenticatedCapability(
-                runId,
-                name,
-                MailboxCapabilityDomain.Retrieve,
-                binding,
-                now,
-                replayCounter),
-            MailboxId = envelope.MailboxId,
-            PlacementId = envelope.PlacementId,
-            IsFinalPage = true,
-            ContinuationToken = ReadOnlyMemory<byte>.Empty,
-            Acknowledgements = acknowledgements
-        });
+        return AuthenticatedRequest(
+            runId,
+            name,
+            MailboxCapabilityDomain.Retrieve,
+            binding,
+            now,
+            replayCounter);
     }
 
     public MailboxClientDecodePolicy ClientDecodePolicy(ulong now) => new()
@@ -1304,7 +1275,7 @@ sealed class Fixture
         return SenderSeed.ToArray();
     }
 
-    private MailboxCapabilityPresentation AuthenticatedCapability(
+    private byte[] AuthenticatedRequest(
         string runId,
         string name,
         MailboxCapabilityDomain domain,
@@ -1345,27 +1316,12 @@ sealed class Fixture
             binding,
             replayCounter,
             holderSeed);
-        var encoded = MailboxAuthenticatedCapabilityCodec.EncodePresentation(
-            presentation);
-        var idempotencyKey = SHA256.HashData(
-            Material(runId, name)
-                .Concat("outer-idempotency"u8.ToArray())
-                .ToArray())[..16];
-        var domainValue = domain == MailboxCapabilityDomain.Deposit
-            ? (MailboxDomainValue)new RotatingDepositCapability(encoded)
-            : new RotatingRetrieveCapability(encoded);
-        return new MailboxCapabilityPresentation
-        {
-            DomainValue = domainValue,
-            Lifecycle = MailboxCapabilityLifecycle.Active,
-            MixedVersion = MailboxMixedVersionMarker.StrictV1,
-            Generation = ProtocolFixture.Epoch,
-            NotBeforeBucket = checked((uint)notBefore),
-            ExpiresAtBucket = checked((uint)expiresAt),
-            OverlapUntilBucket = 0,
-            ReplayCounter = replayCounter,
-            IdempotencyKey = idempotencyKey
-        };
+        return MailboxAuthenticatedClientRequestCodec.Encode(
+            new MailboxAuthenticatedClientRequest
+            {
+                Binding = binding,
+                Presentation = presentation
+            });
     }
 
     private static byte[] Material(string runId, string name) =>
@@ -1649,7 +1605,12 @@ sealed class ExactHttpClient(string baseUrl)
             || response.Content.Headers.ContentEncoding.Count != 0)
         {
             throw new InvalidOperationException(
-                $"Public mailbox {contract.RequestFrame} response violated its exact contract.");
+                $"Public mailbox {contract.RequestFrame} response violated its exact contract: "
+                + $"status={(int)response.StatusCode}, "
+                + $"declaredLength={response.Content.Headers.ContentLength?.ToString() ?? "missing"}, "
+                + $"actualLength={body.Length}, "
+                + $"contentType={response.Content.Headers.ContentType?.ToString() ?? "missing"}, "
+                + $"contentEncodingCount={response.Content.Headers.ContentEncoding.Count}.");
         }
         return body;
     }

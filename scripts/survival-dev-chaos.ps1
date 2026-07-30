@@ -44,7 +44,7 @@ function Get-Commit([string]$Repository) {
 }
 
 function Wait-Node([int]$Index) {
-    $uri = "http://127.0.0.1:$([int](41800 + $Index))/health/ready"
+    $uri = "http://${RuntimeHost}:$([int](41800 + $Index))/health/ready"
     foreach ($attempt in 1..60) {
         try {
             $response = Invoke-WebRequest -UseBasicParsing -Uri $uri -TimeoutSec 2
@@ -56,7 +56,7 @@ function Wait-Node([int]$Index) {
 }
 
 function Assert-NodeUnavailable([int]$Index) {
-    $uri = "http://127.0.0.1:$([int](41800 + $Index))/health/ready"
+    $uri = "http://${RuntimeHost}:$([int](41800 + $Index))/health/ready"
     try {
         $response = Invoke-WebRequest -UseBasicParsing -Uri $uri -TimeoutSec 2
     } catch {
@@ -110,6 +110,23 @@ foreach ($line in Get-Content -LiteralPath $EnvironmentPath) {
 }
 $routerEntries = @($env:XNODE_URLS.Split(';', [StringSplitOptions]::RemoveEmptyEntries))
 if ($routerEntries.Count -ne 6) { throw 'Chaos rehearsal requires exactly six pinned XNODE_URLS entries.' }
+$routerUris = @($routerEntries | ForEach-Object {
+    if ($_ -notmatch '(?<url>https?://[^|,;]+)') {
+        throw 'Chaos rehearsal XNODE_URLS contains an invalid entry.'
+    }
+    [Uri]$Matches.url
+})
+$runtimeHosts = @($routerUris | Select-Object -ExpandProperty Host -Unique)
+$runtimeAddress = $null
+if ($runtimeHosts.Count -ne 1 -or
+    -not ([Net.IPAddress]::TryParse($runtimeHosts[0], [ref]$runtimeAddress)) -or
+    $runtimeAddress.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork -or
+    $runtimeAddress.Equals([Net.IPAddress]::Any)) {
+    throw 'Chaos rehearsal requires one exact routable runtime host.'
+}
+$RuntimeHost = $runtimeHosts[0]
+$env:SURVIVAL_BIND_HOST = $RuntimeHost
+Remove-Item -LiteralPath $EvidencePath -Force -ErrorAction SilentlyContinue
 
 # These tests instrument the client transport itself.  They are deliberately not
 # presented as a live replicated-storage exercise: all development XNodes share
@@ -136,7 +153,7 @@ Invoke-ContractEvidence `
     'This proves client-layer no-redispatch only; it neither proves storage replication nor server-side cross-node deduplication.'
 
 Invoke-Checked docker @('compose', '-p', 'deep-survival-dev', '-f', $ComposePath, 'ps')
-Invoke-Checked node @((Join-Path $PSScriptRoot 'survival-dev-verify.mjs'), '--host', '127.0.0.1')
+Invoke-Checked node @((Join-Path $PSScriptRoot 'survival-dev-verify.mjs'), '--host', $RuntimeHost)
 
 try {
     foreach ($index in 1..6) {
@@ -146,7 +163,7 @@ try {
         try {
             Assert-NodeUnavailable $index
         } finally {
-            Invoke-Checked docker @('compose', '-p', 'deep-survival-dev', '-f', $ComposePath, 'up', '-d', '--wait', $node)
+            Invoke-Checked docker @('compose', '-p', 'deep-survival-dev', '-f', $ComposePath, 'up', '-d', '--no-deps', '--wait', $node)
             Wait-Node $index
         }
         $recoveryResults.Add([pscustomobject]@{
@@ -162,7 +179,7 @@ try {
     Invoke-Checked docker @('compose', '-p', 'deep-survival-dev', '-f', $ComposePath, 'up', '-d', '--wait')
 }
 
-Invoke-Checked node @((Join-Path $PSScriptRoot 'survival-dev-verify.mjs'), '--host', '127.0.0.1')
+Invoke-Checked node @((Join-Path $PSScriptRoot 'survival-dev-verify.mjs'), '--host', $RuntimeHost)
 $evidence = [pscustomobject]@{
     schemaVersion = 2
     generatedAt = [DateTimeOffset]::UtcNow

@@ -171,9 +171,10 @@ host/global plus per-operation admission controls. The launcher runs the pinned 
 implementation to write a public, DEV-LOCAL-ONLY authority environment file containing the
 real current/next six-leaf MIP1 Merkle commitments, canonical MIP1/RIP1 proofs, and all
 30 epoch/pair selections across the six fixed router/signing identities and
-`http://xnode-N:8081` endpoints. A second generated environment enables the bounded
+`http://xnode-N:8081/api/peer/onion` endpoints. A second generated environment enables the bounded
 DEV-LOCAL-ONLY client fixture only on `xnode-1`: MAU2 issuer trust, E/E+1 placement and
-membership authority, and canonical MST1/MRT1/MAK1 ingress. `xnode-2` through `xnode-6`
+membership authority, and native MAU2 ingress with canonical MEO1/MBR2/MBA2
+bindings. `xnode-2` through `xnode-6`
 remain peer-only and report `dormant-unmapped`.
 
 The generator rounds its anchor down to the current minute and creates a genuinely
@@ -224,7 +225,7 @@ coordinator, durable journals, Sodium signatures, and exact P10E codecs. It requ
   delete only the exact canonical terminal outcome, and then remove the replay
   marker as a retryable batch;
 - public Store with selected xnode-2 stopped to fail dependency-unavailable without
-  claiming quorum, followed by exact MST1 retry and native MQR3 after restart;
+  claiming quorum, followed by exact MAU2 retry and native MQR3 after restart;
 - canonical PRQ2 Store to a selected live peer and native MRR2/MQR3 2-of-2;
 - exact MRR2 and MQR3 replay after force-recreating that peer with its named volume;
 - a stopped selected peer to produce only one durable replica, `PartialFailure`, and no MQR3;
