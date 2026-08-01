@@ -409,8 +409,8 @@ internal static class MailboxRuntimePublisher
         foreach (var directory in Directory.EnumerateDirectories(root, "*", SearchOption.AllDirectories)
                      .Prepend(root))
         {
+            RequireCurrentWindowsOwner(directory, isDirectory: true, current);
             var security = new DirectorySecurity();
-            security.SetOwner(current);
             security.SetAccessRuleProtection(true, false);
             foreach (var identity in new[] { current, system, administrators })
                 security.AddAccessRule(new FileSystemAccessRule(identity, FileSystemRights.FullControl,
@@ -420,14 +420,28 @@ internal static class MailboxRuntimePublisher
         }
         foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
         {
+            RequireCurrentWindowsOwner(file, isDirectory: false, current);
             var security = new FileSecurity();
-            security.SetOwner(current);
             security.SetAccessRuleProtection(true, false);
             foreach (var identity in new[] { current, system, administrators })
                 security.AddAccessRule(new FileSystemAccessRule(identity, FileSystemRights.FullControl,
                     AccessControlType.Allow));
             new FileInfo(file).SetAccessControl(security);
         }
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static void RequireCurrentWindowsOwner(
+        string path,
+        bool isDirectory,
+        SecurityIdentifier current)
+    {
+        var security = isDirectory
+            ? (FileSystemSecurity)new DirectoryInfo(path).GetAccessControl(AccessControlSections.Owner)
+            : new FileInfo(path).GetAccessControl(AccessControlSections.Owner);
+        var owner = security.GetOwner(typeof(SecurityIdentifier)) as SecurityIdentifier;
+        Require(owner is not null && owner.Equals(current),
+            "Runtime path owner must be the exact current Windows identity.");
     }
 
     private static void Exact(JsonElement value, string[] expected, string label)

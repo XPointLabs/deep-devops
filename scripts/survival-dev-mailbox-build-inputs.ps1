@@ -290,8 +290,14 @@ function Set-MailboxDirectoryExclusiveWritable([string]$Path) {
         $current = [Security.Principal.WindowsIdentity]::GetCurrent().User
         $system = [Security.Principal.SecurityIdentifier]::new('S-1-5-18')
         $administrators = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
+        $item = [IO.DirectoryInfo](Get-Item -Force -LiteralPath $Path)
+        $owner = $item.GetAccessControl(
+            [Security.AccessControl.AccessControlSections]::Owner).GetOwner(
+                [Security.Principal.SecurityIdentifier])
+        if (-not $owner.Equals($current)) {
+            throw 'Mailbox writable directory owner must be the exact current Windows identity.'
+        }
         $security = [Security.AccessControl.DirectorySecurity]::new()
-        $security.SetOwner($current)
         $security.SetAccessRuleProtection($true, $false)
         foreach ($identity in @($current, $system, $administrators)) {
             $security.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
@@ -302,7 +308,7 @@ function Set-MailboxDirectoryExclusiveWritable([string]$Path) {
                 [Security.AccessControl.PropagationFlags]::None,
                 [Security.AccessControl.AccessControlType]::Allow))
         }
-        ([IO.DirectoryInfo](Get-Item -Force -LiteralPath $Path)).SetAccessControl($security)
+        $item.SetAccessControl($security)
     } else {
         [IO.File]::SetUnixFileMode(
             $Path,

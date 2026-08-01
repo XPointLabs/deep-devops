@@ -817,7 +817,12 @@ static class MailboxGrantProvisioner
         FileSystemSecurity security = isDirectory
             ? new DirectorySecurity()
             : new FileSecurity();
-        security.SetOwner(current);
+        var existing = isDirectory
+            ? (FileSystemSecurity)new DirectoryInfo(path).GetAccessControl(AccessControlSections.Owner)
+            : new FileInfo(path).GetAccessControl(AccessControlSections.Owner);
+        var owner = existing.GetOwner(typeof(SecurityIdentifier)) as SecurityIdentifier;
+        Require(owner is not null && owner.Equals(current),
+            "Provisioned path owner must be the exact current Windows identity.");
         security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
         foreach (var sid in new[] { current, system, administrators })
         {

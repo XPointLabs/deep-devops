@@ -22,7 +22,7 @@ Set-StrictMode -Version Latest
 $root = [IO.Path]::GetFullPath((Split-Path $PSScriptRoot -Parent))
 $buildHelper = Join-Path $PSScriptRoot 'survival-dev-mailbox-build-inputs.ps1'
 $expectedBuildHelperSha256 =
-    '559f9d122edfd310bb7c5c255c091e83be24d3760c598b88b6b23a5e4bd5ee70'
+    '04c0f2cf9118b648ce4868390451afd33cd6ad9ce550703b24b3f429ce694b2c'
 if (((Get-Item -Force -LiteralPath $buildHelper).Attributes -band
     [IO.FileAttributes]::ReparsePoint)) {
     throw 'The mailbox immutable-build helper cannot be a reparse point.'
@@ -74,9 +74,9 @@ $expectedXNodeManifestSha256 =
     '68027e628e81230c8c26aca5724e477e6c1bd6ca76f60a4315ef7e55a4489d40'
 $expectedDriverSha256 = @{
     'MailboxGrantProvisioner.cs' =
-        '1f8a2c81e9249390a8309f0362290e4db6e9aa7a4965779e46bb52a7493d42fe'
+        'b20e40c9e225bd827514f47edd3e3a72c212916d1702385a5e945fb2c2c96419'
     'MailboxRuntimePublisher.cs' =
-        'fcd38824e14376ef95906ed724c97bc9fcafda0a5a568f7c048c24d61edef928'
+        'd6aad71f65987f620ccf0d5a06394240aa199d3bb92ef38b81a9594f8e9ff94b'
     'Program.cs' =
         '03b51b36b6df101412bdf37cd7051e79dee07d7c2b3199489d23b884fbd8fa2d'
     'SurvivalMailboxDriver.csproj' =

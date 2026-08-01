@@ -25,6 +25,7 @@ $ChainLifecycleServices = @(
     'contracts-smoke',
     'staking-backend'
 )
+. (Join-Path $PSScriptRoot 'survival-dev-private-secrets.ps1')
 
 function Invoke-SurvivalDocker([string[]]$Arguments) {
     & docker @Arguments
@@ -189,6 +190,7 @@ function Prepare-SurvivalXNodeIdentitySecrets() {
         } else {
             [IO.File]::WriteAllText($path, $seed + "`n", [Text.UTF8Encoding]::new($false))
         }
+        Protect-SurvivalDevPrivateFile $path
     }
     $issuerPath = Join-Path $directory 'mailbox-client-issuer.seed'
     $issuerSeed = ('{0:x64}' -f 1001)
@@ -199,6 +201,7 @@ function Prepare-SurvivalXNodeIdentitySecrets() {
     } else {
         [IO.File]::WriteAllText($issuerPath, $issuerSeed + "`n", [Text.UTF8Encoding]::new($false))
     }
+    Protect-SurvivalDevPrivateFile $issuerPath
 }
 
 function Reset-SurvivalMembershipFixture() {
