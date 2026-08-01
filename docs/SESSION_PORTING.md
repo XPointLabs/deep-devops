@@ -65,6 +65,11 @@ Storage:
 File/avatar:
 
 - upload/download/info/extend,
+- provenance-bound file-id parity through
+  `tools/fixtures/session-file-id.golden.json`, pinned to upstream
+  `session-file-server` commit `45534715dc755943527ec5e22778bfb5e67285d0`
+  `fileserver/routes.py::generate_file_id` (33-byte salted BLAKE2b plus
+  unpadded base64url),
 - duplicate/idempotent upload semantics,
 - avatar upload/update/fetch/info,
 - TTL pruning,
@@ -95,6 +100,9 @@ Push:
 - the signature-v2 canonicalizer independently rejects coercive, unsorted, duplicate, or
   out-of-domain inputs instead of normalizing them,
 - cross-runtime golden vectors in `tools/fixtures/push-signature-v2.golden.json`,
+- golden text integrity hashes normalized UTF-8 line endings so Git LF and
+  Windows CRLF checkouts attest the same semantic fixture while BOM, lone CR,
+  and invalid UTF-8 remain rejected,
 - provider dispatch success/failure recording,
 - delivery dedupe and persistence,
 - provider canary evidence for staging/prod.

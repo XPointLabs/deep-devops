@@ -1940,7 +1940,7 @@ async function handleStorage(req, res, url) {
       stateChanged = true;
     }
 
-    updated.sort((left, right) => left.hash.localeCompare(right.hash));
+    updated.sort((left, right) => left.hash < right.hash ? -1 : left.hash > right.hash ? 1 : 0);
     const updatedHashes = updated.map(item => item.hash);
     for (const item of updated) {
       updatedExpiries.push(item.expiry);

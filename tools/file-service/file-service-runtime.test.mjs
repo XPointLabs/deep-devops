@@ -9,6 +9,12 @@ import { createHash, randomBytes } from 'node:crypto';
 import { createTestStorageSigningIdentity } from '../compat-services/storage-signatures.mjs';
 
 const scriptPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'file-service.mjs');
+const sessionFileIdFixturePath = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '..',
+  'fixtures',
+  'session-file-id.golden.json'
+);
 
 async function waitForReady(baseUrl, timeoutMs = 5000) {
   const started = Date.now();
@@ -121,6 +127,30 @@ test('health and stats endpoints honor SERVICE_NAME override', async () => {
     assert.equal(statsBody.mode, 'file');
     assert.equal(statsBody.inventory.files, 0);
     assert.equal(typeof statsBody.state.file, 'string');
+  } finally {
+    await service.stop();
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test('file runtime matches the provenance-bound upstream Session BLAKE2b file id', async () => {
+  const stateDir = await mkdtemp(path.join(tmpdir(), 'file-service-runtime-'));
+  const service = await startFileService({ port: randomPort(), stateDir });
+
+  try {
+    const fixture = JSON.parse(await readFile(sessionFileIdFixturePath, 'utf8'));
+    assert.equal(fixture.schema, 'deep.session-file-id-golden/v1');
+    assert.equal(fixture.provenance.repository, 'https://github.com/session-foundation/session-file-server');
+    assert.equal(fixture.provenance.source_commit, '45534715dc755943527ec5e22778bfb5e67285d0');
+    assert.equal(Buffer.from(fixture.input.utf8, 'utf8').toString('hex'), fixture.input.hex);
+    assert.equal(Buffer.from(fixture.digest_hex, 'hex').toString('base64url'), fixture.file_id);
+
+    const response = await fetch(`${service.baseUrl}/file`, {
+      method: 'POST',
+      body: Buffer.from(fixture.input.hex, 'hex')
+    });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).id, fixture.file_id);
   } finally {
     await service.stop();
     await rm(stateDir, { recursive: true, force: true });

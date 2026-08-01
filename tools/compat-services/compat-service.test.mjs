@@ -1,5 +1,5 @@
 ﻿import assert from 'node:assert/strict';
-import { createHash, createPrivateKey, createPublicKey, sign as cryptoSign } from 'node:crypto';
+import { createPrivateKey, createPublicKey, sign as cryptoSign } from 'node:crypto';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -12,6 +12,7 @@ import {
   createTestStorageSigningIdentity,
   verifySessionSignature
 } from './storage-signatures.mjs';
+import { normalizedUtf8FixtureSha256 } from '../fixtures/text-fixture-integrity.mjs';
 
 const scriptPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'compat-service.mjs');
 const pushV2FixturePath = path.resolve(
@@ -21,6 +22,12 @@ const pushV2FixturePath = path.resolve(
   'push-signature-v2.golden.json'
 );
 const pushV2FixtureSha256 = '4bca6bffffa751d124a322a51af878476522faa9ded8a56bd2c89f93ac1e576a';
+const sessionFileIdFixturePath = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '..',
+  'fixtures',
+  'session-file-id.golden.json'
+);
 
 async function waitForReady(baseUrl, timeoutMs = 5000) {
   const started = Date.now();
@@ -92,7 +99,6 @@ const validSessionEd25519 = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 const validPushSignature = 'f8efdd12000700000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000';
 const validEncKey = 'abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd';
 const compatRelayId = '1111111111111111111111111111111111111111111111111111111111111111';
-const expectedSessionFileId = 'G11G5sQmyOccBQIlkx3f_X2Ms8oKfF8bgZ9pyJUzvFGv';
 const storageSigningIdentity = createTestStorageSigningIdentity();
 const pushSigningIdentity = createTestStorageSigningIdentity();
 
@@ -302,7 +308,7 @@ function createStorageStorePayload(overrides = {}) {
 
 test('push signature v2 golden fixture pins UTF-8 canonical bytes and Ed25519 signatures', async () => {
   const fixtureBytes = await readFile(pushV2FixturePath);
-  assert.equal(createHash('sha256').update(fixtureBytes).digest('hex'), pushV2FixtureSha256);
+  assert.equal(normalizedUtf8FixtureSha256(fixtureBytes), pushV2FixtureSha256);
   const fixture = JSON.parse(fixtureBytes.toString('utf8'));
   assert.equal(fixture.signature_version, 2);
   const seed = Buffer.from(fixture.key.private_seed_hex, 'hex');
@@ -2022,7 +2028,7 @@ test('storage expire accepts per-message expiry arrays and returns sorted update
       { hash: stored[0].hash, expiry: requestedExpiries[1] },
       { hash: stored[1].hash, expiry: requestedExpiries[3] },
       { hash: stored[2].hash, expiry: requestedExpiries[0] }
-    ].sort((left, right) => left.hash.localeCompare(right.hash));
+    ].sort((left, right) => left.hash < right.hash ? -1 : left.hash > right.hash ? 1 : 0);
 
     assert.equal(response.status, 200);
     assert.deepEqual(body.swarm[compatRelayId].updated, expectedPairs.map(item => item.hash));
@@ -2905,14 +2911,24 @@ test('file upload id matches upstream Session salted BLAKE2b contract', async ()
   const mock = await startMockService({ port: randomPort(), stateDir });
 
   try {
+    const fixture = JSON.parse(await readFile(sessionFileIdFixturePath, 'utf8'));
+    assert.equal(fixture.schema, 'deep.session-file-id-golden/v1');
+    assert.equal(fixture.provenance.repository, 'https://github.com/session-foundation/session-file-server');
+    assert.equal(fixture.provenance.source_commit, '45534715dc755943527ec5e22778bfb5e67285d0');
+    assert.equal(fixture.provenance.source_path, 'fileserver/routes.py');
+    assert.equal(fixture.provenance.source_function, 'generate_file_id');
+    assert.equal(fixture.algorithm.digest_bytes, 33);
+    assert.equal(Buffer.from(fixture.algorithm.salt_utf8, 'utf8').toString('hex'), fixture.algorithm.salt_hex);
+    assert.equal(Buffer.from(fixture.input.utf8, 'utf8').toString('hex'), fixture.input.hex);
+    assert.equal(Buffer.from(fixture.digest_hex, 'hex').toString('base64url'), fixture.file_id);
     const response = await fetch(`${mock.baseUrl}/file`, {
       method: 'POST',
-      body: Buffer.from('Deep attachment fixture v1\n', 'utf8')
+      body: Buffer.from(fixture.input.hex, 'hex')
     });
     const body = await response.json();
 
     assert.equal(response.status, 200);
-    assert.equal(body.id, expectedSessionFileId);
+    assert.equal(body.id, fixture.file_id);
   } finally {
     await mock.stop();
     await rm(stateDir, { recursive: true, force: true });

@@ -1,5 +1,5 @@
 ﻿import assert from 'node:assert/strict';
-import { createHash, createPrivateKey, createPublicKey, sign as cryptoSign } from 'node:crypto';
+import { createPrivateKey, createPublicKey, sign as cryptoSign } from 'node:crypto';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -12,6 +12,7 @@ import {
   createTestStorageSigningIdentity,
   verifySessionSignature
 } from '../compat-services/storage-signatures.mjs';
+import { normalizedUtf8FixtureSha256 } from '../fixtures/text-fixture-integrity.mjs';
 import { fileURLToPath } from 'node:url';
 
 const scriptPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'push-service.mjs');
@@ -283,7 +284,7 @@ function signOldCoerciveUnsubscribeV2(identity, request) {
 
 test('push signature v2 golden fixture pins UTF-8 canonical bytes and Ed25519 signatures', async () => {
   const fixtureBytes = await readFile(pushV2FixturePath);
-  assert.equal(createHash('sha256').update(fixtureBytes).digest('hex'), pushV2FixtureSha256);
+  assert.equal(normalizedUtf8FixtureSha256(fixtureBytes), pushV2FixtureSha256);
   const fixture = JSON.parse(fixtureBytes.toString('utf8'));
   assert.equal(fixture.signature_version, 2);
   const seed = Buffer.from(fixture.key.private_seed_hex, 'hex');

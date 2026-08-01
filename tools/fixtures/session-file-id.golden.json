@@ -1,0 +1,23 @@
+{
+  "schema": "deep.session-file-id-golden/v1",
+  "provenance": {
+    "repository": "https://github.com/session-foundation/session-file-server",
+    "source_commit": "45534715dc755943527ec5e22778bfb5e67285d0",
+    "source_path": "fileserver/routes.py",
+    "source_function": "generate_file_id",
+    "reference_runtime": "Python hashlib.blake2b + base64.urlsafe_b64encode"
+  },
+  "algorithm": {
+    "name": "BLAKE2b",
+    "digest_bytes": 33,
+    "salt_utf8": "SessionFileSvr\u0000\u0000",
+    "salt_hex": "53657373696f6e46696c655376720000",
+    "encoding": "base64url-without-padding"
+  },
+  "input": {
+    "utf8": "Deep attachment fixture v1\n",
+    "hex": "44656570206174746163686d656e7420666978747572652076310a"
+  },
+  "digest_hex": "b6c65bba673719d89509a785af0a636b773a97f40aa961594c4728636ee90a895d",
+  "file_id": "tsZbumc3GdiVCaeFrwpja3c6l_QKqWFZTEcoY27pCold"
+}
