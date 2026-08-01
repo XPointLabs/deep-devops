@@ -1,0 +1,96 @@
+{
+  "schema": "deep-p15a-failure-path-receipt.v1",
+  "generatedAtUtc": "2026-07-21T19:31:07.456Z",
+  "sourceCommit": "f605351dc34621b130690ed3f3fb7ef42d35c57b",
+  "sourceTree": "9b136e0ed09c379b3eec4a5878d5f2ed435a4c7c",
+  "contextSha256": "sha256:e2efbcf3696acb20cdfb1de7c6141e13de73fb4e6be4c849bfc8e363ced55ee9",
+  "evidenceClock": "2026-07-20T00:00:00.000Z",
+  "executionEnvironment": {
+    "dockerArchitecture": "aarch64",
+    "requiredArchitecture": "arm64",
+    "nativeArm64": true
+  },
+  "scenarios": [
+    {
+      "id": "pre-semantic-validation",
+      "startedAtUtc": "2026-07-21T19:28:56.021Z",
+      "finishedAtUtc": "2026-07-21T19:29:31.446Z",
+      "expectedOutcome": "FAIL_CLOSED",
+      "actualOutcome": "FAILED_AS_EXPECTED",
+      "processExitCode": 1,
+      "exitClassification": "INJECTED_PRE_SEMANTIC_VALIDATION",
+      "finalInventory": {
+        "containers": 0,
+        "networks": 0,
+        "volumes": 0,
+        "images": 0,
+        "runTags": 0,
+        "evidenceFiles": 0
+      },
+      "runEvidenceSha256": null
+    },
+    {
+      "id": "post-build",
+      "startedAtUtc": "2026-07-21T19:29:49.524Z",
+      "finishedAtUtc": "2026-07-21T19:30:17.174Z",
+      "expectedOutcome": "FAIL_CLOSED",
+      "actualOutcome": "FAILED_AS_EXPECTED",
+      "processExitCode": 1,
+      "exitClassification": "INJECTED_POST_BUILD",
+      "finalInventory": {
+        "containers": 0,
+        "networks": 0,
+        "volumes": 0,
+        "images": 0,
+        "runTags": 0,
+        "evidenceFiles": 0
+      },
+      "runEvidenceSha256": null
+    },
+    {
+      "id": "post-up",
+      "startedAtUtc": "2026-07-21T19:30:30.513Z",
+      "finishedAtUtc": "2026-07-21T19:30:43.172Z",
+      "expectedOutcome": "FAIL_CLOSED",
+      "actualOutcome": "FAILED_AS_EXPECTED",
+      "processExitCode": 1,
+      "exitClassification": "INJECTED_POST_UP",
+      "finalInventory": {
+        "containers": 0,
+        "networks": 0,
+        "volumes": 0,
+        "images": 0,
+        "runTags": 0,
+        "evidenceFiles": 0
+      },
+      "runEvidenceSha256": null
+    },
+    {
+      "id": "semantic-label-drift",
+      "startedAtUtc": "2026-07-21T19:31:00.332Z",
+      "finishedAtUtc": "2026-07-21T19:31:07.456Z",
+      "expectedOutcome": "FAIL_CLOSED",
+      "actualOutcome": "FAILED_AS_EXPECTED",
+      "processExitCode": 1,
+      "exitClassification": "SEMANTIC_LABEL_VALIDATION_REJECTED",
+      "finalInventory": {
+        "containers": 0,
+        "networks": 0,
+        "volumes": 0,
+        "images": 0,
+        "runTags": 0,
+        "evidenceFiles": 0
+      },
+      "runEvidenceSha256": null
+    }
+  ],
+  "receiptResult": "PASSED",
+  "sanitization": {
+    "projectNamesIncluded": false,
+    "ownershipNoncesIncluded": false,
+    "dockerResourceIdsIncluded": false,
+    "rawProcessOutputIncluded": false,
+    "machinePathsIncluded": false,
+    "secretMaterialIncluded": false
+  }
+}

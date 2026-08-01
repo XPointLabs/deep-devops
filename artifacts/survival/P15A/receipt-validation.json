@@ -1,0 +1,16 @@
+{
+  "schema": "deep-p15a-carrier-receipt-validation.v1",
+  "sourceCommit": "f605351dc34621b130690ed3f3fb7ef42d35c57b",
+  "sourceTree": "9b136e0ed09c379b3eec4a5878d5f2ed435a4c7c",
+  "requiredReceipts": [
+    {
+      "path": "failure-path-receipt.json",
+      "sha256": "d8dcd6e4fb339e70edb644ddbb08083e20ed6629f6526dbc9b861ab8a30ad545"
+    },
+    {
+      "path": "sentinel-receipt.json",
+      "sha256": "6d9e264355e2cc008c8801c4b9941ddcb0eb4b9ecf20cb01ffc9f1101a616190"
+    }
+  ],
+  "validationStatus": "PASSED"
+}
