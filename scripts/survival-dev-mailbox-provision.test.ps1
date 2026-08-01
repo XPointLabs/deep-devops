@@ -134,6 +134,28 @@ function Get-CurrentPair([string]$PairRoot) {
     }
 }
 
+function Get-GrantSerialCatalog($Bundle) {
+    $serials = [Collections.Generic.List[string]]::new()
+    foreach ($set in @(
+        $Bundle.ownMailbox.retrieveAndAcknowledgeGrants,
+        $Bundle.ownMailbox.depositGrants,
+        $Bundle.peerMailboxRoute.depositGrants)) {
+        foreach ($item in @($set)) {
+            $encoded = [Convert]::FromBase64String([string]$item.canonicalGrant)
+            try {
+                if ($encoded.Length -lt 56) {
+                    throw 'Canonical mailbox grant is too short for its serial.'
+                }
+                $serials.Add(([BitConverter]::ToString(
+                    $encoded, 40, 16).Replace('-', '').ToLowerInvariant()))
+            } finally {
+                [Array]::Clear($encoded, 0, $encoded.Length)
+            }
+        }
+    }
+    return @($serials)
+}
+
 try {
     if (-not (Test-Path -LiteralPath $sourceManifest -PathType Leaf)) {
         throw 'Pinned exported XNode source snapshot is missing.'
@@ -334,6 +356,20 @@ try {
 
     $androidJson = Get-Content -Raw -LiteralPath $first.Android | ConvertFrom-Json
     $windowsJson = Get-Content -Raw -LiteralPath $first.Windows | ConvertFrom-Json
+    $androidSerials = @(Get-GrantSerialCatalog $androidJson)
+    $windowsSerials = @(Get-GrantSerialCatalog $windowsJson)
+    $secondAndroidSerials = @(Get-GrantSerialCatalog (
+        Get-Content -Raw -LiteralPath $second.Android | ConvertFrom-Json))
+    $secondWindowsSerials = @(Get-GrantSerialCatalog (
+        Get-Content -Raw -LiteralPath $second.Windows | ConvertFrom-Json))
+    if (($androidSerials -join ',') -cne ($secondAndroidSerials -join ',') -or
+        ($windowsSerials -join ',') -cne ($secondWindowsSerials -join ',')) {
+        throw 'Identical authority, holders, and host secrets must retain grant serials.'
+    }
+    $allSerials = @($androidSerials) + @($windowsSerials)
+    if (@($allSerials | Sort-Object -Unique).Count -ne 12) {
+        throw 'Grant serials must separate platform, role, domain, and epoch.'
+    }
     if ($androidJson.peerMailboxRoute.blindedMailboxId -ne $windowsJson.ownMailbox.blindedMailboxId -or
         $androidJson.ownMailbox.blindedMailboxId -eq $windowsJson.ownMailbox.blindedMailboxId -or
         $windowsJson.peerMailboxRoute.blindedMailboxId -ne $androidJson.ownMailbox.blindedMailboxId) {
@@ -353,6 +389,46 @@ try {
                 $bundle.ownMailbox.retrieveAndAcknowledgeGrants[0].canonicalGrant) {
             throw 'Each client must receive distinct E/E+1 own-copy deposit, retrieve, and peer deposit grants.'
         }
+    }
+
+    $androidRotated = $issuerPublicKey
+    if ($androidRotated -ceq $android -or $androidRotated -ceq $windows) {
+        throw 'Holder-rotation fixture requires a third distinct Ed25519 public key.'
+    }
+    $rotationOutput = Join-Path $temporary 'holder-rotation-output'
+    New-ProtectedDirectory $rotationOutput
+    $rotationBase = @('provision') + $common + @(
+        '--issuer-seed-path', $issuer,
+        '--output-directory', $rotationOutput,
+        '--mailbox-secret-directory', $hostSecrets)
+    Invoke-Driver $rotationBase
+    $beforeRotation = Get-CurrentPair $rotationOutput
+    $beforeAndroid = Get-Content -Raw -LiteralPath $beforeRotation.Android | ConvertFrom-Json
+    $beforeWindows = Get-Content -Raw -LiteralPath $beforeRotation.Windows | ConvertFrom-Json
+    $beforeAndroidSerials = @(Get-GrantSerialCatalog $beforeAndroid)
+    $beforeWindowsSerials = @(Get-GrantSerialCatalog $beforeWindows)
+    Invoke-Driver (@('provision') + $trust + @(
+        '--android-holder-public-key', $androidRotated,
+        '--windows-holder-public-key', $windows,
+        '--issuer-seed-path', $issuer,
+        '--output-directory', $rotationOutput,
+        '--mailbox-secret-directory', $hostSecrets))
+    $afterRotation = Get-CurrentPair $rotationOutput
+    $afterAndroid = Get-Content -Raw -LiteralPath $afterRotation.Android | ConvertFrom-Json
+    $afterWindows = Get-Content -Raw -LiteralPath $afterRotation.Windows | ConvertFrom-Json
+    $afterAndroidSerials = @(Get-GrantSerialCatalog $afterAndroid)
+    $afterWindowsSerials = @(Get-GrantSerialCatalog $afterWindows)
+    for ($index = 0; $index -lt 6; $index++) {
+        if ($beforeAndroidSerials[$index] -ceq $afterAndroidSerials[$index]) {
+            throw 'Android holder rotation must rotate every Android-held grant serial.'
+        }
+    }
+    if (($beforeWindowsSerials -join ',') -cne ($afterWindowsSerials -join ',') -or
+        [string]$beforeAndroid.ownMailbox.blindedMailboxId -cne
+            [string]$afterAndroid.ownMailbox.blindedMailboxId -or
+        [string]$beforeWindows.ownMailbox.blindedMailboxId -cne
+            [string]$afterWindows.ownMailbox.blindedMailboxId) {
+        throw 'Android holder rotation must preserve Windows grant serials and both mailbox IDs.'
     }
 
     # Publish both platform-specific runtime roots from the minimized authority,
@@ -493,7 +569,12 @@ try {
         '--output-directory', $atomicRoot,
         '--mailbox-secret-directory', $atomicSecrets)
     Invoke-Driver $atomicBase
-    $oldGeneration = (Get-CurrentPair $atomicRoot).Generation
+    $oldPair = Get-CurrentPair $atomicRoot
+    $oldGeneration = $oldPair.Generation
+    $oldAndroidSerials = @(Get-GrantSerialCatalog (
+        Get-Content -Raw -LiteralPath $oldPair.Android | ConvertFrom-Json))
+    $oldWindowsSerials = @(Get-GrantSerialCatalog (
+        Get-Content -Raw -LiteralPath $oldPair.Windows | ConvertFrom-Json))
     $androidTwo = '0303030303030303030303030303030303030303030303030303030303030303'
     $windowsTwo = '0404040404040404040404040404040404040404040404040404040404040404'
     $atomicNew = @('provision') + $trust + @(
@@ -530,6 +611,16 @@ try {
         '--android-holder-public-key', $androidTwo,
         '--windows-holder-public-key', $windowsTwo,
         '--pair-directory', $atomicRoot))
+    $newAndroidSerials = @(Get-GrantSerialCatalog (
+        Get-Content -Raw -LiteralPath $committedAfterPointerBarrier.Android | ConvertFrom-Json))
+    $newWindowsSerials = @(Get-GrantSerialCatalog (
+        Get-Content -Raw -LiteralPath $committedAfterPointerBarrier.Windows | ConvertFrom-Json))
+    for ($index = 0; $index -lt 6; $index++) {
+        if ($oldAndroidSerials[$index] -ceq $newAndroidSerials[$index] -or
+            $oldWindowsSerials[$index] -ceq $newWindowsSerials[$index]) {
+            throw 'Changing a holder must rotate every grant serial in the same epoch.'
+        }
+    }
 
     # Whole-pair substitution with valid signatures but unexpected holders fails.
     $substituteRoot = Join-Path $temporary 'substitute-output'

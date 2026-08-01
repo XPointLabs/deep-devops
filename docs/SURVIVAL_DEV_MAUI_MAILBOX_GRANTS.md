@@ -133,3 +133,15 @@ the lab key pair by signing and verifying each semantic payload, and swaps each
 completed tree into place. Repeating the command safely replaces the previous
 DEV runtime rather than accumulating alternate generations or repository
 copies. No UAT contract or seed is read or changed.
+
+Grant serials use the clean-break `deep.mailbox.grant-serial.v2` derivation.
+The target mailbox secret remains stable so holder rotation does not change the
+blinded mailbox ID or discard queued payloads, while the canonical serial
+context binds the authority, platform, role/domain, epoch/generation, holder,
+membership, and placement. Reissuing an identical holder is deterministic;
+changing a holder creates an independent replay and revocation identity. There
+is no v1 compatibility branch. A production rotation must publish revocations
+for every retired v1 or prior-holder serial for both active epochs, retain them
+through the grant/replay retention window, and garbage-collect only expired
+replay records. It must never delete or rotate mailbox payload storage as a
+substitute for revocation.

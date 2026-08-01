@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Buffers.Binary;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Security.AccessControl;
@@ -53,9 +54,15 @@ static class MailboxGrantProvisioner
             var windowsMailbox = Hmac(windowsSecret, "deep.mailbox.blinded-mailbox-id.v1|windows");
             try
             {
-                var android = BuildBundle(Android, androidHolder, windowsHolder, androidMailbox, windowsMailbox,
+                var android = BuildBundle(
+                    Android, androidHolder, windowsHolder,
+                    androidMailbox, windowsMailbox,
+                    androidSecret, windowsSecret,
                     issuerSeed, authority);
-                var windows = BuildBundle(Windows, windowsHolder, androidHolder, windowsMailbox, androidMailbox,
+                var windows = BuildBundle(
+                    Windows, windowsHolder, androidHolder,
+                    windowsMailbox, androidMailbox,
+                    windowsSecret, androidSecret,
                     issuerSeed, authority);
                 var androidBytes = SerializeBundle(android, issuerSeed);
                 var windowsBytes = SerializeBundle(windows, issuerSeed);
@@ -284,14 +291,16 @@ static class MailboxGrantProvisioner
     }
 
     private static Bundle BuildBundle(string identity, byte[] holder, byte[] peerHolder,
-        byte[] mailbox, byte[] peerMailbox, byte[] issuerSeed, StrictAuthority authority)
+        byte[] mailbox, byte[] peerMailbox,
+        byte[] mailboxSecret, byte[] peerMailboxSecret,
+        byte[] issuerSeed, StrictAuthority authority)
     {
         var ownRetrieve = Grants(identity, "retrieve", MailboxCapabilityDomain.Retrieve,
-            holder, mailbox, issuerSeed, authority);
+            holder, mailboxSecret, issuerSeed, authority);
         var ownDeposit = Grants(identity, "deposit-own", MailboxCapabilityDomain.Deposit,
-            holder, mailbox, issuerSeed, authority);
+            holder, mailboxSecret, issuerSeed, authority);
         var peerDeposit = Grants(identity, "deposit-peer", MailboxCapabilityDomain.Deposit,
-            holder, peerMailbox, issuerSeed, authority);
+            holder, peerMailboxSecret, issuerSeed, authority);
         return new Bundle(
             identity,
             holder,
@@ -309,14 +318,15 @@ static class MailboxGrantProvisioner
         string role,
         MailboxCapabilityDomain domain,
         byte[] holder,
-        byte[] mailbox,
+        byte[] targetMailboxSecret,
         byte[] issuerSeed,
         StrictAuthority authority)
     {
         var crypto = new SodiumMailboxCapabilityCrypto();
         Grant Grant(Epoch epoch, MailboxCapabilityDomain domain)
         {
-            var serial = Hmac(mailbox, $"deep.mailbox.v1|{identity}|{role}|{epoch.Value}|serial")[..16];
+            var serial = GrantSerial(
+                targetMailboxSecret, identity, role, domain, epoch, holder, authority);
             try
             {
                 var signed = crypto.SignGrant(new MailboxAuthenticatedGrant
@@ -888,6 +898,86 @@ static class MailboxGrantProvisioner
 
     private static byte[] Hmac(byte[] key, string value) =>
         HMACSHA256.HashData(key, Encoding.UTF8.GetBytes(value));
+    private static byte[] GrantSerial(
+        byte[] targetMailboxSecret,
+        string platform,
+        string role,
+        MailboxCapabilityDomain domain,
+        Epoch epoch,
+        byte[] holder,
+        StrictAuthority authority)
+    {
+        var authorityHash = Hex(authority.Hash, 32, "authority hash");
+        var network = Hex(authority.NetworkId, 16, "network id");
+        var issuer = Hex(authority.IssuerPublicKey, 32, "issuer public key");
+        var membership = Hex(
+            epoch.MembershipCommitment, 32, "membership commitment");
+        var placement = Hex(
+            epoch.PlacementCommitment, 32, "placement commitment");
+        var selectors = new byte[]
+        {
+            platform switch
+            {
+                Android => 1,
+                Windows => 2,
+                _ => throw new InvalidDataException("Grant platform is invalid.")
+            },
+            role switch
+            {
+                "retrieve" => 1,
+                "deposit-own" => 2,
+                "deposit-peer" => 3,
+                _ => throw new InvalidDataException("Grant role is invalid.")
+            },
+            (byte)domain
+        };
+        var epochAndGeneration = new byte[16];
+        BinaryPrimitives.WriteUInt64BigEndian(
+            epochAndGeneration.AsSpan(0, 8), epoch.Value);
+        BinaryPrimitives.WriteUInt64BigEndian(
+            epochAndGeneration.AsSpan(8, 8), epoch.Value);
+        var context = new byte[
+            "deep.mailbox.grant-serial.v2"u8.Length + authorityHash.Length +
+            network.Length + issuer.Length + selectors.Length +
+            epochAndGeneration.Length + holder.Length + membership.Length +
+            placement.Length];
+        var offset = 0;
+        Append("deep.mailbox.grant-serial.v2"u8, context, ref offset);
+        Append(authorityHash, context, ref offset);
+        Append(network, context, ref offset);
+        Append(issuer, context, ref offset);
+        Append(selectors, context, ref offset);
+        Append(epochAndGeneration, context, ref offset);
+        Append(holder, context, ref offset);
+        Append(membership, context, ref offset);
+        Append(placement, context, ref offset);
+        Require(offset == context.Length, "Grant serial context length is invalid.");
+        var digest = HMACSHA256.HashData(targetMailboxSecret, context);
+        try
+        {
+            return digest[..16];
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(authorityHash);
+            CryptographicOperations.ZeroMemory(network);
+            CryptographicOperations.ZeroMemory(issuer);
+            CryptographicOperations.ZeroMemory(membership);
+            CryptographicOperations.ZeroMemory(placement);
+            CryptographicOperations.ZeroMemory(selectors);
+            CryptographicOperations.ZeroMemory(epochAndGeneration);
+            CryptographicOperations.ZeroMemory(context);
+            CryptographicOperations.ZeroMemory(digest);
+        }
+    }
+    private static void Append(
+        ReadOnlySpan<byte> source,
+        Span<byte> destination,
+        ref int offset)
+    {
+        source.CopyTo(destination[offset..]);
+        offset = checked(offset + source.Length);
+    }
     private static string Sha256(byte[] value) => Lower(SHA256.HashData(value));
     private static string Lower(byte[] value) => Convert.ToHexString(value).ToLowerInvariant();
     private static string Lower(ReadOnlySpan<byte> value) =>
