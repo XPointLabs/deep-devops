@@ -1,5 +1,8 @@
 name: deep-integration
 
+x-node-runtime-build-args: &node-runtime-build-args
+  NODE_IMAGE: node:24-bookworm-slim@sha256:242549cd46785b480c832479a730f4f2a20865d61ea2e404fdb2a5c3d3b73ecf
+
 services:
   xnode:
     build:
@@ -13,6 +16,8 @@ services:
         XRAY_VERSION: ${XNODE_XRAY_VERSION:-v26.3.27}
         XRAY_DOWNLOAD_URL: ${XNODE_XRAY_DOWNLOAD_URL:-}
         XRAY_SHA256: ${XNODE_XRAY_SHA256:-}
+        XRAY_SHA256_AMD64: 23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae
+        XRAY_SHA256_ARM64: 4d30283ae614e3057f730f67cd088a42be6fdf91f8639d82cb69e48cde80413c
     environment:
       ASPNETCORE_ENVIRONMENT: ${XNODE_ASPNETCORE_ENVIRONMENT:-Development}
       ASPNETCORE_URLS: http://0.0.0.0:8080;http://0.0.0.0:8081
@@ -63,6 +68,8 @@ services:
         XRAY_VERSION: ${XNODE_XRAY_VERSION:-v26.3.27}
         XRAY_DOWNLOAD_URL: ${XNODE_XRAY_DOWNLOAD_URL:-}
         XRAY_SHA256: ${XNODE_XRAY_SHA256:-}
+        XRAY_SHA256_AMD64: 23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae
+        XRAY_SHA256_ARM64: 4d30283ae614e3057f730f67cd088a42be6fdf91f8639d82cb69e48cde80413c
     environment:
       ASPNETCORE_ENVIRONMENT: ${XNODE_ASPNETCORE_ENVIRONMENT:-Development}
       ASPNETCORE_URLS: http://0.0.0.0:8080;http://0.0.0.0:8081
@@ -113,6 +120,8 @@ services:
         XRAY_VERSION: ${XNODE_XRAY_VERSION:-v26.3.27}
         XRAY_DOWNLOAD_URL: ${XNODE_XRAY_DOWNLOAD_URL:-}
         XRAY_SHA256: ${XNODE_XRAY_SHA256:-}
+        XRAY_SHA256_AMD64: 23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae
+        XRAY_SHA256_ARM64: 4d30283ae614e3057f730f67cd088a42be6fdf91f8639d82cb69e48cde80413c
     environment:
       ASPNETCORE_ENVIRONMENT: ${XNODE_ASPNETCORE_ENVIRONMENT:-Development}
       ASPNETCORE_URLS: http://0.0.0.0:8080;http://0.0.0.0:8081
@@ -163,6 +172,8 @@ services:
         XRAY_VERSION: ${XNODE_XRAY_VERSION:-v26.3.27}
         XRAY_DOWNLOAD_URL: ${XNODE_XRAY_DOWNLOAD_URL:-}
         XRAY_SHA256: ${XNODE_XRAY_SHA256:-}
+        XRAY_SHA256_AMD64: 23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae
+        XRAY_SHA256_ARM64: 4d30283ae614e3057f730f67cd088a42be6fdf91f8639d82cb69e48cde80413c
     environment:
       ASPNETCORE_ENVIRONMENT: ${XNODE_ASPNETCORE_ENVIRONMENT:-Development}
       ASPNETCORE_URLS: http://0.0.0.0:8080;http://0.0.0.0:8081
@@ -271,6 +282,7 @@ services:
     build:
       context: ${DEEP_DEVOPS_DIR:-.}
       dockerfile: docker/storage-service.Dockerfile
+      args: *node-runtime-build-args
     environment:
       PORT: "8080"
       SERVICE_NAME: deep-storage
@@ -301,6 +313,7 @@ services:
     build:
       context: ${DEEP_DEVOPS_DIR:-.}
       dockerfile: docker/storage-service.Dockerfile
+      args: *node-runtime-build-args
     environment:
       PORT: "8080"
       SERVICE_NAME: deep-storage-service
@@ -331,6 +344,7 @@ services:
     build:
       context: ${DEEP_DEVOPS_DIR:-.}
       dockerfile: docker/file-service.Dockerfile
+      args: *node-runtime-build-args
     environment:
       PORT: "8080"
       SERVICE_NAME: deep-file-service
@@ -350,6 +364,7 @@ services:
     build:
       context: ${DEEP_DEVOPS_DIR:-.}
       dockerfile: docker/calls-service.Dockerfile
+      args: *node-runtime-build-args
     environment:
       PORT: "8080"
       SERVICE_NAME: deep-calls-service
@@ -369,6 +384,7 @@ services:
     build:
       context: ${DEEP_DEVOPS_DIR:-.}
       dockerfile: docker/push-service.Dockerfile
+      args: *node-runtime-build-args
     environment:
       PORT: "8080"
       SERVICE_NAME: deep-push-service
@@ -402,6 +418,7 @@ services:
     build:
       context: ${DEEP_DEVOPS_DIR:-.}
       dockerfile: docker/file-service.Dockerfile
+      args: *node-runtime-build-args
     environment:
       PORT: "8080"
       SERVICE_NAME: deep-file
@@ -438,6 +455,7 @@ services:
     build:
       context: ${DEEP_DEVOPS_DIR:-.}
       dockerfile: docker/calls-service.Dockerfile
+      args: *node-runtime-build-args
     environment:
       PORT: "8080"
       SERVICE_NAME: deep-calls

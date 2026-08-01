@@ -121,6 +121,8 @@ jobs:
             PROJECT=src/XNode/XNode.csproj
             APP_DLL=XNode.dll
             XRAY_VERSION=${{ inputs.xray_version || env.DEFAULT_XRAY_VERSION }}
+            XRAY_SHA256_AMD64=23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae
+            XRAY_SHA256_ARM64=4d30283ae614e3057f730f67cd088a42be6fdf91f8639d82cb69e48cde80413c
           tags: ${{ steps.versions.outputs.xnode_tags }}
           labels: |
             org.opencontainers.image.title=XPoint XNode
@@ -137,6 +139,8 @@ jobs:
           file: deep-devops/docker/storage-service.Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
+          build-args: |
+            NODE_IMAGE=node:24-bookworm-slim@sha256:242549cd46785b480c832479a730f4f2a20865d61ea2e404fdb2a5c3d3b73ecf
           tags: ${{ steps.versions.outputs.storage_tags }}
           labels: |
             org.opencontainers.image.title=XPoint Storage Service

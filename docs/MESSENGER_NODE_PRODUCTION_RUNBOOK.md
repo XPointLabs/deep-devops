@@ -36,7 +36,12 @@ Router release rehearsal:
 - `DEEP_MULTI_NODE_REQUIRE_NO_MOCK=true`
 - `XNODE_XRAY_VERSION`
 - `XNODE_XRAY_DOWNLOAD_URL` when using an approved mirror
-- `XNODE_XRAY_SHA256` for archive verification
+- `XNODE_XRAY_SHA256` for an explicitly supplied archive verification override.
+  The local no-mock compose pins the upstream `v26.3.27` Linux x64 asset to
+  `23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae`
+  and Linux arm64 to
+  `4d30283ae614e3057f730f67cd088a42be6fdf91f8639d82cb69e48cde80413c`;
+  Dockerfile selection is fail-closed on `TARGETARCH`.
 
 Backend triad:
 
@@ -99,6 +104,11 @@ powershell -ExecutionPolicy Bypass -File .\deep-devops\scripts\test-env.ps1 -Sui
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\deep-devops\scripts\multi-node-rehearsal.ps1
 ```
+
+Startup is isolated under compose project
+`deep-multi-node-rehearsal`, reports progress every 15 seconds, and fails with
+cleanup after the bounded timeout (`DEEP_MULTI_NODE_COMPOSE_TIMEOUT_SECONDS`,
+60-1800; default 900).
 
 4. Run the credentialed provider canary:
 

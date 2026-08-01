@@ -154,8 +154,8 @@ test('fails closed if the reviewed Dockerfile restores image defaults or optiona
   const optionalHash = {
     ...inputs,
     reviewedDockerfile: inputs.reviewedDockerfile.replace(
-      'echo "$XRAY_SHA256  /tmp/xray-download/xray.zip" | sha256sum -c -',
-      'if [ -n "${XRAY_SHA256:-}" ]; then echo "$XRAY_SHA256  /tmp/xray-download/xray.zip" | sha256sum -c -; fi'
+      'echo "$XRAY_EXPECTED_SHA256  /tmp/xray-download/xray.zip" | sha256sum -c -',
+      'if [ -n "${XRAY_EXPECTED_SHA256:-}" ]; then echo "$XRAY_EXPECTED_SHA256  /tmp/xray-download/xray.zip" | sha256sum -c -; fi'
     )
   };
   assert.throws(() => validateTopology(topology, optionalHash), /optional Xray archive verification/);

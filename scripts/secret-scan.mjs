@@ -38,6 +38,10 @@ const blockedArchiveExtensions = new Set([
   '.7z', '.aab', '.apk', '.gz', '.msix', '.rar', '.tar', '.tgz', '.zip'
 ]);
 const ignoredDirectoryNames = new Set(['.git', 'node_modules', 'bin', 'obj']);
+const ignoredGeneratedArtifactDirectoryNames = new Set([
+  '.dotnet-home', '.nuget', '.scratch', '.vs', 'build-contexts',
+  'global-packages', 'global-packages-no-rid', 'packages', 'publish'
+]);
 const textExtensions = new Set([
   '.conf', '.cs', '.cmd', '.dockerfile', '.env', '.example', '.html', '.js',
   '.json', '.md', '.mjs', '.ps1', '.sh', '.trx', '.txt', '.xml', '.yaml', '.yml'
@@ -198,7 +202,7 @@ function isProbablyText(filePath, buffer) {
   return controls / sample.length < 0.02;
 }
 
-async function walkFiles(root) {
+async function walkFiles(root, { ignoreGeneratedArtifacts = false } = {}) {
   const files = [];
   if (!existsSync(root)) return files;
   const resolvedRoot = path.resolve(root);
@@ -213,7 +217,10 @@ async function walkFiles(root) {
       if (entry.isSymbolicLink()) throw new Error('scan roots cannot contain symlink/reparse points');
       const fullPath = path.join(current, entry.name);
       if (entry.isDirectory()) {
-        if (!ignoredDirectoryNames.has(entry.name)) pending.push(fullPath);
+        if (!ignoredDirectoryNames.has(entry.name)
+          && !(ignoreGeneratedArtifacts && ignoredGeneratedArtifactDirectoryNames.has(entry.name))) {
+          pending.push(fullPath);
+        }
       } else if (entry.isFile()) files.push(fullPath);
       else throw new Error('scan roots may contain only directories and regular files');
     }
@@ -483,10 +490,14 @@ function inspectBuffer(
   depth = 0,
   manifestEntry = null,
   enforceFilenamePolicy = false) {
-  state.entries += 1;
-  state.expandedBytes += buffer.length;
-  if (state.entries > MAX_ARCHIVE_ENTRIES) throw new Error('archive entry limit exceeded');
-  if (state.expandedBytes > MAX_ARCHIVE_EXPANDED_BYTES) throw new Error('archive expanded-size limit exceeded');
+  if (depth > 0) {
+    state.archiveEntries += 1;
+    state.archiveExpandedBytes += buffer.length;
+    if (state.archiveEntries > MAX_ARCHIVE_ENTRIES) throw new Error('archive entry limit exceeded');
+    if (state.archiveExpandedBytes > MAX_ARCHIVE_EXPANDED_BYTES) {
+      throw new Error('archive expanded-size limit exceeded');
+    }
+  }
   if (buffer.length > MAX_ENTRY_BYTES) {
     findings.push(finding('unscannable-large-file', logicalName));
     return;
@@ -594,14 +605,17 @@ export async function scan(options = {}) {
       const targetInfo = await lstat(target);
       if (targetInfo.isSymbolicLink()) throw new Error('scan target cannot be a symlink/reparse point');
       if (targetInfo.isDirectory()) {
-        for (const file of await walkFiles(target)) candidates.set(file, {});
+        const isArtifactRoot = artifactRoots.some(artifactRoot => path.resolve(artifactRoot) === path.resolve(target));
+        for (const file of await walkFiles(target, { ignoreGeneratedArtifacts: isArtifactRoot })) {
+          candidates.set(file, {});
+        }
       } else if (targetInfo.isFile()) candidates.set(target, {});
       else throw new Error('scan target must be a regular file or directory');
     }
   }
 
   const findings = [];
-  const state = { entries: 0, expandedBytes: 0, textFiles: 0 };
+  const state = { archiveEntries: 0, archiveExpandedBytes: 0, textFiles: 0 };
   for (const [filePath, metadata] of [...candidates.entries()].sort(([left], [right]) => left.localeCompare(right))) {
     const logical = metadata.logical ?? logicalPath(root, filePath, [...artifactRoots, ...explicitPaths]);
     const artifactRelative = Boolean(options.manifest)
@@ -629,7 +643,7 @@ export async function scan(options = {}) {
     programRevisionSha256: PROGRAM_REVISION_SHA,
     scannedFiles: candidates.size,
     scannedTextEntries: state.textFiles,
-    archiveEntriesInspected: Math.max(0, state.entries - candidates.size),
+    archiveEntriesInspected: state.archiveEntries,
     selectedManifestSha256,
     findingCount: unique.length,
     findings: unique

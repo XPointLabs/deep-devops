@@ -87,6 +87,53 @@ test('fails closed for an oversized text artifact', async () => {
   }
 });
 
+test('top-level evidence volume does not consume the nested archive expansion budget', async () => {
+  const root = await fixture();
+  try {
+    for (let index = 0; index < 6; index += 1) {
+      await writeFile(
+        path.join(root, 'artifacts', `large-safe-evidence-${index}.txt`),
+        Buffer.alloc(6 * 1024 * 1024, 65)
+      );
+    }
+    const result = await scan({ root, includeTracked: false, artifactRoots: [path.join(root, 'artifacts')] });
+    assert.equal(result.archiveEntriesInspected, 0);
+    assert.equal(result.findings.filter(item => item.ruleId === 'unscannable-large-file').length, 0);
+  } finally {
+    await remove(root);
+  }
+});
+
+test('default artifact traversal skips generated package/build caches but explicit paths remain fail closed', async () => {
+  const root = await fixture();
+  try {
+    const buildCache = path.join(root, 'artifacts', 'build-contexts');
+    await mkdir(buildCache, { recursive: true });
+    const cacheArchive = path.join(buildCache, 'cached-package.zip');
+    await writeFile(cacheArchive, storedZip('safe.txt', Buffer.from('safe\n')));
+    await writeFile(path.join(root, 'artifacts', 'evidence.json'), '{"status":"ok"}\n');
+
+    const defaultResult = await scan({
+      root,
+      includeTracked: false,
+      artifactRoots: [path.join(root, 'artifacts')]
+    });
+    assert.equal(defaultResult.status, 'ok');
+    assert.equal(defaultResult.scannedFiles, 1);
+
+    const explicitResult = await scan({
+      root,
+      includeTracked: false,
+      artifactRoots: [],
+      paths: [cacheArchive]
+    });
+    assert.equal(explicitResult.status, 'failed');
+    assert.ok(explicitResult.findings.some(item => item.ruleId === 'forbidden-archive-artifact'));
+  } finally {
+    await remove(root);
+  }
+});
+
 test('confirmed bypass: rejects symlink or reparse content inside an upload root', async () => {
   const root = await fixture();
   const outside = await mkdtemp(path.join(os.tmpdir(), 'deep-secret-outside-'));

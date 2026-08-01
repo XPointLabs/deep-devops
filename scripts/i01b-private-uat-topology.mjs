@@ -280,7 +280,7 @@ function validateSourcePlaceholders(inputs) {
   assert.doesNotMatch(inputs.reviewedDockerfile, /^ARG XRAY_DOWNLOAD_URL/m, 'ambient Xray URL override is forbidden');
   assert.match(
     inputs.reviewedDockerfile,
-    /test "\$\{#XRAY_SHA256\}" -eq 64/,
+    /test "\$\{#XRAY_EXPECTED_SHA256\}" -eq 64/,
     'Dockerfile must require an exact-length Xray SHA256'
   );
   assert.match(
@@ -290,7 +290,7 @@ function validateSourcePlaceholders(inputs) {
   );
   assert.doesNotMatch(
     inputs.reviewedDockerfile,
-    /if \[ -n "\$\{XRAY_SHA256/,
+    /if \[ -n "\$\{(?:XRAY_SHA256|XRAY_EXPECTED_SHA256)/,
     'optional Xray archive verification is forbidden'
   );
   for (const [name, dockerfile] of Object.entries(inputs.reviewedAncillaryDockerfiles)) {

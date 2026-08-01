@@ -11,6 +11,16 @@ $WorkspaceRoot = Resolve-Path (Join-Path $DevopsDir "..")
 $ComposeFile = Join-Path $DevopsDir "docker-compose.yml"
 $ArtifactDir = Join-Path $DevopsDir "artifacts"
 $TestResultDir = Join-Path $ArtifactDir "test-results"
+$ComposeProjectName = "deep-multi-node-rehearsal"
+$ComposeTimeoutSeconds = 900
+if (-not [string]::IsNullOrWhiteSpace($env:DEEP_MULTI_NODE_COMPOSE_TIMEOUT_SECONDS)) {
+    $parsedTimeout = 0
+    if (-not [int]::TryParse($env:DEEP_MULTI_NODE_COMPOSE_TIMEOUT_SECONDS, [ref]$parsedTimeout) -or
+        $parsedTimeout -lt 60 -or $parsedTimeout -gt 1800) {
+        throw "DEEP_MULTI_NODE_COMPOSE_TIMEOUT_SECONDS must be an integer from 60 through 1800"
+    }
+    $ComposeTimeoutSeconds = $parsedTimeout
+}
 
 $env:DEEP_ROOT = $WorkspaceRoot.Path
 $env:DEEP_DEVOPS_DIR = $DevopsDir.Path
@@ -93,14 +103,92 @@ function Invoke-Docker {
     }
 }
 
+function Invoke-DockerBounded {
+    param(
+        [string[]] $Arguments,
+        [int] $TimeoutSeconds
+    )
+
+    $runId = [Guid]::NewGuid().ToString("N")
+    $stdoutPath = Join-Path ([System.IO.Path]::GetTempPath()) "deep-docker-$runId.stdout.log"
+    $stderrPath = Join-Path ([System.IO.Path]::GetTempPath()) "deep-docker-$runId.stderr.log"
+    $process = $null
+    try {
+        Write-Host "Starting bounded docker command (timeout ${TimeoutSeconds}s): docker $($Arguments -join ' ')"
+        $process = Start-Process `
+            -FilePath "docker" `
+            -ArgumentList $Arguments `
+            -PassThru `
+            -WindowStyle Hidden `
+            -RedirectStandardOutput $stdoutPath `
+            -RedirectStandardError $stderrPath
+        $startedAt = [DateTimeOffset]::UtcNow
+        $nextProgressAt = $startedAt.AddSeconds(15)
+        while (-not $process.WaitForExit(1000)) {
+            $now = [DateTimeOffset]::UtcNow
+            $elapsedSeconds = [int]($now - $startedAt).TotalSeconds
+            if ($elapsedSeconds -ge $TimeoutSeconds) {
+                try { $process.Kill($true) } catch { Write-Warning "failed to terminate timed-out docker process tree: $_" }
+                $process.WaitForExit()
+                foreach ($path in @($stdoutPath, $stderrPath)) {
+                    if (Test-Path $path) { Get-Content $path -Tail 40 }
+                }
+                throw "docker command exceeded bounded timeout of ${TimeoutSeconds}s"
+            }
+            if ($now -ge $nextProgressAt) {
+                Write-Host "docker compose is still running (${elapsedSeconds}s elapsed)"
+                foreach ($path in @($stdoutPath, $stderrPath)) {
+                    if (Test-Path $path) { Get-Content $path -Tail 8 }
+                }
+                $nextProgressAt = $now.AddSeconds(15)
+            }
+        }
+        $process.WaitForExit()
+        $process.Refresh()
+        $exitCode = $process.ExitCode
+        foreach ($path in @($stdoutPath, $stderrPath)) {
+            if (Test-Path $path) { Get-Content $path }
+        }
+        if ($exitCode -ne 0) {
+            throw "docker $($Arguments -join ' ') failed with exit code $exitCode"
+        }
+    }
+    finally {
+        foreach ($path in @($stdoutPath, $stderrPath)) {
+            Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+        }
+        if ($null -ne $process) { $process.Dispose() }
+    }
+}
+
 Invoke-Docker -Arguments @("info") -Quiet -AllowFailure
 if ($script:LastDockerExitCode -ne 0) {
     throw "Docker daemon is not reachable. Start Docker Desktop or the Docker service, then rerun this command."
 }
 
 try {
+    # A prior interrupted rehearsal must never make the next run wait on stale
+    # project state. The fixed, isolated project name cannot address the live
+    # survival-dev stack.
     Invoke-Docker -Arguments @(
         "compose",
+        "-p",
+        $ComposeProjectName,
+        "-f",
+        $ComposeFile,
+        "--profile",
+        "multi-node",
+        "down",
+        "--volumes",
+        "--remove-orphans"
+    ) -Quiet -AllowFailure
+
+    Invoke-DockerBounded -TimeoutSeconds $ComposeTimeoutSeconds -Arguments @(
+        "compose",
+        "--progress",
+        "plain",
+        "-p",
+        $ComposeProjectName,
         "-f",
         $ComposeFile,
         "--profile",
@@ -131,6 +219,8 @@ finally {
     if (-not $KeepStack) {
         Invoke-Docker -Arguments @(
             "compose",
+            "-p",
+            $ComposeProjectName,
             "-f",
             $ComposeFile,
             "--profile",

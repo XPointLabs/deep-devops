@@ -42,6 +42,8 @@ docker buildx build `
   --build-arg PROJECT=src/XNode/XNode.csproj `
   --build-arg APP_DLL=XNode.dll `
   --build-arg XRAY_VERSION=v26.3.27 `
+  --build-arg XRAY_SHA256_AMD64=23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae `
+  --build-arg XRAY_SHA256_ARM64=4d30283ae614e3057f730f67cd088a42be6fdf91f8639d82cb69e48cde80413c `
   -t "$org/xnode:$tag" `
   -t "$org/xnode:latest" `
   --push ..\xnode
@@ -49,6 +51,7 @@ docker buildx build `
 docker buildx build `
   --platform linux/amd64,linux/arm64 `
   -f .\docker\storage-service.Dockerfile `
+  --build-arg NODE_IMAGE=node:24-bookworm-slim@sha256:242549cd46785b480c832479a730f4f2a20865d61ea2e404fdb2a5c3d3b73ecf `
   -t "$org/deep-storage-service:$tag" `
   -t "$org/deep-storage-service:latest" `
   --push .
