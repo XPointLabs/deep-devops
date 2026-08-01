@@ -15,7 +15,7 @@ if ($script -notmatch [regex]::Escape('foreach ($index in 1..6)')) {
     throw 'Chaos script does not iterate the exact six-node recovery set.'
 }
 if (-not $script.Contains("'stop', `$node") -or
-    -not $script.Contains("'up', '-d', '--wait', `$node")) {
+    -not $script.Contains("'up', '-d', '--no-deps', '--wait', `$node")) {
     throw 'Chaos script does not restore each stopped XNode in a finally block.'
 }
 foreach ($required in @(

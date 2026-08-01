@@ -109,6 +109,10 @@ Startup is isolated under compose project
 `deep-multi-node-rehearsal`, reports progress every 15 seconds, and fails with
 cleanup after the bounded timeout (`DEEP_MULTI_NODE_COMPOSE_TIMEOUT_SECONDS`,
 60-1800; default 900).
+Every invocation writes only beneath a unique
+`artifacts/rehearsals/multi-node/<UTC-run-id>/` directory. Failure collection
+and secret scanning are bound to that directory and never rescan historical
+rehearsal artifacts.
 
 4. Run the credentialed provider canary:
 
@@ -276,7 +280,7 @@ Release sign-off requires all of these:
 - `artifacts/test-results/backend-restart-smoke.json` proving storage/file/avatar/push persistence across restart;
 - `artifacts/test-results/push-provider-canary.json` with provider status `delivered`, `hasConfiguredUrl=true`, staging release lane, env-sourced canary token, configured provider auth, and non-local provider host for release sign-off;
 - the manual `supporting-release-evidence.yml` workflow must fail on staging lanes when the selected provider service lacks a base or service-specific provider URL/auth pair, or when `DEEP_PUSH_PROVIDER_CANARY_TOKEN` is missing; use `release_lane=local`, `dev`, `test`, or `smoke` only for non-release provider-sink smoke runs;
-- `artifacts/test-results/multi-node-topology.json` with three no-mock routers, registry runtime node count `>= 3`, no reconciliation issues for those nodes, and a `select_path` result with three distinct hops;
+- the selected run's `artifacts/rehearsals/multi-node/<run-id>/test-results/multi-node-topology.json` with three no-mock routers, registry runtime node count `>= 3`, no reconciliation issues for those nodes, and a `select_path` result with three distinct hops;
 - `artifacts/test-results/registry-recovery.json` with status `ok`, proving registry snapshot persistence/reload, corrupted snapshot quarantine, runtime recovery counters, and reconciliation job status;
 - `artifacts/test-results/rollback-drill.json` with status `ok`, accepted MTTR, and green post-rollback storage/file/avatar/push smoke;
 - `artifacts/security/security-gate-summary.json` with status `ok`;

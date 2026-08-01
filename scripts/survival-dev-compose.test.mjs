@@ -448,8 +448,15 @@ test('daily launcher always uses the fixed project without release-gate ceremony
   assert.match(launcher, /survival-dev-seed\.mjs/);
   assert.match(launcher, /survival-dev-context-export\.mjs/);
   assert.match(launcher, /function Reset-SurvivalChainLifecycle/);
+  assert.match(launcher, /function Invoke-SurvivalDockerBounded/);
+  assert.match(launcher, /completed without an observable integer exit code/);
   assert.match(launcher, /'contracts-deploy', 'contracts-smoke', 'staking-backend'/);
   assert.match(launcher, /if \(\$Chain\) \{ Reset-SurvivalChainLifecycle \}/);
+  const buildIndex = launcher.indexOf("($buildArguments + @('build') + $Service)");
+  const authorityIndex = launcher.indexOf('Prepare-SurvivalMailboxPeerAuthority', buildIndex);
+  const upIndex = launcher.indexOf("@('up', '-d', '--no-build', '--wait')", authorityIndex);
+  assert.ok(buildIndex >= 0 && authorityIndex > buildIndex && upIndex > authorityIndex,
+    'images must build before fresh authority generation and no-build startup');
   assert.match(launcher, /Up -Chain always recreates the complete chain lifecycle/);
   assert.match(launcher, /Chain lifecycle services cannot be restarted independently/);
   assert.match(launcher, /41811\/health\/ready/);
@@ -470,6 +477,7 @@ test('daily launcher always uses the fixed project without release-gate ceremony
   assert.match(serviceBlock('contracts-devnet'), /profiles: \[chain\]/);
   assert.match(serviceBlock('staking-backend'), /profiles: \[chain\]/);
   assert.match(compose, /Runtime__BootstrapFromStorage: "true"/);
+  assert.doesNotMatch(compose, /Runtime__AllowLoopbackPeerEndpoints/);
   assert.match(compose, /Runtime__AllowPrivatePeerEndpoints: "true"/);
   assert.match(compose, /RegistryBootstrap__BaseUrl: http:\/\/relay-bootstrap:8080/);
   assert.doesNotMatch(launcher, /nonce|evidence|receipt|P15C_/i);
@@ -531,7 +539,7 @@ test('P10E uses real current/next MIP1/RIP1 authority, bounded client ingress, a
     assert.match(serviceBlock(`xnode-${index}`), /target: xnode-ed25519\.seed/);
     assert.match(compose, new RegExp(`xnode-${index}-ed25519: \\{ file: \\.\\/.secrets\\/survival-dev\\/xnode-${index}-ed25519\\.seed \\}`));
   }
-  assert.match(launcher, /\$SurvivalXNodeCommit = '5b38cab30f35a57a0b4dc40c3ed3981bc2fa5ec7'/);
+  assert.match(launcher, /\$SurvivalXNodeCommit = 'c6c5113c7e77fb9e6577a493e2cc57144cc0de91'/);
   assert.match(launcher, /Prepare-SurvivalXNodeIdentitySecrets/);
   assert.match(launcher, /Prepare-SurvivalMailboxPeerAuthority/);
   assert.match(launcher, /mailbox-client-xnode-1\.env/);
@@ -552,7 +560,7 @@ test('P10E uses real current/next MIP1/RIP1 authority, bounded client ingress, a
     mailboxDriverStateInit,
     /chown 65532:65532 \/state \/state\/driver/);
   assert.doesNotMatch(mailboxDriverStateInit, /chmod|777|DAC_OVERRIDE/);
-  assert.match(compose, /XNODE_REVISION: 5b38cab30f35a57a0b4dc40c3ed3981bc2fa5ec7/);
+  assert.match(compose, /XNODE_REVISION: c6c5113c7e77fb9e6577a493e2cc57144cc0de91/);
   assert.match(compose, /XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: [0-9a-f]{64}/);
   assert.match(compose, /org\.opencontainers\.image\.revision/);
   assert.match(compose, /com\.xpoint\.source-context\.manifest-sha256/);

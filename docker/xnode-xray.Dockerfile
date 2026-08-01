@@ -6,7 +6,18 @@ ARG PROJECT
 ARG TARGETARCH
 WORKDIR /src
 COPY . .
-RUN dotnet restore "$PROJECT" --locked-mode
+RUN set -eu; \
+    for attempt in 1 2 3; do \
+      if dotnet restore "$PROJECT" --locked-mode > /tmp/dotnet-restore.log 2>&1; then \
+        cat /tmp/dotnet-restore.log; rm -f /tmp/dotnet-restore.log; break; \
+      fi; \
+      cat /tmp/dotnet-restore.log >&2; \
+      if ! grep -Eiq 'ResponseEnded|unexpected EOF|end of file|connection reset|connection refused|temporar(y|ily) unavailable|temporary failure|timed out|timeout|NU1301|HTTP status (408|429|500|502|503|504)' /tmp/dotnet-restore.log; then \
+        rm -f /tmp/dotnet-restore.log; exit 1; \
+      fi; \
+      if [ "$attempt" = "3" ]; then rm -f /tmp/dotnet-restore.log; exit 1; fi; \
+      rm -f /tmp/dotnet-restore.log; sleep $((attempt * 10)); \
+    done
 RUN case "$TARGETARCH" in \
       amd64) DOTNET_ARCH=x64 ;; \
       arm64) DOTNET_ARCH=arm64 ;; \
@@ -47,7 +58,7 @@ RUN set -eux; \
     && test "${#XRAY_EXPECTED_SHA256}" -eq 64 \
     && case "$XRAY_EXPECTED_SHA256" in *[!0-9a-f]*) echo "selected Xray SHA256 must be 64 lowercase hexadecimal characters" >&2; exit 1 ;; esac \
     && XRAY_DOWNLOAD_URL="https://github.com/XTLS/Xray-core/releases/download/$XRAY_VERSION/$XRAY_ASSET" \
-    && curl -fsSL "$XRAY_DOWNLOAD_URL" -o /tmp/xray-download/xray.zip \
+    && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 30 --max-time 300 "$XRAY_DOWNLOAD_URL" -o /tmp/xray-download/xray.zip \
     && echo "$XRAY_EXPECTED_SHA256  /tmp/xray-download/xray.zip" | sha256sum -c - \
     && unzip -q /tmp/xray-download/xray.zip -d /tmp/xray-download \
     && install -m 0755 /tmp/xray-download/xray /usr/local/bin/xray \

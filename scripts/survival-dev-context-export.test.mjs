@@ -99,6 +99,42 @@ test('exports the dotnet allowlist and only project-referenced local restore inp
   }
 });
 
+test('exports tracked local packages referenced by the selected root NuGet.Config', () => {
+  const item = fixture();
+  try {
+    mkdirSync(path.join(item.source, 'vendor', 'p04'), { recursive: true });
+    mkdirSync(path.join(item.source, 'vendor', 'unrelated'), { recursive: true });
+    writeFileSync(
+      path.join(item.source, 'NuGet.Config'),
+      [
+        '<configuration>',
+        '  <packageSources>',
+        '    <clear />',
+        '    <add key="p04" value="vendor/p04" />',
+        '    <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />',
+        '  </packageSources>',
+        '</configuration>'
+      ].join('\n')
+    );
+    writeFileSync(path.join(item.source, 'vendor', 'p04', 'Deep.Protocol.1.2.3.nupkg'), 'protocol');
+    writeFileSync(path.join(item.source, 'vendor', 'p04', 'package-manifest.json'), '{}\n');
+    writeFileSync(path.join(item.source, 'vendor', 'unrelated', 'Ignored.1.0.0.nupkg'), 'ignored');
+
+    const destination = path.join(item.owned, 'registry');
+    const result = exportDevelopmentContext({
+      kind: 'dotnet', source: item.source, destination, ownedRoot: item.owned
+    });
+
+    assert.equal(result.fileCount, 5);
+    assert.ok(existsSync(path.join(destination, 'NuGet.Config')));
+    assert.ok(existsSync(path.join(destination, 'vendor', 'p04', 'Deep.Protocol.1.2.3.nupkg')));
+    assert.ok(existsSync(path.join(destination, 'vendor', 'p04', 'package-manifest.json')));
+    assert.equal(existsSync(path.join(destination, 'vendor', 'unrelated', 'Ignored.1.0.0.nupkg')), false);
+  } finally {
+    rmSync(item.root, { recursive: true, force: true });
+  }
+});
+
 test('fails closed on selected secret-like paths without disclosing their names', () => {
   const item = fixture();
   try {

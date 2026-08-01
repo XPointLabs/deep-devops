@@ -1,6 +1,7 @@
 param(
     [string] $ArtifactDir = "",
-    [string] $ComposeFile = ""
+    [string] $ComposeFile = "",
+    [string] $ComposeProjectName = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -24,13 +25,22 @@ if (-not $resolvedArtifactDir.StartsWith($devopsPrefix, [System.StringComparison
     throw "ArtifactDir must remain inside the deep-devops repository"
 }
 
-node (Join-Path $ScriptDir "redacted-compose-topology.mjs") `
-    --compose-file $ComposeFile `
-    --output (Join-Path $ArtifactDir "compose.topology.redacted.json")
+$topologyArguments = @(
+    (Join-Path $ScriptDir "redacted-compose-topology.mjs"),
+    '--compose-file', $ComposeFile,
+    '--output', (Join-Path $ArtifactDir "compose.topology.redacted.json")
+)
+if (-not [string]::IsNullOrWhiteSpace($ComposeProjectName)) {
+    $topologyArguments += @('--project-name', $ComposeProjectName)
+}
+& node @topologyArguments
+if ($LASTEXITCODE -ne 0) { throw "redacted topology collection failed with exit code $LASTEXITCODE" }
 & (Join-Path $ScriptDir "runtime-snapshot.ps1") -ArtifactDir $ArtifactDir
-node (Join-Path $ScriptDir "secret-scan.mjs") `
+if ($LASTEXITCODE -ne 0) { throw "runtime snapshot collection failed with exit code $LASTEXITCODE" }
+& node (Join-Path $ScriptDir "secret-scan.mjs") `
     --root $DevopsDir `
     --no-tracked `
     --artifacts $ArtifactDir `
     --summary (Join-Path $ArtifactDir "security/secret-scan-summary.json")
+if ($LASTEXITCODE -ne 0) { throw "isolated rehearsal secret scan failed with exit code $LASTEXITCODE" }
 

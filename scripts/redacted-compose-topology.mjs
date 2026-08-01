@@ -53,13 +53,17 @@ function normalizePort(publisher) {
 export async function main(argv = process.argv.slice(2)) {
   const composeFile = path.resolve(argumentValue(argv, '--compose-file')
     ?? path.join(repositoryRoot, 'docker-compose.yml'));
+  const projectName = argumentValue(argv, '--project-name');
   const outputPath = path.resolve(argumentValue(argv, '--output')
     ?? path.join(repositoryRoot, 'artifacts', 'compose.topology.redacted.json'));
   relativeInsideRoot(outputPath);
 
+  const composeArguments = ['compose'];
+  if (projectName) composeArguments.push('-p', projectName);
+  composeArguments.push('-f', composeFile, 'ps', '--all', '--format', 'json');
   const result = spawnSync(
     'docker',
-    ['compose', '-f', composeFile, 'ps', '--all', '--format', 'json'],
+    composeArguments,
     { encoding: 'utf8', windowsHide: true }
   );
   if (result.status !== 0) {

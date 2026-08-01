@@ -9,7 +9,9 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $DevopsDir = Resolve-Path (Join-Path $ScriptDir "..")
 $WorkspaceRoot = Resolve-Path (Join-Path $DevopsDir "..")
 $ComposeFile = Join-Path $DevopsDir "docker-compose.yml"
-$ArtifactDir = Join-Path $DevopsDir "artifacts"
+$ArtifactRoot = Join-Path $DevopsDir "artifacts"
+$RunId = '{0}-{1}' -f ([DateTimeOffset]::UtcNow.ToString('yyyyMMddTHHmmssfffZ')), ([Guid]::NewGuid().ToString('N').Substring(0, 12))
+$ArtifactDir = Join-Path $ArtifactRoot (Join-Path 'rehearsals\multi-node' $RunId)
 $TestResultDir = Join-Path $ArtifactDir "test-results"
 $ComposeProjectName = "deep-multi-node-rehearsal"
 $ComposeTimeoutSeconds = 900
@@ -26,6 +28,7 @@ $env:DEEP_ROOT = $WorkspaceRoot.Path
 $env:DEEP_DEVOPS_DIR = $DevopsDir.Path
 $env:DEEP_COMPOSE_FILE = $ComposeFile
 $env:DEEP_ARTIFACT_DIR = $TestResultDir
+$env:DEEP_REHEARSAL_RUN_DIR = $ArtifactDir
 $env:DEEP_REGISTRY_URL = "http://127.0.0.1:18080"
 $env:DEEP_MULTI_NODE_ROUTER_URLS = "http://127.0.0.1:19281,http://127.0.0.1:19282,http://127.0.0.1:19283"
 . (Join-Path $ScriptDir "ephemeral-compose-secrets.ps1")
@@ -40,7 +43,9 @@ else {
         $env:XNODE_DOCKERFILE = (Join-Path $DevopsDir "docker/xnode-xray.Dockerfile")
     }
     if ([string]::IsNullOrWhiteSpace($env:XNODE_ASPNETCORE_ENVIRONMENT)) {
-        $env:XNODE_ASPNETCORE_ENVIRONMENT = "Production"
+        # This is a development no-mock transport lane. Production XNode is
+        # intentionally DenyAll until verified ownership tickets are wired.
+        $env:XNODE_ASPNETCORE_ENVIRONMENT = "Development"
     }
     if ([string]::IsNullOrWhiteSpace($env:XNODE_VLESS_MOCK_PROCESS)) {
         $env:XNODE_VLESS_MOCK_PROCESS = "false"
@@ -96,6 +101,9 @@ function Invoke-Docker {
     }
     $exitCode = $LASTEXITCODE
     $ErrorActionPreference = $previousErrorActionPreference
+    if ($null -eq $exitCode -or -not ($exitCode -is [int])) {
+        $exitCode = 125
+    }
     $script:LastDockerExitCode = $exitCode
 
     if ($exitCode -ne 0 -and -not $AllowFailure) {
@@ -122,13 +130,22 @@ function Invoke-DockerBounded {
             -WindowStyle Hidden `
             -RedirectStandardOutput $stdoutPath `
             -RedirectStandardError $stderrPath
+        # Windows PowerShell can lose ExitCode for a quickly-exiting child if
+        # the native handle was never materialized before WaitForExit.
+        [void]$process.Handle
         $startedAt = [DateTimeOffset]::UtcNow
         $nextProgressAt = $startedAt.AddSeconds(15)
         while (-not $process.WaitForExit(1000)) {
             $now = [DateTimeOffset]::UtcNow
             $elapsedSeconds = [int]($now - $startedAt).TotalSeconds
             if ($elapsedSeconds -ge $TimeoutSeconds) {
-                try { $process.Kill($true) } catch { Write-Warning "failed to terminate timed-out docker process tree: $_" }
+                try {
+                    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+                        & taskkill.exe /PID $process.Id /T /F *> $null
+                    } else {
+                        $process.Kill()
+                    }
+                } catch { Write-Warning "failed to terminate timed-out docker process tree: $_" }
                 $process.WaitForExit()
                 foreach ($path in @($stdoutPath, $stderrPath)) {
                     if (Test-Path $path) { Get-Content $path -Tail 40 }
@@ -145,7 +162,12 @@ function Invoke-DockerBounded {
         }
         $process.WaitForExit()
         $process.Refresh()
-        $exitCode = $process.ExitCode
+        $rawExitCode = $process.ExitCode
+        if ($null -eq $rawExitCode -or -not ($rawExitCode -is [int])) {
+            throw "docker process completed without an observable integer exit code"
+        }
+        $exitCode = [int]$rawExitCode
+        $script:LastDockerExitCode = $exitCode
         foreach ($path in @($stdoutPath, $stderrPath)) {
             if (Test-Path $path) { Get-Content $path }
         }
@@ -159,6 +181,26 @@ function Invoke-DockerBounded {
         }
         if ($null -ne $process) { $process.Dispose() }
     }
+}
+
+function Invoke-DockerCleanupBounded {
+    param(
+        [string[]] $Arguments,
+        [int] $Attempts = 6,
+        [int] $DelaySeconds = 5
+    )
+
+    foreach ($attempt in 1..$Attempts) {
+        Invoke-Docker -Arguments $Arguments -Quiet -AllowFailure
+        if ($script:LastDockerExitCode -eq 0) {
+            return $true
+        }
+        if ($attempt -lt $Attempts) {
+            Write-Warning "docker cleanup attempt $attempt/$Attempts failed with exit code $script:LastDockerExitCode; retrying after ${DelaySeconds}s"
+            Start-Sleep -Seconds $DelaySeconds
+        }
+    }
+    return $false
 }
 
 Invoke-Docker -Arguments @("info") -Quiet -AllowFailure
@@ -192,9 +234,24 @@ try {
         "-f",
         $ComposeFile,
         "--profile",
+        "multi-node-build",
+        "build",
+        "xnode-multi-node-image",
+        "registry"
+    )
+
+    Invoke-DockerBounded -TimeoutSeconds 300 -Arguments @(
+        "compose",
+        "--progress",
+        "plain",
+        "-p",
+        $ComposeProjectName,
+        "-f",
+        $ComposeFile,
+        "--profile",
         "multi-node",
         "up",
-        "--build",
+        "--no-build",
         "-d",
         "--wait",
         "registry",
@@ -211,13 +268,21 @@ try {
     }
 }
 catch {
+    $primaryError = $_
     Repair-HostArtifactOwnership -Path $ArtifactDir
-    & (Join-Path $ScriptDir "collect-artifacts.ps1") -ArtifactDir $ArtifactDir -ComposeFile $ComposeFile
-    throw
+    try {
+        & (Join-Path $ScriptDir "collect-artifacts.ps1") `
+            -ArtifactDir $ArtifactDir `
+            -ComposeFile $ComposeFile `
+            -ComposeProjectName $ComposeProjectName
+    } catch {
+        Write-Warning "isolated failure collection failed: $($_.Exception.Message)"
+    }
+    throw $primaryError
 }
 finally {
     if (-not $KeepStack) {
-        Invoke-Docker -Arguments @(
+        $cleanupSucceeded = Invoke-DockerCleanupBounded -Arguments @(
             "compose",
             "-p",
             $ComposeProjectName,
@@ -228,11 +293,13 @@ finally {
             "down",
             "--volumes",
             "--remove-orphans"
-        ) -AllowFailure
+        )
 
-        if ($script:LastDockerExitCode -ne 0) {
+        if (-not $cleanupSucceeded) {
             Write-Warning "docker compose cleanup for multi-node profile failed with exit code $script:LastDockerExitCode"
         }
     }
     Clear-DeepEphemeralComposeSecrets -GeneratedNames $generatedComposeSecretNames
 }
+
+Write-Output "Multi-node rehearsal run directory: $ArtifactDir"

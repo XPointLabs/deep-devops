@@ -80,6 +80,8 @@ function hexAddress(index) {
 
 function toRegisterRequest(node, index) {
   const payload = node.registryPayload;
+  const transportStatus = node.xray ?? property(payload, 'transport', 'Transport');
+  assert.ok(transportStatus, `router ${node.url} did not expose transport runtime status`);
   return {
     nodeId: node.routerId,
     operatorAddress: hexAddress(index),
@@ -92,14 +94,27 @@ function toRegisterRequest(node, index) {
     ed25519Signature1: String(index + 1).padStart(64, '0'),
     ed25519Signature2: String(index + 11).padStart(64, '0'),
     operatorFeeBps: 0,
-    stakeAtomic: 20_000n * 1_000_000_000n,
+    stakeAtomic: 25_000n * 1_000_000_000n,
     contributors: [
       {
         address: hexAddress(index),
         beneficiary: hexAddress(index + 10),
-        amountAtomic: 20_000n * 1_000_000_000n
+        amountAtomic: 25_000n * 1_000_000_000n
       }
     ],
+    signingEndpoint: `http://xnode-${index + 1}:8080/api/staking/quorum/sign`,
+    transportStatus: {
+      enabled: Boolean(property(transportStatus, 'enabled', 'Enabled')),
+      running: Boolean(property(transportStatus, 'running', 'Running')),
+      degraded: Boolean(property(transportStatus, 'degraded', 'Degraded')),
+      mode: String(property(transportStatus, 'mode', 'Mode') ?? 'unknown'),
+      mocked: Boolean(property(transportStatus, 'mocked', 'Mocked')),
+      restartCount: Number(property(transportStatus, 'restartCount', 'RestartCount') ?? 0),
+      consecutiveFailures: Number(property(transportStatus, 'consecutiveFailures', 'ConsecutiveFailures') ?? 0),
+      lastExitReason: property(transportStatus, 'lastExitReason', 'LastExitReason'),
+      lastStartedAt: property(transportStatus, 'lastStartedAt', 'LastStartedAt'),
+      degradedUntil: property(transportStatus, 'degradedUntil', 'DegradedUntil')
+    },
     transport: {
       protocol: 'vless',
       host: property(payload, 'publicHost', 'PublicHost'),

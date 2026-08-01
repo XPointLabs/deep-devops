@@ -17,8 +17,8 @@ $ComposePath = Join-Path $Root 'docker-compose.survival.dev.yml'
 $Project = 'deep-survival-dev'
 $baseArguments = @('compose', '-p', $Project, '-f', $ComposePath)
 $ContextRoot = Join-Path $Root 'artifacts\survival-dev\build-contexts'
-$SurvivalXNodeCommit = '5b38cab30f35a57a0b4dc40c3ed3981bc2fa5ec7'
-$SurvivalXNodeContextManifestSha256 = '55a424d8094a066a111fe0dbaed8367a14c4ebee2de8b2d979af77de55e312ff'
+$SurvivalXNodeCommit = 'c6c5113c7e77fb9e6577a493e2cc57144cc0de91'
+$SurvivalXNodeContextManifestSha256 = '68027e628e81230c8c26aca5724e477e6c1bd6ca76f60a4315ef7e55a4489d40'
 $ChainLifecycleServices = @(
     'contracts-devnet',
     'contracts-deploy',
@@ -41,6 +41,54 @@ function Resolve-SurvivalSource([string]$EnvironmentName,[string]$DefaultRelativ
         $configured
     }
     return [IO.Path]::GetFullPath($candidate)
+}
+
+function Invoke-SurvivalDockerBounded([string[]]$Arguments,[int]$TimeoutSeconds) {
+    $runId = [Guid]::NewGuid().ToString('N')
+    $stdoutPath = Join-Path ([IO.Path]::GetTempPath()) "deep-survival-docker-$runId.stdout.log"
+    $stderrPath = Join-Path ([IO.Path]::GetTempPath()) "deep-survival-docker-$runId.stderr.log"
+    $process = $null
+    try {
+        $process = Start-Process -FilePath 'docker' -ArgumentList $Arguments -PassThru `
+            -WindowStyle Hidden -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+        [void]$process.Handle
+        $startedAt = [DateTimeOffset]::UtcNow
+        $nextProgressAt = $startedAt.AddSeconds(15)
+        while (-not $process.WaitForExit(1000)) {
+            $now = [DateTimeOffset]::UtcNow
+            $elapsedSeconds = [int]($now - $startedAt).TotalSeconds
+            if ($elapsedSeconds -ge $TimeoutSeconds) {
+                try {
+                    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+                        & taskkill.exe /PID $process.Id /T /F *> $null
+                    } else {
+                        $process.Kill()
+                    }
+                } catch { Write-Warning "Failed to terminate timed-out Survival Docker process tree: $_" }
+                $process.WaitForExit()
+                throw "Survival Docker command exceeded bounded timeout of ${TimeoutSeconds}s."
+            }
+            if ($now -ge $nextProgressAt) {
+                Write-Output "Survival Docker command still running (${elapsedSeconds}s elapsed)."
+                $nextProgressAt = $now.AddSeconds(15)
+            }
+        }
+        $process.WaitForExit()
+        $process.Refresh()
+        $exitCode = $process.ExitCode
+        foreach ($path in @($stdoutPath, $stderrPath)) {
+            if (Test-Path -LiteralPath $path) { Get-Content -LiteralPath $path }
+        }
+        if ($null -eq $exitCode -or -not ($exitCode -is [int])) {
+            throw 'Survival Docker process completed without an observable integer exit code.'
+        }
+        if ($exitCode -ne 0) { throw "Survival Docker command failed with exit code $exitCode." }
+    } finally {
+        foreach ($path in @($stdoutPath, $stderrPath)) {
+            Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+        }
+        if ($null -ne $process) { $process.Dispose() }
+    }
 }
 
 function Export-SurvivalContext([string]$Kind,[string]$Source,[string]$Name,[string]$EnvironmentName,[string]$ExpectedCommit = '') {
@@ -360,12 +408,21 @@ switch ($Action) {
         $env:SURVIVAL_BIND_HOST = $advertisedHost
         Prepare-SurvivalBuildContexts -IncludeChain:$Chain
         Prepare-SurvivalXNodeIdentitySecrets
+        $buildArguments = @($baseArguments)
+        if ($Chain) { $buildArguments += @('--profile', 'chain') }
+        Invoke-SurvivalDockerBounded `
+            -TimeoutSeconds 900 `
+            -Arguments ($buildArguments + @('build') + $Service)
+        # Authority windows are intentionally generated only after every image
+        # build succeeds, immediately before one-shots and XNodes are created.
         Prepare-SurvivalMailboxPeerAuthority
         Reset-SurvivalMembershipFixture
         if ($Chain) { Reset-SurvivalChainLifecycle }
         $upArguments = @($baseArguments)
         if ($Chain) { $upArguments += @('--profile', 'chain') }
-        Invoke-SurvivalDocker ($upArguments + @('up', '-d', '--build', '--wait') + $Service)
+        Invoke-SurvivalDockerBounded `
+            -TimeoutSeconds 300 `
+            -Arguments ($upArguments + @('up', '-d', '--no-build', '--wait') + $Service)
         Assert-SurvivalHostEndpoints $advertisedHost -IncludeChain:$Chain
         & node (Join-Path $PSScriptRoot 'survival-dev-seed.mjs') '--host' $advertisedHost
         if ($LASTEXITCODE -ne 0) { throw 'Survival relay contact seed failed.' }
@@ -390,10 +447,9 @@ switch ($Action) {
         $includeChainContexts = $Chain -or $Service -contains 'contracts-devnet' -or $Service -contains 'staking-backend'
         Prepare-SurvivalBuildContexts -IncludeChain:$includeChainContexts
         Prepare-SurvivalXNodeIdentitySecrets
-        Prepare-SurvivalMailboxPeerAuthority
         $arguments = @($baseArguments)
         if ($Service -contains 'mailbox-driver') { $arguments += @('--profile', 'mailbox-rehearsal') }
-        Invoke-SurvivalDocker ($arguments + @('build') + $Service)
+        Invoke-SurvivalDockerBounded -TimeoutSeconds 900 -Arguments ($arguments + @('build') + $Service)
     }
     'Restart' {
         if ($Service.Count -eq 0) { throw 'Restart requires at least one -Service.' }

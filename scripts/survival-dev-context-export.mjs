@@ -128,7 +128,9 @@ function replaceDirectory(stage, destination) {
 function referencedRestoreInputs(source, inventory, initiallySelected) {
   const inventorySet = new Set(inventory);
   const selected = new Set(initiallySelected);
-  const configs = new Set();
+  const configs = new Set(
+    initiallySelected.filter(entry => /(?:^|\/)NuGet\.Config$/i.test(entry))
+  );
 
   for (const entry of initiallySelected) {
     if (!/\.(?:csproj|fsproj|vbproj|props|targets)$/i.test(entry)) continue;

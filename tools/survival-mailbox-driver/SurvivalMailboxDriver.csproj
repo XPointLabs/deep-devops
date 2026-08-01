@@ -5,7 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <RestoreConfigFile>$(XNodeSource)\eng\mailbox-client.NuGet.Config</RestoreConfigFile>
+    <RestoreConfigFile>$(XNodeSource)\eng\survival-beta.NuGet.Config</RestoreConfigFile>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="$(XNodeSource)\src\XNode.Core\XNode.Core.csproj" />

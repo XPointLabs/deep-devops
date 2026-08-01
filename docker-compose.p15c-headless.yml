@@ -81,7 +81,6 @@ x-xnode: &xnode
     Node__PublicPort: "8080"
     Node__PublicPeerRpcPort: "8081"
     Runtime__BootstrapFromStorage: "false"
-    Runtime__AllowLoopbackPeerEndpoints: "true"
     StorageRpc__BaseUrl: http://storage:8080
     RegistryHeartbeat__Enabled: "false"
     Vless__Enabled: "false"

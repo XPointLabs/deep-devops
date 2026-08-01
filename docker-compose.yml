@@ -55,8 +55,9 @@ services:
       retries: 30
       start_period: 10s
 
-  xnode-1:
-    profiles: ["multi-node"]
+  xnode-multi-node-image:
+    profiles: ["multi-node-build"]
+    image: deep-multi-node-rehearsal/xnode-xray:dev
     build:
       context: ${DEEP_ROOT:-..}/xnode
       dockerfile: ${XNODE_DOCKERFILE:-../deep-devops/docker/dotnet-service.Dockerfile}
@@ -70,6 +71,11 @@ services:
         XRAY_SHA256: ${XNODE_XRAY_SHA256:-}
         XRAY_SHA256_AMD64: 23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae
         XRAY_SHA256_ARM64: 4d30283ae614e3057f730f67cd088a42be6fdf91f8639d82cb69e48cde80413c
+
+  xnode-1:
+    profiles: ["multi-node"]
+    image: deep-multi-node-rehearsal/xnode-xray:dev
+    pull_policy: never
     environment:
       ASPNETCORE_ENVIRONMENT: ${XNODE_ASPNETCORE_ENVIRONMENT:-Development}
       ASPNETCORE_URLS: http://0.0.0.0:8080;http://0.0.0.0:8081
@@ -109,19 +115,8 @@ services:
 
   xnode-2:
     profiles: ["multi-node"]
-    build:
-      context: ${DEEP_ROOT:-..}/xnode
-      dockerfile: ${XNODE_DOCKERFILE:-../deep-devops/docker/dotnet-service.Dockerfile}
-      args:
-        SDK_IMAGE: mcr.microsoft.com/dotnet/sdk:10.0
-        RUNTIME_IMAGE: mcr.microsoft.com/dotnet/aspnet:10.0
-        PROJECT: src/XNode/XNode.csproj
-        APP_DLL: XNode.dll
-        XRAY_VERSION: ${XNODE_XRAY_VERSION:-v26.3.27}
-        XRAY_DOWNLOAD_URL: ${XNODE_XRAY_DOWNLOAD_URL:-}
-        XRAY_SHA256: ${XNODE_XRAY_SHA256:-}
-        XRAY_SHA256_AMD64: 23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae
-        XRAY_SHA256_ARM64: 4d30283ae614e3057f730f67cd088a42be6fdf91f8639d82cb69e48cde80413c
+    image: deep-multi-node-rehearsal/xnode-xray:dev
+    pull_policy: never
     environment:
       ASPNETCORE_ENVIRONMENT: ${XNODE_ASPNETCORE_ENVIRONMENT:-Development}
       ASPNETCORE_URLS: http://0.0.0.0:8080;http://0.0.0.0:8081
@@ -161,19 +156,8 @@ services:
 
   xnode-3:
     profiles: ["multi-node"]
-    build:
-      context: ${DEEP_ROOT:-..}/xnode
-      dockerfile: ${XNODE_DOCKERFILE:-../deep-devops/docker/dotnet-service.Dockerfile}
-      args:
-        SDK_IMAGE: mcr.microsoft.com/dotnet/sdk:10.0
-        RUNTIME_IMAGE: mcr.microsoft.com/dotnet/aspnet:10.0
-        PROJECT: src/XNode/XNode.csproj
-        APP_DLL: XNode.dll
-        XRAY_VERSION: ${XNODE_XRAY_VERSION:-v26.3.27}
-        XRAY_DOWNLOAD_URL: ${XNODE_XRAY_DOWNLOAD_URL:-}
-        XRAY_SHA256: ${XNODE_XRAY_SHA256:-}
-        XRAY_SHA256_AMD64: 23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae
-        XRAY_SHA256_ARM64: 4d30283ae614e3057f730f67cd088a42be6fdf91f8639d82cb69e48cde80413c
+    image: deep-multi-node-rehearsal/xnode-xray:dev
+    pull_policy: never
     environment:
       ASPNETCORE_ENVIRONMENT: ${XNODE_ASPNETCORE_ENVIRONMENT:-Development}
       ASPNETCORE_URLS: http://0.0.0.0:8080;http://0.0.0.0:8081

@@ -27,8 +27,8 @@ x-xnode-build: &xnode-build
   args:
     SDK_IMAGE: ${SURVIVAL_DOTNET_SDK_IMAGE:-mcr.microsoft.com/dotnet/sdk@sha256:7e964ea8bc6c1e18ea9fbc76ed403da41c9b19aeee2aab6bf9c845f25e891380}
     RUNTIME_IMAGE: ${SURVIVAL_DOTNET_RUNTIME_IMAGE:-mcr.microsoft.com/dotnet/aspnet@sha256:e3736b0d423db99c6988e1ddf5ea725c14b12579bb120024e5ff7ff204a14080}
-    XNODE_REVISION: 5b38cab30f35a57a0b4dc40c3ed3981bc2fa5ec7
-    XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: 55a424d8094a066a111fe0dbaed8367a14c4ebee2de8b2d979af77de55e312ff
+    XNODE_REVISION: c6c5113c7e77fb9e6577a493e2cc57144cc0de91
+    XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: 68027e628e81230c8c26aca5724e477e6c1bd6ca76f60a4315ef7e55a4489d40
   dockerfile_inline: |
     ARG SDK_IMAGE
     ARG RUNTIME_IMAGE
@@ -38,7 +38,18 @@ x-xnode-build: &xnode-build
     WORKDIR /src
     COPY --from=xnode_source . .
     RUN printf '%s  %s\n' "$${XNODE_SOURCE_CONTEXT_MANIFEST_SHA256}" .survival-source-manifest.json | sha256sum -c -
-    RUN dotnet publish src/XNode/XNode.csproj -c Debug -o /out --runtime linux-arm64 --self-contained false -p:UseAppHost=false
+    RUN set -eu; for attempt in 1 2 3; do \
+          if dotnet restore src/XNode/XNode.csproj --locked-mode > /tmp/xnode-restore.log 2>&1; then \
+            cat /tmp/xnode-restore.log; rm -f /tmp/xnode-restore.log; break; \
+          fi; \
+          cat /tmp/xnode-restore.log >&2; \
+          if ! grep -Eiq 'ResponseEnded|unexpected EOF|end of file|connection reset|connection refused|temporar(y|ily) unavailable|temporary failure|timed out|timeout|NU1301|HTTP status (408|429|500|502|503|504)' /tmp/xnode-restore.log; then \
+            rm -f /tmp/xnode-restore.log; exit 1; \
+          fi; \
+          if [ "$$attempt" = "3" ]; then rm -f /tmp/xnode-restore.log; exit 1; fi; \
+          rm -f /tmp/xnode-restore.log; sleep $$((attempt * 10)); \
+        done
+    RUN dotnet publish src/XNode/XNode.csproj -c Debug -o /out --runtime linux-arm64 --self-contained false -p:UseAppHost=false --no-restore
     FROM $${RUNTIME_IMAGE}
     ARG XNODE_REVISION
     ARG XNODE_SOURCE_CONTEXT_MANIFEST_SHA256
@@ -68,7 +79,6 @@ x-xnode: &xnode
     Node__PublicPort: "8080"
     Node__PublicPeerRpcPort: "8081"
     Runtime__BootstrapFromStorage: "true"
-    Runtime__AllowLoopbackPeerEndpoints: "true"
     Runtime__AllowPrivatePeerEndpoints: "true"
     RegistryBootstrap__BaseUrl: http://relay-bootstrap:8080
     StorageRpc__BaseUrl: http://storage:8080
@@ -99,8 +109,8 @@ x-mailbox-driver-build: &mailbox-driver-build
   args:
     SDK_IMAGE: ${SURVIVAL_DOTNET_SDK_IMAGE:-mcr.microsoft.com/dotnet/sdk@sha256:7e964ea8bc6c1e18ea9fbc76ed403da41c9b19aeee2aab6bf9c845f25e891380}
     RUNTIME_IMAGE: ${SURVIVAL_DOTNET_RUNTIME_IMAGE:-mcr.microsoft.com/dotnet/aspnet@sha256:e3736b0d423db99c6988e1ddf5ea725c14b12579bb120024e5ff7ff204a14080}
-    XNODE_REVISION: 5b38cab30f35a57a0b4dc40c3ed3981bc2fa5ec7
-    XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: 55a424d8094a066a111fe0dbaed8367a14c4ebee2de8b2d979af77de55e312ff
+    XNODE_REVISION: c6c5113c7e77fb9e6577a493e2cc57144cc0de91
+    XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: 68027e628e81230c8c26aca5724e477e6c1bd6ca76f60a4315ef7e55a4489d40
   dockerfile_inline: |
     ARG SDK_IMAGE
     ARG RUNTIME_IMAGE
