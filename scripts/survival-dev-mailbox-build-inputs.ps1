@@ -151,6 +151,7 @@ function New-SurvivalMailboxIsolatedSource {
 
     $driverNames = @(
         'MailboxGrantProvisioner.cs',
+        'MailboxRuntimePublisher.cs',
         'Program.cs',
         'SurvivalMailboxDriver.csproj'
     )

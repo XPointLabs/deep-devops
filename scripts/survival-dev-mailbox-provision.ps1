@@ -5,10 +5,15 @@ param(
     [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{64}$')][string]$AuthoritySha256,
     [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{64}$')][string]$ExpectedIssuerPublicKey,
     [string]$AuthorityPublic = '',
+    [ValidatePattern('^$|^[0-9a-f]{64}$')][string]$RuntimeAuthoritySha256 = '',
+    [string]$RuntimeAuthorityPublic = '',
     [string]$IssuerSeedPath = '',
     [string]$OutputDirectory = '',
     [string]$MailboxSecretDirectory = '',
-    [string]$CoordinatorUrl = 'http://192.168.1.44:41801'
+    [string]$CoordinatorUrl = 'http://192.168.1.44:41801',
+    [switch]$PublishRuntime,
+    [ValidateRange(1800,14400)][int]$RevocationTtlSeconds = 14400,
+    [string]$RuntimeOutputParent = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -17,7 +22,7 @@ Set-StrictMode -Version Latest
 $root = [IO.Path]::GetFullPath((Split-Path $PSScriptRoot -Parent))
 $buildHelper = Join-Path $PSScriptRoot 'survival-dev-mailbox-build-inputs.ps1'
 $expectedBuildHelperSha256 =
-    'fa1b87b7928b47f4b4ffa603f02b52d46e4fc2419ee9812bf09737c6d878e872'
+    '559f9d122edfd310bb7c5c255c091e83be24d3760c598b88b6b23a5e4bd5ee70'
 if (((Get-Item -Force -LiteralPath $buildHelper).Attributes -band
     [IO.FileAttributes]::ReparsePoint)) {
     throw 'The mailbox immutable-build helper cannot be a reparse point.'
@@ -69,14 +74,20 @@ $expectedXNodeManifestSha256 =
     '68027e628e81230c8c26aca5724e477e6c1bd6ca76f60a4315ef7e55a4489d40'
 $expectedDriverSha256 = @{
     'MailboxGrantProvisioner.cs' =
-        '845aa8070304c6b0d81bca7c6ffa4a12fdd1c3255d45b0ea31f09abf2cb3461d'
+        '1f8a2c81e9249390a8309f0362290e4db6e9aa7a4965779e46bb52a7493d42fe'
+    'MailboxRuntimePublisher.cs' =
+        'fcd38824e14376ef95906ed724c97bc9fcafda0a5a568f7c048c24d61edef928'
     'Program.cs' =
-        'e71820fd4c5a0084593f738eb4c5e7ab9adf918e00f6803ef8ebfde2d31fb60e'
+        '03b51b36b6df101412bdf37cd7051e79dee07d7c2b3199489d23b884fbd8fa2d'
     'SurvivalMailboxDriver.csproj' =
         '4db436d69ea88ac3ff16f08c161b61cc0c048bad84cb7e529b2208fa569eafbe'
 }
 $xnodeSource = Join-Path $root 'artifacts\survival-dev\build-contexts\xnode'
 foreach ($path in @($OutputDirectory, $MailboxSecretDirectory)) {
+    if (-not (Test-Path -LiteralPath $path)) {
+        [void][IO.Directory]::CreateDirectory($path)
+        Set-MailboxDirectoryExclusiveWritable $path
+    }
     if (-not (Test-Path -LiteralPath $path -PathType Container)) {
         throw "Operator-protected root must already exist: $path"
     }
@@ -138,6 +149,16 @@ try {
         '--output-directory', ([IO.Path]::GetFullPath($OutputDirectory)),
         '--mailbox-secret-directory', ([IO.Path]::GetFullPath($MailboxSecretDirectory)),
         '--coordinator-url', $CoordinatorUrl)
+    if (-not [string]::IsNullOrWhiteSpace($RuntimeAuthorityPublic) -or
+        -not [string]::IsNullOrWhiteSpace($RuntimeAuthoritySha256)) {
+        if ([string]::IsNullOrWhiteSpace($RuntimeAuthorityPublic) -or
+            [string]::IsNullOrWhiteSpace($RuntimeAuthoritySha256)) {
+            throw 'Runtime authority path and SHA-256 must be supplied together.'
+        }
+        $arguments += @(
+            '--runtime-authority-public', ([IO.Path]::GetFullPath($RuntimeAuthorityPublic)),
+            '--expected-runtime-authority-sha256', $RuntimeAuthoritySha256)
+    }
     & dotnet @arguments
     if ($LASTEXITCODE -ne 0) {
         throw 'DEV-LOCAL-ONLY MAUI mailbox grant provisioning failed.'
@@ -153,9 +174,56 @@ try {
         '--coordinator-url', $CoordinatorUrl,
         '--android-holder-public-key', $AndroidHolderPublicKey,
         '--windows-holder-public-key', $WindowsHolderPublicKey)
+    if (-not [string]::IsNullOrWhiteSpace($RuntimeAuthorityPublic)) {
+        $verifyArguments += @(
+            '--runtime-authority-public', ([IO.Path]::GetFullPath($RuntimeAuthorityPublic)),
+            '--expected-runtime-authority-sha256', $RuntimeAuthoritySha256)
+    }
     & dotnet @verifyArguments
     if ($LASTEXITCODE -ne 0) {
         throw 'Published DEV-LOCAL-ONLY mailbox pair verification failed.'
+    }
+    if ($PublishRuntime) {
+        if ([string]::IsNullOrWhiteSpace($RuntimeAuthorityPublic) -or
+            [string]::IsNullOrWhiteSpace($RuntimeAuthoritySha256)) {
+            throw 'Runtime publication requires the minimized runtime authority and its SHA-256.'
+        }
+        $deepSessionRoot = [IO.Path]::GetFullPath((Split-Path (Split-Path $root -Parent) -Parent))
+        $labRoot = Join-Path $deepSessionRoot 'secrets\android-lab-dev'
+        $expectedRuntimeParent = Join-Path $deepSessionRoot 'secrets\mailbox-bootstrap\runtime'
+        if ([string]::IsNullOrWhiteSpace($RuntimeOutputParent)) {
+            $RuntimeOutputParent = $expectedRuntimeParent
+        }
+        $runtimeParent = [IO.Path]::GetFullPath($RuntimeOutputParent)
+        if (-not $runtimeParent.Equals(
+            [IO.Path]::GetFullPath($expectedRuntimeParent),
+            [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'DEV runtime outputs must use the canonical protected mailbox-bootstrap runtime root.'
+        }
+        [void][IO.Directory]::CreateDirectory($runtimeParent)
+        Set-MailboxDirectoryExclusiveWritable $runtimeParent
+        $privateKey = Join-Path $labRoot 'mr-x-dev-private-key.bin'
+        $publicKey = Join-Path $labRoot 'mr-x-dev-public-key.bin'
+        foreach ($key in @($privateKey, $publicKey)) {
+            if (-not (Test-Path -LiteralPath $key -PathType Leaf)) {
+                throw 'The software-held DEV-only Mr. X key pair is incomplete.'
+            }
+        }
+        & dotnet $driver publish-runtime `
+            --development-only `
+            --runtime-authority-public ([IO.Path]::GetFullPath($RuntimeAuthorityPublic)) `
+            --expected-runtime-authority-sha256 $RuntimeAuthoritySha256 `
+            --pair-directory ([IO.Path]::GetFullPath($OutputDirectory)) `
+            --android-runtime-root (Join-Path $runtimeParent 'android') `
+            --windows-runtime-root (Join-Path $runtimeParent 'windows') `
+            --android-holder-public-key $AndroidHolderPublicKey `
+            --windows-holder-public-key $WindowsHolderPublicKey `
+            --mr-x-private-key $privateKey `
+            --mr-x-public-key $publicKey `
+            --revocation-ttl-seconds $RevocationTtlSeconds
+        if ($LASTEXITCODE -ne 0) {
+            throw 'DEV-LOCAL-ONLY Android/Windows mailbox runtime publication failed.'
+        }
     }
 } finally {
     if ($null -ne $publishLocks) {

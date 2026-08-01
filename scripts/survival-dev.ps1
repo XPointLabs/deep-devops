@@ -157,6 +157,7 @@ function Prepare-SurvivalMailboxPeerAuthority() {
     $authorityPath = Join-Path $outputDirectory 'mailbox-peer-authority.env'
     $clientAuthorityPath = Join-Path $outputDirectory 'mailbox-client-xnode-1.env'
     $publicPath = Join-Path $outputDirectory 'mailbox-peer-authority.public.json'
+    $clientPublicPath = Join-Path $outputDirectory 'mailbox-client-authority.public.json'
     $coordinatorHost = [Environment]::GetEnvironmentVariable('SURVIVAL_BIND_HOST')
     if ([string]::IsNullOrWhiteSpace($coordinatorHost)) { $coordinatorHost = '127.0.0.1' }
     & dotnet run `
@@ -168,11 +169,13 @@ function Prepare-SurvivalMailboxPeerAuthority() {
         --output-env $authorityPath `
         --output-client-env $clientAuthorityPath `
         --coordinator-url "http://$coordinatorHost`:41801" `
-        --output-public $publicPath
+        --output-public $publicPath `
+        --output-client-public $clientPublicPath
     if ($LASTEXITCODE -ne 0) { throw 'Real DEV-LOCAL-ONLY mailbox peer authority generation failed.' }
     Set-Item -Path 'Env:SURVIVAL_MAILBOX_AUTHORITY_ENV' -Value $authorityPath
     Set-Item -Path 'Env:SURVIVAL_MAILBOX_CLIENT_AUTHORITY_ENV' -Value $clientAuthorityPath
     Set-Item -Path 'Env:SURVIVAL_MAILBOX_PUBLIC_AUTHORITY' -Value $publicPath
+    Set-Item -Path 'Env:SURVIVAL_MAILBOX_CLIENT_PUBLIC_AUTHORITY' -Value $clientPublicPath
 }
 
 function Prepare-SurvivalXNodeIdentitySecrets() {

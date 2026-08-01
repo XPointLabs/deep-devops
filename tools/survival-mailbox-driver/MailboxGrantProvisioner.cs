@@ -147,6 +147,7 @@ static class MailboxGrantProvisioner
             new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
             ?? throw new InvalidDataException("Authority JSON is invalid.");
         Require(source.SchemaVersion == 2
+            && source.Scope == "DEV-LOCAL-ONLY"
             && source.Protocol == "P10E/MCP2/MAU2/MIP1/RIP1/PRQ2"
             && source.MinimumGeneration == ProtocolFixture.Epoch
             && source.MaximumGeneration == ProtocolFixture.NextEpoch
@@ -156,6 +157,27 @@ static class MailboxGrantProvisioner
             && source.ReplicaSigningPublicKeys.Count == 2
             && source.IssuerPublicKey == expectedIssuer,
             "Only the exact trusted authority schema is accepted.");
+
+        var runtimeAuthorityHash = actualHash;
+        if (arguments.RuntimeAuthorityPublicPath is not null ||
+            arguments.ExpectedRuntimeAuthoritySha256 is not null)
+        {
+            Require(arguments.RuntimeAuthorityPublicPath is not null &&
+                    arguments.ExpectedRuntimeAuthoritySha256 is not null,
+                "Runtime authority path and hash must be supplied together.");
+            RequireFile(arguments.RuntimeAuthorityPublicPath!, "runtime authority");
+            var runtimeAuthorityBytes = ReadStableFile(arguments.RuntimeAuthorityPublicPath!);
+            var expectedRuntimeBytes = Fixture.SerializeClientAuthority(source);
+            var expectedRuntimeHash = LowerHex(
+                arguments.ExpectedRuntimeAuthoritySha256, 32,
+                "expected runtime authority sha256");
+            runtimeAuthorityHash = Sha256(runtimeAuthorityBytes);
+            Require(runtimeAuthorityHash == expectedRuntimeHash &&
+                    runtimeAuthorityBytes.Length == expectedRuntimeBytes.Length &&
+                    CryptographicOperations.FixedTimeEquals(
+                        runtimeAuthorityBytes, expectedRuntimeBytes),
+                "Runtime authority is not the exact minimized projection of the trusted source authority.");
+        }
 
         var expectedNetwork = Lower(SHA256.HashData(
             Encoding.UTF8.GetBytes("deep-survival-dev-p10e-network-v1"))[..16]);
@@ -169,8 +191,8 @@ static class MailboxGrantProvisioner
             && currentSource.NotBeforeUnixSeconds < nextSource.NotBeforeUnixSeconds
             && nextSource.NotBeforeUnixSeconds <= currentSource.ExpiresAtUnixSeconds
             && currentSource.ExpiresAtUnixSeconds < nextSource.ExpiresAtUnixSeconds
-            && currentSource.ExpiresAtUnixSeconds - currentSource.NotBeforeUnixSeconds <= 7200
-            && nextSource.ExpiresAtUnixSeconds - nextSource.NotBeforeUnixSeconds <= 10800
+            && currentSource.ExpiresAtUnixSeconds - currentSource.NotBeforeUnixSeconds == 29100
+            && nextSource.ExpiresAtUnixSeconds - nextSource.NotBeforeUnixSeconds == 43260
             && now >= nextSource.NotBeforeUnixSeconds
             && now + 1800 <= currentSource.ExpiresAtUnixSeconds,
             "Authority does not contain a live bounded overlapping E/E+1 window.");
@@ -227,7 +249,7 @@ static class MailboxGrantProvisioner
 
         var replicas = source.ReplicaIds.Select((id, index) =>
             new Replica(id, source.ReplicaSigningPublicKeys[index])).ToArray();
-        return new StrictAuthority(actualHash, source.NetworkId, source.IssuerPublicKey, coordinator,
+        return new StrictAuthority(runtimeAuthorityHash, source.NetworkId, source.IssuerPublicKey, coordinator,
             FromAuthorityEpoch(currentSource), FromAuthorityEpoch(nextSource), replicas);
     }
 

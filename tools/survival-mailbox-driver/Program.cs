@@ -7,6 +7,12 @@ using XNode.Core;
 using XNode.Core.Mailbox;
 using XNode.Core.Mailbox.Client;
 
+if (args.Length > 0 && args[0] == "publish-runtime")
+{
+    MailboxRuntimePublisher.Publish(args);
+    return;
+}
+
 var arguments = Arguments.Parse(args);
 if (arguments.Command == "provision")
 {
@@ -48,7 +54,8 @@ switch (arguments.Command)
             arguments.OutputEnvironment!,
             arguments.OutputClientEnvironment!,
             arguments.OutputPublic!,
-            arguments.CoordinatorUrl);
+            arguments.CoordinatorUrl,
+            arguments.OutputClientPublic);
         Result("authority", new
         {
             membershipProofs = 12,
@@ -650,8 +657,11 @@ sealed class Fixture
             (ulong)DateTimeOffset.UtcNow.ToUnixTimeSeconds() / 60 * 60);
         var currentNotBefore = anchor - 300;
         var nextNotBefore = anchor - 60;
-        var currentExpiresAt = anchor + 3600;
-        var nextExpiresAt = anchor + 7200;
+        // A physical Android/Windows lab lane routinely spans builds, installs,
+        // and device runs. Keep the DEV authority bounded but long enough that
+        // it cannot expire during one working session.
+        var currentExpiresAt = anchor + 28800;
+        var nextExpiresAt = anchor + 43200;
         var ids = seeds.Select(RelayContactSigner.DeriveRouterId).ToArray();
         var expectedIds = new[]
         {
@@ -797,9 +807,9 @@ sealed class Fixture
             || currentAuthority.ExpiresAtUnixSeconds
                 >= nextAuthority.ExpiresAtUnixSeconds
             || currentAuthority.ExpiresAtUnixSeconds
-                - currentAuthority.NotBeforeUnixSeconds > 7200
+                - currentAuthority.NotBeforeUnixSeconds != 29100
             || nextAuthority.ExpiresAtUnixSeconds
-                - nextAuthority.NotBeforeUnixSeconds > 10800
+                - nextAuthority.NotBeforeUnixSeconds != 43260
             || now < nextAuthority.NotBeforeUnixSeconds
             || now + 1800 > currentAuthority.ExpiresAtUnixSeconds)
         {
@@ -902,7 +912,8 @@ sealed class Fixture
         string environmentPath,
         string clientEnvironmentPath,
         string publicPath,
-        string coordinatorUrl)
+        string coordinatorUrl,
+        string? clientPublicPath)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(environmentPath))!);
         var lines = new List<string>
@@ -1029,6 +1040,46 @@ sealed class Fixture
             },
             selections
         }, new JsonSerializerOptions { WriteIndented = true }) + "\n");
+        if (!string.IsNullOrWhiteSpace(clientPublicPath))
+        {
+            var source = JsonSerializer.Deserialize<PublicAuthority>(
+                File.ReadAllText(publicPath),
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+                ?? throw new InvalidDataException("Generated mailbox authority is invalid.");
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(clientPublicPath))!);
+            File.WriteAllBytes(clientPublicPath, SerializeClientAuthority(source));
+        }
+    }
+
+    internal static byte[] SerializeClientAuthority(PublicAuthority source)
+    {
+        var json = JsonSerializer.Serialize(new
+        {
+            schemaVersion = source.SchemaVersion,
+            scope = source.Scope,
+            protocol = source.Protocol,
+            networkId = source.NetworkId,
+            issuerPublicKey = source.IssuerPublicKey,
+            minimumGeneration = source.MinimumGeneration,
+            maximumGeneration = source.MaximumGeneration,
+            issuerValidFromUnixSeconds = source.IssuerValidFromUnixSeconds,
+            issuerValidUntilUnixSeconds = source.IssuerValidUntilUnixSeconds,
+            coordinatorUrl = source.CoordinatorUrl,
+            replicaIds = source.ReplicaIds,
+            replicaSigningPublicKeys = source.ReplicaSigningPublicKeys,
+            epochs = source.Epochs.Select(epoch => new
+            {
+                epoch = epoch.Epoch,
+                notBeforeUnixSeconds = epoch.NotBeforeUnixSeconds,
+                expiresAtUnixSeconds = epoch.ExpiresAtUnixSeconds,
+                membershipCommitment = epoch.MembershipCommitment,
+                placementId = epoch.PlacementId,
+                placementCommitment = epoch.PlacementCommitment,
+                replicas = Array.Empty<object>()
+            }),
+            selections = Array.Empty<object>()
+        }, new JsonSerializerOptions { WriteIndented = true });
+        return System.Text.Encoding.UTF8.GetBytes(json + "\n");
     }
 
     public Scenario NewScenario(
@@ -1538,6 +1589,7 @@ sealed class Fixture
 
 sealed record PublicAuthority(
     int SchemaVersion,
+    string Scope,
     string Protocol,
     string NetworkId,
     string IssuerPublicKey,
@@ -1688,6 +1740,7 @@ sealed record Arguments(
     string? OutputEnvironment,
     string? OutputClientEnvironment,
     string? OutputPublic,
+    string? OutputClientPublic,
     string? AndroidHolderPublicKey,
     string? WindowsHolderPublicKey,
     string? IssuerSeedPath,
@@ -1697,6 +1750,8 @@ sealed record Arguments(
     bool AllowHttp,
     bool PhysicalDev,
     string? ExpectedAuthoritySha256,
+    string? RuntimeAuthorityPublicPath,
+    string? ExpectedRuntimeAuthoritySha256,
     string? ExpectedIssuerPublicKey,
     string? PairDirectory,
     bool FailAfterStage,
@@ -1730,6 +1785,7 @@ sealed record Arguments(
             Optional("--output-env"),
             Optional("--output-client-env"),
             Optional("--output-public"),
+            Optional("--output-client-public"),
             Optional("--android-holder-public-key"),
             Optional("--windows-holder-public-key"),
             Optional("--issuer-seed-path"),
@@ -1739,6 +1795,8 @@ sealed record Arguments(
             values.Contains("--allow-http", StringComparer.Ordinal),
             values.Contains("--physical-dev", StringComparer.Ordinal),
             Optional("--expected-authority-sha256"),
+            Optional("--runtime-authority-public"),
+            Optional("--expected-runtime-authority-sha256"),
             Optional("--expected-issuer-public-key"),
             Optional("--pair-directory"),
             values.Contains("--fail-after-stage", StringComparer.Ordinal),

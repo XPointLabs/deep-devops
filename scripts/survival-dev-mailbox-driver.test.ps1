@@ -18,8 +18,10 @@ try {
     $clientEnv = Join-Path $work 'client.env'
     $authorityPublic = Join-Path $work 'authority.public.json'
     $state = Join-Path $work 'state'
+    $artifacts = Join-Path $work 'build-artifacts'
     $common = @(
-        'run', '--project', $driver, "-p:XNodeSource=$xnode", '--no-restore', '--')
+        'run', '--project', $driver, '--artifacts-path', $artifacts,
+        "-p:XNodeSource=$xnode", '--')
     $authority = @(& dotnet @common authority `
         '--secrets-dir' $secrets `
         '--output-env' $authorityEnv `

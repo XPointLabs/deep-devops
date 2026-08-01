@@ -13,6 +13,17 @@ function Get-LowerSha256([string]$Path) {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 
+function Convert-HexToBytes([string]$Value) {
+    if ($Value.Length % 2 -ne 0 -or $Value -cnotmatch '^[0-9a-f]+$') {
+        throw 'Test hexadecimal input is not canonical.'
+    }
+    $bytes = [byte[]]::new($Value.Length / 2)
+    for ($index = 0; $index -lt $bytes.Length; $index++) {
+        $bytes[$index] = [Convert]::ToByte($Value.Substring($index * 2, 2), 16)
+    }
+    return $bytes
+}
+
 function New-ProtectedDirectory([string]$Path) {
     New-Item -ItemType Directory -Path $Path -Force | Out-Null
     if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
@@ -147,6 +158,7 @@ try {
     $driverHashes = @{}
     foreach ($name in @(
         'MailboxGrantProvisioner.cs',
+        'MailboxRuntimePublisher.cs',
         'Program.cs',
         'SurvivalMailboxDriver.csproj')) {
         $driverHashes[$name] = (Get-FileHash -LiteralPath (
@@ -224,26 +236,39 @@ try {
     [IO.File]::WriteAllText($issuer, ('{0:x64}' -f 1001) + "`n")
     Protect-TestSecret $issuer
     $authority = Join-Path $temporary 'authority.json'
+    $runtimeAuthority = Join-Path $temporary 'runtime-authority.json'
     Invoke-Driver @(
         'authority', '--secrets-dir', $secrets,
         '--output-env', (Join-Path $temporary 'authority.env'),
         '--output-client-env', (Join-Path $temporary 'client.env'),
         '--output-public', $authority,
+        '--output-client-public', $runtimeAuthority,
         '--coordinator-url', 'http://192.168.1.44:41801')
     $authorityHash = Get-LowerSha256 $authority
+    $runtimeAuthorityHash = Get-LowerSha256 $runtimeAuthority
     $authorityObject = Get-Content -Raw -LiteralPath $authority | ConvertFrom-Json
+    $runtimeAuthorityObject = Get-Content -Raw -LiteralPath $runtimeAuthority | ConvertFrom-Json
+    if (@($runtimeAuthorityObject.selections).Count -ne 0 -or
+        @($runtimeAuthorityObject.epochs | Where-Object { @($_.replicas).Count -ne 0 }).Count -ne 0 -or
+        [string]$runtimeAuthorityObject.issuerPublicKey -cne [string]$authorityObject.issuerPublicKey) {
+        throw 'Client authority is not the exact minimized semantic projection.'
+    }
     $issuerPublicKey = [string]$authorityObject.issuerPublicKey
 
     $output = Join-Path $temporary 'output'
     $hostSecrets = Join-Path $temporary 'host-secrets'
     New-ProtectedDirectory $output
     New-ProtectedDirectory $hostSecrets
-    $android = '0101010101010101010101010101010101010101010101010101010101010101'
-    $windows = '0202020202020202020202020202020202020202020202020202020202020202'
+    # Runtime publication derives canonical 05 Session IDs, so holders must be
+    # valid Ed25519 points rather than arbitrary 32-byte provision fixtures.
+    $android = [string]$authorityObject.replicaSigningPublicKeys[0]
+    $windows = [string]$authorityObject.replicaSigningPublicKeys[1]
     $trust = @(
         '--development-only', '--allow-http', '--physical-dev',
         '--authority-public', $authority,
         '--expected-authority-sha256', $authorityHash,
+        '--runtime-authority-public', $runtimeAuthority,
+        '--expected-runtime-authority-sha256', $runtimeAuthorityHash,
         '--expected-issuer-public-key', $issuerPublicKey,
         '--coordinator-url', 'http://192.168.1.44:41801')
     $common = $trust + @(
@@ -329,6 +354,50 @@ try {
             throw 'Each client must receive distinct E/E+1 own-copy deposit, retrieve, and peer deposit grants.'
         }
     }
+
+    # Publish both platform-specific runtime roots from the minimized authority,
+    # bounded empty revocations, and a public RFC 8032 synthetic test key.
+    $runtimeParent = Join-Path $temporary 'runtime-output'
+    New-ProtectedDirectory $runtimeParent
+    $testPrivateKey = Join-Path $temporary 'synthetic-mr-x.private'
+    $testPublicKey = Join-Path $temporary 'synthetic-mr-x.public'
+    $testSeed = '9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60'
+    $testPublic = 'd75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a'
+    [IO.File]::WriteAllBytes($testPrivateKey, (Convert-HexToBytes ($testSeed + $testPublic)))
+    [IO.File]::WriteAllBytes($testPublicKey, (Convert-HexToBytes $testPublic))
+    Protect-TestSecret $testPrivateKey
+    Protect-TestSecret $testPublicKey
+    $publishRuntime = @(
+        'publish-runtime', '--development-only',
+        '--runtime-authority-public', $runtimeAuthority,
+        '--expected-runtime-authority-sha256', $runtimeAuthorityHash,
+        '--pair-directory', $output,
+        '--android-runtime-root', (Join-Path $runtimeParent 'android'),
+        '--windows-runtime-root', (Join-Path $runtimeParent 'windows'),
+        '--android-holder-public-key', $android,
+        '--windows-holder-public-key', $windows,
+        '--mr-x-private-key', $testPrivateKey,
+        '--mr-x-public-key', $testPublicKey,
+        '--revocation-ttl-seconds', '3600')
+    Invoke-Driver $publishRuntime
+    Invoke-Driver $publishRuntime
+    foreach ($platform in @('android', 'windows')) {
+        $published = Join-Path $runtimeParent $platform
+        $activation = Get-Content -Raw (Join-Path $published 'activation.v1.json') | ConvertFrom-Json
+        $revocations = Get-Content -Raw (Join-Path $published 'revocations.v1.json') | ConvertFrom-Json
+        if ([string]$activation.platform -cne $platform -or
+            [string]$activation.authoritySha256 -cne $runtimeAuthorityHash -or
+            @($revocations.revoked).Count -ne 0 -or
+            (Get-Item (Join-Path $published 'mr-x-mailbox-policy.signature')).Length -ne 64) {
+            throw "Published $platform runtime is not the exact bounded signed schema."
+        }
+    }
+    $badPublicKey = Join-Path $temporary 'synthetic-mr-x.bad-public'
+    [IO.File]::WriteAllBytes($badPublicKey, [byte[]](1..32))
+    Protect-TestSecret $badPublicKey
+    $badPublish = @($publishRuntime)
+    $badPublish[[Array]::IndexOf($badPublish, '--mr-x-public-key') + 1] = $badPublicKey
+    Invoke-Driver $badPublish -ExpectFailure
     $issuerText = (Get-Content -Raw -LiteralPath $issuer).Trim()
     foreach ($file in @($first.Android, $first.Windows, $first.Manifest,
         (Join-Path $output 'current-generation.json'))) {
@@ -552,6 +621,8 @@ try {
         -AuthoritySha256 $authorityHash `
         -ExpectedIssuerPublicKey $issuerPublicKey `
         -AuthorityPublic $authority `
+        -RuntimeAuthorityPublic $runtimeAuthority `
+        -RuntimeAuthoritySha256 $runtimeAuthorityHash `
         -IssuerSeedPath $issuer `
         -OutputDirectory $wrapperOutput `
         -MailboxSecretDirectory $wrapperSecrets `
@@ -561,7 +632,7 @@ try {
     }
 
     $expectedDriverFailures = if (
-        [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) { 18 } else { 14 }
+        [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) { 19 } else { 15 }
     if ($script:ExpectedFailures -ne $expectedDriverFailures) {
         throw "Expected $expectedDriverFailures driver negative paths, executed $script:ExpectedFailures."
     }
