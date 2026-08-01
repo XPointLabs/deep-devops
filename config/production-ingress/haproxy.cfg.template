@@ -1,0 +1,86 @@
+global
+  log stdout format raw local0 info
+  user haproxy
+  group haproxy
+  maxconn 2048
+  ssl-default-bind-options ssl-min-ver TLSv1.2 no-tls-tickets
+  ssl-default-bind-ciphers ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256
+  ssl-default-bind-ciphersuites TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256
+
+defaults
+  log global
+  mode tcp
+  option dontlognull
+  timeout connect 5s
+  timeout client ${DEEP_INGRESS_CLIENT_TIMEOUT_SECONDS}s
+  timeout server ${DEEP_INGRESS_SERVER_TIMEOUT_SECONDS}s
+
+frontend public_tls
+  bind :443
+  mode tcp
+  tcp-request inspect-delay 5s
+  tcp-request content accept if { req.ssl_hello_type 1 }
+  acl deep_https_sni req.ssl_sni -i ${DEEP_INGRESS_HOST}
+  acl deep_reality_sni req.ssl_sni -i ${DEEP_NODE_REALITY_SERVER_NAME}
+  tcp-request content reject unless deep_https_sni or deep_reality_sni
+  use_backend local_https_terminator if deep_https_sni
+  use_backend xray_reality if deep_reality_sni
+
+backend local_https_terminator
+  mode tcp
+  server local 127.0.0.1:8443
+
+backend xray_reality
+  mode tcp
+  server xray 172.31.241.10:443 check
+
+frontend deep_https
+  bind 127.0.0.1:8443 ssl strict-sni crt /var/lib/haproxy/ingress-current.pem alpn h2,http/1.1
+  mode http
+  log-format "deep_ingress status=%ST bytes=%B termination=%ts"
+  option http-buffer-request
+  http-request deny deny_status 421 unless { ssl_fc_sni -i ${DEEP_INGRESS_HOST} }
+  http-request deny deny_status 421 unless { hdr(host),field(1,:) -i ${DEEP_INGRESS_HOST} }
+  http-request del-header Forwarded
+  http-request del-header X-Forwarded-For
+  http-request del-header X-Forwarded-Host
+  http-request del-header X-Forwarded-Port
+  http-request del-header X-Forwarded-Proto
+  http-request del-header X-Real-IP
+  http-request del-header True-Client-IP
+  http-request del-header CF-Connecting-IP
+  http-request del-header Client-IP
+  http-request set-header X-Forwarded-Proto https
+  http-request set-header X-Forwarded-Host ${DEEP_INGRESS_HOST}
+
+  acl get_method method GET
+  acl post_method method POST
+  acl has_transfer_encoding req.hdr(transfer-encoding) -m found
+  acl single_content_length req.hdr_cnt(content-length) eq 1
+  acl content_length_too_large req.hdr(content-length) -m int gt ${DEEP_INGRESS_MAX_BODY_BYTES}
+  http-request deny deny_status 400 if post_method has_transfer_encoding
+  http-request deny deny_status 400 if post_method !single_content_length
+  http-request deny deny_status 413 if post_method content_length_too_large
+  http-request deny deny_status 400 if get_method { req.body_size gt 0 }
+  acl public_get path /api/bootstrap/client /api/network/contact /api/network/membership-route-catalog
+  acl public_post path /api/session/rpc /api/client/mailbox/v2/store /api/client/mailbox/v2/retrieve /api/client/mailbox/v2/acknowledge
+  acl peer_post path /api/peer/onion /api/peer/mailbox/v2/store /api/peer/mailbox/v2/tombstone
+  acl quorum_post path /api/staking/quorum/sign
+  acl quorum_source src ${DEEP_QUORUM_COORDINATOR_CIDR}
+  http-request deny deny_status 404 unless get_method public_get or post_method public_post or post_method peer_post or post_method quorum_post quorum_source
+  use_backend xnode_api if get_method public_get
+  use_backend xnode_api if post_method public_post
+  use_backend xnode_peer if post_method peer_post
+  use_backend xnode_peer if post_method quorum_post quorum_source
+
+backend xnode_api
+  mode http
+  option httpchk GET /health/ready
+  http-check expect status 200
+  server xnode 172.31.241.10:8080 check
+
+backend xnode_peer
+  mode http
+  option httpchk GET /health/ready
+  http-check expect status 200
+  server xnode 172.31.241.10:8081 check

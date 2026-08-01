@@ -1,6 +1,131 @@
 name: xpoint-node-prod
 
 services:
+  ingress-preflight:
+    image: ${DEEP_STORAGE_SERVICE_IMAGE:?set DEEP_STORAGE_SERVICE_IMAGE}
+    restart: "no"
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 96m
+    cpus: 0.25
+    logging:
+      driver: json-file
+      options:
+        max-size: 1m
+        max-file: "1"
+    entrypoint: ["node"]
+    command:
+      - /opt/deep/production-ingress-spki.mjs
+      - --profile
+      - ${DEEP_INGRESS_CERTIFICATE_PROFILE:?set DEEP_INGRESS_CERTIFICATE_PROFILE}
+      - --host
+      - ${DEEP_INGRESS_HOST:?set DEEP_INGRESS_HOST}
+      - --current-cert
+      - /run/secrets/ingress-current.crt
+      - --current-key
+      - /run/secrets/ingress-current.key
+      - --current-pin
+      - /run/secrets/ingress-current.spki-sha256
+      - --next-cert
+      - /run/secrets/ingress-next.crt
+      - --next-key
+      - /run/secrets/ingress-next.key
+      - --next-pin
+      - /run/secrets/ingress-next.spki-sha256
+      - --client-timeout-seconds
+      - ${DEEP_INGRESS_CLIENT_TIMEOUT_SECONDS:-30}
+      - --server-timeout-seconds
+      - ${DEEP_INGRESS_SERVER_TIMEOUT_SECONDS:-30}
+      - --quorum-cidr
+      - ${DEEP_QUORUM_COORDINATOR_CIDR:?set DEEP_QUORUM_COORDINATOR_CIDR}
+      - --attestation-output
+      - /run/ingress-attestation/preflight.v1
+    volumes:
+      - ./scripts/production-ingress-spki.mjs:/opt/deep/production-ingress-spki.mjs:ro
+      - ingress-preflight-attestation:/run/ingress-attestation
+    secrets:
+      - source: ingress-current-cert
+        target: ingress-current.crt
+        mode: 0444
+      - source: ingress-current-key
+        target: ingress-current.key
+        mode: 0400
+      - source: ingress-current-spki
+        target: ingress-current.spki-sha256
+        mode: 0444
+      - source: ingress-next-cert
+        target: ingress-next.crt
+        mode: 0444
+      - source: ingress-next-key
+        target: ingress-next.key
+        mode: 0400
+      - source: ingress-next-spki
+        target: ingress-next.spki-sha256
+        mode: 0444
+
+  ingress:
+    image: ${DEEP_INGRESS_IMAGE:-haproxy:3.2.4-alpine3.22@sha256:436a5691e6fd563ca4090e351048fda1066bec93b595cc8eaf26988c65eb1152}
+    restart: unless-stopped
+    init: true
+    user: "0:0"
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE, SETUID, SETGID]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: ${DEEP_INGRESS_MEMORY_LIMIT:-128m}
+    cpus: ${DEEP_INGRESS_CPU_LIMIT:-0.50}
+    tmpfs:
+      - /var/lib/haproxy:size=1m,mode=0700
+    logging:
+      driver: json-file
+      options:
+        max-size: ${DEEP_DOCKER_LOG_MAX_SIZE:-50m}
+        max-file: ${DEEP_DOCKER_LOG_MAX_FILE:-5}
+    environment:
+      DEEP_INGRESS_CERTIFICATE_PROFILE: ${DEEP_INGRESS_CERTIFICATE_PROFILE:?set DEEP_INGRESS_CERTIFICATE_PROFILE}
+      DEEP_INGRESS_HOST: ${DEEP_INGRESS_HOST:?set DEEP_INGRESS_HOST}
+      DEEP_NODE_REALITY_SERVER_NAME: ${DEEP_NODE_REALITY_SERVER_NAME:?set DEEP_NODE_REALITY_SERVER_NAME}
+      DEEP_INGRESS_MAX_BODY_BYTES: ${DEEP_INGRESS_MAX_BODY_BYTES:-1048576}
+      DEEP_INGRESS_CLIENT_TIMEOUT_SECONDS: ${DEEP_INGRESS_CLIENT_TIMEOUT_SECONDS:-30}
+      DEEP_INGRESS_SERVER_TIMEOUT_SECONDS: ${DEEP_INGRESS_SERVER_TIMEOUT_SECONDS:-30}
+      DEEP_QUORUM_COORDINATOR_CIDR: ${DEEP_QUORUM_COORDINATOR_CIDR:?set DEEP_QUORUM_COORDINATOR_CIDR}
+    entrypoint: ["/bin/sh", "/usr/local/bin/deep-ingress-entrypoint.sh"]
+    ports:
+      - "${DEEP_INGRESS_HTTPS_BIND:-443}:443"
+    volumes:
+      - ./config/production-ingress/haproxy.cfg.template:/usr/local/etc/haproxy/haproxy.cfg.template:ro
+      - ./scripts/production-ingress-entrypoint.sh:/usr/local/bin/deep-ingress-entrypoint.sh:ro
+      - ingress-preflight-attestation:/run/ingress-attestation:ro
+    secrets:
+      - source: ingress-current-cert
+        target: ingress-current.crt
+        mode: 0444
+      - source: ingress-current-key
+        target: ingress-current.key
+        mode: 0400
+      - source: ingress-current-spki
+        target: ingress-current.spki-sha256
+        mode: 0444
+    networks:
+      ingress-upstream:
+        ipv4_address: 172.31.241.2
+      public-edge: {}
+    depends_on:
+      ingress-preflight:
+        condition: service_completed_successfully
+      xnode:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "haproxy -c -q -f /var/lib/haproxy/haproxy.cfg && kill -0 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
   xnode:
     image: ${XNODE_IMAGE:?set XNODE_IMAGE}
     restart: unless-stopped
@@ -12,10 +137,10 @@ services:
         max-file: ${DEEP_DOCKER_LOG_MAX_FILE:-5}
     environment:
       ASPNETCORE_ENVIRONMENT: Production
-      ASPNETCORE_URLS: http://0.0.0.0:8080;http://0.0.0.0:8081
+      ASPNETCORE_URLS: http://127.0.0.1:8080;http://127.0.0.1:8081;http://172.31.241.10:8080;http://172.31.241.10:8081
 
-      Node__ApiListenUrl: http://0.0.0.0:8080
-      Node__PeerRpcListenUrl: http://0.0.0.0:8081
+      Node__ApiListenUrl: http://172.31.241.10:8080
+      Node__PeerRpcListenUrl: http://172.31.241.10:8081
       Node__DataDirectory: /var/lib/xnode
       Node__RouterId: ${DEEP_NODE_ED25519_PUBLIC_KEY:?set DEEP_NODE_ED25519_PUBLIC_KEY}
       Node__Ed25519PrivateKeyPath: /run/secrets/node-ed25519-private-key
@@ -24,16 +149,16 @@ services:
       Node__PublicHost: ${DEEP_NODE_PUBLIC_HOST:?set DEEP_NODE_PUBLIC_HOST}
       Node__PublicIp: ${DEEP_NODE_PUBLIC_IP:?set DEEP_NODE_PUBLIC_IP}
       Node__PublicPort: ${DEEP_NODE_PUBLIC_PORT:-443}
-      Node__PublicPeerRpcPort: ${DEEP_NODE_PEER_RPC_PORT:-22020}
+      Node__PublicPeerRpcPort: ${DEEP_NODE_PEER_RPC_PORT:-443}
       Node__PublicPeerRpcEndpoint: ${DEEP_NODE_PEER_RPC_ENDPOINT:?set DEEP_NODE_PEER_RPC_ENDPOINT}
-      Node__QuorumCoordinatorNetworks: "111.235.151.150/32"
+      Node__QuorumCoordinatorNetworks: "172.31.241.2/32"
 
       Runtime__BootstrapFromStorage: ${DEEP_NODE_BOOTSTRAP_FROM_STORAGE:-true}
       Runtime__HeartbeatInterval: ${DEEP_NODE_RUNTIME_HEARTBEAT_INTERVAL:-00:00:30}
       Runtime__RequireSignedRelayContacts: "true"
 
       RegistryBootstrap__BaseUrl: ${DEEP_REGISTRY_URL:?set DEEP_REGISTRY_URL}
-      StorageRpc__BaseUrl: ${DEEP_STORAGE_RPC_URL:?set DEEP_STORAGE_RPC_URL}
+      StorageRpc__BaseUrl: http://172.31.241.20:8080
 
       Vless__Enabled: "true"
       Vless__MockProcess: "false"
@@ -44,7 +169,7 @@ services:
       Vless__InboundListenPort: ${DEEP_NODE_VLESS_CONTAINER_PORT:-443}
       Vless__PublicHost: ${DEEP_NODE_PUBLIC_HOST:?set DEEP_NODE_PUBLIC_HOST}
       Vless__PublicPort: ${DEEP_NODE_PUBLIC_PORT:-443}
-      Vless__ApiIngressHost: 127.0.0.1
+      Vless__ApiIngressHost: 172.31.241.10
       Vless__ApiIngressPort: "8080"
       Vless__ClientId: ${DEEP_NODE_VLESS_CLIENT_ID:?set DEEP_NODE_VLESS_CLIENT_ID}
       Vless__MaskDomain: ${DEEP_NODE_MASK_DOMAIN:-www.microsoft.com}
@@ -76,10 +201,10 @@ services:
       RegistryRegistration__QuorumPolicyBackendTimeoutSeconds: ${DEEP_QUORUM_POLICY_BACKEND_TIMEOUT_SECONDS:-5}
       RegistryRegistration__MaxRewardSignatureIncreaseAtomic: ${DEEP_MAX_REWARD_SIGNATURE_INCREASE_ATOMIC:-100000000000000}
       RegistryRegistration__MaxQuorumSignatureTimestampSkewSeconds: ${DEEP_MAX_QUORUM_SIGNATURE_TIMESTAMP_SKEW_SECONDS:-300}
-    ports:
-      - "${DEEP_NODE_VLESS_BIND:-443}:${DEEP_NODE_VLESS_CONTAINER_PORT:-443}"
-      - "${DEEP_NODE_PEER_RPC_BIND:-22020}:8081"
-      - "${DEEP_NODE_API_BIND:-127.0.0.1:8080}:8080"
+    expose:
+      - "${DEEP_NODE_VLESS_CONTAINER_PORT:-443}"
+      - "8080"
+      - "8081"
     volumes:
       - xnode-state:/var/lib/xnode
       - xnode-config:/etc/xnode
@@ -88,8 +213,12 @@ services:
         target: node-ed25519-private-key
       - source: node-bls-private-key
         target: node-bls-private-key
+    networks:
+      ingress-upstream:
+        ipv4_address: 172.31.241.10
+      node-egress: {}
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health/ready >/dev/null"]
+      test: ["CMD-SHELL", "curl -fsS http://172.31.241.10:8080/health/ready >/dev/null"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -105,6 +234,7 @@ services:
         max-file: ${DEEP_DOCKER_LOG_MAX_FILE:-5}
     environment:
       PORT: "8080"
+      LISTEN_HOST: 172.31.241.20
       SERVICE_NAME: deep-storage-service
       COMPAT_STATE_DIR: /var/lib/deep/storage-service
       PUSH_COMPAT_NOTIFY_URL: ${DEEP_PUSH_NOTIFY_URL:-}
@@ -120,15 +250,19 @@ services:
       STORAGE_MAX_RETRIEVE_PAGE_BYTES: ${DEEP_STORAGE_MAX_RETRIEVE_PAGE_BYTES:-1048576}
       STORAGE_RATE_LIMIT_PER_MINUTE: ${DEEP_STORAGE_RATE_LIMIT_PER_MINUTE:-600}
       STORAGE_SNAPSHOT_EVERY_MUTATIONS: ${DEEP_STORAGE_SNAPSHOT_EVERY_MUTATIONS:-100}
-    ports:
-      - "${DEEP_NODE_STORAGE_BIND:-127.0.0.1:22021}:8080"
+    expose:
+      - "8080"
     volumes:
       - node-storage-state:/var/lib/deep/storage-service
     secrets:
       - source: node-ed25519-private-key
         target: node-ed25519-private-key
+    networks:
+      ingress-upstream:
+        ipv4_address: 172.31.241.20
+      node-egress: {}
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      test: ["CMD-SHELL", "node -e \"fetch('http://172.31.241.20:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -138,8 +272,30 @@ volumes:
   xnode-state:
   xnode-config:
   node-storage-state:
+  ingress-preflight-attestation:
+
+networks:
+  public-edge: {}
+  ingress-upstream:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.31.241.0/24
+  node-egress: {}
 
 secrets:
+  ingress-current-cert:
+    file: ${DEEP_INGRESS_CURRENT_CERT_FILE:?set DEEP_INGRESS_CURRENT_CERT_FILE}
+  ingress-current-key:
+    file: ${DEEP_INGRESS_CURRENT_KEY_FILE:?set DEEP_INGRESS_CURRENT_KEY_FILE}
+  ingress-next-cert:
+    file: ${DEEP_INGRESS_NEXT_CERT_FILE:?set DEEP_INGRESS_NEXT_CERT_FILE}
+  ingress-next-key:
+    file: ${DEEP_INGRESS_NEXT_KEY_FILE:?set DEEP_INGRESS_NEXT_KEY_FILE}
+  ingress-current-spki:
+    file: ${DEEP_INGRESS_CURRENT_SPKI_FILE:?set DEEP_INGRESS_CURRENT_SPKI_FILE}
+  ingress-next-spki:
+    file: ${DEEP_INGRESS_NEXT_SPKI_FILE:?set DEEP_INGRESS_NEXT_SPKI_FILE}
   node-ed25519-private-key:
     file: ${DEEP_NODE_ED25519_PRIVATE_KEY_FILE:?set DEEP_NODE_ED25519_PRIVATE_KEY_FILE}
   node-bls-private-key:

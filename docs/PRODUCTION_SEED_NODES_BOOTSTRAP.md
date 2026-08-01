@@ -21,13 +21,10 @@ Requested seed hostnames:
    and the Docker Compose plugin.
 2. Build and push the node images from `docs/PRODUCTION_NODE_RUNBOOK.md`.
 3. Create DNS `A`/`AAAA` records for all three seed hosts.
-4. Open the chosen public VLESS Reality TCP port to each seed host. The
-   recommended default is `443`, but any reachable TCP port is supported.
-   Also open the signed node-to-node peer port, `22020` by default.
-5. Keep the node API/signing endpoint private to the control plane. Use
-   WireGuard, Tailscale, a private load balancer, or an allowlisted reverse
-   proxy. Do not expose the raw node API as an unauthenticated public admin
-   surface.
+4. Open only hardened ingress TCP `443`. Exact-host HTTPS and Reality SNI
+   share that listener. Do not open raw peer/API/storage ports.
+5. Prepare current/next TLS certificates, private keys, and PMT1 SPKI pins as
+   specified by `docs/PRODUCTION_NODE_TLS_INGRESS.md`.
 6. Prepare the production control-plane URLs:
    - registry API, used by `DEEP_REGISTRY_URL`;
    - staking backend, used by the portal and registry reconciliation;
@@ -99,12 +96,18 @@ Copy these files from `deep-devops` to `/opt/xpoint-node`:
 docker-compose.node.prod.yml
 .env.node.prod.example
 scripts/new-xnode-identity.mjs
+scripts/production-ingress-entrypoint.sh
+scripts/production-ingress-preflight.ps1
+scripts/production-ingress-spki.mjs
+scripts/production-ingress-contracts.mjs
+config/production-ingress/haproxy.cfg.template
+docs/PRODUCTION_NODE_TLS_INGRESS.md
 ```
 
 Example from the operator workstation:
 
 ```bash
-rsync -av docker-compose.node.prod.yml .env.node.prod.example scripts/new-xnode-identity.mjs \
+rsync -av docker-compose.node.prod.yml .env.node.prod.example scripts config docs/PRODUCTION_NODE_TLS_INGRESS.md \
   deploy@<seed-host>:/opt/xpoint-node/
 ```
 
@@ -120,7 +123,7 @@ chmod 700 secrets
 Generate the node identity:
 
 ```bash
-node ./new-xnode-identity.mjs --as-env --out-dir ./secrets | tee ./identity.generated.env
+node ./scripts/new-xnode-identity.mjs --as-env --out-dir ./secrets | tee ./identity.generated.env
 chmod 600 ./identity.generated.env ./secrets/key_ed25519 ./secrets/key_bls
 ```
 
@@ -163,17 +166,25 @@ DEEP_STORAGE_SERVICE_IMAGE=ghcr.io/xpointlabs/deep-storage-service:<release-tag>
 DEEP_NETWORK=mainnet
 
 DEEP_NODE_PUBLIC_PORT=443
-DEEP_NODE_VLESS_BIND=443
 DEEP_NODE_PUBLIC_IP=<public origin IPv4 address>
-DEEP_NODE_PEER_RPC_PORT=22020
-DEEP_NODE_PEER_RPC_BIND=22020
-DEEP_NODE_PEER_RPC_ENDPOINT=http://<public origin IPv4 address>:22020/api/peer/onion
-DEEP_NODE_API_BIND=127.0.0.1:8080
-DEEP_NODE_STORAGE_BIND=127.0.0.1:22021
+DEEP_NODE_PEER_RPC_PORT=443
+DEEP_NODE_PEER_RPC_ENDPOINT=https://<seed-host>/api/peer/onion
+
+DEEP_INGRESS_CERTIFICATE_PROFILE=deep-managed
+DEEP_INGRESS_HOST=<seed-host>
+DEEP_INGRESS_HTTPS_BIND=443
+DEEP_INGRESS_CURRENT_CERT_FILE=./secrets/ingress/current.crt
+DEEP_INGRESS_CURRENT_KEY_FILE=./secrets/ingress/current.key
+DEEP_INGRESS_CURRENT_SPKI_FILE=./secrets/ingress/current.spki-sha256
+DEEP_INGRESS_NEXT_CERT_FILE=./secrets/ingress/next.crt
+DEEP_INGRESS_NEXT_KEY_FILE=./secrets/ingress/next.key
+DEEP_INGRESS_NEXT_SPKI_FILE=./secrets/ingress/next.spki-sha256
+DEEP_INGRESS_CLIENT_TIMEOUT_SECONDS=30
+DEEP_INGRESS_SERVER_TIMEOUT_SECONDS=30
+DEEP_QUORUM_COORDINATOR_CIDR=<exact-public-coordinator-ip>/32
 
 DEEP_REGISTRY_URL=https://registry.xpoint.network
 DEEP_STAKING_BACKEND_URL=https://staking-api.xpoint.network
-DEEP_STORAGE_RPC_URL=http://storage-service:8080
 DEEP_PUSH_NOTIFY_URL=https://push.xpoint.network/_compat/push-notify
 DEEP_REGISTRY_HEARTBEAT_INTERVAL=00:00:30
 DEEP_ENFORCE_QUORUM_SIGNING_POLICY=true
@@ -218,14 +229,14 @@ DEEP_NODE_PUBLIC_HOST=seed3.xpoint.network
 
 The public client bootstrap endpoint is
 `DEEP_NODE_PUBLIC_HOST:DEEP_NODE_PUBLIC_PORT`. Keep `DEEP_NODE_PUBLIC_PORT` and
-`DEEP_NODE_VLESS_BIND` equal unless a reverse proxy, NAT rule, or cloud load
-balancer maps a different external port to the local Docker bind.
+`DEEP_INGRESS_HTTPS_BIND` equal unless an approved NAT rule maps a different
+external port to the local Docker bind.
 
 For a non-443 node:
 
 ```text
 DEEP_NODE_PUBLIC_PORT=8443
-DEEP_NODE_VLESS_BIND=8443
+DEEP_INGRESS_HTTPS_BIND=8443
 ```
 
 The peer RPC endpoint is generated from the node's origin IP and peer port.
@@ -236,21 +247,15 @@ operator-configurable signer URL.
 
 ## Firewall
 
-Open the chosen Reality transport port and the signed peer transport port:
+Open only the shared hardened ingress:
 
 ```bash
 sudo ufw allow 443/tcp
-sudo ufw allow 22020/tcp
 sudo ufw enable
 sudo ufw status verbose
 ```
 
-Replace `443` with the node's `DEEP_NODE_PUBLIC_PORT` and `22020` with its
-`DEEP_NODE_PEER_RPC_PORT` when the node uses a
-non-default port.
-
-Keep `8080` and `22021` bound to localhost or to a private management
-interface. Do not open them to the public internet.
+Do not open `8080`, `8081`, `22020`, or `22021`.
 
 ## Start A Seed Node
 
@@ -258,6 +263,8 @@ Run on each seed host:
 
 ```bash
 cd /opt/xpoint-node
+node ./scripts/production-ingress-contracts.mjs
+# Run production-ingress-preflight.ps1 with the six protected inputs; see TLS ingress runbook.
 docker compose --env-file ./.env.node.prod -f ./docker-compose.node.prod.yml config --quiet
 docker compose --env-file ./.env.node.prod -f ./docker-compose.node.prod.yml pull
 docker compose --env-file ./.env.node.prod -f ./docker-compose.node.prod.yml up -d
@@ -271,14 +278,12 @@ after host reboot once Docker is enabled.
 
 ## Verify Locally
 
-Run on the seed host:
+Run backend health checks inside Docker and the public API with CA plus SPKI
+pin verification:
 
 ```bash
-curl -fsS http://127.0.0.1:8080/health/live
-curl -fsS http://127.0.0.1:8080/health/ready
-curl -fsS http://127.0.0.1:8080/status
-curl -fsS http://127.0.0.1:22021/health/ready
-curl -fsS http://127.0.0.1:22021/stats
+docker compose --env-file ./.env.node.prod -f ./docker-compose.node.prod.yml exec xnode curl -fsS http://127.0.0.1:8080/health/ready
+curl --fail --cacert /trusted/ca.pem --pinnedpubkey "sha256//<approved-spki-base64>" https://<seed-host>/api/bootstrap/client
 ```
 
 Check the public VLESS Reality port is listening:

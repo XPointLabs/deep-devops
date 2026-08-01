@@ -80,10 +80,11 @@ cache, so preserve any rollback tags you need before using it.
 
 Use the public installer README for the complete operator flow and CLI options.
 
-2. Open the chosen public VLESS Reality TCP port to the node host. Port `443`
-   is the recommended default, but the node can publish and serve any reachable
-   TCP port.
-3. Keep the node API/signing port private. The example binds it to `127.0.0.1:8080`; expose it through a private VPN, private reverse proxy, or another controlled internal path used by the registry/staking backend.
+2. Open only the hardened ingress TCP port (`443` by default). The ingress
+   terminates exact-host HTTPS and passes the exact Reality SNI through to
+   Xray on the same port. Follow `docs/PRODUCTION_NODE_TLS_INGRESS.md`.
+3. Do not publish the raw node API, peer RPC, storage, health, status, or
+   signing ports. The compose file keeps every backend container-only.
 4. If you are not using the public installer end to end, copy
    `docker-compose.node.prod.yml` and create `.env.node.prod` from
    `.env.node.prod.example`.
@@ -118,25 +119,27 @@ Put the generated private/public key pair into `DEEP_NODE_REALITY_PRIVATE_KEY` a
 
 - `XNODE_IMAGE`: pushed image tag.
 - `DEEP_STORAGE_SERVICE_IMAGE`: pushed per-node storage service image tag.
-- `DEEP_NODE_PUBLIC_HOST`: public DNS name or public IP clients can reach.
-- `DEEP_NODE_PUBLIC_PORT`: public VLESS Reality port clients use. Keep it equal
-  to `DEEP_NODE_VLESS_BIND` unless a reverse proxy, NAT rule, or cloud load
-  balancer translates the port.
+- `DEEP_NODE_PUBLIC_HOST`: exact public DNS name clients can reach.
+- `DEEP_INGRESS_CERTIFICATE_PROFILE`, `DEEP_INGRESS_HOST`, and the six
+  current/next cert/key/SPKI file variables: mandatory TLS ingress authority;
+  see `docs/PRODUCTION_NODE_TLS_INGRESS.md`.
+- `DEEP_NODE_PUBLIC_PORT`: public shared ingress/VLESS Reality port clients use.
+  Keep it equal to `DEEP_INGRESS_HTTPS_BIND` unless an approved NAT rule
+  translates the port.
 - `DEEP_NODE_PUBLIC_IP`: public origin IPv4 address advertised to other nodes.
-- `DEEP_NODE_PEER_RPC_PORT` and `DEEP_NODE_PEER_RPC_ENDPOINT`: public peer-only
-  listener and exact `/api/peer/onion` endpoint. Requests are encrypted by the
+- `DEEP_NODE_PEER_RPC_PORT` and `DEEP_NODE_PEER_RPC_ENDPOINT`: advertised
+  peer endpoint, now `https://<ingress-host>/api/peer/onion` on the shared TLS
+  ingress. Requests are encrypted by the
   onion protocol and authenticated with the sending node's Ed25519 identity,
   timestamp, and one-time nonce. The endpoint does not expose the admin API.
 - The BLS signing URL is derived from the signed peer RPC contact and is not an
   operator setting. Production images accept that route only from the staking
   control-plane network.
-- `DEEP_NODE_STORAGE_BIND`: host bind address for the per-node storage sidecar; keep it private or expose it through the approved node/onion ingress path.
 - `DEEP_PUSH_NOTIFY_URL`: optional centralized push notify endpoint used by storage to trigger push delivery.
 - `DEEP_REGISTRY_URL`: production registry API base URL.
 - `DEEP_STAKING_BACKEND_URL`: production staking backend API base URL used by
   xnodes to verify quorum-signing policy quotes before signing reward,
   exit, or liquidation messages.
-- `DEEP_STORAGE_RPC_URL`: node-local or private storage RPC base URL used only by the exit router hop.
 - `DEEP_OPERATOR_ADDRESS` and `DEEP_REWARDS_ADDRESS`: staked operator/reward wallet.
 - `DEEP_ARBITRUM_RPC_URL`: backend-only Arbitrum One RPC. Use Alchemy or
   another private provider here if desired; do not expose this value through
@@ -152,6 +155,9 @@ Put the generated private/public key pair into `DEEP_NODE_REALITY_PRIVATE_KEY` a
 
 ## Start And Verify
 
+Run the protected certificate/SPKI preflight from
+`docs/PRODUCTION_NODE_TLS_INGRESS.md` first. Then:
+
 ```powershell
 docker compose --env-file .\.env.node.prod -f .\docker-compose.node.prod.yml config --quiet
 docker compose --env-file .\.env.node.prod -f .\docker-compose.node.prod.yml up -d
@@ -160,14 +166,13 @@ docker compose --env-file .\.env.node.prod -f .\docker-compose.node.prod.yml log
 docker compose --env-file .\.env.node.prod -f .\docker-compose.node.prod.yml logs --tail 100 storage-service
 ```
 
-Host checks:
+The only host listener is ingress. Raw backend health/status checks are
+container-local and public admin/status paths are deliberately denied:
 
 ```powershell
-curl http://127.0.0.1:8080/health/live
-curl http://127.0.0.1:8080/health/ready
-curl http://127.0.0.1:8080/status
-curl http://127.0.0.1:22021/health/ready
-curl http://127.0.0.1:22021/stats
+docker compose --env-file .\.env.node.prod -f .\docker-compose.node.prod.yml exec xnode curl -fsS http://127.0.0.1:8080/health/ready
+docker compose --env-file .\.env.node.prod -f .\docker-compose.node.prod.yml exec storage-service node -e "fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+curl --fail --cacert <trusted-ca.pem> --pinnedpubkey "sha256//<approved-spki-base64>" https://<ingress-host>/api/bootstrap/client
 ```
 
 The relay contact published by heartbeat must include `x25519PublicKey`,

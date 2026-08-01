@@ -1,0 +1,30 @@
+services:
+  xnode:
+    image: node:24-alpine
+    entrypoint: ["node", "/lab/production-ingress-lab-server.mjs"]
+    environment:
+      LAB_REALITY_CERT: /lab-secrets/reality.crt
+      LAB_REALITY_KEY: /lab-secrets/reality.key
+    volumes:
+      - ./tools/production-ingress-lab/production-ingress-lab-server.mjs:/lab/production-ingress-lab-server.mjs:ro
+      - ${DEEP_INGRESS_LAB_SECRET_DIR:?set DEEP_INGRESS_LAB_SECRET_DIR}:/lab-secrets:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/health/ready >/dev/null && wget -q -O - http://127.0.0.1:8081/health/ready >/dev/null"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+      start_period: 2s
+
+  storage-service:
+    image: node:24-alpine
+    entrypoint: ["node", "/lab/production-ingress-lab-server.mjs"]
+    environment:
+      LAB_HTTP_ONLY: "true"
+    volumes:
+      - ./tools/production-ingress-lab/production-ingress-lab-server.mjs:/lab/production-ingress-lab-server.mjs:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/health/ready >/dev/null"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+      start_period: 2s

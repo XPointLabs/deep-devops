@@ -2,12 +2,17 @@
 import http from 'node:http';
 import { createPrivateKey, sign } from 'node:crypto';
 import path from 'node:path';
+import { isIP } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { appendFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { decodeHexOrBase64Bytes, storageSubaccountAccess, verifyStorageSignature } from '../compat-services/storage-signatures.mjs';
 
 const mode = 'storage';
 const port = Number(process.env.PORT ?? 8080);
+const listenHost = String(process.env.LISTEN_HOST ?? '0.0.0.0');
+if (isIP(listenHost) === 0) {
+  throw new Error('LISTEN_HOST must be an explicit IPv4 or IPv6 address.');
+}
 const serviceName = String(process.env.SERVICE_NAME ?? 'deep-storage-service');
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const stateDir = process.env.COMPAT_STATE_DIR ?? process.env.MOCK_STATE_DIR ?? path.resolve(scriptDir, '..', '..', 'artifacts', 'compat-state');
@@ -2090,6 +2095,6 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(port, '0.0.0.0', () => {
+server.listen(port, listenHost, () => {
   console.log(`${serviceName} listening on ${port}`);
 });
