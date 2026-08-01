@@ -153,6 +153,11 @@ Do not store secrets in artifacts. Summaries may include configured/missing bool
 - Local compatibility services use deterministic file-backed state instead of upstream production databases.
 - Upstream Oxen/native internals are not required for local CI if externally visible contracts are pinned by fixtures.
 - Some provider endpoints may use provider proxies in staging; production must document the final provider and auth path.
+- Physical DEV mailbox rejection evidence uses disposable, protected Windows app-data roots under
+  `secrets/mailbox-bootstrap/e2e-runs`. It covers a tampered Mr. X signature, a missing required
+  authority file, and a valid Android runtime presented to Windows. Expiry/revocation and a second
+  valid wrong-holder bundle are not synthesized by editing signed bytes; they require explicit
+  issuer-backed fixtures in a later bounded drill.
 
 ## Stop-The-Line Conditions
 
