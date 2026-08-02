@@ -1025,6 +1025,26 @@ function gitValue(directory, args) {
   return result.stdout.trim();
 }
 
+function gitBytes(directory, args) {
+  const result = spawnSync('git', ['-C', directory, ...args], {
+    encoding: null,
+    windowsHide: true,
+    maxBuffer: maximumTextBytes
+  });
+  assert.equal(result.status, 0, `git ${args.join(' ')} failed`);
+  return result.stdout;
+}
+
+function readPinnedGitFile(repositoryDirectory, commit, absoluteFilePath) {
+  const repository = gitValue(repositoryDirectory, ['rev-parse', '--show-toplevel']);
+  const relativeFilePath = path.relative(repository, absoluteFilePath);
+  assert.ok(relativeFilePath && !path.isAbsolute(relativeFilePath));
+  assert.ok(!relativeFilePath.split(path.sep).includes('..'));
+  const gitPath = relativeFilePath.split(path.sep).join('/');
+  gitBytes(repository, ['cat-file', '-e', `${commit}^{commit}`]);
+  return gitBytes(repository, ['show', `${commit}:${gitPath}`]);
+}
+
 export async function validatePinnedInputs({ xnodeDir, clientExpectationsPath }) {
   const policyPath = path.join(repositoryRoot, 'config', 'metadata-safe', 'retention-policy.v1.json');
   const manifestPath = path.join(repositoryRoot, 'release', 'manifests', 'survival-v2.0.1-i01b.local.json');
@@ -1032,19 +1052,22 @@ export async function validatePinnedInputs({ xnodeDir, clientExpectationsPath })
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
   const xnode = manifest.repositories.find(item => item.name === 'xnode');
   assert.ok(xnode, 'pinned manifest lacks xnode');
-  assert.equal(gitValue(xnodeDir, ['rev-parse', 'HEAD']), xnode.sha);
-  assert.equal(gitValue(xnodeDir, ['status', '--short']), '');
-  const xraySource = await readFile(
-    path.join(xnodeDir, 'src', 'XNode.Transport.Vless', 'XrayConfigGenerator.cs'),
-    'utf8'
-  );
+  const xraySource = readPinnedGitFile(
+    xnodeDir,
+    xnode.sha,
+    path.join(xnodeDir, 'src', 'XNode.Transport.Vless', 'XrayConfigGenerator.cs')
+  ).toString('utf8');
   validateXrayGeneratorSource(xraySource);
-  const expectationsBytes = await readFile(clientExpectationsPath);
+  const clientRepository = gitValue(path.dirname(clientExpectationsPath), ['rev-parse', '--show-toplevel']);
+  const expectationsBytes = readPinnedGitFile(
+    clientRepository,
+    policy.clientP01.commit,
+    clientExpectationsPath
+  );
   assert.equal(
     createHash('sha256').update(expectationsBytes).digest('hex'),
     policy.clientP01.expectationsSha256
   );
-  assert.equal(gitValue(path.resolve(clientExpectationsPath, '..', '..', '..', '..'), ['rev-parse', 'HEAD']), policy.clientP01.commit);
   return { policy, xnodeCommit: xnode.sha };
 }
 

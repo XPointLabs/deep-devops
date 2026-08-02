@@ -1,12 +1,14 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)]
-    [ValidateSet('Prepare','Up','Down','Status','Logs','Build','Restart')]
+    [ValidateSet('Prepare','Up','Down','Status','Logs','Build','Restart','ChaosBegin','ChaosEnd','ChaosStatus')]
     [string]$Action,
     [string[]]$Service = @(),
     [string]$LanHost,
     [switch]$Chain,
-    [switch]$Reset
+    [switch]$Reset,
+    [ValidateRange(5, 300)]
+    [int]$ChaosTtlSeconds = 60
 )
 
 $ErrorActionPreference = 'Stop'
@@ -14,11 +16,20 @@ Set-StrictMode -Version Latest
 
 $Root = [IO.Path]::GetFullPath((Split-Path $PSScriptRoot -Parent))
 $ComposePath = Join-Path $Root 'docker-compose.survival.dev.yml'
+$ChaosComposePath = Join-Path $Root 'docker-compose.survival-resend-chaos.dev.yml'
 $Project = 'deep-survival-dev'
 $baseArguments = @('compose', '-p', $Project, '-f', $ComposePath)
+$chaosArguments = @('compose', '-p', $Project, '-f', $ComposePath, '-f', $ChaosComposePath, '--profile', 'resend-chaos')
 $ContextRoot = Join-Path $Root 'artifacts\survival-dev\build-contexts'
-$SurvivalXNodeCommit = 'c6c5113c7e77fb9e6577a493e2cc57144cc0de91'
-$SurvivalXNodeContextManifestSha256 = '68027e628e81230c8c26aca5724e477e6c1bd6ca76f60a4315ef7e55a4489d40'
+$SurvivalXNodeCommit = '3aa74cbb4831e68284468ef04385d24306d22282'
+$SurvivalXNodeContextManifestSha256 = '6f078787bd121767435ef36acde16e2775715e312f941cb8516fecc57c59a8a7'
+$SurvivalMailboxBuildHelperSha256 = '04c0f2cf9118b648ce4868390451afd33cd6ad9ce550703b24b3f429ce694b2c'
+$SurvivalMailboxDriverSha256 = @{
+    'MailboxGrantProvisioner.cs' = '6233ee64279ebabb57ce17939c0ff68e537a1e8441730f0a23609e9a012bdd4b'
+    'MailboxRuntimePublisher.cs' = 'd6aad71f65987f620ccf0d5a06394240aa199d3bb92ef38b81a9594f8e9ff94b'
+    'Program.cs' = 'c63e30740a455416a52f5d208c5d3b019abca5ae13c1b8830f63164e82db2766'
+    'SurvivalMailboxDriver.csproj' = '4db436d69ea88ac3ff16f08c161b61cc0c048bad84cb7e529b2208fa569eafbe'
+}
 $ChainLifecycleServices = @(
     'contracts-devnet',
     'contracts-deploy',
@@ -26,6 +37,24 @@ $ChainLifecycleServices = @(
     'staking-backend'
 )
 . (Join-Path $PSScriptRoot 'survival-dev-private-secrets.ps1')
+$mailboxBuildHelper = Join-Path $PSScriptRoot 'survival-dev-mailbox-build-inputs.ps1'
+$mailboxBuildHelperBytes = [IO.File]::ReadAllBytes($mailboxBuildHelper)
+try {
+    $mailboxBuildHelperHasher = [Security.Cryptography.SHA256]::Create()
+    try {
+        $actualMailboxBuildHelperSha256 = ([BitConverter]::ToString(
+            $mailboxBuildHelperHasher.ComputeHash($mailboxBuildHelperBytes)).Replace('-', '')).ToLowerInvariant()
+    } finally {
+        $mailboxBuildHelperHasher.Dispose()
+    }
+    if ($mailboxBuildHelperBytes.Length -gt 1024 * 1024 -or
+        $actualMailboxBuildHelperSha256 -cne $SurvivalMailboxBuildHelperSha256) {
+        throw 'The immutable mailbox build helper does not match its exact reviewed pin.'
+    }
+    . ([ScriptBlock]::Create([Text.Encoding]::UTF8.GetString($mailboxBuildHelperBytes)))
+} finally {
+    [Array]::Clear($mailboxBuildHelperBytes, 0, $mailboxBuildHelperBytes.Length)
+}
 
 function Invoke-SurvivalDocker([string[]]$Arguments) {
     & docker @Arguments
@@ -149,30 +178,75 @@ function Prepare-SurvivalBuildContexts([switch]$IncludeChain) {
     }
 }
 
-function Prepare-SurvivalMailboxPeerAuthority() {
+function Invoke-SurvivalMailboxDriverImmutable([string]$PinnedXNodeSource,[string[]]$Arguments) {
+    $work = Join-Path ([IO.Path]::GetTempPath()) (
+        'deep-survival-mailbox-driver-' + [Guid]::NewGuid().ToString('N'))
+    $sourceRoot = Join-Path $work 'source'
+    $artifactsRoot = Join-Path $work 'artifacts'
+    $publishRoot = Join-Path $work 'publish'
+    $sourceLocks = $null
+    try {
+        [void][IO.Directory]::CreateDirectory($work)
+        Set-MailboxDirectoryExclusiveWritable $work
+        $isolated = New-SurvivalMailboxIsolatedSource `
+            -XNodeSource $PinnedXNodeSource `
+            -DriverSource (Join-Path $Root 'tools\survival-mailbox-driver') `
+            -Destination $sourceRoot `
+            -ExpectedCommit $SurvivalXNodeCommit `
+            -ExpectedManifestSha256 $SurvivalXNodeContextManifestSha256 `
+            -ExpectedDriverSha256 $SurvivalMailboxDriverSha256
+        Set-MailboxTreeReadOnly $sourceRoot
+        $sourceLocks = Open-MailboxTreeReadLocks $sourceRoot
+        Assert-SurvivalMailboxIsolatedSource $isolated
+        & dotnet publish $isolated.DriverProject `
+            --configuration Release `
+            --output $publishRoot `
+            --artifacts-path $artifactsRoot `
+            --no-self-contained `
+            '-p:UseAppHost=false' `
+            "-p:XNodeSource=$($isolated.XNode)" `
+            '-p:ImportDirectoryBuildProps=false' `
+            '-p:ImportDirectoryBuildTargets=false' `
+            "-p:DirectoryPackagesPropsPath=$(Join-Path $isolated.XNode 'Directory.Packages.props')"
+        if ($LASTEXITCODE -ne 0) { throw 'The immutable survival mailbox driver build failed.' }
+        Assert-SurvivalMailboxIsolatedSource $isolated
+        $driverDll = Join-Path $publishRoot 'SurvivalMailboxDriver.dll'
+        if (-not (Test-Path -LiteralPath $driverDll -PathType Leaf)) {
+            throw 'The immutable survival mailbox driver entry assembly is missing.'
+        }
+        & dotnet $driverDll @Arguments
+        if ($LASTEXITCODE -ne 0) { throw 'The immutable survival mailbox driver command failed.' }
+    } finally {
+        if ($null -ne $sourceLocks) {
+            foreach ($sourceLock in $sourceLocks) { $sourceLock.Dispose() }
+        }
+        if (Test-Path -LiteralPath $sourceRoot) { Set-MailboxTreeWritable $sourceRoot }
+        Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Prepare-SurvivalMailboxPeerAuthority([string]$PinnedXNodeSource = '') {
     # Generate the real MIP1 Merkle commitment, canonical RIP1 proofs and exact
     # 15-pair placement allowlist through the pinned XNode/Deep.Protocol code.
     $outputDirectory = Join-Path $Root 'artifacts\survival-dev'
     [void][IO.Directory]::CreateDirectory($outputDirectory)
-    $xnodeSource = Resolve-SurvivalSource 'SURVIVAL_XNODE_PATH' '..\xnode'
+    $xnodeSource = if ([string]::IsNullOrWhiteSpace($PinnedXNodeSource)) {
+        Get-PinnedSurvivalXNodeContext
+    } else { [IO.Path]::GetFullPath($PinnedXNodeSource) }
     $authorityPath = Join-Path $outputDirectory 'mailbox-peer-authority.env'
     $clientAuthorityPath = Join-Path $outputDirectory 'mailbox-client-xnode-1.env'
     $publicPath = Join-Path $outputDirectory 'mailbox-peer-authority.public.json'
     $clientPublicPath = Join-Path $outputDirectory 'mailbox-client-authority.public.json'
     $coordinatorHost = [Environment]::GetEnvironmentVariable('SURVIVAL_BIND_HOST')
     if ([string]::IsNullOrWhiteSpace($coordinatorHost)) { $coordinatorHost = '127.0.0.1' }
-    & dotnet run `
-        --project (Join-Path $Root 'tools\survival-mailbox-driver\SurvivalMailboxDriver.csproj') `
-        "-p:XNodeSource=$xnodeSource" `
-        -- `
-        authority `
-        --secrets-dir (Join-Path $Root '.secrets\survival-dev') `
-        --output-env $authorityPath `
-        --output-client-env $clientAuthorityPath `
-        --coordinator-url "http://$coordinatorHost`:41801" `
-        --output-public $publicPath `
-        --output-client-public $clientPublicPath
-    if ($LASTEXITCODE -ne 0) { throw 'Real DEV-LOCAL-ONLY mailbox peer authority generation failed.' }
+    Invoke-SurvivalMailboxDriverImmutable $xnodeSource @(
+        'authority',
+        '--secrets-dir', (Join-Path $Root '.secrets\survival-dev'),
+        '--output-env', $authorityPath,
+        '--output-client-env', $clientAuthorityPath,
+        '--coordinator-url', "http://$coordinatorHost`:41801",
+        '--output-public', $publicPath,
+        '--output-client-public', $clientPublicPath)
     Set-Item -Path 'Env:SURVIVAL_MAILBOX_AUTHORITY_ENV' -Value $authorityPath
     Set-Item -Path 'Env:SURVIVAL_MAILBOX_CLIENT_AUTHORITY_ENV' -Value $clientAuthorityPath
     Set-Item -Path 'Env:SURVIVAL_MAILBOX_PUBLIC_AUTHORITY' -Value $publicPath
@@ -391,6 +465,114 @@ function Write-ClientEnvironment(
     Write-Output "Client environments: $outputDirectory"
 }
 
+function Get-SurvivalChaosHost() {
+    $environmentPath = Join-Path $Root 'artifacts\survival-dev\client.windows.env'
+    if (-not (Test-Path -LiteralPath $environmentPath -PathType Leaf)) {
+        throw 'ChaosBegin requires a successfully prepared survival client environment.'
+    }
+    $line = @(Get-Content -LiteralPath $environmentPath | Where-Object { $_ -clike 'XNODE_URLS=*' })
+    if ($line.Count -ne 1 -or $line[0] -cnotmatch '^XNODE_URLS=[0-9a-f]{64}\|http://(?<host>[0-9.]+):41801(?:;|$)') {
+        throw 'Survival client environment does not contain the exact first XNode endpoint.'
+    }
+    $publishedHost = $Matches.host
+    $address = $null
+    if (-not [Net.IPAddress]::TryParse($publishedHost, [ref]$address) -or
+        $address.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork -or
+        $address.Equals([Net.IPAddress]::Any)) {
+        throw 'Survival chaos host must be one exact non-wildcard IPv4 address.'
+    }
+    if (-not [string]::IsNullOrWhiteSpace($LanHost) -and $LanHost -cne $publishedHost) {
+        throw 'ChaosBegin LanHost must exactly match the current verified client environment.'
+    }
+    return $publishedHost
+}
+
+function Get-PinnedSurvivalXNodeContext() {
+    $context = Join-Path $ContextRoot 'xnode'
+    $manifest = Join-Path $context '.survival-source-manifest.json'
+    if (-not (Test-Path -LiteralPath $manifest -PathType Leaf) -or
+        (Get-FileHash -LiteralPath $manifest -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+            $SurvivalXNodeContextManifestSha256) {
+        throw 'ChaosBegin requires the exact previously verified pinned XNode build context.'
+    }
+    return $context
+}
+
+function New-SurvivalChaosToken() {
+    $directory = Join-Path $Root '.secrets\survival-dev'
+    [void][IO.Directory]::CreateDirectory($directory)
+    $path = Join-Path $directory 'resend-chaos.token'
+    $temporary = "$path.$([Guid]::NewGuid().ToString('N')).tmp"
+    try {
+        $random = [byte[]]::new(32)
+        $generator = [Security.Cryptography.RandomNumberGenerator]::Create()
+        try { $generator.GetBytes($random) } finally { $generator.Dispose() }
+        $token = ([BitConverter]::ToString($random) -replace '-', '').ToLowerInvariant()
+        [Array]::Clear($random, 0, $random.Length)
+        [IO.File]::WriteAllText($temporary, "$token`n", [Text.UTF8Encoding]::new($false))
+        Protect-SurvivalDevPrivateFile $temporary
+        Move-Item -LiteralPath $temporary -Destination $path -Force
+        Assert-SurvivalDevPrivateFile $path
+    } finally {
+        Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
+    }
+    $env:SURVIVAL_RESEND_CHAOS_TOKEN_FILE = $path
+    return $path
+}
+
+function Invoke-SurvivalChaosControl([ValidateSet('arm','disarm','status')][string]$Command) {
+    $arguments = $chaosArguments + @(
+        'exec', '-T', 'resend-chaos', 'node',
+        '/opt/deep-chaos/control-client.mjs', $Command)
+    if ($Command -eq 'arm') { $arguments += @('--ttl', [string]$ChaosTtlSeconds) }
+    $json = (& docker @arguments | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0) { throw 'Survival resend chaos control failed.' }
+    $status = $json | ConvertFrom-Json
+    if ($status.schema -cne 'deep-survival-resend-chaos-status.v1' -or
+        $status.mode -cne 'development-only' -or
+        $status.identifiersIncluded -ne $false -or
+        $status.payloadInspected -ne $false) {
+        throw 'Survival resend chaos returned invalid or unsafe status.'
+    }
+    return $status
+}
+
+function Test-SurvivalChaosRunning() {
+    $id = (& docker @($chaosArguments + @('ps', '--status', 'running', '--quiet', 'resend-chaos')) | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0) { throw 'Unable to inspect survival resend chaos state.' }
+    return -not [string]::IsNullOrWhiteSpace($id)
+}
+
+function Wait-SurvivalXNodeOne([string]$HostName) {
+    foreach ($attempt in 1..40) {
+        try {
+            $response = Invoke-WebRequest -UseBasicParsing -Uri "http://$HostName`:41801/health/ready" -TimeoutSec 2
+            if ($response.StatusCode -eq 200) { return }
+        } catch {}
+        Start-Sleep -Milliseconds 500
+    }
+    throw 'xnode-1 did not recover its ordinary host publisher.'
+}
+
+function Stop-SurvivalChaos([string]$HostName, [switch]$BestEffort) {
+    $failure = $null
+    try {
+        if (Test-SurvivalChaosRunning) { [void](Invoke-SurvivalChaosControl 'disarm') }
+        Invoke-SurvivalDocker ($chaosArguments + @('stop', 'resend-chaos', 'xnode-1'))
+        Invoke-SurvivalDocker ($chaosArguments + @('rm', '-f', 'resend-chaos', 'xnode-1'))
+        Invoke-SurvivalDockerBounded -TimeoutSeconds 120 -Arguments ($baseArguments + @('up', '-d', '--no-deps', '--wait', 'xnode-1'))
+        Wait-SurvivalXNodeOne $HostName
+    } catch {
+        $failure = $_
+    }
+    $tokenPath = Join-Path $Root '.secrets\survival-dev\resend-chaos.token'
+    if ($null -eq $failure -and (Test-Path -LiteralPath $tokenPath)) {
+        Remove-Item -LiteralPath $tokenPath -Force
+    }
+    if ($null -ne $failure -and -not $BestEffort) { throw $failure }
+    if ($null -ne $failure -and $BestEffort) { Write-Warning 'Chaos cleanup failed; protected token retained.' }
+}
+
 switch ($Action) {
     'Prepare' {
         if ($Chain -or $Service.Count -gt 0 -or $Reset) {
@@ -443,7 +625,9 @@ switch ($Action) {
         Write-ClientEnvironment $advertisedHost $membershipPin -IncludeChain:$Chain
     }
     'Down' {
-        $arguments = $baseArguments + @('down')
+        $arguments = @($baseArguments)
+        if ($Chain) { $arguments += @('--profile', 'chain') }
+        $arguments += 'down'
         if ($Reset) { $arguments += '--volumes' }
         Invoke-SurvivalDocker $arguments
     }
@@ -463,5 +647,74 @@ switch ($Action) {
             throw 'Chain lifecycle services cannot be restarted independently. Use -Action Up -Chain so devnet, deployment, smoke, and staking backend are recreated in order.'
         }
         Invoke-SurvivalDocker ($baseArguments + @('restart') + $Service)
+    }
+    'ChaosBegin' {
+        if ($Chain -or $Service.Count -gt 0 -or $Reset) {
+            throw 'ChaosBegin does not accept -Chain, -Service, or -Reset.'
+        }
+        if (Test-SurvivalChaosRunning) { throw 'Resend chaos is already running; use ChaosEnd first.' }
+        $advertisedHost = Get-SurvivalChaosHost
+        $env:SURVIVAL_BIND_HOST = $advertisedHost
+        $tokenPath = New-SurvivalChaosToken
+        try {
+            Prepare-SurvivalMailboxPeerAuthority (Get-PinnedSurvivalXNodeContext)
+            $nodes = 1..6 | ForEach-Object { "xnode-$_" }
+            Invoke-SurvivalDocker ($baseArguments + @('stop') + $nodes)
+            Invoke-SurvivalDocker ($chaosArguments + @('rm', '-f', 'resend-chaos') + $nodes)
+            Invoke-SurvivalDockerBounded -TimeoutSeconds 180 -Arguments (
+                $chaosArguments + @('up', '-d', '--no-build', '--no-deps', '--wait') + $nodes + @('resend-chaos'))
+            & node (Join-Path $PSScriptRoot 'survival-dev-seed.mjs') '--host' $advertisedHost
+            if ($LASTEXITCODE -ne 0) { throw 'Survival resend chaos relay contact seed failed.' }
+            Invoke-SurvivalDocker ($chaosArguments + @('restart') + $nodes)
+            Invoke-SurvivalDockerBounded -TimeoutSeconds 120 -Arguments (
+                $chaosArguments + @('up', '-d', '--no-deps', '--wait') + $nodes + @('resend-chaos'))
+            & node (Join-Path $PSScriptRoot 'survival-dev-verify.mjs') '--host' $advertisedHost
+            if ($LASTEXITCODE -ne 0) { throw 'Survival resend chaos topology verification failed.' }
+            $status = Invoke-SurvivalChaosControl 'status'
+            if ($status.armed -or $status.consumed) {
+                throw 'Resend chaos did not start from a clean disarmed state.'
+            }
+            Invoke-SurvivalChaosControl 'arm' | ConvertTo-Json -Compress
+        } catch {
+            Stop-SurvivalChaos $advertisedHost -BestEffort
+            throw
+        }
+    }
+    'ChaosEnd' {
+        if ($Chain -or $Service.Count -gt 0 -or $Reset) {
+            throw 'ChaosEnd does not accept -Chain, -Service, or -Reset.'
+        }
+        $advertisedHost = Get-SurvivalChaosHost
+        $env:SURVIVAL_BIND_HOST = $advertisedHost
+        Stop-SurvivalChaos $advertisedHost
+        [pscustomobject]@{
+            schema = 'deep-survival-resend-chaos-end.v1'
+            status = 'ok'
+            running = $false
+            armed = $false
+            protectedTokenDeleted = $true
+        } | ConvertTo-Json -Compress
+    }
+    'ChaosStatus' {
+        if ($Chain -or $Service.Count -gt 0 -or $Reset -or -not [string]::IsNullOrWhiteSpace($LanHost)) {
+            throw 'ChaosStatus does not accept -Chain, -Service, -Reset, or -LanHost.'
+        }
+        if (Test-SurvivalChaosRunning) {
+            Invoke-SurvivalChaosControl 'status' | ConvertTo-Json -Compress
+        } else {
+            [pscustomobject]@{
+                schema = 'deep-survival-resend-chaos-status.v1'
+                mode = 'development-only'
+                running = $false
+                armed = $false
+                consumed = $false
+                upstreamSuccessObserved = 0
+                downstreamDropped = 0
+                requestCount = 0
+                expiresInSeconds = 0
+                identifiersIncluded = $false
+                payloadInspected = $false
+            } | ConvertTo-Json -Compress
+        }
     }
 }

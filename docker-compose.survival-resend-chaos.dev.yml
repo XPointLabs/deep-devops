@@ -1,0 +1,58 @@
+services:
+  xnode-1:
+    # The supported ChaosBegin action recreates xnode-1 with no host publisher.
+    # Its real MAU2 ingress remains reachable only by the proxy on `runtime`.
+    ports: !reset []
+
+  resend-chaos:
+    profiles: [resend-chaos]
+    image: ${SURVIVAL_NODE_IMAGE:-node@sha256:242549cd46785b480c832479a730f4f2a20865d61ea2e404fdb2a5c3d3b73ecf}
+    platform: linux/arm64
+    init: true
+    restart: unless-stopped
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 64m
+    cpus: 0.25
+    tmpfs:
+      - /run/deep-chaos:rw,noexec,nosuid,nodev,size=1m,mode=0700,uid=1000,gid=1000
+      - /tmp:rw,noexec,nosuid,nodev,size=8m,mode=1777
+    environment:
+      DEEP_CHAOS_UPSTREAM_ORIGIN: http://xnode-1:8080
+      DEEP_CHAOS_TOKEN_FILE: /run/secrets/resend-chaos-token
+      DEEP_CHAOS_CONTROL_SOCKET: /run/deep-chaos/control.sock
+      DEEP_CHAOS_DATA_HOST: 0.0.0.0
+      DEEP_CHAOS_DATA_PORT: "8080"
+      DEEP_CHAOS_MAX_RESPONSE_BYTES: "2097152"
+      DEEP_CHAOS_UPSTREAM_TIMEOUT_MS: "30000"
+    entrypoint: [node, /opt/deep-chaos/resend-chaos-proxy.mjs]
+    volumes:
+      - ./tools/survival-resend-chaos:/opt/deep-chaos:ro
+    secrets:
+      - source: resend-chaos-token
+        target: resend-chaos-token
+        mode: 0444
+    networks: [runtime]
+    ports:
+      - "${SURVIVAL_BIND_HOST:-127.0.0.1}:41801:8080"
+    depends_on:
+      xnode-1: { condition: service_healthy }
+    healthcheck:
+      test: [CMD, node, /opt/deep-chaos/control-client.mjs, status]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+      start_period: 2s
+    logging:
+      driver: json-file
+      options: { max-size: 1m, max-file: "1" }
+    labels:
+      com.xpoint.survival.stack: dev
+      com.xpoint.survival.resend-chaos: development-only
+
+secrets:
+  resend-chaos-token:
+    file: ${SURVIVAL_RESEND_CHAOS_TOKEN_FILE:-./.secrets/survival-dev/resend-chaos.token}

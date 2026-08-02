@@ -12,6 +12,7 @@ import {
 } from './survival-dev-membership-trust.mjs';
 
 const compose = readFileSync(new URL('../docker-compose.survival.dev.yml', import.meta.url), 'utf8');
+const resendChaosCompose = readFileSync(new URL('../docker-compose.survival-resend-chaos.dev.yml', import.meta.url), 'utf8');
 const productionCompose = readFileSync(new URL('../docker-compose.node.prod.yml', import.meta.url), 'utf8');
 const productionNodeEnvironment = readFileSync(new URL('../.env.node.prod.example', import.meta.url), 'utf8');
 const docs = readFileSync(new URL('../docs/SURVIVAL_DEV_STACK.md', import.meta.url), 'utf8');
@@ -26,6 +27,8 @@ const membershipRepeat = readFileSync(new URL('./survival-dev-membership-fixture
 const mailboxIntegration = readFileSync(new URL('./survival-dev-mailbox.integration.test.ps1', import.meta.url), 'utf8');
 const mailboxEvidenceTest = readFileSync(new URL('./survival-dev-mailbox-evidence.test.ps1', import.meta.url), 'utf8');
 const chaos = readFileSync(new URL('./survival-dev-chaos.ps1', import.meta.url), 'utf8');
+const resendChaosIntegration = readFileSync(new URL('./survival-dev-resend-chaos.integration.test.ps1', import.meta.url), 'utf8');
+const resendChaosProxy = readFileSync(new URL('../tools/survival-resend-chaos/resend-chaos-proxy.mjs', import.meta.url), 'utf8');
 const mailboxDriver = readFileSync(new URL('../tools/survival-mailbox-driver/Program.cs', import.meta.url), 'utf8');
 const membershipNuget = readFileSync(new URL('../tools/membership-fixture/NuGet.Config', import.meta.url), 'utf8');
 const membershipLock = JSON.parse(readFileSync(new URL('../tools/membership-fixture/packages.lock.json', import.meta.url), 'utf8'));
@@ -429,7 +432,7 @@ test('future DEV consumer contract rejects TOFU, pin mismatch, remote roots, and
 
 test('daily launcher always uses the fixed project without release-gate ceremony', () => {
   assert.match(launcher, /'deep-survival-dev'/);
-  assert.match(launcher, /ValidateSet\('Prepare','Up','Down','Status','Logs','Build','Restart'\)/);
+  assert.match(launcher, /ValidateSet\('Prepare','Up','Down','Status','Logs','Build','Restart','ChaosBegin','ChaosEnd','ChaosStatus'\)/);
   assert.match(launcher, /'compose', '-p', \$Project, '-f', \$ComposePath/);
   assert.match(launcher, /\[string\]\$LanHost/);
   assert.match(launcher, /SURVIVAL_BIND_HOST/);
@@ -452,6 +455,7 @@ test('daily launcher always uses the fixed project without release-gate ceremony
   assert.match(launcher, /completed without an observable integer exit code/);
   assert.match(launcher, /'contracts-deploy', 'contracts-smoke', 'staking-backend'/);
   assert.match(launcher, /if \(\$Chain\) \{ Reset-SurvivalChainLifecycle \}/);
+  assert.match(launcher, /if \(\$Chain\) \{ \$arguments \+= @\('--profile', 'chain'\) \}[\s\S]*?\$arguments \+= 'down'/);
   const buildIndex = launcher.indexOf("($buildArguments + @('build') + $Service)");
   const authorityIndex = launcher.indexOf('Prepare-SurvivalMailboxPeerAuthority', buildIndex);
   const upIndex = launcher.indexOf("@('up', '-d', '--no-build', '--wait')", authorityIndex);
@@ -478,13 +482,68 @@ test('daily launcher always uses the fixed project without release-gate ceremony
   assert.match(serviceBlock('staking-backend'), /profiles: \[chain\]/);
   assert.match(compose, /Runtime__BootstrapFromStorage: "true"/);
   assert.doesNotMatch(compose, /Runtime__AllowLoopbackPeerEndpoints/);
-  assert.match(compose, /Runtime__AllowPrivatePeerEndpoints: "true"/);
+  assert.doesNotMatch(compose, /Runtime__AllowPrivatePeerEndpoints/);
+  assert.match(compose, /Runtime__EnablePrivatePeerEndpoints: "true"/);
+  assert.match(compose, /Runtime__AllowPublicPeerEndpoints: "false"/);
+  assert.match(compose, /Runtime__PrivatePeerNetworkIdentity: local/);
+  for (let index = 0; index < 6; index += 1) {
+    const suffix = index.toString();
+    assert.match(compose, new RegExp(`Runtime__PrivatePeerEndpointAllowlist__${suffix}__RouterId:`));
+    assert.match(compose, new RegExp(`Runtime__PrivatePeerEndpointAllowlist__${suffix}__IpAddress: 172\\.30\\.82\\.${11 + index}`));
+    assert.match(compose, new RegExp(`Runtime__PrivatePeerEndpointAllowlist__${suffix}__Port: "8081"`));
+    assert.match(compose, new RegExp(`Runtime__PrivatePeerEndpointAllowlist__${suffix}__Path: /api/peer/onion`));
+    assert.match(compose, new RegExp(`ipv4_address: 172\\.30\\.82\\.${11 + index}`));
+  }
   assert.match(compose, /RegistryBootstrap__BaseUrl: http:\/\/relay-bootstrap:8080/);
   assert.doesNotMatch(launcher, /nonce|evidence|receipt|P15C_/i);
   assert.match(contextExport, /git.*ls-files/si);
   assert.match(contextExport, /safe\.directory=\$\{source\}/);
   assert.doesNotMatch(contextExport, /config.*--global|safe\.directory=\*/si);
   assert.match(contextExport, /prohibited source entries/i);
+});
+
+test('resend uncertainty chaos is a bounded survival-only real-ingress interposer', () => {
+  assert.match(resendChaosCompose, /profiles: \[resend-chaos\]/);
+  assert.match(resendChaosCompose, /xnode-1:[\s\S]*?ports: !reset \[\]/);
+  assert.match(resendChaosCompose, /DEEP_CHAOS_UPSTREAM_ORIGIN: http:\/\/xnode-1:8080/);
+  assert.match(resendChaosCompose, /SURVIVAL_BIND_HOST:-127\.0\.0\.1}:41801:8080/);
+  assert.match(resendChaosCompose, /DEEP_CHAOS_CONTROL_SOCKET: \/run\/deep-chaos\/control\.sock/);
+  assert.match(resendChaosCompose, /read_only: true/);
+  assert.match(resendChaosCompose, /cap_drop: \[ALL\]/);
+  assert.match(resendChaosCompose, /resend-chaos-token/);
+  assert.doesNotMatch(resendChaosCompose, /8081:8081|control.*ports/);
+  assert.doesNotMatch(productionCompose, /resend-chaos|DEEP_CHAOS_/);
+  assert.match(launcher, /New-SurvivalChaosToken/);
+  assert.match(launcher, /Protect-SurvivalDevPrivateFile/);
+  assert.match(launcher, /Get-PinnedSurvivalXNodeContext/);
+  assert.match(launcher, /Invoke-SurvivalChaosControl 'arm'/);
+  assert.match(launcher, /Stop-SurvivalChaos/);
+  assert.match(resendChaosProxy, /\/api\/client\/mailbox\/v2\/store/);
+  assert.match(resendChaosProxy, /upstreamResponse\.on\('end'/);
+  assert.match(resendChaosProxy, /state\.downstreamDropped \+= 1/);
+  assert.match(resendChaosProxy, /response\.destroy\(\)/);
+  assert.match(resendChaosProxy, /ttlSeconds < 5 \|\| ttlSeconds > 300/);
+  assert.match(resendChaosProxy, /payloadInspected: false/);
+  assert.doesNotMatch(resendChaosProxy, /console\.(?:log|error).*request|operationId|deduplicationDigest/i);
+  assert.match(resendChaosIntegration, /client-uncertain-resend/);
+  assert.match(resendChaosIntegration, /--test-force-exit/);
+  assert.match(resendChaosIntegration, /New-SurvivalMailboxIsolatedSource/);
+  assert.match(resendChaosIntegration, /Set-MailboxTreeReadOnly \$SourceRoot/);
+  assert.match(resendChaosIntegration, /Open-MailboxTreeReadLocks \$SourceRoot/);
+  assert.match(resendChaosIntegration, /'publish', \$isolated\.DriverProject/);
+  assert.match(resendChaosIntegration, /'--artifacts-path', \$BuildArtifacts/);
+  assert.match(resendChaosIntegration, /Assert-SurvivalMailboxIsolatedSource \$verified/);
+  assert.ok(resendChaosIntegration.indexOf('Assert-SurvivalMailboxIsolatedSource $verified')
+    < resendChaosIntegration.indexOf("'-Action', 'ChaosBegin'"));
+  assert.doesNotMatch(resendChaosIntegration, /dotnet @\([^)]*\$PinnedXNode/);
+  assert.match(resendChaosIntegration, /serverItemCount -ne 1/);
+  assert.match(resendChaosIntegration, /downstreamDropped -ne 1/);
+  assert.match(resendChaosIntegration, /one new replica and zero duplicate writes/i);
+  assert.match(resendChaosIntegration, /'ChaosEnd'/);
+  assert.match(resendChaosIntegration, /deep-survival-resend-chaos-evidence\.v1/);
+  assert.doesNotMatch(resendChaosIntegration, /docker\s+compose/i);
+  assert.match(mailboxDriver, /PrivatePeerOrigin\(int zeroBasedNodeIndex\)/);
+  assert.match(mailboxDriver, /http:\/\/172\.30\.82\.\{zeroBasedNodeIndex \+ 11\}:8081/);
 });
 
 test('post-seed XNode restart cannot rerun membership one-shot dependencies or duplicate the pin', () => {
@@ -539,12 +598,18 @@ test('P10E uses real current/next MIP1/RIP1 authority, bounded client ingress, a
     assert.match(serviceBlock(`xnode-${index}`), /target: xnode-ed25519\.seed/);
     assert.match(compose, new RegExp(`xnode-${index}-ed25519: \\{ file: \\.\\/.secrets\\/survival-dev\\/xnode-${index}-ed25519\\.seed \\}`));
   }
-  assert.match(launcher, /\$SurvivalXNodeCommit = 'c6c5113c7e77fb9e6577a493e2cc57144cc0de91'/);
+  assert.match(launcher, /\$SurvivalXNodeCommit = '3aa74cbb4831e68284468ef04385d24306d22282'/);
   assert.match(launcher, /Prepare-SurvivalXNodeIdentitySecrets/);
   assert.match(launcher, /Prepare-SurvivalMailboxPeerAuthority/);
   assert.match(launcher, /mailbox-client-xnode-1\.env/);
   assert.match(launcher, /'Prepare' \{/);
-  assert.match(launcher, /survival-mailbox-driver\\SurvivalMailboxDriver\.csproj/);
+  assert.match(launcher, /function Invoke-SurvivalMailboxDriverImmutable/);
+  assert.match(launcher, /New-SurvivalMailboxIsolatedSource/);
+  assert.match(launcher, /Set-MailboxTreeReadOnly \$sourceRoot/);
+  assert.match(launcher, /Open-MailboxTreeReadLocks \$sourceRoot/);
+  assert.match(launcher, /--artifacts-path \$artifactsRoot/);
+  assert.match(launcher, /Assert-SurvivalMailboxIsolatedSource \$isolated/);
+  assert.doesNotMatch(launcher, /dotnet run[\s\S]*?XNodeSource=/);
   assert.doesNotMatch(launcher, /deep-survival-dev-p10c-mip1-rip1-v1/);
   assert.match(compose, /profiles: \[mailbox-rehearsal\]/);
   assert.match(serviceBlock('mailbox-driver'), /networks: \[runtime\]|<<: \*service/);
@@ -560,7 +625,7 @@ test('P10E uses real current/next MIP1/RIP1 authority, bounded client ingress, a
     mailboxDriverStateInit,
     /chown 65532:65532 \/state \/state\/driver/);
   assert.doesNotMatch(mailboxDriverStateInit, /chmod|777|DAC_OVERRIDE/);
-  assert.match(compose, /XNODE_REVISION: c6c5113c7e77fb9e6577a493e2cc57144cc0de91/);
+  assert.match(compose, /XNODE_REVISION: 3aa74cbb4831e68284468ef04385d24306d22282/);
   assert.match(compose, /XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: [0-9a-f]{64}/);
   assert.match(compose, /org\.opencontainers\.image\.revision/);
   assert.match(compose, /com\.xpoint\.source-context\.manifest-sha256/);

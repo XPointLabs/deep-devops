@@ -27,8 +27,8 @@ x-xnode-build: &xnode-build
   args:
     SDK_IMAGE: ${SURVIVAL_DOTNET_SDK_IMAGE:-mcr.microsoft.com/dotnet/sdk@sha256:7e964ea8bc6c1e18ea9fbc76ed403da41c9b19aeee2aab6bf9c845f25e891380}
     RUNTIME_IMAGE: ${SURVIVAL_DOTNET_RUNTIME_IMAGE:-mcr.microsoft.com/dotnet/aspnet@sha256:e3736b0d423db99c6988e1ddf5ea725c14b12579bb120024e5ff7ff204a14080}
-    XNODE_REVISION: c6c5113c7e77fb9e6577a493e2cc57144cc0de91
-    XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: 68027e628e81230c8c26aca5724e477e6c1bd6ca76f60a4315ef7e55a4489d40
+    XNODE_REVISION: 3aa74cbb4831e68284468ef04385d24306d22282
+    XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: 6f078787bd121767435ef36acde16e2775715e312f941cb8516fecc57c59a8a7
   dockerfile_inline: |
     ARG SDK_IMAGE
     ARG RUNTIME_IMAGE
@@ -75,11 +75,37 @@ x-xnode: &xnode
     Node__ApiListenUrl: http://0.0.0.0:8080
     Node__PeerRpcListenUrl: http://0.0.0.0:8081
     Node__DataDirectory: /state
-    Node__Network: survival-local
+    Node__Network: local
     Node__PublicPort: "8080"
     Node__PublicPeerRpcPort: "8081"
     Runtime__BootstrapFromStorage: "true"
-    Runtime__AllowPrivatePeerEndpoints: "true"
+    Runtime__EnablePrivatePeerEndpoints: "true"
+    Runtime__AllowPublicPeerEndpoints: "false"
+    Runtime__PrivatePeerNetworkIdentity: local
+    Runtime__PrivatePeerEndpointAllowlist__0__RouterId: 4cb5abf6ad79fbf5abbccafcc269d85cd2651ed4b885b5869f241aedf0a5ba29
+    Runtime__PrivatePeerEndpointAllowlist__0__IpAddress: 172.30.82.11
+    Runtime__PrivatePeerEndpointAllowlist__0__Port: "8081"
+    Runtime__PrivatePeerEndpointAllowlist__0__Path: /api/peer/onion
+    Runtime__PrivatePeerEndpointAllowlist__1__RouterId: 7422b9887598068e32c4448a949adb290d0f4e35b9e01b0ee5f1a1e600fe2674
+    Runtime__PrivatePeerEndpointAllowlist__1__IpAddress: 172.30.82.12
+    Runtime__PrivatePeerEndpointAllowlist__1__Port: "8081"
+    Runtime__PrivatePeerEndpointAllowlist__1__Path: /api/peer/onion
+    Runtime__PrivatePeerEndpointAllowlist__2__RouterId: f381626e41e7027ea431bfe3009e94bdd25a746beec468948d6c3c7c5dc9a54b
+    Runtime__PrivatePeerEndpointAllowlist__2__IpAddress: 172.30.82.13
+    Runtime__PrivatePeerEndpointAllowlist__2__Port: "8081"
+    Runtime__PrivatePeerEndpointAllowlist__2__Path: /api/peer/onion
+    Runtime__PrivatePeerEndpointAllowlist__3__RouterId: fd50b8e3b144ea244fbf7737f550bc8dd0c2650bbc1aada833ca17ff8dbf329b
+    Runtime__PrivatePeerEndpointAllowlist__3__IpAddress: 172.30.82.14
+    Runtime__PrivatePeerEndpointAllowlist__3__Port: "8081"
+    Runtime__PrivatePeerEndpointAllowlist__3__Path: /api/peer/onion
+    Runtime__PrivatePeerEndpointAllowlist__4__RouterId: fde4fba030ad002f7c2f7d4c331f49d13fb0ec747eceebec634f1ff4cbca9def
+    Runtime__PrivatePeerEndpointAllowlist__4__IpAddress: 172.30.82.15
+    Runtime__PrivatePeerEndpointAllowlist__4__Port: "8081"
+    Runtime__PrivatePeerEndpointAllowlist__4__Path: /api/peer/onion
+    Runtime__PrivatePeerEndpointAllowlist__5__RouterId: b4c92afb3ba57f3ab959ffe6d319c98484a2155a0f4c65b2c37011ffd197b075
+    Runtime__PrivatePeerEndpointAllowlist__5__IpAddress: 172.30.82.16
+    Runtime__PrivatePeerEndpointAllowlist__5__Port: "8081"
+    Runtime__PrivatePeerEndpointAllowlist__5__Path: /api/peer/onion
     RegistryBootstrap__BaseUrl: http://relay-bootstrap:8080
     StorageRpc__BaseUrl: http://storage:8080
     RegistryHeartbeat__Enabled: "false"
@@ -109,8 +135,8 @@ x-mailbox-driver-build: &mailbox-driver-build
   args:
     SDK_IMAGE: ${SURVIVAL_DOTNET_SDK_IMAGE:-mcr.microsoft.com/dotnet/sdk@sha256:7e964ea8bc6c1e18ea9fbc76ed403da41c9b19aeee2aab6bf9c845f25e891380}
     RUNTIME_IMAGE: ${SURVIVAL_DOTNET_RUNTIME_IMAGE:-mcr.microsoft.com/dotnet/aspnet@sha256:e3736b0d423db99c6988e1ddf5ea725c14b12579bb120024e5ff7ff204a14080}
-    XNODE_REVISION: c6c5113c7e77fb9e6577a493e2cc57144cc0de91
-    XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: 68027e628e81230c8c26aca5724e477e6c1bd6ca76f60a4315ef7e55a4489d40
+    XNODE_REVISION: 3aa74cbb4831e68284468ef04385d24306d22282
+    XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: 6f078787bd121767435ef36acde16e2775715e312f941cb8516fecc57c59a8a7
   dockerfile_inline: |
     ARG SDK_IMAGE
     ARG RUNTIME_IMAGE
@@ -372,6 +398,7 @@ services:
       Node__RouterId: 4cb5abf6ad79fbf5abbccafcc269d85cd2651ed4b885b5869f241aedf0a5ba29
       Node__Ed25519PrivateKeyPath: /run/secrets/xnode-ed25519.seed
     ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41801:8080"]
+    networks: { runtime: { ipv4_address: 172.30.82.11 } }
     volumes: [xnode-1-state:/state, membership-route-artifact:/run/deep-membership:ro]
     secrets:
       - source: xnode-1-ed25519
@@ -389,6 +416,7 @@ services:
       Node__RouterId: 7422b9887598068e32c4448a949adb290d0f4e35b9e01b0ee5f1a1e600fe2674
       Node__Ed25519PrivateKeyPath: /run/secrets/xnode-ed25519.seed
     ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41802:8080"]
+    networks: { runtime: { ipv4_address: 172.30.82.12 } }
     volumes: [xnode-2-state:/state, membership-route-artifact:/run/deep-membership:ro]
     secrets:
       - source: xnode-2-ed25519
@@ -406,6 +434,7 @@ services:
       Node__RouterId: f381626e41e7027ea431bfe3009e94bdd25a746beec468948d6c3c7c5dc9a54b
       Node__Ed25519PrivateKeyPath: /run/secrets/xnode-ed25519.seed
     ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41803:8080"]
+    networks: { runtime: { ipv4_address: 172.30.82.13 } }
     volumes: [xnode-3-state:/state, membership-route-artifact:/run/deep-membership:ro]
     secrets:
       - source: xnode-3-ed25519
@@ -423,6 +452,7 @@ services:
       Node__RouterId: fd50b8e3b144ea244fbf7737f550bc8dd0c2650bbc1aada833ca17ff8dbf329b
       Node__Ed25519PrivateKeyPath: /run/secrets/xnode-ed25519.seed
     ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41804:8080"]
+    networks: { runtime: { ipv4_address: 172.30.82.14 } }
     volumes: [xnode-4-state:/state, membership-route-artifact:/run/deep-membership:ro]
     secrets:
       - source: xnode-4-ed25519
@@ -440,6 +470,7 @@ services:
       Node__RouterId: fde4fba030ad002f7c2f7d4c331f49d13fb0ec747eceebec634f1ff4cbca9def
       Node__Ed25519PrivateKeyPath: /run/secrets/xnode-ed25519.seed
     ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41805:8080"]
+    networks: { runtime: { ipv4_address: 172.30.82.15 } }
     volumes: [xnode-5-state:/state, membership-route-artifact:/run/deep-membership:ro]
     secrets:
       - source: xnode-5-ed25519
@@ -457,6 +488,7 @@ services:
       Node__RouterId: b4c92afb3ba57f3ab959ffe6d319c98484a2155a0f4c65b2c37011ffd197b075
       Node__Ed25519PrivateKeyPath: /run/secrets/xnode-ed25519.seed
     ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41806:8080"]
+    networks: { runtime: { ipv4_address: 172.30.82.16 } }
     volumes: [xnode-6-state:/state, membership-route-artifact:/run/deep-membership:ro]
     secrets:
       - source: xnode-6-ed25519
@@ -595,6 +627,8 @@ services:
 networks:
   runtime:
     driver: bridge
+    ipam:
+      config: [{ subnet: 172.30.82.0/24 }]
 
 volumes:
   contracts-deployments:

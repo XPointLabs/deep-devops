@@ -726,6 +726,9 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(port, '0.0.0.0', () => {
-  console.log(`deep ${mode} mock listening on ${port}`);
+  const address = server.address();
+  const boundPort = typeof address === 'object' && address !== null ? address.port : port;
+  if (typeof process.send === 'function') process.send({ type: 'listening', port: boundPort });
+  console.log(`deep ${mode} mock listening on ${boundPort}`);
 });
 

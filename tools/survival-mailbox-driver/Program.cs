@@ -101,6 +101,9 @@ switch (arguments.Command)
     case "client-retry-loss":
         await RunClientRetryLossAsync(arguments);
         break;
+    case "client-uncertain-resend":
+        await RunClientUncertainResendAsync(fixture, arguments);
+        break;
     case "retention-gc":
         RunRetentionGc(fixture, arguments);
         break;
@@ -443,6 +446,61 @@ static async Task RunClientRetryLossAsync(Arguments arguments)
     });
 }
 
+static async Task RunClientUncertainResendAsync(Fixture fixture, Arguments arguments)
+{
+    if (string.IsNullOrWhiteSpace(arguments.RunId))
+    {
+        throw new InvalidOperationException("A run id is required.");
+    }
+    var now = checked((ulong)DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+    var store = fixture.NewClientStore(arguments.RunId, "client-uncertain-resend", now);
+    var client = new ExactHttpClient(arguments.ClientUrl);
+    await client.SendTransportFailureAsync(
+        MailboxWireHttpContract.Store,
+        store.CanonicalRequest);
+    var retry = await client.SendSuccessAsync(
+        MailboxWireHttpContract.Store,
+        store.CanonicalRequest);
+    var replay = await client.SendSuccessAsync(
+        MailboxWireHttpContract.Store,
+        store.CanonicalRequest);
+    _ = MailboxReceiptV3Codec.DecodeDurableQuorum(retry);
+    if (!CryptographicOperations.FixedTimeEquals(retry, replay))
+    {
+        throw new InvalidOperationException(
+            "Exact uncertain Store retry changed the durable MQR3 outcome.");
+    }
+
+    var retrieve = fixture.NewClientRetrieve(
+        arguments.RunId,
+        "client-uncertain-resend-retrieve",
+        store.Envelope,
+        now,
+        replayCounter: 2);
+    var pageBytes = await client.SendSuccessAsync(
+        MailboxWireHttpContract.Retrieve,
+        retrieve);
+    var page = MailboxClientCodec.DecodeRetrievePage(
+        pageBytes,
+        fixture.ClientDecodePolicy(now));
+    if (page.Items.Count != 1
+        || !page.Items[0].Envelope.OperationId.Span.SequenceEqual(
+            store.Envelope.OperationId.Span))
+    {
+        throw new InvalidOperationException(
+            "Uncertain Store retry produced anything other than one exact server item.");
+    }
+    Result("client-uncertain-resend", new
+    {
+        firstOutcome = "transport-unknown-after-dispatch",
+        retry = "durable",
+        exactReplay = true,
+        serverItemCount = page.Items.Count,
+        duplicateServerItemCreated = false,
+        nativeMqr3 = true
+    });
+}
+
 static void RunRetentionGc(Fixture fixture, Arguments arguments)
 {
     var directory = Path.Combine(arguments.StateDirectory, "retention-gc");
@@ -684,7 +742,7 @@ sealed class Fixture
                 RouterId = id.ToBytes(),
                 Ed25519PublicKey = signingKey,
                 X25519PublicKey = SHA256.HashData(signingKey),
-                RpcEndpoint = $"http://xnode-{index + 1}:8081",
+                RpcEndpoint = PrivatePeerOrigin(index),
                 Roles = MembershipRouteRole.Storage,
                 Capabilities = MembershipRouteCapability.Storage,
                 Epoch = ProtocolFixture.Epoch,
@@ -710,7 +768,7 @@ sealed class Fixture
                 RouterId = id.ToBytes(),
                 Ed25519PublicKey = signingKey,
                 X25519PublicKey = SHA256.HashData(signingKey),
-                RpcEndpoint = $"http://xnode-{index + 1}:8081",
+                RpcEndpoint = PrivatePeerOrigin(index),
                 Roles = MembershipRouteRole.Storage,
                 Capabilities = MembershipRouteCapability.Storage,
                 Epoch = ProtocolFixture.NextEpoch,
@@ -1313,7 +1371,7 @@ sealed class Fixture
             : MailboxWireHttpContract.PeerTombstone.Route;
         return new MailboxReplicaPeer(
             RouterIds[recipientIndex],
-            $"http://xnode-{recipientIndex + 1}:8081{route}");
+            $"{PrivatePeerOrigin(recipientIndex)}{route}");
     }
 
     public byte[] SenderPrivateSeed(int senderIndex)
@@ -1378,6 +1436,15 @@ sealed class Fixture
     private static byte[] Material(string runId, string name) =>
         SHA256.HashData(
             System.Text.Encoding.UTF8.GetBytes($"{runId}|{name}"));
+
+    private static string PrivatePeerOrigin(int zeroBasedNodeIndex)
+    {
+        if (zeroBasedNodeIndex is < 0 or > 5)
+        {
+            throw new ArgumentOutOfRangeException(nameof(zeroBasedNodeIndex));
+        }
+        return $"http://172.30.82.{zeroBasedNodeIndex + 11}:8081";
+    }
 
     private static byte[] NetworkId() =>
         SHA256.HashData(
@@ -1540,7 +1607,7 @@ sealed class Fixture
             if (item.Node != index + 1
                 || item.RouterId != routerId.Value
                 || item.SigningPublicKey != Lower(descriptor.Ed25519PublicKey.Span)
-                || item.RpcEndpoint != $"http://xnode-{index + 1}:8081"
+                || item.RpcEndpoint != PrivatePeerOrigin(index)
                 || descriptor.Epoch != expectedEpoch
                 || descriptor.ValidFromUnixSeconds != expectedNotBefore
                 || descriptor.ValidUntilUnixSeconds != expectedExpiresAt
@@ -1680,6 +1747,24 @@ sealed class ExactHttpClient(string baseUrl)
         {
             throw new InvalidOperationException(
                 $"Public mailbox {contract.RequestFrame} failure violated its exact contract.");
+        }
+    }
+
+    public async Task SendTransportFailureAsync(
+        MailboxHttpEndpointContract contract,
+        byte[] canonicalRequest)
+    {
+        try
+        {
+            using var response = await SendAsync(contract, canonicalRequest);
+            throw new InvalidOperationException(
+                $"Public mailbox {contract.RequestFrame} unexpectedly returned "
+                + $"HTTP {(int)response.StatusCode} instead of a transport-unknown outcome.");
+        }
+        catch (HttpRequestException)
+        {
+            // The development chaos proxy closes the downstream connection only
+            // after it has consumed the complete successful upstream response.
         }
     }
 

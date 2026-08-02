@@ -153,9 +153,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/survival-dev.ps1 -Ac
 ## P10E mailbox client and peer rehearsal
 
 The survival stack pins its filtered XNode context to accepted source
-`c6c5113c7e77fb9e6577a493e2cc57144cc0de91`; a dirty checkout, another revision,
+`3aa74cbb4831e68284468ef04385d24306d22282`; a dirty checkout, another revision,
 or a filtered-source manifest other than
-`68027e628e81230c8c26aca5724e477e6c1bd6ca76f60a4315ef7e55a4489d40`
+`6f078787bd121767435ef36acde16e2775715e312f941cb8516fecc57c59a8a7`
 fails closed before build. The source exporter writes a deterministic
 `.survival-source-manifest.json`, and the shared XNode image carries both the exact
 revision and manifest SHA-256 as OCI labels. The live rehearsal requires all six
@@ -171,7 +171,8 @@ host/global plus per-operation admission controls. The launcher runs the pinned 
 implementation to write a public, DEV-LOCAL-ONLY authority environment file containing the
 real current/next six-leaf MIP1 Merkle commitments, canonical MIP1/RIP1 proofs, and all
 30 epoch/pair selections across the six fixed router/signing identities and
-`http://xnode-N:8081/api/peer/onion` endpoints. A second generated environment enables the bounded
+exact literal `http://172.30.82.11:8081` through `http://172.30.82.16:8081`
+endpoints on the isolated DEV bridge. A second generated environment enables the bounded
 DEV-LOCAL-ONLY client fixture only on `xnode-1`: MAU2 issuer trust, E/E+1 placement and
 membership authority, and native MAU2 ingress with canonical MEO1/MBR2/MBA2
 bindings. `xnode-2` through `xnode-6`
@@ -247,7 +248,7 @@ DEV-LOCAL-ONLY client issuer seed, and the generated public authority fixture; i
 receives any selected recipient's private key. The issuer seed can mint only the explicitly
 pinned development client capabilities; it cannot sign a peer receipt. The driver therefore
 cannot synthesize a recipient MRR2 or substitute a quorum: every remote
-signature must arrive in an HTTP response from the actual `xnode-N:8081` listener and pass
+signature must arrive in an HTTP response from the actual literal-IP `xnode-N:8081` listener and pass
 XNode Core verification. The launcher reads all six ignored development seeds only in its
 host-side authority-generation step to derive the public descriptors and canonical proofs;
 no recipient seed enters the driver image, container, state, output, or evidence.
@@ -257,6 +258,40 @@ and booleans. The script is bounded and restores all six XNodes to readiness in 
 without deleting their named volumes. The public ingress and issuer are deterministic,
 bounded DEV-LOCAL-ONLY fixtures; this is not production authority, production durability,
 or a production-readiness claim.
+
+### One-shot uncertain-resend rehearsal
+
+The resend-chaos overlay is development-only and is absent from staging and production
+Compose. Do not start it with raw Compose commands. `ChaosBegin` regenerates the bounded
+public authority for the same advertised `:41801` origin, removes xnode-1's host publisher,
+places an opaque reverse proxy in front of its real native MAU2 ingress, verifies the six-node
+topology, and only then arms one Store response drop. The proxy never decodes or logs a
+payload or identifier. It consumes its one shot only after the upstream XNode has returned a
+complete 2xx response; non-2xx responses do not consume it. The protected random lab token,
+Unix control socket, 5–300 second TTL, process restart default-disarm, and `ChaosEnd` cleanup
+bound the fault to one local rehearsal.
+
+Manual use is intentionally explicit:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/survival-dev.ps1 -Action ChaosBegin -LanHost 192.168.1.44 -ChaosTtlSeconds 120
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/survival-dev.ps1 -Action ChaosStatus
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/survival-dev.ps1 -Action ChaosEnd
+```
+
+Always run `ChaosEnd` in a `finally` block. The checked live lane does this automatically. It
+uses the real MAU2 Store, observes a transport-unknown first outcome, sends the byte-identical
+request again, requires native MQR3 2xx and an identical replay, retrieves exactly one item,
+checks one remote replica write with zero duplicate writes, then restores all 14 ordinary
+containers and deletes the lab token:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/survival-dev-resend-chaos.integration.test.ps1 -BindHost 192.168.1.44
+```
+
+The sanitized evidence schema is `deep-survival-resend-chaos-evidence.v1`; it contains only
+booleans and aggregate counters. It never contains message bytes, mailbox/operation IDs,
+authority material, endpoints, tokens, receipts, or device identifiers.
 
 Rollback is volume-preserving: recreate only the six `xnode-*` services from the previous
 local image or restore the prior clean DevOps commit, then verify `/health/ready` and

@@ -4,8 +4,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
-const scriptPath = path.resolve('c:/Work/Deep/deep-devops/tools/mock-services/mock-service.mjs');
+const scriptPath = fileURLToPath(new URL('./mock-service.mjs', import.meta.url));
 
 async function waitForReady(baseUrl, timeoutMs = 5000) {
   const started = Date.now();
@@ -25,15 +26,40 @@ async function waitForReady(baseUrl, timeoutMs = 5000) {
   throw new Error('mock-service did not become ready in time');
 }
 
-async function startMockService({ port, stateDir }) {
+function waitForExit(child, timeoutMs) {
+  if (child.exitCode !== null) return Promise.resolve(true);
+  return new Promise(resolve => {
+    const timer = setTimeout(() => {
+      child.off('exit', onExit);
+      resolve(false);
+    }, timeoutMs);
+    const onExit = () => {
+      clearTimeout(timer);
+      resolve(true);
+    };
+    child.once('exit', onExit);
+  });
+}
+
+async function terminateChild(child) {
+  if (child.exitCode !== null) return;
+  child.kill('SIGTERM');
+  if (await waitForExit(child, 1000)) return;
+  child.kill('SIGKILL');
+  if (!await waitForExit(child, 2000)) {
+    throw new Error('mock-service did not terminate within the bounded cleanup deadline');
+  }
+}
+
+async function startMockService({ stateDir }) {
   const child = spawn(process.execPath, [scriptPath], {
     env: {
       ...process.env,
       SERVICE_MODE: 'all',
-      PORT: String(port),
+      PORT: '0',
       MOCK_STATE_DIR: stateDir
     },
-    stdio: ['ignore', 'pipe', 'pipe']
+    stdio: ['ignore', 'pipe', 'pipe', 'ipc']
   });
 
   let stderr = '';
@@ -41,21 +67,34 @@ async function startMockService({ port, stateDir }) {
     stderr += String(chunk);
   });
 
+  const port = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('mock-service did not publish its bound port in time')), 5000);
+    child.once('exit', code => {
+      clearTimeout(timer);
+      reject(new Error(`mock-service exited before readiness with code ${code}`));
+    });
+    child.on('message', message => {
+      if (message?.type === 'listening' && Number.isInteger(message.port) && message.port > 0) {
+        clearTimeout(timer);
+        resolve(message.port);
+      }
+    });
+  }).catch(async error => {
+    await terminateChild(child);
+    throw error;
+  });
   const baseUrl = `http://127.0.0.1:${port}`;
-  await waitForReady(baseUrl);
+  try {
+    await waitForReady(baseUrl);
+  } catch (error) {
+    await terminateChild(child);
+    throw error;
+  }
 
   return {
     baseUrl,
     async stop() {
-      child.kill('SIGTERM');
-      await new Promise(resolve => {
-        child.once('exit', () => resolve());
-        setTimeout(() => {
-          if (!child.killed) {
-            child.kill('SIGKILL');
-          }
-        }, 1000);
-      });
+      await terminateChild(child);
 
       if (stderr.trim()) {
         assert.fail(`mock-service stderr was not empty:\n${stderr}`);
@@ -64,13 +103,9 @@ async function startMockService({ port, stateDir }) {
   };
 }
 
-function randomPort() {
-  return 19000 + Math.floor(Math.random() * 1000);
-}
-
 test('storage store supports idempotency key replay', async () => {
   const stateDir = await mkdtemp(path.join(tmpdir(), 'deep-mock-'));
-  const mock = await startMockService({ port: randomPort(), stateDir });
+  const mock = await startMockService({ stateDir });
 
   try {
     const payload = {
@@ -120,7 +155,7 @@ test('storage store supports idempotency key replay', async () => {
 
 test('storage retrieve prunes expired messages', async () => {
   const stateDir = await mkdtemp(path.join(tmpdir(), 'deep-mock-'));
-  const mock = await startMockService({ port: randomPort(), stateDir });
+  const mock = await startMockService({ stateDir });
 
   try {
     const storeResponse = await fetch(`${mock.baseUrl}/storage/store`, {
@@ -168,7 +203,7 @@ test('file GET prunes expired records from persisted state', async () => {
     ])
   );
 
-  const mock = await startMockService({ port: randomPort(), stateDir });
+  const mock = await startMockService({ stateDir });
 
   try {
     const infoResponse = await fetch(`${mock.baseUrl}/file/expired-file-id/info`);
@@ -188,14 +223,14 @@ test('file GET prunes expired records from persisted state', async () => {
 
 test('push subscribe supports idempotency key replay', async () => {
   const stateDir = await mkdtemp(path.join(tmpdir(), 'deep-mock-'));
-  const mock = await startMockService({ port: randomPort(), stateDir });
+  const mock = await startMockService({ stateDir });
 
   try {
     const payload = {
       pubkey: '05push',
       session_ed25519: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
       data: true,
-      sig_ts: 1780000000,
+      sig_ts: Math.floor(Date.now() / 1000),
       signature: 'f8efdd12000700000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000',
       service: 'apns',
       service_info: { token: 'token-1' },
@@ -258,7 +293,7 @@ test('push subscriptions listing prunes expired persisted entries', async () => 
     ])
   );
 
-  const mock = await startMockService({ port: randomPort(), stateDir });
+  const mock = await startMockService({ stateDir });
 
   try {
     const listResponse = await fetch(`${mock.baseUrl}/subscriptions/${encodeURIComponent('05push')}`);
@@ -278,7 +313,7 @@ test('push subscriptions listing prunes expired persisted entries', async () => 
 
 test('push subscribe returns Session-style BAD_INPUT error code', async () => {
   const stateDir = await mkdtemp(path.join(tmpdir(), 'deep-mock-'));
-  const mock = await startMockService({ port: randomPort(), stateDir });
+  const mock = await startMockService({ stateDir });
 
   try {
     const response = await fetch(`${mock.baseUrl}/subscribe`, {
@@ -298,7 +333,7 @@ test('push subscribe returns Session-style BAD_INPUT error code', async () => {
 
 test('push subscribe returns Session-style SERVICE_NOT_AVAILABLE error code', async () => {
   const stateDir = await mkdtemp(path.join(tmpdir(), 'deep-mock-'));
-  const mock = await startMockService({ port: randomPort(), stateDir });
+  const mock = await startMockService({ stateDir });
 
   try {
     const response = await fetch(`${mock.baseUrl}/subscribe`, {
@@ -308,7 +343,7 @@ test('push subscribe returns Session-style SERVICE_NOT_AVAILABLE error code', as
         pubkey: '05push',
         session_ed25519: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         data: true,
-        sig_ts: 1780000000,
+        sig_ts: Math.floor(Date.now() / 1000),
         signature: 'f8efdd12000700000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000',
         service: 'unknown-service',
         service_info: { token: 'token-unknown' },
@@ -328,7 +363,7 @@ test('push subscribe returns Session-style SERVICE_NOT_AVAILABLE error code', as
 
 test('push subscribe supports Session-style array payload with per-item results', async () => {
   const stateDir = await mkdtemp(path.join(tmpdir(), 'deep-mock-'));
-  const mock = await startMockService({ port: randomPort(), stateDir });
+  const mock = await startMockService({ stateDir });
 
   try {
     const response = await fetch(`${mock.baseUrl}/subscribe`, {
@@ -339,7 +374,7 @@ test('push subscribe supports Session-style array payload with per-item results'
           pubkey: '05batch',
           session_ed25519: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
           data: true,
-          sig_ts: 1780000000,
+          sig_ts: Math.floor(Date.now() / 1000),
           signature: 'f8efdd12000700000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000',
           service: 'apns',
           service_info: { token: 'token-batch-1' },
@@ -350,7 +385,7 @@ test('push subscribe supports Session-style array payload with per-item results'
           pubkey: '05batch',
           session_ed25519: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
           data: true,
-          sig_ts: 1780000000,
+          sig_ts: Math.floor(Date.now() / 1000),
           signature: 'f8efdd12000700000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000',
           service: 'unsupported-service',
           service_info: { token: 'token-batch-2' },
@@ -382,7 +417,7 @@ test('push subscribe supports Session-style array payload with per-item results'
 
 test('push subscribe requires Session signature payload fields', async () => {
   const stateDir = await mkdtemp(path.join(tmpdir(), 'deep-mock-'));
-  const mock = await startMockService({ port: randomPort(), stateDir });
+  const mock = await startMockService({ stateDir });
 
   try {
     const response = await fetch(`${mock.baseUrl}/subscribe`, {
@@ -408,7 +443,7 @@ test('push subscribe requires Session signature payload fields', async () => {
 
 test('push subscribe rejects too old sig_ts with BAD_INPUT', async () => {
   const stateDir = await mkdtemp(path.join(tmpdir(), 'deep-mock-'));
-  const mock = await startMockService({ port: randomPort(), stateDir });
+  const mock = await startMockService({ stateDir });
 
   try {
     const response = await fetch(`${mock.baseUrl}/subscribe`, {
@@ -439,7 +474,7 @@ test('push subscribe rejects too old sig_ts with BAD_INPUT', async () => {
 
 test('push subscribe rejects invalid signature length with BAD_INPUT', async () => {
   const stateDir = await mkdtemp(path.join(tmpdir(), 'deep-mock-'));
-  const mock = await startMockService({ port: randomPort(), stateDir });
+  const mock = await startMockService({ stateDir });
 
   try {
     const response = await fetch(`${mock.baseUrl}/subscribe`, {
@@ -470,7 +505,7 @@ test('push subscribe rejects invalid signature length with BAD_INPUT', async () 
 
 test('stats endpoint reports request counters and inventory', async () => {
   const stateDir = await mkdtemp(path.join(tmpdir(), 'deep-mock-'));
-  const mock = await startMockService({ port: randomPort(), stateDir });
+  const mock = await startMockService({ stateDir });
 
   try {
     const storeResponse = await fetch(`${mock.baseUrl}/storage/store`, {

@@ -355,9 +355,43 @@ test('deny-by-default context manifest ignores untracked and ignored fixture byt
 
 test('.dockerignore is deny-by-default and allows only the tracked context manifest', async () => {
   const source = await readFile(new URL('../.dockerignore', import.meta.url), 'utf8');
-  assert.match(source, /^\*\*\s*$/m);
-  assert.doesNotMatch(source, /^!\*\*/m);
-  assert.doesNotMatch(source, /test|fixture|artifact|\.git/i);
+  const entries = source.split(/\r?\n/).filter(Boolean);
+  assert.deepEqual(entries, [
+    '**',
+    '!.dockerignore',
+    '!docker-compose.p15-compat.yml',
+    '!scripts/',
+    '!scripts/p15-compat-contracts.mjs',
+    '!scripts/p15-evidence-sanitizer.mjs',
+    '!scripts/p15c-package-json-normalizer.mjs',
+    '!tools/',
+    '!tools/compat-services/',
+    '!tools/compat-services/blake2b.mjs',
+    '!tools/compat-services/storage-signatures.mjs',
+    '!tools/storage-service/',
+    '!tools/storage-service/storage-service.mjs',
+    '!tools/storage-service/storage-service-runtime.mjs',
+    '!tools/file-service/',
+    '!tools/file-service/file-service.mjs',
+    '!tools/file-service/file-service-runtime.mjs',
+    '!tools/push-service/',
+    '!tools/push-service/push-service.mjs',
+    '!tools/push-service/push-service-runtime.mjs',
+    '!tools/calls-service/',
+    '!tools/calls-service/calls-service.mjs',
+    '!tools/calls-service/calls-service-runtime.mjs',
+    '!tools/relay-bootstrap/',
+    '!tools/relay-bootstrap/relay-bootstrap.mjs',
+    '!tools/membership-fixture/',
+    '!tools/membership-fixture/MembershipFixture.csproj',
+    '!tools/membership-fixture/NuGet.Config',
+    '!tools/membership-fixture/Program.cs',
+    '!tools/membership-fixture/packages.lock.json',
+    '!tools/survival-mailbox-driver/',
+    '!tools/survival-mailbox-driver/SurvivalMailboxDriver.csproj',
+    '!tools/survival-mailbox-driver/Program.cs'
+  ]);
+  assert.ok(entries.every(entry => !/artifact|\.git/i.test(entry)));
   const contract = JSON.parse(await readFile(
     new URL('../release/contracts/p15-compat-lab-v1.json', import.meta.url),
     'utf8'
@@ -365,6 +399,7 @@ test('.dockerignore is deny-by-default and allows only the tracked context manif
   assert.ok(Array.isArray(contract.buildContext?.files));
   assert.ok(contract.buildContext.files.length > 0);
   assert.equal(new Set(contract.buildContext.files).size, contract.buildContext.files.length);
+  assert.ok(contract.buildContext.files.every(file => entries.includes(`!${file}`)));
 });
 
 function serviceFixture(identity, profile) {
