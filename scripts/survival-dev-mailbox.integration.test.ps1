@@ -28,8 +28,8 @@ Remove-Item -LiteralPath $EvidencePath -Force -ErrorAction SilentlyContinue
 $ComposePath = Join-Path $Root 'docker-compose.survival.dev.yml'
 $Launcher = Join-Path $PSScriptRoot 'survival-dev.ps1'
 $Project = 'deep-survival-dev'
-$expectedCommit = 'a68a4cb64d2030beb8afbd9c9d73aa31dd21bd64'
-$expectedManifest = '78cce5998014f9f6eb4230695cf69f175a6e60864d9753384589a310111d7377'
+$expectedCommit = '4d05fe7dd2dadd3f094c172a382ad675d2ff545a'
+$expectedManifest = '2b2a223c96bb3a9cb075262e14b64e083d28f3a2b4a1068b68c737250311e52a'
 $base = @('compose', '-p', $Project, '-f', $ComposePath)
 $nodes = 1..6 | ForEach-Object { "xnode-$_" }
 

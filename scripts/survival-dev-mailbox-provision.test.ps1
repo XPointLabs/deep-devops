@@ -161,9 +161,9 @@ try {
         throw 'Pinned exported XNode source snapshot is missing.'
     }
     $source = Get-Content -Raw -LiteralPath $sourceManifest | ConvertFrom-Json
-    if ($source.sourceCommit -ne 'a68a4cb64d2030beb8afbd9c9d73aa31dd21bd64' -or
+    if ($source.sourceCommit -ne '4d05fe7dd2dadd3f094c172a382ad675d2ff545a' -or
         (Get-FileHash -LiteralPath $sourceManifest -Algorithm SHA256).Hash -ne
-            '78CCE5998014F9F6EB4230695CF69F175A6E60864D9753384589A310111D7377') {
+            '2B2A223C96BB3A9CB075262E14B64E083D28F3A2B4A1068B68C737250311E52A') {
         throw 'Tests require the exact clean exported XNode source snapshot.'
     }
     foreach ($file in $source.files) {
@@ -192,9 +192,9 @@ try {
             -XNodeSource $Source `
             -DriverSource $Driver `
             -Destination $Destination `
-            -ExpectedCommit 'a68a4cb64d2030beb8afbd9c9d73aa31dd21bd64' `
+            -ExpectedCommit '4d05fe7dd2dadd3f094c172a382ad675d2ff545a' `
             -ExpectedManifestSha256 `
-                '78cce5998014f9f6eb4230695cf69f175a6e60864d9753384589a310111d7377' `
+                '2b2a223c96bb3a9cb075262e14b64e083d28f3a2b4a1068b68c737250311e52a' `
             -ExpectedDriverSha256 $driverHashes
     }
 
