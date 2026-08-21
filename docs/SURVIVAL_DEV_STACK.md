@@ -239,7 +239,7 @@ coordinator, durable journals, Sodium signatures, and exact P10E codecs. It requ
 Run:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/survival-dev-mailbox.integration.test.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/survival-dev-mailbox.integration.test.ps1 -BindHost <exact-lan-ipv4>
 ```
 
 The driver has its own named sender-state volume so it does not contend with a running

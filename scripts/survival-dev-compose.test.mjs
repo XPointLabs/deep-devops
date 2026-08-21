@@ -138,7 +138,9 @@ test('only local Hardhat and loopback host ports are configured', () => {
   assert.match(staking, /GET \/health\/ready HTTP\/1\.1/);
   assert.doesNotMatch(staking, /test -r \/proc\/1\/status/);
   assert.match(contracts, /eth_chainId/);
-  assert.doesNotMatch(compose, /https?:\/\/(?!127\.0\.0\.1|0\.0\.0\.0|[a-z][a-z0-9-]*:)/i);
+  assert.doesNotMatch(
+    compose,
+    /https?:\/\/(?!127\.0\.0\.1|0\.0\.0\.0|172\.30\.82\.1[1-6]:|[a-z][a-z0-9-]*:)/i);
   const bindings = [...compose.matchAll(/"\$\{SURVIVAL_BIND_HOST:-127\.0\.0\.1\}:(\d+):(\d+)"/g)];
   assert.equal(bindings.length, 13);
   assert.equal(new Set(bindings.map(match => match[1])).size, bindings.length);
@@ -469,7 +471,10 @@ test('daily launcher always uses the fixed project without release-gate ceremony
   assert.doesNotMatch(launcher, /Up requires -LanHost/);
   assert.match(seed, /api\/network\/contact/);
   assert.match(seed, /relay-bootstrap/);
-  assert.match(verify, /JSON\.stringify\(\{ id: `survival-\$\{method\}`, method, payload: \{\} \}\)/);
+  assert.match(verify, /JSON\.stringify\(\{ id: `survival-\$\{method\}`, method, payload \}\)/);
+  assert.match(verify, /rpc\(port, 'storage_route'/);
+  assert.match(verify, /routeIds\.length !== 3/);
+  assert.match(verify, /selected a route outside the exact private endpoint allowlist/);
   assert.doesNotMatch(verify, /params:/);
   assert.match(verify, /api\/peer\/onion/);
   assert.match(verify, /non-canonical onion peer endpoint/);
@@ -477,7 +482,7 @@ test('daily launcher always uses the fixed project without release-gate ceremony
   assert.match(bootstrap, /\/seed/);
   assert.match(
     bootstrap,
-    /\^http:\\\/\\\/xnode-\[1-6\]:8081\\\/api\\\/peer\\\/onion\$/);
+    /\^http:\\\/\\\/172\\\.30\\\.82\\\.1\[1-6\]:8081\\\/api\\\/peer\\\/onion\$/);
   assert.match(serviceBlock('contracts-devnet'), /profiles: \[chain\]/);
   assert.match(serviceBlock('staking-backend'), /profiles: \[chain\]/);
   assert.match(compose, /Runtime__BootstrapFromStorage: "true"/);
@@ -593,7 +598,7 @@ test('P10E uses real current/next MIP1/RIP1 authority, bounded client ingress, a
     assert.match(
       serviceBlock(`xnode-${index}`),
       new RegExp(
-        `Node__PublicPeerRpcEndpoint: http:\\/\\/xnode-${index}:8081\\/api\\/peer\\/onion`));
+        `Node__PublicPeerRpcEndpoint: http:\\/\\/172\\.30\\.82\\.${10 + index}:8081\\/api\\/peer\\/onion`));
     assert.match(serviceBlock(`xnode-${index}`), new RegExp(`source: xnode-${index}-ed25519`));
     assert.match(serviceBlock(`xnode-${index}`), /target: xnode-ed25519\.seed/);
     assert.match(compose, new RegExp(`xnode-${index}-ed25519: \\{ file: \\.\\/.secrets\\/survival-dev\\/xnode-${index}-ed25519\\.seed \\}`));
@@ -705,7 +710,9 @@ test('P10E uses real current/next MIP1/RIP1 authority, bounded client ingress, a
   assert.doesNotMatch(mailboxDriver, /journal\.CollectExpired\(/);
   assert.doesNotMatch(mailboxDriver, /ePlusOneReservation/);
   assert.doesNotMatch(mailboxDriver, /2_145_000_000|2_145_916_800/);
-  assert.match(mailboxIntegration, /BindHost = '192\.168\.1\.44'/);
+  assert.match(mailboxIntegration, /\[Parameter\(Mandatory\)\][\s\S]*?\[string\]\$BindHost/);
+  assert.match(mailboxIntegration, /-Action Up -LanHost \$BindHost/);
+  assert.match(mailboxIntegration, /-Action Build -Service @\('mailbox-driver'\)/);
   assert.match(mailboxIntegration, /--require-non-loopback-coordinator/);
 });
 

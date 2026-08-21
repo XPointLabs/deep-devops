@@ -2,7 +2,8 @@
 param(
     [string]$XNodeRepository,
     [string]$EvidencePath,
-    [string]$BindHost = '192.168.1.44'
+    [Parameter(Mandatory)]
+    [string]$BindHost
 )
 
 $ErrorActionPreference = 'Stop'
@@ -190,7 +191,11 @@ try {
     Invoke-Checked powershell @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $PSScriptRoot 'survival-dev-mailbox-driver.test.ps1'))
     Invoke-Checked dotnet @('test', (Join-Path $XNodeRepository 'tests\XNode.IntegrationTests\XNode.IntegrationTests.csproj'), '--no-restore', '--filter', 'FullyQualifiedName~ReplicatedMailboxIntegrationTests', '--logger', 'console;verbosity=minimal')
     Invoke-Checked dotnet @('test', (Join-Path $XNodeRepository 'tests\XNode.IntegrationTests\XNode.IntegrationTests.csproj'), '--no-restore', '--filter', 'FullyQualifiedName~MailboxClientActivatedEndToEndTests', '--logger', 'console;verbosity=minimal')
-    & $Launcher -Action Build -Service @('xnode-1', 'mailbox-driver')
+    # Converge the complete stack onto one exact advertised LAN address before
+    # the rehearsal. Reusing loopback-bound support services or authority from
+    # another host would make a partial dev stack look healthier than UAT.
+    & $Launcher -Action Up -LanHost $BindHost
+    & $Launcher -Action Build -Service @('mailbox-driver')
 
     # Recreate, never reset, each peer so all six receive the real authority
     # and exact labelled image while preserving their named state volumes.
