@@ -2,7 +2,7 @@
 param(
     [string]$AndroidHolderPath = '',
     [string]$WindowsHolderPath = '',
-    [string]$CoordinatorUrl = 'http://192.168.1.44:41801',
+    [Parameter(Mandatory)][string]$CoordinatorUrl,
     [ValidateRange(1800,14400)][int]$RevocationTtlSeconds = 14400,
     [string]$RuntimeOutputParent = ''
 )

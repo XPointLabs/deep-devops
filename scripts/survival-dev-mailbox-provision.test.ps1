@@ -542,7 +542,7 @@ try {
         '--output-directory', $tamperedRoot,
         '--mailbox-secret-directory', $tamperedSecrets)) -ExpectFailure
 
-    # HTTP can never be enabled for an arbitrary LAN endpoint.
+    # HTTP is accepted only under the explicit physical-dev gate.
     $lanAuthority = Join-Path $temporary 'lan-authority.json'
     $lanObject = Get-Content -Raw -LiteralPath $authority | ConvertFrom-Json
     $lanObject.coordinatorUrl = 'http://192.168.1.45:41801'
@@ -553,6 +553,23 @@ try {
         '--expected-authority-sha256', (Get-LowerSha256 $lanAuthority),
         '--expected-issuer-public-key', $issuerPublicKey,
         '--coordinator-url', 'http://192.168.1.45:41801',
+        '--android-holder-public-key', $android,
+        '--windows-holder-public-key', $windows,
+        '--issuer-seed-path', $issuer,
+        '--output-directory', $tamperedRoot,
+        '--mailbox-secret-directory', $tamperedSecrets)) -ExpectFailure
+
+    # Even the physical-dev gate cannot authorize a public HTTP endpoint.
+    $publicAuthority = Join-Path $temporary 'public-http-authority.json'
+    $publicObject = Get-Content -Raw -LiteralPath $authority | ConvertFrom-Json
+    $publicObject.coordinatorUrl = 'http://203.0.113.10:41801'
+    $publicObject | ConvertTo-Json -Depth 14 | Set-Content -NoNewline $publicAuthority
+    Invoke-Driver (@(
+        'provision', '--development-only', '--allow-http', '--physical-dev',
+        '--authority-public', $publicAuthority,
+        '--expected-authority-sha256', (Get-LowerSha256 $publicAuthority),
+        '--expected-issuer-public-key', $issuerPublicKey,
+        '--coordinator-url', 'http://203.0.113.10:41801',
         '--android-holder-public-key', $android,
         '--windows-holder-public-key', $windows,
         '--issuer-seed-path', $issuer,
@@ -723,7 +740,7 @@ try {
     }
 
     $expectedDriverFailures = if (
-        [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) { 19 } else { 15 }
+        [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) { 20 } else { 16 }
     if ($script:ExpectedFailures -ne $expectedDriverFailures) {
         throw "Expected $expectedDriverFailures driver negative paths, executed $script:ExpectedFailures."
     }

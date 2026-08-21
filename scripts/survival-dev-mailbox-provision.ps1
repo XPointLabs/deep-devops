@@ -10,7 +10,7 @@ param(
     [string]$IssuerSeedPath = '',
     [string]$OutputDirectory = '',
     [string]$MailboxSecretDirectory = '',
-    [string]$CoordinatorUrl = 'http://192.168.1.44:41801',
+    [Parameter(Mandatory)][string]$CoordinatorUrl,
     [switch]$PublishRuntime,
     [ValidateRange(1800,14400)][int]$RevocationTtlSeconds = 14400,
     [string]$RuntimeOutputParent = ''
@@ -74,7 +74,7 @@ $expectedXNodeManifestSha256 =
     '2b2a223c96bb3a9cb075262e14b64e083d28f3a2b4a1068b68c737250311e52a'
 $expectedDriverSha256 = @{
     'MailboxGrantProvisioner.cs' =
-        '6233ee64279ebabb57ce17939c0ff68e537a1e8441730f0a23609e9a012bdd4b'
+        'cc8c60029767aa78c693fab74a75092031f618985a80b434f85fc8721af4766c'
     'MailboxRuntimePublisher.cs' =
         'd6aad71f65987f620ccf0d5a06394240aa199d3bb92ef38b81a9594f8e9ff94b'
     'Program.cs' =

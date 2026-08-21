@@ -19,7 +19,6 @@ static class MailboxGrantProvisioner
 {
     private const string Android = "android";
     private const string Windows = "windows";
-    private const string PhysicalCoordinator = "http://192.168.1.44:41801";
     private static readonly string[] ExpectedReplicaIds =
     [
         "4cb5abf6ad79fbf5abbccafcc269d85cd2651ed4b885b5869f241aedf0a5ba29",
@@ -272,15 +271,21 @@ static class MailboxGrantProvisioner
             && string.IsNullOrEmpty(authorityUrl.UserInfo)
             && authorityUrl.AbsolutePath == "/"
             && string.IsNullOrEmpty(authorityUrl.Query)
-            && string.IsNullOrEmpty(authorityUrl.Fragment)
-            && System.Net.IPAddress.TryParse(authorityUrl.Host, out var address)
-            && !System.Net.IPAddress.IsLoopback(address),
+            && string.IsNullOrEmpty(authorityUrl.Fragment),
+            "Authority coordinator must be the exact expected non-loopback IP URL.");
+        if (!System.Net.IPAddress.TryParse(authorityUrl!.Host, out var address))
+        {
+            throw new InvalidDataException(
+                "Authority coordinator must be the exact expected non-loopback IP URL.");
+        }
+        Require(!System.Net.IPAddress.IsLoopback(address),
             "Authority coordinator must be the exact expected non-loopback IP URL.");
         if (authorityUrl!.Scheme == Uri.UriSchemeHttp)
         {
             Require(arguments.DevelopmentOnly && arguments.AllowHttp && arguments.PhysicalDev
-                && authorityUrl.ToString().TrimEnd('/') == PhysicalCoordinator,
-                "Any HTTP coordinator requires --physical-dev and exact http://192.168.1.44:41801.");
+                && authorityUrl.Port == 41801
+                && IsPrivateIpv4(address!),
+                "Any HTTP coordinator requires --physical-dev and the exact authority-bound RFC1918 IPv4 endpoint on port 41801.");
         }
         else
         {
@@ -288,6 +293,19 @@ static class MailboxGrantProvisioner
                 "Only HTTPS is accepted outside the exact physical development HTTP route.");
         }
         return authorityUrl;
+    }
+
+    private static bool IsPrivateIpv4(System.Net.IPAddress address)
+    {
+        if (address.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork)
+        {
+            return false;
+        }
+
+        var bytes = address.GetAddressBytes();
+        return bytes[0] == 10
+            || (bytes[0] == 172 && bytes[1] is >= 16 and <= 31)
+            || (bytes[0] == 192 && bytes[1] == 168);
     }
 
     private static Bundle BuildBundle(string identity, byte[] holder, byte[] peerHolder,

@@ -32,7 +32,8 @@ after a single publish, and source plus published binaries remain read-locked
 and replacement-protected through both provision and verification. The build
 therefore completes before any secret-bearing command begins.
 The physical development HTTP coordinator is exactly
-`http://192.168.1.44:41801`; arbitrary HTTP is rejected. HTTPS may be used only
+the exact authority-bound RFC1918 IPv4 endpoint on port `41801`; arbitrary or
+public HTTP is rejected. HTTPS may be used only
 when the exact URL is supplied together with the independently trusted
 authority hash and issuer public key.
 
@@ -86,7 +87,7 @@ or attach it to evidence.
 
 ## Physical Android/Windows runtime issuance
 
-`survival-dev.ps1 -Action Up -LanHost 192.168.1.44` now creates two distinct
+`survival-dev.ps1 -Action Up -LanHost <exact-lan-ipv4>` now creates two distinct
 authority files during the same one-shot issuance:
 
 - `mailbox-peer-authority.public.json` is the rich XNode authority containing
@@ -105,7 +106,8 @@ runtime pair with:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass `
-  -File .\scripts\survival-dev-mailbox-issue.ps1
+  -File .\scripts\survival-dev-mailbox-issue.ps1 `
+  -CoordinatorUrl http://<exact-lan-ipv4>:41801
 ```
 
 The issuer reads only the exact protected holder records
