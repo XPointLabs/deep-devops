@@ -441,6 +441,8 @@ function Write-ClientEnvironment(
         $hostValue = $target.Host
         $values = @(
             'SURVIVAL_ENV=Development',
+            'DEEP_TRANSPORT_PROTOCOL=authenticated-mau2',
+            'DEEP_TRANSPORT_OWNERSHIP=user-managed',
             "XNODE_URLS=$($routerIds[0])|http://$hostValue`:41801;$($routerIds[1])|http://$hostValue`:41802;$($routerIds[2])|http://$hostValue`:41803;$($routerIds[3])|http://$hostValue`:41804;$($routerIds[4])|http://$hostValue`:41805;$($routerIds[5])|http://$hostValue`:41806",
             "DEEP_REGISTRY_URL=http://$hostValue`:41810",
             "DEEP_MEMBERSHIP_ROUTE_CATALOG_URL=http://$hostValue`:41810/api/network/membership-route-catalog",

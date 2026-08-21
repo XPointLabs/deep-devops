@@ -730,6 +730,8 @@ test('development identities remain exact strings and Up proves host HTTP reacha
   assert.doesNotMatch(serviceBlock('registry'), /test -r \/proc\/1\/status/);
   assert.doesNotMatch(launcher, /--force-recreate/);
   assert.match(launcher, /Assert-SurvivalHostEndpoints/);
+  assert.match(launcher, /DEEP_TRANSPORT_PROTOCOL=authenticated-mau2/);
+  assert.match(launcher, /DEEP_TRANSPORT_OWNERSHIP=user-managed/);
   for (const port of [41545, 41801, 41802, 41803, 41804, 41805, 41806, 41810, 41811, 41820, 41821, 41822, 41823, 41999]) {
     assert.match(launcher, new RegExp(String(port)));
   }
