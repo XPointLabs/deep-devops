@@ -423,12 +423,19 @@ try {
             throw 'Android holder rotation must rotate every Android-held grant serial.'
         }
     }
-    if (($beforeWindowsSerials -join ',') -cne ($afterWindowsSerials -join ',') -or
-        [string]$beforeAndroid.ownMailbox.blindedMailboxId -cne
+    if (($beforeWindowsSerials[0..3] -join ',') -cne
+            ($afterWindowsSerials[0..3] -join ',') -or
+        ($beforeWindowsSerials[4..5] -join ',') -ceq
+            ($afterWindowsSerials[4..5] -join ',') -or
+        [string]$beforeAndroid.ownMailbox.blindedMailboxId -ceq
             [string]$afterAndroid.ownMailbox.blindedMailboxId -or
         [string]$beforeWindows.ownMailbox.blindedMailboxId -cne
+            [string]$afterWindows.ownMailbox.blindedMailboxId -or
+        [string]$afterWindows.peerMailboxRoute.blindedMailboxId -cne
+            [string]$afterAndroid.ownMailbox.blindedMailboxId -or
+        [string]$afterAndroid.peerMailboxRoute.blindedMailboxId -cne
             [string]$afterWindows.ownMailbox.blindedMailboxId) {
-        throw 'Android holder rotation must preserve Windows grant serials and both mailbox IDs.'
+        throw 'Android holder rotation must rotate its mailbox and dependent peer grants without changing the Windows mailbox.'
     }
 
     # Publish both platform-specific runtime roots from the minimized authority,

@@ -47,8 +47,8 @@ static class MailboxGrantProvisioner
                 "The protected expected issuer public key does not match the issuer seed.");
             var authority = LoadStrictAuthority(arguments);
 
-            var androidSecret = ReadOrCreateMailboxSecret(secretRoot, Android);
-            var windowsSecret = ReadOrCreateMailboxSecret(secretRoot, Windows);
+            var androidSecret = ReadOrCreateMailboxSecret(secretRoot, Android, androidHolder);
+            var windowsSecret = ReadOrCreateMailboxSecret(secretRoot, Windows, windowsHolder);
             var androidMailbox = Hmac(androidSecret, "deep.mailbox.blinded-mailbox-id.v1|android");
             var windowsMailbox = Hmac(windowsSecret, "deep.mailbox.blinded-mailbox-id.v1|windows");
             try
@@ -628,9 +628,17 @@ static class MailboxGrantProvisioner
         new { epoch = set.Next.Epoch, canonicalGrant = set.Next.CanonicalGrant, sha256 = set.Next.Hash }
     };
 
-    private static byte[] ReadOrCreateMailboxSecret(string root, string identity)
+    private static byte[] ReadOrCreateMailboxSecret(
+        string root,
+        string identity,
+        ReadOnlySpan<byte> holder)
     {
-        var path = Path.Combine(root, identity + ".mailbox-secret");
+        Require(holder.Length == 32 && holder.IndexOfAnyExcept((byte)0) >= 0,
+            "Mailbox holder binding is invalid.");
+        var holderBinding = Lower(SHA256.HashData(holder));
+        var path = Path.Combine(
+            root,
+            identity + "-" + holderBinding + ".mailbox-secret");
         AssertNoReparseTraversal(path);
         if (!File.Exists(path))
         {
