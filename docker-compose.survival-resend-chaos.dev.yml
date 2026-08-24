@@ -1,9 +1,4 @@
 services:
-  xnode-1:
-    # The supported ChaosBegin action recreates xnode-1 with no host publisher.
-    # Its real MAU2 ingress remains reachable only by the proxy on `runtime`.
-    ports: !reset []
-
   resend-chaos:
     profiles: [resend-chaos]
     image: ${SURVIVAL_NODE_IMAGE:-node@sha256:242549cd46785b480c832479a730f4f2a20865d61ea2e404fdb2a5c3d3b73ecf}
@@ -36,8 +31,6 @@ services:
         target: resend-chaos-token
         mode: 0444
     networks: [runtime]
-    ports:
-      - "${SURVIVAL_BIND_HOST:-127.0.0.1}:41801:8080"
     depends_on:
       xnode-1: { condition: service_healthy }
     healthcheck:
@@ -52,6 +45,12 @@ services:
     labels:
       com.xpoint.survival.stack: dev
       com.xpoint.survival.resend-chaos: development-only
+
+  survival-uat-tls-ingress:
+    environment:
+      DEEP_UAT_XNODE_1_UPSTREAM: resend-chaos
+    depends_on:
+      resend-chaos: { condition: service_healthy }
 
 secrets:
   resend-chaos-token:

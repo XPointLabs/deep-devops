@@ -19,10 +19,11 @@ $ExpectedXNodeManifestSha256 = '2b2a223c96bb3a9cb075262e14b64e083d28f3a2b4a1068b
 $ExpectedDriverSha256 = @{
     'MailboxGrantProvisioner.cs' = 'f88f7ebb0c06f11fde52386341202090e8bd4205ad23bb40c31e7d79d2ac8184'
     'MailboxRuntimePublisher.cs' = 'd6aad71f65987f620ccf0d5a06394240aa199d3bb92ef38b81a9594f8e9ff94b'
-    'Program.cs' = '6f8017cf7eb6902a99ffe98d5931e1731c3a704746c598287d1a6147e135f1c2'
+    'Program.cs' = '42bc7aa6c57f9e64e8bb7fae2f864133eba4ba64115e39948c19104a45900daf'
     'SurvivalMailboxDriver.csproj' = '4db436d69ea88ac3ff16f08c161b61cc0c048bad84cb7e529b2208fa569eafbe'
 }
-$PublicAuthority = Join-Path $Root 'artifacts\survival-dev\mailbox-peer-authority.public.json'
+. (Join-Path $PSScriptRoot 'survival-dev-private-secrets.ps1')
+$AuthorityState = Join-Path $Root '.secrets\survival-dev\mailbox-authority-state.v1.json'
 $Secrets = Join-Path $Root '.secrets\survival-dev'
 $State = Join-Path $Root 'artifacts\survival-dev\resend-chaos-driver-state'
 $BuildWork = Join-Path ([IO.Path]::GetTempPath()) ('deep-resend-chaos-driver-' + [Guid]::NewGuid().ToString('N'))
@@ -31,6 +32,7 @@ $VerificationRoot = Join-Path $BuildWork 'verification'
 $BuildArtifacts = Join-Path $BuildWork 'artifacts'
 $PublishRoot = Join-Path $BuildWork 'publish'
 $DriverDll = Join-Path $PublishRoot 'SurvivalMailboxDriver.dll'
+$HttpsAuthority = Join-Path $BuildWork 'mailbox-peer-authority.https.public.json'
 if ([string]::IsNullOrWhiteSpace($EvidencePath)) {
     $EvidencePath = Join-Path $Root 'artifacts\survival-dev\resend-chaos-integration.json'
 }
@@ -62,7 +64,9 @@ try {
 
 function Invoke-Checked([string]$File, [string[]]$Arguments) {
     $output = @(& $File @Arguments)
-    if ($LASTEXITCODE -ne 0) { throw "$File failed with exit code $LASTEXITCODE." }
+    if ($LASTEXITCODE -ne 0) {
+        throw "$File failed with exit code $LASTEXITCODE.`n$($output -join "`n")"
+    }
     return $output
 }
 
@@ -70,26 +74,15 @@ function Get-RunningStackCount() {
     return @(& docker ps --filter 'label=com.docker.compose.project=deep-survival-dev' --format '{{.Names}}').Count
 }
 
-function Get-ReceiverTotals() {
-    $stored = 0L
-    $duplicates = 0L
-    # xnode-1's public publisher is deliberately removed while chaos is active;
-    # only the five remote peer receivers are relevant to fanout duplication.
-    foreach ($index in 2..6) {
-        $status = Invoke-RestMethod -Uri "http://${BindHost}:$((41800 + $index))/status" -TimeoutSec 5
-        $stored += [long]$status.mailbox.receiver.stored
-        $duplicates += [long]$status.mailbox.receiver.duplicates
-    }
-    return [pscustomobject]@{ stored = $stored; duplicates = $duplicates }
-}
-
 if ((Get-RunningStackCount) -ne 14) { throw 'Resend chaos integration requires the ordinary 14-container survival stack.' }
 $initial = @(& powershell -NoProfile -ExecutionPolicy Bypass -File $Launcher -Action ChaosStatus)
-$initialStatus = ($initial | Where-Object { $_ -match '^\{"schema":"deep-survival-resend-chaos-status\.v1"' } | Select-Object -Last 1) | ConvertFrom-Json
+$initialStatus = ($initial | Where-Object { $_ -match '^\{"schema":"deep-survival-resend-chaos-status\.v2"' } | Select-Object -Last 1) | ConvertFrom-Json
 if ($initialStatus.running -ne $false -or $initialStatus.armed -ne $false) { throw 'Resend chaos must start fully off.' }
 
 $chaosStarted = $false
 $sourceLocks = $null
+$faultEvidence = @()
+$runtimeImages = $null
 try {
     [void](Invoke-Checked node @('--test', '--test-force-exit', (Join-Path $Root 'tools\survival-resend-chaos\resend-chaos-proxy.test.mjs')))
     [void][IO.Directory]::CreateDirectory($BuildWork)
@@ -133,38 +126,98 @@ try {
     Set-MailboxTreeWritable $VerificationRoot
     Remove-Item -LiteralPath $VerificationRoot -Recurse -Force
 
-    [void](Invoke-Checked powershell @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $Launcher, '-Action', 'ChaosBegin', '-LanHost', $BindHost, '-ChaosTtlSeconds', [string]$TtlSeconds))
-    $chaosStarted = $true
-    # ChaosBegin intentionally recreates the XNodes, which resets process-local
-    # counters; take the comparison baseline only after that supported lifecycle.
-    $before = Get-ReceiverTotals
-    $runId = [Guid]::NewGuid().ToString('N')
-    $driverOutput = Invoke-Checked dotnet @(
-        $DriverDll, 'client-uncertain-resend',
+    [void](Invoke-Checked dotnet @(
+        $DriverDll, 'authority',
         '--secrets-dir', $Secrets,
-        '--state-dir', $State,
-        '--authority-public', $PublicAuthority,
-        '--coordinator-url', "http://${BindHost}:41801",
-        '--client-url', "http://${BindHost}:41801",
-        '--require-non-loopback-coordinator',
-        '--run-id', $runId)
-    $driver = ($driverOutput | Where-Object { $_ -match '^\{"schemaVersion":1,"phase":"client-uncertain-resend"' } | Select-Object -Last 1) | ConvertFrom-Json
-    if ($driver.passed -ne $true -or $driver.details.serverItemCount -ne 1 -or
-        $driver.details.duplicateServerItemCreated -ne $false -or
-        $driver.details.exactReplay -ne $true -or $driver.details.nativeMqr3 -ne $true) {
-        throw 'Real uncertain-resend driver assertions failed.'
-    }
-    $statusOutput = Invoke-Checked powershell @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $Launcher, '-Action', 'ChaosStatus')
-    $chaos = ($statusOutput | Where-Object { $_ -match '^\{"schema":"deep-survival-resend-chaos-status\.v1"' } | Select-Object -Last 1) | ConvertFrom-Json
-    if ($chaos.armed -ne $false -or $chaos.consumed -ne $true -or
-        $chaos.upstreamSuccessObserved -ne 4 -or $chaos.downstreamDropped -ne 1 -or
-        $chaos.requestCount -ne 4 -or $chaos.identifiersIncluded -ne $false -or
-        $chaos.payloadInspected -ne $false) {
-        throw 'One-shot chaos counters did not prove one exact post-durable drop.'
-    }
-    $after = Get-ReceiverTotals
-    if (($after.stored - $before.stored) -ne 1 -or ($after.duplicates - $before.duplicates) -ne 0) {
-        throw 'Real XNode receiver counters did not prove one new replica and zero duplicate writes.'
+        '--authority-state', $AuthorityState,
+        '--output-env', (Join-Path $BuildWork 'mailbox-peer-authority.https.env'),
+        '--output-client-env', (Join-Path $BuildWork 'mailbox-client-authority.https.env'),
+        '--coordinator-url', "https://${BindHost}:41801",
+        '--output-public', $HttpsAuthority,
+        '--output-client-public', (Join-Path $BuildWork 'mailbox-client-authority.https.public.json')))
+
+    foreach ($fault in @('post-durable-response-drop', 'pre-dispatch-outage')) {
+        try {
+            $beginOutput = Invoke-Checked powershell @(
+                '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $Launcher,
+                '-Action', 'ChaosBegin', '-LanHost', $BindHost,
+                '-ChaosTtlSeconds', [string]$TtlSeconds, '-ChaosFault', $fault)
+            $chaosStarted = $true
+            $begin = ($beginOutput | Where-Object { $_ -match '^\{"schema":"deep-survival-resend-chaos-status\.v2"' } | Select-Object -Last 1) | ConvertFrom-Json
+            if ($begin.armed -ne $true -or $begin.fault -cne $fault -or
+                ([long]$begin.faultWindowDeadlineUnixMilliseconds - [long]$begin.faultWindowStartedUnixMilliseconds) -ne ($TtlSeconds * 1000L)) {
+                throw 'ChaosBegin did not return the exact armed fault/deadline binding.'
+            }
+            $runId = [Guid]::NewGuid().ToString('N')
+            $driverOutput = Invoke-Checked dotnet @(
+                $DriverDll, 'client-uncertain-resend',
+                '--secrets-dir', $Secrets,
+                '--state-dir', $State,
+                '--authority-public', $HttpsAuthority,
+                '--coordinator-url', "https://${BindHost}:41801",
+                '--client-url', "https://${BindHost}:41801",
+                '--require-non-loopback-coordinator',
+                '--run-id', $runId)
+            $driver = ($driverOutput | Where-Object { $_ -match '^\{"schemaVersion":1,"phase":"client-uncertain-resend"' } | Select-Object -Last 1) | ConvertFrom-Json
+            if ($driver.passed -ne $true -or $driver.details.serverItemCount -ne 1 -or
+                $driver.details.duplicateServerItemCreated -ne $false -or
+                $driver.details.exactReplay -ne $true -or $driver.details.nativeMqr3 -ne $true) {
+                throw "Real uncertain-resend driver assertions failed for $fault."
+            }
+            $statusOutput = Invoke-Checked powershell @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $Launcher, '-Action', 'ChaosStatus')
+            $chaos = ($statusOutput | Where-Object { $_ -match '^\{"schema":"deep-survival-resend-chaos-status\.v2"' } | Select-Object -Last 1) | ConvertFrom-Json
+            $expectedDispatches = if ($fault -ceq 'post-durable-response-drop') { 3 } else { 2 }
+            $expectedPostDrop = if ($fault -ceq 'post-durable-response-drop') { 1 } else { 0 }
+            $expectedPreOutage = if ($fault -ceq 'pre-dispatch-outage') { 1 } else { 0 }
+            if ($chaos.armed -ne $false -or $chaos.consumed -ne $true -or
+                $chaos.operation -cne 'mailbox-store' -or $chaos.fault -cne $fault -or
+                $chaos.requestCount -ne 4 -or
+                $chaos.operationAttemptCount -ne 3 -or
+                $chaos.operationUpstreamDispatchCount -ne $expectedDispatches -or
+                $chaos.operationUpstreamSuccessCount -ne $expectedDispatches -or
+                $chaos.injectedFaultCount -ne 1 -or
+                $chaos.postDurableResponseDropCount -ne $expectedPostDrop -or
+                $chaos.preDispatchOutageCount -ne $expectedPreOutage -or
+                $chaos.identifiersIncluded -ne $false -or $chaos.payloadInspected -ne $false) {
+                throw "One-shot chaos counters did not prove the exact $fault attempt lifecycle: $($chaos | ConvertTo-Json -Compress)"
+            }
+            if ($null -eq $runtimeImages) {
+                $proxyId = (& docker ps --filter 'label=com.docker.compose.service=resend-chaos' --quiet | Out-String).Trim()
+                $ingressId = (& docker ps --filter 'label=com.docker.compose.service=survival-uat-tls-ingress' --quiet | Out-String).Trim()
+                if ($proxyId -notmatch '^[0-9a-f]{12,64}$' -or $ingressId -notmatch '^[0-9a-f]{12,64}$') {
+                    throw 'Unable to bind evidence to the exact running chaos and TLS ingress images.'
+                }
+                $runtimeImages = [ordered]@{
+                    resendChaos = ((& docker inspect --format '{{.Image}}' $proxyId) | Out-String).Trim()
+                    uatTlsIngress = ((& docker inspect --format '{{.Image}}' $ingressId) | Out-String).Trim()
+                }
+                if ($runtimeImages.resendChaos -notmatch '^sha256:[0-9a-f]{64}$' -or
+                    $runtimeImages.uatTlsIngress -notmatch '^sha256:[0-9a-f]{64}$') {
+                    throw 'Runtime image evidence is not bound to exact SHA-256 image identities.'
+                }
+            }
+            $faultEvidence += [ordered]@{
+                fault = $fault
+                operation = $chaos.operation
+                faultWindowStartedUnixMilliseconds = [long]$chaos.faultWindowStartedUnixMilliseconds
+                faultWindowDeadlineUnixMilliseconds = [long]$chaos.faultWindowDeadlineUnixMilliseconds
+                requestCount = [long]$chaos.requestCount
+                operationAttemptCount = [long]$chaos.operationAttemptCount
+                operationUpstreamDispatchCount = [long]$chaos.operationUpstreamDispatchCount
+                operationUpstreamSuccessCount = [long]$chaos.operationUpstreamSuccessCount
+                injectedFaultCount = [long]$chaos.injectedFaultCount
+                postDurableResponseDropCount = [long]$chaos.postDurableResponseDropCount
+                preDispatchOutageCount = [long]$chaos.preDispatchOutageCount
+                serverItemCount = 1
+                duplicateServerItemCreated = $false
+                exactReplay = $true
+            }
+        } finally {
+            if ($chaosStarted) {
+                [void](Invoke-Checked powershell @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $Launcher, '-Action', 'ChaosEnd'))
+                $chaosStarted = $false
+            }
+        }
     }
 }
 finally {
@@ -191,33 +244,86 @@ $proxyCount = @(& docker ps --filter 'label=com.xpoint.survival.resend-chaos=dev
 $tokenExists = Test-Path -LiteralPath (Join-Path $Secrets 'resend-chaos.token')
 if ($proxyCount -ne 0 -or $tokenExists) { throw 'Chaos cleanup did not remove the proxy and protected token.' }
 
-$evidence = [pscustomobject]@{
-    schema = 'deep-survival-resend-chaos-evidence.v1'
-    generatedAt = [DateTimeOffset]::UtcNow
-    scope = 'development-only-real-mau2-ingress'
+function Get-FileSha256Lower([string]$Path) {
+    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+
+$evidenceCore = [ordered]@{
+    schema = 'deep-survival-resend-chaos-evidence.v2'
+    generatedAt = [DateTimeOffset]::UtcNow.ToString('O')
+    scope = 'development-only-real-mau2-ca-trusted-https-ingress'
     passed = $true
-    assertions = [pscustomobject]@{
-        deterministicProxyContract = $true
-        realXNodeDurableBeforeDrop = $true
-        exactlyOneDownstreamDrop = $true
+    publicTransport = [ordered]@{
+        origin = "https://${BindHost}:41801"
+        platformTlsValidation = $true
+        cleartextApplicationHttpRejected = $true
+        publicRoute = '/api/client/mailbox/v2/store'
+    }
+    sourceBindings = [ordered]@{
+        xnodeCommit = $ExpectedXNodeCommit
+        xnodeManifestSha256 = $ExpectedXNodeManifestSha256
+        mailboxBuildHelperSha256 = $ExpectedBuildHelperSha256
+        mailboxDriverFilesSha256 = $ExpectedDriverSha256
+    }
+    configurationBindingsSha256 = [ordered]@{
+        baseCompose = Get-FileSha256Lower (Join-Path $Root 'docker-compose.survival.dev.yml')
+        uatTlsCompose = Get-FileSha256Lower (Join-Path $Root 'docker-compose.survival-uat-tls.dev.yml')
+        chaosCompose = Get-FileSha256Lower (Join-Path $Root 'docker-compose.survival-resend-chaos.dev.yml')
+        haproxy = Get-FileSha256Lower (Join-Path $Root 'config\survival-uat-tls\haproxy.cfg')
+        proxy = Get-FileSha256Lower (Join-Path $Root 'tools\survival-resend-chaos\resend-chaos-proxy.mjs')
+        controlClient = Get-FileSha256Lower (Join-Path $Root 'tools\survival-resend-chaos\control-client.mjs')
+    }
+    runtimeImages = $runtimeImages
+    faultRuns = $faultEvidence
+    assertions = [ordered]@{
+        authenticatedPrivateControlSocket = $true
+        boundedTtl = $true
+        exactOneShotFaultPerRun = $true
+        postDurableResponseDropRecovered = $true
+        preDispatchOutageRecovered = $true
         exactRetryReturnsNativeMqr3 = $true
         exactReplayStable = $true
-        serverItemCount = 1
-        remoteReplicaStoredDelta = 1
-        remoteDuplicateDelta = 0
         payloadInspected = $false
         identifiersIncluded = $false
-        ttlAndRestartDefaultDisarmed = $true
-        ordinaryStackRestored = $true
+        ordinaryHttpsStackRestored = $true
         protectedTokenDeleted = $true
     }
-    counters = [pscustomobject]@{
-        upstreamSuccessObserved = 4
-        downstreamDropped = 1
-        requestCount = 4
-    }
-    limitations = 'DEV-only fault injection with a software-held random lab token; it is structurally absent from staging and production Compose.'
+    authorityClaim = 'none; SHA-256 content addressing detects mutation but does not create a signing authority'
+    limitations = 'DEV-only fault injection; the interposer is private behind the unchanged CA-trusted HTTPS ingress and is structurally absent from staging and production Compose.'
+}
+$canonicalEvidence = $evidenceCore | ConvertTo-Json -Depth 12 -Compress
+$canonicalBytes = [Text.Encoding]::UTF8.GetBytes($canonicalEvidence)
+try {
+    $hasher = [Security.Cryptography.SHA256]::Create()
+    try { $evidenceSha256 = ([BitConverter]::ToString($hasher.ComputeHash($canonicalBytes)).Replace('-', '')).ToLowerInvariant() }
+    finally { $hasher.Dispose() }
+} finally { [Array]::Clear($canonicalBytes, 0, $canonicalBytes.Length) }
+$envelope = [ordered]@{
+    schema = 'deep-survival-resend-chaos-evidence-envelope.v2'
+    evidenceSha256 = $evidenceSha256
+    evidence = $evidenceCore
 }
 [void][IO.Directory]::CreateDirectory((Split-Path $EvidencePath -Parent))
-[IO.File]::WriteAllText($EvidencePath, (($evidence | ConvertTo-Json -Depth 6) + "`n"), [Text.UTF8Encoding]::new($false))
+$temporaryEvidencePath = "$EvidencePath.$([Guid]::NewGuid().ToString('N')).tmp"
+try {
+    [IO.File]::WriteAllText($temporaryEvidencePath, (($envelope | ConvertTo-Json -Depth 12) + "`n"), [Text.UTF8Encoding]::new($false))
+    Protect-SurvivalDevPrivateFile $temporaryEvidencePath
+    Move-Item -LiteralPath $temporaryEvidencePath -Destination $EvidencePath -Force
+    Assert-SurvivalDevPrivateFile $EvidencePath
+} finally {
+    Remove-Item -LiteralPath $temporaryEvidencePath -Force -ErrorAction SilentlyContinue
+}
+$reread = Get-Content -Raw -LiteralPath $EvidencePath | ConvertFrom-Json
+$rereadCanonical = $reread.evidence | ConvertTo-Json -Depth 12 -Compress
+$rereadBytes = [Text.Encoding]::UTF8.GetBytes($rereadCanonical)
+try {
+    $rereadHasher = [Security.Cryptography.SHA256]::Create()
+    try { $rereadSha256 = ([BitConverter]::ToString($rereadHasher.ComputeHash($rereadBytes)).Replace('-', '')).ToLowerInvariant() }
+    finally { $rereadHasher.Dispose() }
+} finally { [Array]::Clear($rereadBytes, 0, $rereadBytes.Length) }
+if ($reread.schema -cne 'deep-survival-resend-chaos-evidence-envelope.v2' -or
+    $reread.evidenceSha256 -cne $evidenceSha256 -or $rereadSha256 -cne $evidenceSha256) {
+    throw 'Atomic protected chaos evidence failed independent same-process digest verification.'
+}
 Write-Output "Resend chaos integration evidence: $EvidencePath"
+Write-Output "Resend chaos evidence SHA256: $evidenceSha256"

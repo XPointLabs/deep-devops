@@ -8,7 +8,9 @@ param(
     [switch]$Chain,
     [switch]$Reset,
     [ValidateRange(5, 300)]
-    [int]$ChaosTtlSeconds = 60
+    [int]$ChaosTtlSeconds = 60,
+    [ValidateSet('post-durable-response-drop','pre-dispatch-outage')]
+    [string]$ChaosFault
 )
 
 $ErrorActionPreference = 'Stop'
@@ -16,10 +18,12 @@ Set-StrictMode -Version Latest
 
 $Root = [IO.Path]::GetFullPath((Split-Path $PSScriptRoot -Parent))
 $ComposePath = Join-Path $Root 'docker-compose.survival.dev.yml'
+$UatTlsComposePath = Join-Path $Root 'docker-compose.survival-uat-tls.dev.yml'
 $ChaosComposePath = Join-Path $Root 'docker-compose.survival-resend-chaos.dev.yml'
 $Project = 'deep-survival-dev'
 $baseArguments = @('compose', '-p', $Project, '-f', $ComposePath)
-$chaosArguments = @('compose', '-p', $Project, '-f', $ComposePath, '-f', $ChaosComposePath, '--profile', 'resend-chaos')
+$uatTlsArguments = @('compose', '-p', $Project, '-f', $ComposePath, '-f', $UatTlsComposePath)
+$chaosArguments = @('compose', '-p', $Project, '-f', $ComposePath, '-f', $UatTlsComposePath, '-f', $ChaosComposePath, '--profile', 'resend-chaos')
 $ContextRoot = Join-Path $Root 'artifacts\survival-dev\build-contexts'
 $SurvivalXNodeCommit = '4d05fe7dd2dadd3f094c172a382ad675d2ff545a'
 $SurvivalXNodeContextManifestSha256 = '2b2a223c96bb3a9cb075262e14b64e083d28f3a2b4a1068b68c737250311e52a'
@@ -27,7 +31,7 @@ $SurvivalMailboxBuildHelperSha256 = '04c0f2cf9118b648ce4868390451afd33cd6ad9ce55
 $SurvivalMailboxDriverSha256 = @{
     'MailboxGrantProvisioner.cs' = 'f88f7ebb0c06f11fde52386341202090e8bd4205ad23bb40c31e7d79d2ac8184'
     'MailboxRuntimePublisher.cs' = 'd6aad71f65987f620ccf0d5a06394240aa199d3bb92ef38b81a9594f8e9ff94b'
-    'Program.cs' = '6f8017cf7eb6902a99ffe98d5931e1731c3a704746c598287d1a6147e135f1c2'
+    'Program.cs' = '42bc7aa6c57f9e64e8bb7fae2f864133eba4ba64115e39948c19104a45900daf'
     'SurvivalMailboxDriver.csproj' = '4db436d69ea88ac3ff16f08c161b61cc0c048bad84cb7e529b2208fa569eafbe'
 }
 $ChainLifecycleServices = @(
@@ -553,36 +557,82 @@ function Write-ClientEnvironment(
 }
 
 function Get-SurvivalChaosHost() {
-    $environmentPath = Join-Path $Root 'artifacts\survival-dev\client.windows.env'
-    if (-not (Test-Path -LiteralPath $environmentPath -PathType Leaf)) {
-        throw 'ChaosBegin requires a successfully prepared survival client environment.'
+    if ([string]::IsNullOrWhiteSpace($LanHost)) {
+        throw 'ChaosBegin requires the exact UAT TLS IPv4 host in -LanHost.'
     }
-    $line = @(Get-Content -LiteralPath $environmentPath | Where-Object { $_ -clike 'XNODE_URLS=*' })
-    if ($line.Count -ne 1 -or $line[0] -cnotmatch '^XNODE_URLS=[0-9a-f]{64}\|http://(?<host>[0-9.]+):41801(?:;|$)') {
-        throw 'Survival client environment does not contain the exact first XNode endpoint.'
-    }
-    $publishedHost = $Matches.host
+    $publishedHost = $LanHost
     $address = $null
     if (-not [Net.IPAddress]::TryParse($publishedHost, [ref]$address) -or
         $address.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork -or
         $address.Equals([Net.IPAddress]::Any)) {
         throw 'Survival chaos host must be one exact non-wildcard IPv4 address.'
     }
-    if (-not [string]::IsNullOrWhiteSpace($LanHost) -and $LanHost -cne $publishedHost) {
-        throw 'ChaosBegin LanHost must exactly match the current verified client environment.'
-    }
     return $publishedHost
 }
 
-function Get-PinnedSurvivalXNodeContext() {
-    $context = Join-Path $ContextRoot 'xnode'
-    $manifest = Join-Path $context '.survival-source-manifest.json'
-    if (-not (Test-Path -LiteralPath $manifest -PathType Leaf) -or
-        (Get-FileHash -LiteralPath $manifest -Algorithm SHA256).Hash.ToLowerInvariant() -cne
-            $SurvivalXNodeContextManifestSha256) {
-        throw 'ChaosBegin requires the exact previously verified pinned XNode build context.'
+function Get-SurvivalUatTlsSecretDirectory() {
+    $configured = [Environment]::GetEnvironmentVariable('SURVIVAL_UAT_TLS_SECRET_DIR')
+    if ([string]::IsNullOrWhiteSpace($configured)) {
+        throw 'SURVIVAL_UAT_TLS_SECRET_DIR is required for the supported HTTPS chaos lane.'
     }
-    return $context
+    $directory = [IO.Path]::GetFullPath($configured)
+    foreach ($name in @('server.pem', 'ca.crt', 'public\deep-physical-uat-ca.crl')) {
+        if (-not (Test-Path -LiteralPath (Join-Path $directory $name) -PathType Leaf)) {
+            throw "UAT TLS material is incomplete: $name is missing."
+        }
+    }
+    return $directory
+}
+
+function Assert-SurvivalUatTlsEndpoint([string]$HostName) {
+    try {
+        $response = Invoke-WebRequest -UseBasicParsing `
+            -Uri "https://$HostName`:41801/api/network/contact" -TimeoutSec 5
+        if ($response.StatusCode -ne 200) { throw 'unexpected HTTPS status' }
+    } catch {
+        throw "The CA-trusted HTTPS XNode ingress is not ready: $_"
+    }
+    $acceptedCleartext = $false
+    try {
+        [void](Invoke-WebRequest -UseBasicParsing -Uri "http://$HostName`:41801/api/network/contact" -TimeoutSec 2)
+        $acceptedCleartext = $true
+    } catch {}
+    if ($acceptedCleartext) { throw 'The XNode application port accepted cleartext HTTP.' }
+}
+
+function Get-SurvivalChaosBindingPath() {
+    return Join-Path $Root '.secrets\survival-dev\resend-chaos.binding.json'
+}
+
+function Write-SurvivalChaosBinding([string]$HostName,[string]$TlsSecretDirectory) {
+    $path = Get-SurvivalChaosBindingPath
+    $temporary = "$path.$([Guid]::NewGuid().ToString('N')).tmp"
+    try {
+        $value = [ordered]@{
+            schema = 'deep-survival-resend-chaos-binding.v2'
+            host = $HostName
+            tlsSecretDirectory = $TlsSecretDirectory
+        } | ConvertTo-Json -Compress
+        [IO.File]::WriteAllText($temporary, "$value`n", [Text.UTF8Encoding]::new($false))
+        Protect-SurvivalDevPrivateFile $temporary
+        Move-Item -LiteralPath $temporary -Destination $path -Force
+        Assert-SurvivalDevPrivateFile $path
+    } finally {
+        Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Read-SurvivalChaosBinding() {
+    $path = Get-SurvivalChaosBindingPath
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
+    Assert-SurvivalDevPrivateFile $path
+    $value = Get-Content -Raw -LiteralPath $path | ConvertFrom-Json
+    if ($value.schema -cne 'deep-survival-resend-chaos-binding.v2' -or
+        [string]::IsNullOrWhiteSpace($value.host) -or
+        [string]::IsNullOrWhiteSpace($value.tlsSecretDirectory)) {
+        throw 'Protected chaos binding is invalid.'
+    }
+    return $value
 }
 
 function New-SurvivalChaosToken() {
@@ -611,12 +661,15 @@ function Invoke-SurvivalChaosControl([ValidateSet('arm','disarm','status')][stri
     $arguments = $chaosArguments + @(
         'exec', '-T', 'resend-chaos', 'node',
         '/opt/deep-chaos/control-client.mjs', $Command)
-    if ($Command -eq 'arm') { $arguments += @('--ttl', [string]$ChaosTtlSeconds) }
+    if ($Command -eq 'arm') {
+        $arguments += @('--ttl', [string]$ChaosTtlSeconds, '--fault', $ChaosFault)
+    }
     $json = (& docker @arguments | Out-String).Trim()
     if ($LASTEXITCODE -ne 0) { throw 'Survival resend chaos control failed.' }
     $status = $json | ConvertFrom-Json
-    if ($status.schema -cne 'deep-survival-resend-chaos-status.v1' -or
+    if ($status.schema -cne 'deep-survival-resend-chaos-status.v2' -or
         $status.mode -cne 'development-only' -or
+        $status.operation -cne 'mailbox-store' -or
         $status.identifiersIncluded -ne $false -or
         $status.payloadInspected -ne $false) {
         throw 'Survival resend chaos returned invalid or unsafe status.'
@@ -625,7 +678,10 @@ function Invoke-SurvivalChaosControl([ValidateSet('arm','disarm','status')][stri
 }
 
 function Test-SurvivalChaosRunning() {
-    $id = (& docker @($chaosArguments + @('ps', '--status', 'running', '--quiet', 'resend-chaos')) | Out-String).Trim()
+    $id = (& docker ps `
+        --filter "label=com.docker.compose.project=$Project" `
+        --filter 'label=com.docker.compose.service=resend-chaos' `
+        --filter 'status=running' --quiet | Out-String).Trim()
     if ($LASTEXITCODE -ne 0) { throw 'Unable to inspect survival resend chaos state.' }
     return -not [string]::IsNullOrWhiteSpace($id)
 }
@@ -633,28 +689,44 @@ function Test-SurvivalChaosRunning() {
 function Wait-SurvivalXNodeOne([string]$HostName) {
     foreach ($attempt in 1..40) {
         try {
-            $response = Invoke-WebRequest -UseBasicParsing -Uri "http://$HostName`:41801/health/ready" -TimeoutSec 2
+            $response = Invoke-WebRequest -UseBasicParsing -Uri "https://$HostName`:41801/api/network/contact" -TimeoutSec 2
             if ($response.StatusCode -eq 200) { return }
         } catch {}
         Start-Sleep -Milliseconds 500
     }
-    throw 'xnode-1 did not recover its ordinary host publisher.'
+    throw 'xnode-1 did not recover behind its CA-trusted HTTPS ingress.'
 }
 
-function Stop-SurvivalChaos([string]$HostName, [switch]$BestEffort) {
+function Stop-SurvivalChaos([switch]$BestEffort) {
     $failure = $null
+    $binding = Read-SurvivalChaosBinding
     try {
-        if (Test-SurvivalChaosRunning) { [void](Invoke-SurvivalChaosControl 'disarm') }
-        Invoke-SurvivalDocker ($chaosArguments + @('stop', 'resend-chaos', 'xnode-1'))
-        Invoke-SurvivalDocker ($chaosArguments + @('rm', '-f', 'resend-chaos', 'xnode-1'))
-        Invoke-SurvivalDockerBounded -TimeoutSeconds 120 -Arguments ($baseArguments + @('up', '-d', '--no-deps', '--wait', 'xnode-1'))
-        Wait-SurvivalXNodeOne $HostName
+        if ($null -ne $binding) {
+            $env:SURVIVAL_BIND_HOST = $binding.host
+            $env:SURVIVAL_UAT_TLS_SECRET_DIR = $binding.tlsSecretDirectory
+        }
+        $chaosRunning = Test-SurvivalChaosRunning
+        if ($chaosRunning -and $null -eq $binding) {
+            throw 'Running chaos has no protected HTTPS binding; refusing ambiguous cleanup.'
+        }
+        if ($chaosRunning) {
+            [void](Invoke-SurvivalChaosControl 'disarm')
+        }
+        if ($null -ne $binding) {
+            Invoke-SurvivalDocker ($chaosArguments + @('stop', 'resend-chaos'))
+            Invoke-SurvivalDocker ($chaosArguments + @('rm', '-f', 'resend-chaos'))
+            Invoke-SurvivalDockerBounded -TimeoutSeconds 120 -Arguments (
+                $uatTlsArguments + @('up', '-d', '--no-deps', '--wait', '--force-recreate', 'survival-uat-tls-ingress'))
+            Wait-SurvivalXNodeOne $binding.host
+            Assert-SurvivalUatTlsEndpoint $binding.host
+        }
     } catch {
         $failure = $_
     }
     $tokenPath = Join-Path $Root '.secrets\survival-dev\resend-chaos.token'
-    if ($null -eq $failure -and (Test-Path -LiteralPath $tokenPath)) {
-        Remove-Item -LiteralPath $tokenPath -Force
+    if ($null -eq $failure) {
+        Remove-Item -LiteralPath $tokenPath -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath (Get-SurvivalChaosBindingPath) -Force -ErrorAction SilentlyContinue
     }
     if ($null -ne $failure -and -not $BestEffort) { throw $failure }
     if ($null -ne $failure -and $BestEffort) { Write-Warning 'Chaos cleanup failed; protected token retained.' }
@@ -736,46 +808,43 @@ switch ($Action) {
         Invoke-SurvivalDocker ($baseArguments + @('restart') + $Service)
     }
     'ChaosBegin' {
-        if ($Chain -or $Service.Count -gt 0 -or $Reset) {
-            throw 'ChaosBegin does not accept -Chain, -Service, or -Reset.'
+        if ($Chain -or $Service.Count -gt 0 -or $Reset -or [string]::IsNullOrWhiteSpace($ChaosFault)) {
+            throw 'ChaosBegin requires -ChaosFault and does not accept -Chain, -Service, or -Reset.'
         }
         if (Test-SurvivalChaosRunning) { throw 'Resend chaos is already running; use ChaosEnd first.' }
+        if ($null -ne (Read-SurvivalChaosBinding)) { throw 'A stale protected chaos binding exists; use ChaosEnd first.' }
         $advertisedHost = Get-SurvivalChaosHost
+        $tlsSecretDirectory = Get-SurvivalUatTlsSecretDirectory
         $env:SURVIVAL_BIND_HOST = $advertisedHost
+        $env:SURVIVAL_UAT_TLS_SECRET_DIR = $tlsSecretDirectory
+        Assert-SurvivalUatTlsEndpoint $advertisedHost
         $tokenPath = New-SurvivalChaosToken
+        Write-SurvivalChaosBinding $advertisedHost $tlsSecretDirectory
         try {
-            Prepare-SurvivalMailboxPeerAuthority (Get-PinnedSurvivalXNodeContext)
-            $nodes = 1..6 | ForEach-Object { "xnode-$_" }
-            Invoke-SurvivalDocker ($baseArguments + @('stop') + $nodes)
-            Invoke-SurvivalDocker ($chaosArguments + @('rm', '-f', 'resend-chaos') + $nodes)
-            Invoke-SurvivalDockerBounded -TimeoutSeconds 180 -Arguments (
-                $chaosArguments + @('up', '-d', '--no-build', '--no-deps', '--wait') + $nodes + @('resend-chaos'))
-            & node (Join-Path $PSScriptRoot 'survival-dev-seed.mjs') '--host' $advertisedHost
-            if ($LASTEXITCODE -ne 0) { throw 'Survival resend chaos relay contact seed failed.' }
-            Invoke-SurvivalDocker ($chaosArguments + @('restart') + $nodes)
             Invoke-SurvivalDockerBounded -TimeoutSeconds 120 -Arguments (
-                $chaosArguments + @('up', '-d', '--no-deps', '--wait') + $nodes + @('resend-chaos'))
-            & node (Join-Path $PSScriptRoot 'survival-dev-verify.mjs') '--host' $advertisedHost
-            if ($LASTEXITCODE -ne 0) { throw 'Survival resend chaos topology verification failed.' }
+                $chaosArguments + @('up', '-d', '--no-build', '--no-deps', '--wait', 'resend-chaos'))
+            Invoke-SurvivalDockerBounded -TimeoutSeconds 120 -Arguments (
+                $chaosArguments + @('up', '-d', '--no-build', '--no-deps', '--wait', '--force-recreate', 'survival-uat-tls-ingress'))
+            Assert-SurvivalUatTlsEndpoint $advertisedHost
             $status = Invoke-SurvivalChaosControl 'status'
             if ($status.armed -or $status.consumed) {
                 throw 'Resend chaos did not start from a clean disarmed state.'
             }
             Invoke-SurvivalChaosControl 'arm' | ConvertTo-Json -Compress
         } catch {
-            Stop-SurvivalChaos $advertisedHost -BestEffort
+            Stop-SurvivalChaos -BestEffort
             throw
         }
     }
     'ChaosEnd' {
-        if ($Chain -or $Service.Count -gt 0 -or $Reset) {
-            throw 'ChaosEnd does not accept -Chain, -Service, or -Reset.'
+        if ($Chain -or $Service.Count -gt 0 -or $Reset -or
+            -not [string]::IsNullOrWhiteSpace($LanHost) -or
+            -not [string]::IsNullOrWhiteSpace($ChaosFault)) {
+            throw 'ChaosEnd does not accept -Chain, -Service, -Reset, -LanHost, or -ChaosFault.'
         }
-        $advertisedHost = Get-SurvivalChaosHost
-        $env:SURVIVAL_BIND_HOST = $advertisedHost
-        Stop-SurvivalChaos $advertisedHost
+        Stop-SurvivalChaos
         [pscustomobject]@{
-            schema = 'deep-survival-resend-chaos-end.v1'
+            schema = 'deep-survival-resend-chaos-end.v2'
             status = 'ok'
             running = $false
             armed = $false
@@ -783,21 +852,35 @@ switch ($Action) {
         } | ConvertTo-Json -Compress
     }
     'ChaosStatus' {
-        if ($Chain -or $Service.Count -gt 0 -or $Reset -or -not [string]::IsNullOrWhiteSpace($LanHost)) {
-            throw 'ChaosStatus does not accept -Chain, -Service, -Reset, or -LanHost.'
+        if ($Chain -or $Service.Count -gt 0 -or $Reset -or
+            -not [string]::IsNullOrWhiteSpace($LanHost) -or
+            -not [string]::IsNullOrWhiteSpace($ChaosFault)) {
+            throw 'ChaosStatus does not accept -Chain, -Service, -Reset, -LanHost, or -ChaosFault.'
         }
         if (Test-SurvivalChaosRunning) {
+            $binding = Read-SurvivalChaosBinding
+            if ($null -eq $binding) { throw 'Running chaos has no protected HTTPS binding.' }
+            $env:SURVIVAL_BIND_HOST = $binding.host
+            $env:SURVIVAL_UAT_TLS_SECRET_DIR = $binding.tlsSecretDirectory
             Invoke-SurvivalChaosControl 'status' | ConvertTo-Json -Compress
         } else {
             [pscustomobject]@{
-                schema = 'deep-survival-resend-chaos-status.v1'
+                schema = 'deep-survival-resend-chaos-status.v2'
                 mode = 'development-only'
                 running = $false
+                operation = 'mailbox-store'
+                fault = $null
                 armed = $false
                 consumed = $false
-                upstreamSuccessObserved = 0
-                downstreamDropped = 0
                 requestCount = 0
+                operationAttemptCount = 0
+                operationUpstreamDispatchCount = 0
+                operationUpstreamSuccessCount = 0
+                injectedFaultCount = 0
+                postDurableResponseDropCount = 0
+                preDispatchOutageCount = 0
+                faultWindowStartedUnixMilliseconds = 0
+                faultWindowDeadlineUnixMilliseconds = 0
                 expiresInSeconds = 0
                 identifiersIncluded = $false
                 payloadInspected = $false

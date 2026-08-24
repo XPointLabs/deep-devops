@@ -11,8 +11,8 @@ function listen(server) {
   return new Promise((resolve, reject) => server.listen(0, '127.0.0.1', resolve).once('error', reject));
 }
 
-function control(socketPath, token, action, ttlSeconds) {
-  const body = action === 'arm' ? Buffer.from(JSON.stringify({ ttlSeconds })) : Buffer.alloc(0);
+function control(socketPath, token, action, ttlSeconds, fault) {
+  const body = action === 'arm' ? Buffer.from(JSON.stringify({ ttlSeconds, fault })) : Buffer.alloc(0);
   return new Promise((resolve, reject) => {
     const request = http.request({
       socketPath,
@@ -86,7 +86,7 @@ test('one-shot chaos drops only one completed durable response and restart/TTL d
     assert.equal(passthrough.body, 'durable-response');
     assert.equal(items.size, 1);
 
-    const armed = await control(controlSocket, token, 'arm', 5);
+    const armed = await control(controlSocket, token, 'arm', 5, 'post-durable-response-drop');
     assert.equal(armed.armed, true);
     await assert.rejects(sendStore(Buffer.from('uncertain-mau2')));
     assert.equal(items.size, 2, 'upstream durable state must exist before the downstream drop');
@@ -99,24 +99,53 @@ test('one-shot chaos drops only one completed durable response and restart/TTL d
     assert.equal(upstreamRequests, 3);
     const consumed = await control(controlSocket, token, 'status');
     assert.deepEqual({
+      schema: consumed.schema,
+      operation: consumed.operation,
+      fault: consumed.fault,
       armed: consumed.armed,
       consumed: consumed.consumed,
-      upstreamSuccessObserved: consumed.upstreamSuccessObserved,
-      downstreamDropped: consumed.downstreamDropped,
+      operationAttemptCount: consumed.operationAttemptCount,
+      operationUpstreamDispatchCount: consumed.operationUpstreamDispatchCount,
+      operationUpstreamSuccessCount: consumed.operationUpstreamSuccessCount,
+      injectedFaultCount: consumed.injectedFaultCount,
+      postDurableResponseDropCount: consumed.postDurableResponseDropCount,
+      preDispatchOutageCount: consumed.preDispatchOutageCount,
       requestCount: consumed.requestCount,
       identifiersIncluded: consumed.identifiersIncluded,
       payloadInspected: consumed.payloadInspected,
     }, {
-      armed: false, consumed: true, upstreamSuccessObserved: 2,
-      downstreamDropped: 1, requestCount: 2,
+      schema: 'deep-survival-resend-chaos-status.v2',
+      operation: 'mailbox-store', fault: 'post-durable-response-drop',
+      armed: false, consumed: true,
+      operationAttemptCount: 2, operationUpstreamDispatchCount: 2,
+      operationUpstreamSuccessCount: 2, injectedFaultCount: 1,
+      postDurableResponseDropCount: 1, preDispatchOutageCount: 0,
+      requestCount: 2,
       identifiersIncluded: false, payloadInspected: false,
     });
 
-    await control(controlSocket, token, 'arm', 5);
+    await control(controlSocket, token, 'arm', 5, 'pre-dispatch-outage');
+    const outage = await sendStore(Buffer.from('not-dispatched'));
+    assert.equal(outage.status, 503);
+    assert.equal(upstreamRequests, 3, 'pre-dispatch fault must not reach the durable store');
+    const afterOutage = await control(controlSocket, token, 'status');
+    assert.equal(afterOutage.operationAttemptCount, 1);
+    assert.equal(afterOutage.operationUpstreamDispatchCount, 0);
+    assert.equal(afterOutage.operationUpstreamSuccessCount, 0);
+    assert.equal(afterOutage.injectedFaultCount, 1);
+    assert.equal(afterOutage.preDispatchOutageCount, 1);
+    assert.equal(afterOutage.postDurableResponseDropCount, 0);
+
+    const outageRetry = await sendStore(Buffer.from('not-dispatched'));
+    assert.equal(outageRetry.status, 200);
+    assert.equal(items.size, 3);
+    assert.equal(upstreamRequests, 4);
+
+    await control(controlSocket, token, 'arm', 5, 'post-durable-response-drop');
     await new Promise((resolve) => setTimeout(resolve, 5_100));
     assert.equal((await control(controlSocket, token, 'status')).armed, false);
 
-    await control(controlSocket, token, 'arm', 30);
+    await control(controlSocket, token, 'arm', 30, 'pre-dispatch-outage');
     await proxy.close();
     proxy = await startResendChaosProxy({
       upstreamOrigin: `http://127.0.0.1:${upstreamPort}`,
@@ -129,12 +158,12 @@ test('one-shot chaos drops only one completed durable response and restart/TTL d
     const restarted = await control(controlSocket, token, 'status');
     assert.equal(restarted.armed, false);
     assert.equal(restarted.consumed, false);
-    assert.equal(restarted.downstreamDropped, 0);
+    assert.equal(restarted.injectedFaultCount, 0);
     assert.equal(restarted.requestCount, 0);
 
     const denied = await send(proxyPort, '/status');
     assert.equal(denied.status, 404, 'control state must never be exposed on the data listener');
-    assert.equal(upstreamRequests, 3);
+    assert.equal(upstreamRequests, 4);
   } finally {
     if (proxy) await proxy.close();
     await new Promise((resolve) => upstream.close(resolve));

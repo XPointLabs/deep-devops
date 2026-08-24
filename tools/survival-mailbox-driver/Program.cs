@@ -897,7 +897,9 @@ sealed class Fixture
             Uri.TryCreate(authority.CoordinatorUrl, UriKind.Absolute, out var coordinator)
             && Uri.TryCreate(expectedCoordinatorUrl, UriKind.Absolute, out var expectedCoordinator)
             && coordinator == expectedCoordinator
-            && coordinator.Scheme == Uri.UriSchemeHttp
+            && coordinator.Scheme == expectedCoordinator.Scheme
+            && (coordinator.Scheme == Uri.UriSchemeHttp
+                || coordinator.Scheme == Uri.UriSchemeHttps)
             && string.IsNullOrEmpty(coordinator.UserInfo)
             && coordinator.AbsolutePath == "/"
             && string.IsNullOrEmpty(coordinator.Query)
@@ -1830,14 +1832,23 @@ sealed class ExactHttpClient(string baseUrl)
         try
         {
             using var response = await SendAsync(contract, canonicalRequest);
+            if ((int)response.StatusCode is 502 or 503)
+            {
+                var body = await response.Content.ReadAsByteArrayAsync();
+                if (body.Length <= 4096
+                    && response.Content.Headers.ContentEncoding.Count == 0)
+                {
+                    return;
+                }
+            }
             throw new InvalidOperationException(
                 $"Public mailbox {contract.RequestFrame} unexpectedly returned "
                 + $"HTTP {(int)response.StatusCode} instead of a transport-unknown outcome.");
         }
         catch (HttpRequestException)
         {
-            // The development chaos proxy closes the downstream connection only
-            // after it has consumed the complete successful upstream response.
+            // The private chaos backend can close only its HAProxy-side connection;
+            // the unchanged TLS frontend may surface that as an exact bounded 502.
         }
     }
 

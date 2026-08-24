@@ -18,6 +18,7 @@ const ROUTES = new Map([
   ])],
 ]);
 const DROP_ROUTE = '/api/client/mailbox/v2/store';
+const FAULTS = new Set(['post-durable-response-drop', 'pre-dispatch-outage']);
 const HOP_HEADERS = new Set([
   'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
   'te', 'trailer', 'transfer-encoding', 'upgrade',
@@ -44,13 +45,22 @@ function publicState(state, now = Date.now()) {
     state.expiresAtMs = 0;
   }
   return {
-    schema: 'deep-survival-resend-chaos-status.v1',
+    schema: 'deep-survival-resend-chaos-status.v2',
     mode: 'development-only',
+    running: true,
+    operation: 'mailbox-store',
+    fault: state.fault,
     armed: state.armed,
     consumed: state.consumed,
-    upstreamSuccessObserved: state.upstreamSuccessObserved,
-    downstreamDropped: state.downstreamDropped,
     requestCount: state.requestCount,
+    operationAttemptCount: state.operationAttemptCount,
+    operationUpstreamDispatchCount: state.operationUpstreamDispatchCount,
+    operationUpstreamSuccessCount: state.operationUpstreamSuccessCount,
+    injectedFaultCount: state.injectedFaultCount,
+    postDurableResponseDropCount: state.postDurableResponseDropCount,
+    preDispatchOutageCount: state.preDispatchOutageCount,
+    faultWindowStartedUnixMilliseconds: state.faultWindowStartedUnixMilliseconds,
+    faultWindowDeadlineUnixMilliseconds: state.faultWindowDeadlineUnixMilliseconds,
     expiresInSeconds: state.armed ? Math.max(0, Math.ceil((state.expiresAtMs - now) / 1000)) : 0,
     identifiersIncluded: false,
     payloadInspected: false,
@@ -71,18 +81,40 @@ export async function startResendChaosProxy(options) {
   if (!Number.isSafeInteger(maximumResponseBytes) || maximumResponseBytes < 1024 || maximumResponseBytes > 8_388_608) throw new Error('Invalid response bound.');
   if (!Number.isSafeInteger(upstreamTimeoutMs) || upstreamTimeoutMs < 1_000 || upstreamTimeoutMs > 60_000) throw new Error('Invalid upstream timeout.');
 
-  const state = { armed: false, consumed: false, expiresAtMs: 0, upstreamSuccessObserved: 0, downstreamDropped: 0, requestCount: 0 };
+  const state = {
+    armed: false,
+    consumed: false,
+    fault: null,
+    expiresAtMs: 0,
+    requestCount: 0,
+    operationAttemptCount: 0,
+    operationUpstreamDispatchCount: 0,
+    operationUpstreamSuccessCount: 0,
+    injectedFaultCount: 0,
+    postDurableResponseDropCount: 0,
+    preDispatchOutageCount: 0,
+    faultWindowStartedUnixMilliseconds: 0,
+    faultWindowDeadlineUnixMilliseconds: 0,
+  };
   let expiryTimer;
-  const disarm = () => { state.armed = false; state.expiresAtMs = 0; clearTimeout(expiryTimer); expiryTimer = undefined; };
-  const arm = (ttlSeconds) => {
+  const disarm = () => { state.armed = false; clearTimeout(expiryTimer); expiryTimer = undefined; };
+  const arm = (ttlSeconds, fault) => {
     if (!Number.isSafeInteger(ttlSeconds) || ttlSeconds < 5 || ttlSeconds > 300) throw new Error('TTL must be an integer from 5 through 300 seconds.');
+    if (!FAULTS.has(fault)) throw new Error('Unsupported chaos fault.');
     disarm();
     state.armed = true;
     state.consumed = false;
-    state.upstreamSuccessObserved = 0;
-    state.downstreamDropped = 0;
+    state.fault = fault;
     state.requestCount = 0;
-    state.expiresAtMs = Date.now() + ttlSeconds * 1000;
+    state.operationAttemptCount = 0;
+    state.operationUpstreamDispatchCount = 0;
+    state.operationUpstreamSuccessCount = 0;
+    state.injectedFaultCount = 0;
+    state.postDurableResponseDropCount = 0;
+    state.preDispatchOutageCount = 0;
+    state.faultWindowStartedUnixMilliseconds = Date.now();
+    state.expiresAtMs = state.faultWindowStartedUnixMilliseconds + ttlSeconds * 1000;
+    state.faultWindowDeadlineUnixMilliseconds = state.expiresAtMs;
     expiryTimer = setTimeout(disarm, ttlSeconds * 1000);
     expiryTimer.unref();
   };
@@ -96,6 +128,21 @@ export async function startResendChaosProxy(options) {
       return;
     }
     state.requestCount += 1;
+    const eligibleOperation = request.method === 'POST' && requestPath === DROP_ROUTE;
+    if (eligibleOperation) {
+      state.operationAttemptCount += 1;
+      const snapshot = publicState(state);
+      if (snapshot.armed && snapshot.fault === 'pre-dispatch-outage') {
+        disarm();
+        state.consumed = true;
+        state.injectedFaultCount += 1;
+        state.preDispatchOutageCount += 1;
+        request.resume();
+        response.writeHead(503, { connection: 'close', 'retry-after': '1' }).end();
+        return;
+      }
+      state.operationUpstreamDispatchCount += 1;
+    }
     const upstreamRequest = http.request({
       protocol: upstream.protocol,
       hostname: upstream.hostname,
@@ -123,12 +170,13 @@ export async function startResendChaosProxy(options) {
         if (response.destroyed) return;
         const status = upstreamResponse.statusCode ?? 502;
         const successful = status >= 200 && status <= 299;
-        if (successful) state.upstreamSuccessObserved += 1;
+        if (successful && eligibleOperation) state.operationUpstreamSuccessCount += 1;
         const snapshot = publicState(state);
-        if (successful && request.method === 'POST' && requestPath === DROP_ROUTE && snapshot.armed) {
+        if (successful && eligibleOperation && snapshot.armed && snapshot.fault === 'post-durable-response-drop') {
           disarm();
           state.consumed = true;
-          state.downstreamDropped += 1;
+          state.injectedFaultCount += 1;
+          state.postDurableResponseDropCount += 1;
           response.destroy();
           return;
         }
@@ -160,8 +208,8 @@ export async function startResendChaosProxy(options) {
         }
         if (request.method === 'POST' && request.url === '/arm') {
           const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-          if (!body || Object.keys(body).length !== 1) throw new Error('invalid arm request');
-          arm(body.ttlSeconds);
+          if (!body || Object.keys(body).length !== 2) throw new Error('invalid arm request');
+          arm(body.ttlSeconds, body.fault);
           response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(publicState(state)));
           return;
         }
@@ -222,5 +270,5 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
   const shutdown = async () => { await instance.close(); process.exit(0); };
   process.once('SIGTERM', shutdown);
   process.once('SIGINT', shutdown);
-  process.stdout.write('{"schema":"deep-survival-resend-chaos-runtime.v1","status":"ready","developmentOnly":true}\n');
+  process.stdout.write('{"schema":"deep-survival-resend-chaos-runtime.v2","status":"ready","developmentOnly":true}\n');
 }

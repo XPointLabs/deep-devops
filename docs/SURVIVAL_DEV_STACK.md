@@ -262,41 +262,52 @@ or a production-readiness claim.
 ### One-shot uncertain-resend rehearsal
 
 The resend-chaos overlay is development-only and is absent from staging and production
-Compose. Do not start it with raw Compose commands. `ChaosBegin` regenerates the bounded
-public authority for the same advertised `:41801` origin, removes xnode-1's host publisher,
-places an opaque reverse proxy in front of its real native MAU2 ingress, verifies the six-node
-topology, and only then arms one Store response drop. The proxy never decodes or logs a
-payload or identifier. It consumes its one shot only after the upstream XNode has returned a
-complete 2xx response; non-2xx responses do not consume it. The protected random lab token,
-Unix control socket, 5–300 second TTL, process restart default-disarm, and `ChaosEnd` cleanup
-bound the fault to one local rehearsal.
+Compose. Do not start it with raw Compose commands. `ChaosBegin` requires the CA-trusted
+physical UAT TLS lane, keeps HAProxy as the sole `:41801` publisher, and changes only its
+private xnode-1 backend from `xnode-1:8080` to the opaque interposer. The client therefore
+continues to use the exact `https://<LAN-IP>:41801` origin, public route, certificate chain,
+hostname/IP validation, revocation validation, and TLS policy. Cleartext application HTTP
+remains rejected.
+
+The required `-ChaosFault` is either `post-durable-response-drop` or
+`pre-dispatch-outage`. The former consumes its one shot only after the upstream XNode has
+returned a complete 2xx response; the latter returns one 503 without dispatching the Store
+upstream. Non-eligible routes never consume either fault. The proxy never decodes or logs a
+payload or identifier. The protected random lab token, private Unix control socket, exact
+operation counters, 5–300 second deadline, process restart default-disarm, and idempotent
+`ChaosEnd` cleanup bound the fault to one local rehearsal.
 
 Manual use is intentionally explicit:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/survival-dev.ps1 -Action ChaosBegin -LanHost 192.168.1.44 -ChaosTtlSeconds 120
+$env:SURVIVAL_UAT_TLS_SECRET_DIR = 'C:/Work/DeepSession/secrets/survival-uat-tls'
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/survival-dev.ps1 -Action ChaosBegin -LanHost 192.168.1.43 -ChaosTtlSeconds 120 -ChaosFault post-durable-response-drop
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/survival-dev.ps1 -Action ChaosStatus
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/survival-dev.ps1 -Action ChaosEnd
 ```
 
 Always run `ChaosEnd` in a `finally` block. The checked live lane does this automatically. It
 uses the real MAU2 Store, observes a transport-unknown first outcome, sends the byte-identical
-request again, requires native MQR3 2xx and an identical replay, retrieves exactly one item,
-checks one remote replica write with zero duplicate writes, then restores all 14 ordinary
-containers and deletes the lab token:
+request again, requires native MQR3 2xx and an identical replay, and retrieves exactly one
+item. It runs both supported fault modes, restores the ordinary HTTPS ingress after each,
+and deletes the protected binding and lab token:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/survival-dev-resend-chaos.integration.test.ps1 -BindHost 192.168.1.44
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/survival-dev-resend-chaos.integration.test.ps1 -BindHost 192.168.1.43
 ```
 
-The sanitized evidence schema is `deep-survival-resend-chaos-evidence.v1`; it contains only
-booleans and aggregate counters. It never contains message bytes, mailbox/operation IDs,
-authority material, endpoints, tokens, receipts, or device identifiers.
+The protected, atomically written evidence envelope is
+`deep-survival-resend-chaos-evidence-envelope.v2`. Its canonical v2 evidence is
+content-addressed with SHA-256 and immediately reread and independently verified by the same
+runner. It binds exact source/configuration hashes, runtime image identities, HTTPS origin,
+fault operation, fault deadlines, and attempt/dispatch/success/injection counts. It never
+contains message bytes, mailbox/operation IDs, authority material, tokens, receipts, or
+device identifiers. The digest detects evidence mutation; it deliberately makes no signing
+authority or production-attestation claim.
 
-Rollback is volume-preserving: recreate only the six `xnode-*` services from the previous
-local image or restore the prior clean DevOps commit, then verify `/health/ready` and
-`/status`. Do not delete an `xnode-N-state` volume during a rollback drill; corrupt state is
-intentionally a readiness failure, not a state-reset signal.
+Rollback is volume-preserving: run `ChaosEnd`, which removes the private interposer and
+force-recreates only HAProxy with its ordinary xnode-1 backend. No XNode is restarted and no
+named volume is deleted.
 
 The launcher also exchanges the six fresh signed relay contacts through the
 local bootstrap sidecar and restarts the XNodes. Routed storage still requires

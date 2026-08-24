@@ -12,6 +12,7 @@ import {
 } from './survival-dev-membership-trust.mjs';
 
 const compose = readFileSync(new URL('../docker-compose.survival.dev.yml', import.meta.url), 'utf8');
+const uatTlsCompose = readFileSync(new URL('../docker-compose.survival-uat-tls.dev.yml', import.meta.url), 'utf8');
 const resendChaosCompose = readFileSync(new URL('../docker-compose.survival-resend-chaos.dev.yml', import.meta.url), 'utf8');
 const productionCompose = readFileSync(new URL('../docker-compose.node.prod.yml', import.meta.url), 'utf8');
 const productionNodeEnvironment = readFileSync(new URL('../.env.node.prod.example', import.meta.url), 'utf8');
@@ -510,9 +511,10 @@ test('daily launcher always uses the fixed project without release-gate ceremony
 
 test('resend uncertainty chaos is a bounded survival-only real-ingress interposer', () => {
   assert.match(resendChaosCompose, /profiles: \[resend-chaos\]/);
-  assert.match(resendChaosCompose, /xnode-1:[\s\S]*?ports: !reset \[\]/);
   assert.match(resendChaosCompose, /DEEP_CHAOS_UPSTREAM_ORIGIN: http:\/\/xnode-1:8080/);
-  assert.match(resendChaosCompose, /SURVIVAL_BIND_HOST:-127\.0\.0\.1}:41801:8080/);
+  assert.match(resendChaosCompose, /DEEP_UAT_XNODE_1_UPSTREAM: resend-chaos/);
+  assert.doesNotMatch(resendChaosCompose, /ports:/);
+  assert.match(uatTlsCompose, /DEEP_UAT_XNODE_1_UPSTREAM: xnode-1/);
   assert.match(resendChaosCompose, /DEEP_CHAOS_CONTROL_SOCKET: \/run\/deep-chaos\/control\.sock/);
   assert.match(resendChaosCompose, /read_only: true/);
   assert.match(resendChaosCompose, /cap_drop: \[ALL\]/);
@@ -521,12 +523,15 @@ test('resend uncertainty chaos is a bounded survival-only real-ingress interpose
   assert.doesNotMatch(productionCompose, /resend-chaos|DEEP_CHAOS_/);
   assert.match(launcher, /New-SurvivalChaosToken/);
   assert.match(launcher, /Protect-SurvivalDevPrivateFile/);
-  assert.match(launcher, /Get-PinnedSurvivalXNodeContext/);
+  assert.match(launcher, /docker-compose\.survival-uat-tls\.dev\.yml/);
+  assert.match(launcher, /Assert-SurvivalUatTlsEndpoint/);
   assert.match(launcher, /Invoke-SurvivalChaosControl 'arm'/);
   assert.match(launcher, /Stop-SurvivalChaos/);
   assert.match(resendChaosProxy, /\/api\/client\/mailbox\/v2\/store/);
   assert.match(resendChaosProxy, /upstreamResponse\.on\('end'/);
-  assert.match(resendChaosProxy, /state\.downstreamDropped \+= 1/);
+  assert.match(resendChaosProxy, /state\.postDurableResponseDropCount \+= 1/);
+  assert.match(resendChaosProxy, /state\.preDispatchOutageCount \+= 1/);
+  assert.match(resendChaosProxy, /operationAttemptCount/);
   assert.match(resendChaosProxy, /response\.destroy\(\)/);
   assert.match(resendChaosProxy, /ttlSeconds < 5 \|\| ttlSeconds > 300/);
   assert.match(resendChaosProxy, /payloadInspected: false/);
@@ -543,13 +548,20 @@ test('resend uncertainty chaos is a bounded survival-only real-ingress interpose
     < resendChaosIntegration.indexOf("'-Action', 'ChaosBegin'"));
   assert.doesNotMatch(resendChaosIntegration, /dotnet @\([^)]*\$PinnedXNode/);
   assert.match(resendChaosIntegration, /serverItemCount -ne 1/);
-  assert.match(resendChaosIntegration, /downstreamDropped -ne 1/);
-  assert.match(resendChaosIntegration, /one new replica and zero duplicate writes/i);
+  assert.match(resendChaosIntegration, /post-durable-response-drop/);
+  assert.match(resendChaosIntegration, /pre-dispatch-outage/);
+  assert.match(resendChaosIntegration, /operationAttemptCount -ne 3/);
+  assert.match(resendChaosIntegration, /https:\/\/\$\{BindHost\}:41801/);
   assert.match(resendChaosIntegration, /'ChaosEnd'/);
-  assert.match(resendChaosIntegration, /deep-survival-resend-chaos-evidence\.v1/);
+  assert.match(resendChaosIntegration, /deep-survival-resend-chaos-evidence\.v2/);
+  assert.match(resendChaosIntegration, /evidenceSha256/);
+  assert.match(resendChaosIntegration, /Protect-SurvivalDevPrivateFile \$temporaryEvidencePath/);
   assert.doesNotMatch(resendChaosIntegration, /docker\s+compose/i);
   assert.match(mailboxDriver, /PrivatePeerOrigin\(int zeroBasedNodeIndex\)/);
   assert.match(mailboxDriver, /http:\/\/172\.30\.82\.\{zeroBasedNodeIndex \+ 11\}:8081/);
+  assert.match(mailboxDriver, /coordinator\.Scheme == expectedCoordinator\.Scheme/);
+  assert.match(mailboxDriver, /response\.StatusCode is 502 or 503/);
+  assert.match(mailboxDriver, /body\.Length <= 4096/);
 });
 
 test('post-seed XNode restart cannot rerun membership one-shot dependencies or duplicate the pin', () => {
@@ -729,7 +741,8 @@ test('development identities remain exact strings and Up proves host HTTP reacha
   assert.match(serviceBlock('registry'), /GET \/health\/live HTTP\/1\.1/);
   assert.doesNotMatch(serviceBlock('xnode-1'), /test -r \/proc\/1\/status/);
   assert.doesNotMatch(serviceBlock('registry'), /test -r \/proc\/1\/status/);
-  assert.doesNotMatch(launcher, /--force-recreate/);
+  const ordinaryUp = launcher.match(/'Up' \{([\s\S]*?)\r?\n    \}\r?\n    'Down'/)?.[1] ?? '';
+  assert.doesNotMatch(ordinaryUp, /--force-recreate/);
   assert.match(launcher, /Assert-SurvivalHostEndpoints/);
   assert.match(launcher, /DEEP_TRANSPORT_PROTOCOL=authenticated-mau2/);
   assert.match(launcher, /DEEP_TRANSPORT_OWNERSHIP=user-managed/);

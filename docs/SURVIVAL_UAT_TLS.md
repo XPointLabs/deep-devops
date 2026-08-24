@@ -67,3 +67,16 @@ docker ps --filter label=com.docker.compose.project=deep-survival-dev `
 Only the ingress may publish `41801-41806`, `41810`, and `41821-41823`.
 Storage `41820` must remain internal. Plain HTTP to any application port must
 fail during the TLS handshake, and `/health/*` is not a public route.
+
+## HTTPS-preserving retry chaos
+
+The only supported retry/ACK fault lane is `survival-dev.ps1 -Action ChaosBegin` with an
+explicit `-ChaosFault`. It starts a private interposer behind this HAProxy and never changes
+the public HTTPS origin, certificate validation, route ACL, or port. The interposer has no
+published port. Use `ChaosStatus` for exact v2 operation/attempt counters and always call the
+idempotent `ChaosEnd`, which restores the ordinary HAProxy backend without restarting an
+XNode or deleting state.
+
+The integration runner exercises both supported one-shot faults and writes an atomic,
+ACL-protected, SHA-256 content-addressed v2 evidence envelope. That digest is an integrity
+check only; it does not claim a signing authority or production attestation.
