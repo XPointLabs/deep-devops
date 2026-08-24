@@ -8,7 +8,11 @@ const faultIndex = process.argv.indexOf('--fault');
 const fault = faultIndex >= 0 ? process.argv[faultIndex + 1] : undefined;
 if (!['arm', 'disarm', 'status'].includes(action)) throw new Error('Expected arm, disarm, or status.');
 if (action === 'arm' && (!Number.isSafeInteger(ttlSeconds) || ttlSeconds < 5 || ttlSeconds > 300)) throw new Error('TTL must be 5-300 seconds.');
-if (action === 'arm' && !['post-durable-response-drop', 'pre-dispatch-outage'].includes(fault)) throw new Error('Expected an exact supported fault.');
+if (action === 'arm' && ![
+  'post-durable-response-drop',
+  'pre-dispatch-outage',
+  'post-durable-ack-response-drop',
+].includes(fault)) throw new Error('Expected an exact supported fault.');
 const token = fs.readFileSync(process.env.DEEP_CHAOS_TOKEN_FILE, 'utf8').trim();
 const body = action === 'arm' ? Buffer.from(JSON.stringify({ ttlSeconds, fault })) : Buffer.alloc(0);
 const result = await new Promise((resolve, reject) => {

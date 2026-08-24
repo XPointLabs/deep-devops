@@ -269,10 +269,11 @@ continues to use the exact `https://<LAN-IP>:41801` origin, public route, certif
 hostname/IP validation, revocation validation, and TLS policy. Cleartext application HTTP
 remains rejected.
 
-The required `-ChaosFault` is either `post-durable-response-drop` or
-`pre-dispatch-outage`. The former consumes its one shot only after the upstream XNode has
-returned a complete 2xx response; the latter returns one 503 without dispatching the Store
-upstream. Non-eligible routes never consume either fault. The proxy never decodes or logs a
+The required `-ChaosFault` is `post-durable-response-drop`, `pre-dispatch-outage`, or
+`post-durable-ack-response-drop`. The first and third consume their one shot only after the
+upstream XNode has returned a complete 2xx response for the exact Store or Acknowledge route;
+the second returns one 503 without dispatching the Store upstream. A Store can never consume
+the ACK fault and an ACK can never consume either Store fault. The proxy never decodes or logs a
 payload or identifier. The protected random lab token, private Unix control socket, exact
 operation counters, 5–300 second deadline, process restart default-disarm, and idempotent
 `ChaosEnd` cleanup bound the fault to one local rehearsal.
@@ -289,7 +290,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/survival-dev.ps1 -Ac
 Always run `ChaosEnd` in a `finally` block. The checked live lane does this automatically. It
 uses the real MAU2 Store, observes a transport-unknown first outcome, sends the byte-identical
 request again, requires native MQR3 2xx and an identical replay, and retrieves exactly one
-item. It runs both supported fault modes, restores the ordinary HTTPS ingress after each,
+item. It runs all supported fault modes, including a two-process ACK crash/retry window,
+restores the ordinary HTTPS ingress after each,
 and deletes the protected binding and lab token:
 
 ```powershell

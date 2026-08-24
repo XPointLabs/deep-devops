@@ -17,8 +17,11 @@ const ROUTES = new Map([
     '/api/client/mailbox/v2/acknowledge',
   ])],
 ]);
-const DROP_ROUTE = '/api/client/mailbox/v2/store';
-const FAULTS = new Set(['post-durable-response-drop', 'pre-dispatch-outage']);
+const FAULTS = new Map([
+  ['post-durable-response-drop', { operation: 'mailbox-store', route: '/api/client/mailbox/v2/store', phase: 'post-durable' }],
+  ['pre-dispatch-outage', { operation: 'mailbox-store', route: '/api/client/mailbox/v2/store', phase: 'pre-dispatch' }],
+  ['post-durable-ack-response-drop', { operation: 'mailbox-ack', route: '/api/client/mailbox/v2/acknowledge', phase: 'post-durable' }],
+]);
 const HOP_HEADERS = new Set([
   'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
   'te', 'trailer', 'transfer-encoding', 'upgrade',
@@ -48,7 +51,7 @@ function publicState(state, now = Date.now()) {
     schema: 'deep-survival-resend-chaos-status.v2',
     mode: 'development-only',
     running: true,
-    operation: 'mailbox-store',
+    operation: state.operation,
     fault: state.fault,
     armed: state.armed,
     consumed: state.consumed,
@@ -58,6 +61,7 @@ function publicState(state, now = Date.now()) {
     operationUpstreamSuccessCount: state.operationUpstreamSuccessCount,
     injectedFaultCount: state.injectedFaultCount,
     postDurableResponseDropCount: state.postDurableResponseDropCount,
+    postDurableAckResponseDropCount: state.postDurableAckResponseDropCount,
     preDispatchOutageCount: state.preDispatchOutageCount,
     faultWindowStartedUnixMilliseconds: state.faultWindowStartedUnixMilliseconds,
     faultWindowDeadlineUnixMilliseconds: state.faultWindowDeadlineUnixMilliseconds,
@@ -85,6 +89,9 @@ export async function startResendChaosProxy(options) {
     armed: false,
     consumed: false,
     fault: null,
+    operation: null,
+    targetRoute: null,
+    faultPhase: null,
     expiresAtMs: 0,
     requestCount: 0,
     operationAttemptCount: 0,
@@ -92,6 +99,7 @@ export async function startResendChaosProxy(options) {
     operationUpstreamSuccessCount: 0,
     injectedFaultCount: 0,
     postDurableResponseDropCount: 0,
+    postDurableAckResponseDropCount: 0,
     preDispatchOutageCount: 0,
     faultWindowStartedUnixMilliseconds: 0,
     faultWindowDeadlineUnixMilliseconds: 0,
@@ -100,17 +108,22 @@ export async function startResendChaosProxy(options) {
   const disarm = () => { state.armed = false; clearTimeout(expiryTimer); expiryTimer = undefined; };
   const arm = (ttlSeconds, fault) => {
     if (!Number.isSafeInteger(ttlSeconds) || ttlSeconds < 5 || ttlSeconds > 300) throw new Error('TTL must be an integer from 5 through 300 seconds.');
-    if (!FAULTS.has(fault)) throw new Error('Unsupported chaos fault.');
+    const definition = FAULTS.get(fault);
+    if (!definition) throw new Error('Unsupported chaos fault.');
     disarm();
     state.armed = true;
     state.consumed = false;
     state.fault = fault;
+    state.operation = definition.operation;
+    state.targetRoute = definition.route;
+    state.faultPhase = definition.phase;
     state.requestCount = 0;
     state.operationAttemptCount = 0;
     state.operationUpstreamDispatchCount = 0;
     state.operationUpstreamSuccessCount = 0;
     state.injectedFaultCount = 0;
     state.postDurableResponseDropCount = 0;
+    state.postDurableAckResponseDropCount = 0;
     state.preDispatchOutageCount = 0;
     state.faultWindowStartedUnixMilliseconds = Date.now();
     state.expiresAtMs = state.faultWindowStartedUnixMilliseconds + ttlSeconds * 1000;
@@ -128,11 +141,11 @@ export async function startResendChaosProxy(options) {
       return;
     }
     state.requestCount += 1;
-    const eligibleOperation = request.method === 'POST' && requestPath === DROP_ROUTE;
+    const eligibleOperation = request.method === 'POST' && requestPath === state.targetRoute;
     if (eligibleOperation) {
       state.operationAttemptCount += 1;
       const snapshot = publicState(state);
-      if (snapshot.armed && snapshot.fault === 'pre-dispatch-outage') {
+      if (snapshot.armed && state.faultPhase === 'pre-dispatch') {
         disarm();
         state.consumed = true;
         state.injectedFaultCount += 1;
@@ -172,11 +185,12 @@ export async function startResendChaosProxy(options) {
         const successful = status >= 200 && status <= 299;
         if (successful && eligibleOperation) state.operationUpstreamSuccessCount += 1;
         const snapshot = publicState(state);
-        if (successful && eligibleOperation && snapshot.armed && snapshot.fault === 'post-durable-response-drop') {
+        if (successful && eligibleOperation && snapshot.armed && state.faultPhase === 'post-durable') {
           disarm();
           state.consumed = true;
           state.injectedFaultCount += 1;
-          state.postDurableResponseDropCount += 1;
+          if (state.operation === 'mailbox-ack') state.postDurableAckResponseDropCount += 1;
+          else state.postDurableResponseDropCount += 1;
           response.destroy();
           return;
         }

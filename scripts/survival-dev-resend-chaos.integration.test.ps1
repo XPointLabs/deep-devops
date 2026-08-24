@@ -19,7 +19,7 @@ $ExpectedXNodeManifestSha256 = '2b2a223c96bb3a9cb075262e14b64e083d28f3a2b4a1068b
 $ExpectedDriverSha256 = @{
     'MailboxGrantProvisioner.cs' = 'f88f7ebb0c06f11fde52386341202090e8bd4205ad23bb40c31e7d79d2ac8184'
     'MailboxRuntimePublisher.cs' = 'd6aad71f65987f620ccf0d5a06394240aa199d3bb92ef38b81a9594f8e9ff94b'
-    'Program.cs' = '42bc7aa6c57f9e64e8bb7fae2f864133eba4ba64115e39948c19104a45900daf'
+    'Program.cs' = 'c420637f23aa44f2fefa2f93962149134fdf8a4b8a54539049a87d72b7c3bb24'
     'SurvivalMailboxDriver.csproj' = '4db436d69ea88ac3ff16f08c161b61cc0c048bad84cb7e529b2208fa569eafbe'
 }
 . (Join-Path $PSScriptRoot 'survival-dev-private-secrets.ps1')
@@ -136,7 +136,7 @@ try {
         '--output-public', $HttpsAuthority,
         '--output-client-public', (Join-Path $BuildWork 'mailbox-client-authority.https.public.json')))
 
-    foreach ($fault in @('post-durable-response-drop', 'pre-dispatch-outage')) {
+    foreach ($fault in @('post-durable-response-drop', 'pre-dispatch-outage', 'post-durable-ack-response-drop')) {
         try {
             $beginOutput = Invoke-Checked powershell @(
                 '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $Launcher,
@@ -149,34 +149,113 @@ try {
                 throw 'ChaosBegin did not return the exact armed fault/deadline binding.'
             }
             $runId = [Guid]::NewGuid().ToString('N')
-            $driverOutput = Invoke-Checked dotnet @(
-                $DriverDll, 'client-uncertain-resend',
+            $commonDriverArguments = @(
                 '--secrets-dir', $Secrets,
                 '--state-dir', $State,
                 '--authority-public', $HttpsAuthority,
                 '--coordinator-url', "https://${BindHost}:41801",
                 '--client-url', "https://${BindHost}:41801",
-                '--require-non-loopback-coordinator',
-                '--run-id', $runId)
-            $driver = ($driverOutput | Where-Object { $_ -match '^\{"schemaVersion":1,"phase":"client-uncertain-resend"' } | Select-Object -Last 1) | ConvertFrom-Json
-            if ($driver.passed -ne $true -or $driver.details.serverItemCount -ne 1 -or
-                $driver.details.duplicateServerItemCreated -ne $false -or
-                $driver.details.exactReplay -ne $true -or $driver.details.nativeMqr3 -ne $true) {
-                throw "Real uncertain-resend driver assertions failed for $fault."
+                '--require-non-loopback-coordinator')
+            $preRestartCounters = $null
+            $postRestartCounters = $null
+            $driverAssertions = $null
+            if ($fault -ceq 'post-durable-ack-response-drop') {
+                $lossArguments = @($DriverDll, 'client-ack-loss') + $commonDriverArguments + @('--run-id', $runId)
+                $lossOutput = Invoke-Checked dotnet $lossArguments
+                $loss = ($lossOutput | Where-Object { $_ -match '^\{"schemaVersion":1,"phase":"client-ack-loss"' } | Select-Object -Last 1) | ConvertFrom-Json
+                if ($loss.passed -ne $true -or $loss.details.processRestartRequired -ne $true -or
+                    $loss.details.retrievedItemsBeforeAck -ne 1) {
+                    throw 'Real ACK loss driver did not stop at the exact crash window.'
+                }
+                $preRestartOutput = Invoke-Checked powershell @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $Launcher, '-Action', 'ChaosStatus')
+                $preRestart = ($preRestartOutput | Where-Object { $_ -match '^\{"schema":"deep-survival-resend-chaos-status\.v2"' } | Select-Object -Last 1) | ConvertFrom-Json
+                if ($preRestart.operation -cne 'mailbox-ack' -or $preRestart.fault -cne $fault -or
+                    $preRestart.requestCount -ne 3 -or $preRestart.operationAttemptCount -ne 1 -or
+                    $preRestart.operationUpstreamDispatchCount -ne 1 -or
+                    $preRestart.operationUpstreamSuccessCount -ne 1 -or
+                    $preRestart.injectedFaultCount -ne 1 -or
+                    $preRestart.postDurableAckResponseDropCount -ne 1) {
+                    throw "ACK crash-window counters were not exact before process restart: $($preRestart | ConvertTo-Json -Compress)"
+                }
+                $preRestartCounters = [ordered]@{
+                    requestCount = 3
+                    operationAttemptCount = 1
+                    operationUpstreamDispatchCount = 1
+                    operationUpstreamSuccessCount = 1
+                    injectedFaultCount = 1
+                }
+                $retryArguments = @($DriverDll, 'client-retry-ack-loss') + $commonDriverArguments
+                $retryOutput = Invoke-Checked dotnet $retryArguments
+                $retry = ($retryOutput | Where-Object { $_ -match '^\{"schemaVersion":1,"phase":"client-retry-ack-loss"' } | Select-Object -Last 1) | ConvertFrom-Json
+                if ($retry.passed -ne $true -or $retry.details.processRestarted -ne $true -or
+                    $retry.details.nativeMar1 -ne $true -or
+                    $retry.details.tombstoneQuorums -ne 1 -or $retry.details.retrieveAfterAckItems -ne 0) {
+                    throw 'Real ACK retry after process restart did not prove durable ACK and empty inbox.'
+                }
+                $postRestartOutput = Invoke-Checked powershell @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $Launcher, '-Action', 'ChaosStatus')
+                $postRestart = ($postRestartOutput | Where-Object { $_ -match '^\{"schema":"deep-survival-resend-chaos-status\.v2"' } | Select-Object -Last 1) | ConvertFrom-Json
+                if ($postRestart.requestCount -ne 5 -or $postRestart.operationAttemptCount -ne 2 -or
+                    $postRestart.operationUpstreamDispatchCount -ne 2 -or
+                    $postRestart.operationUpstreamSuccessCount -ne 2 -or
+                    $postRestart.injectedFaultCount -ne 1 -or
+                    $postRestart.postDurableAckResponseDropCount -ne 1) {
+                    throw "ACK counters were not exact after process restart and one retry: $($postRestart | ConvertTo-Json -Compress)"
+                }
+                $postRestartCounters = [ordered]@{
+                    requestCount = 5
+                    operationAttemptCount = 2
+                    operationUpstreamDispatchCount = 2
+                    operationUpstreamSuccessCount = 2
+                    injectedFaultCount = 1
+                }
+                $replayArguments = @($DriverDll, 'client-replay-ack-loss') + $commonDriverArguments
+                $replayOutput = Invoke-Checked dotnet $replayArguments
+                $replay = ($replayOutput | Where-Object { $_ -match '^\{"schemaVersion":1,"phase":"client-replay-ack-loss"' } | Select-Object -Last 1) | ConvertFrom-Json
+                if ($replay.passed -ne $true -or $replay.details.exactReplay -ne $true -or
+                    $replay.details.nativeMar1 -ne $true) {
+                    throw 'Exact ACK replay after recovery changed the native MAR1.'
+                }
+                $driverAssertions = [ordered]@{
+                    processRestarted = $true
+                    exactAckReplay = $true
+                    nativeMar1 = $true
+                    tombstoneQuorums = 1
+                    retrieveAfterAckItems = 0
+                }
+            } else {
+                $driverArguments = @($DriverDll, 'client-uncertain-resend') + $commonDriverArguments + @('--run-id', $runId)
+                $driverOutput = Invoke-Checked dotnet $driverArguments
+                $driver = ($driverOutput | Where-Object { $_ -match '^\{"schemaVersion":1,"phase":"client-uncertain-resend"' } | Select-Object -Last 1) | ConvertFrom-Json
+                if ($driver.passed -ne $true -or $driver.details.serverItemCount -ne 1 -or
+                    $driver.details.duplicateServerItemCreated -ne $false -or
+                    $driver.details.exactReplay -ne $true -or $driver.details.nativeMqr3 -ne $true) {
+                    throw "Real uncertain-resend driver assertions failed for $fault."
+                }
+                $driverAssertions = [ordered]@{
+                    serverItemCount = 1
+                    duplicateServerItemCreated = $false
+                    exactStoreReplay = $true
+                    nativeMqr3 = $true
+                }
             }
             $statusOutput = Invoke-Checked powershell @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $Launcher, '-Action', 'ChaosStatus')
             $chaos = ($statusOutput | Where-Object { $_ -match '^\{"schema":"deep-survival-resend-chaos-status\.v2"' } | Select-Object -Last 1) | ConvertFrom-Json
-            $expectedDispatches = if ($fault -ceq 'post-durable-response-drop') { 3 } else { 2 }
+            $ackFault = $fault -ceq 'post-durable-ack-response-drop'
+            $expectedOperation = if ($ackFault) { 'mailbox-ack' } else { 'mailbox-store' }
+            $expectedRequests = if ($ackFault) { 6 } else { 4 }
+            $expectedDispatches = if ($fault -ceq 'pre-dispatch-outage') { 2 } else { 3 }
             $expectedPostDrop = if ($fault -ceq 'post-durable-response-drop') { 1 } else { 0 }
+            $expectedAckDrop = if ($ackFault) { 1 } else { 0 }
             $expectedPreOutage = if ($fault -ceq 'pre-dispatch-outage') { 1 } else { 0 }
             if ($chaos.armed -ne $false -or $chaos.consumed -ne $true -or
-                $chaos.operation -cne 'mailbox-store' -or $chaos.fault -cne $fault -or
-                $chaos.requestCount -ne 4 -or
+                $chaos.operation -cne $expectedOperation -or $chaos.fault -cne $fault -or
+                $chaos.requestCount -ne $expectedRequests -or
                 $chaos.operationAttemptCount -ne 3 -or
                 $chaos.operationUpstreamDispatchCount -ne $expectedDispatches -or
                 $chaos.operationUpstreamSuccessCount -ne $expectedDispatches -or
                 $chaos.injectedFaultCount -ne 1 -or
                 $chaos.postDurableResponseDropCount -ne $expectedPostDrop -or
+                $chaos.postDurableAckResponseDropCount -ne $expectedAckDrop -or
                 $chaos.preDispatchOutageCount -ne $expectedPreOutage -or
                 $chaos.identifiersIncluded -ne $false -or $chaos.payloadInspected -ne $false) {
                 throw "One-shot chaos counters did not prove the exact $fault attempt lifecycle: $($chaos | ConvertTo-Json -Compress)"
@@ -207,10 +286,11 @@ try {
                 operationUpstreamSuccessCount = [long]$chaos.operationUpstreamSuccessCount
                 injectedFaultCount = [long]$chaos.injectedFaultCount
                 postDurableResponseDropCount = [long]$chaos.postDurableResponseDropCount
+                postDurableAckResponseDropCount = [long]$chaos.postDurableAckResponseDropCount
                 preDispatchOutageCount = [long]$chaos.preDispatchOutageCount
-                serverItemCount = 1
-                duplicateServerItemCreated = $false
-                exactReplay = $true
+                preRestartCounters = $preRestartCounters
+                postRestartCounters = $postRestartCounters
+                outcome = $driverAssertions
             }
         } finally {
             if ($chaosStarted) {
@@ -240,9 +320,12 @@ finally {
 }
 
 if ((Get-RunningStackCount) -ne 14) { throw 'Ordinary survival stack was not fully restored.' }
-$proxyCount = @(& docker ps --filter 'label=com.xpoint.survival.resend-chaos=development-only' --format '{{.Names}}').Count
+$proxyCount = @(& docker ps -a --filter 'label=com.xpoint.survival.resend-chaos=development-only' --format '{{.Names}}').Count
 $tokenExists = Test-Path -LiteralPath (Join-Path $Secrets 'resend-chaos.token')
-if ($proxyCount -ne 0 -or $tokenExists) { throw 'Chaos cleanup did not remove the proxy and protected token.' }
+$bindingExists = Test-Path -LiteralPath (Join-Path $Secrets 'resend-chaos.binding.json')
+if ($proxyCount -ne 0 -or $tokenExists -or $bindingExists) {
+    throw 'Chaos cleanup did not remove the proxy, protected token, and protected binding.'
+}
 
 function Get-FileSha256Lower([string]$Path) {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -257,7 +340,10 @@ $evidenceCore = [ordered]@{
         origin = "https://${BindHost}:41801"
         platformTlsValidation = $true
         cleartextApplicationHttpRejected = $true
-        publicRoute = '/api/client/mailbox/v2/store'
+        publicRoutes = @(
+            '/api/client/mailbox/v2/store',
+            '/api/client/mailbox/v2/acknowledge'
+        )
     }
     sourceBindings = [ordered]@{
         xnodeCommit = $ExpectedXNodeCommit
@@ -281,6 +367,9 @@ $evidenceCore = [ordered]@{
         exactOneShotFaultPerRun = $true
         postDurableResponseDropRecovered = $true
         preDispatchOutageRecovered = $true
+        postDurableAckResponseDropRecovered = $true
+        ackRetryAfterProcessRestart = $true
+        ackInboxEmptyAfterRetry = $true
         exactRetryReturnsNativeMqr3 = $true
         exactReplayStable = $true
         payloadInspected = $false

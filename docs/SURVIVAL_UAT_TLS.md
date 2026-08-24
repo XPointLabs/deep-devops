@@ -77,6 +77,7 @@ published port. Use `ChaosStatus` for exact v2 operation/attempt counters and al
 idempotent `ChaosEnd`, which restores the ordinary HAProxy backend without restarting an
 XNode or deleting state.
 
-The integration runner exercises both supported one-shot faults and writes an atomic,
+The integration runner exercises all supported one-shot faults, including the exact
+post-durable ACK response loss followed by a retry in a fresh driver process, and writes an atomic,
 ACL-protected, SHA-256 content-addressed v2 evidence envelope. That digest is an integrity
 check only; it does not claim a signing authority or production attestation.

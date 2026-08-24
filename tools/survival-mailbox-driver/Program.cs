@@ -107,6 +107,15 @@ switch (arguments.Command)
     case "client-uncertain-resend":
         await RunClientUncertainResendAsync(fixture, arguments);
         break;
+    case "client-ack-loss":
+        await RunClientAckLossAsync(fixture, arguments);
+        break;
+    case "client-retry-ack-loss":
+        await RunClientRetryAckLossAsync(fixture, arguments);
+        break;
+    case "client-replay-ack-loss":
+        await RunClientReplayAckLossAsync(arguments);
+        break;
     case "retention-gc":
         RunRetentionGc(fixture, arguments);
         break;
@@ -504,6 +513,133 @@ static async Task RunClientUncertainResendAsync(Fixture fixture, Arguments argum
     });
 }
 
+static async Task RunClientAckLossAsync(Fixture fixture, Arguments arguments)
+{
+    if (string.IsNullOrWhiteSpace(arguments.RunId))
+    {
+        throw new InvalidOperationException("A run id is required.");
+    }
+    var now = checked((ulong)DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+    var store = fixture.NewClientStore(arguments.RunId, "client-ack-loss-store", now);
+    var client = new ExactHttpClient(arguments.ClientUrl);
+    var storeReceipt = await client.SendSuccessAsync(
+        MailboxWireHttpContract.Store,
+        store.CanonicalRequest);
+    _ = MailboxReceiptV3Codec.DecodeDurableQuorum(storeReceipt);
+
+    var retrieve = fixture.NewClientRetrieve(
+        arguments.RunId,
+        "client-ack-loss-retrieve",
+        store.Envelope,
+        now,
+        replayCounter: 2);
+    var pageBytes = await client.SendSuccessAsync(
+        MailboxWireHttpContract.Retrieve,
+        retrieve);
+    var page = MailboxClientCodec.DecodeRetrievePage(
+        pageBytes,
+        fixture.ClientDecodePolicy(now));
+    if (page.Items.Count != 1)
+    {
+        throw new InvalidOperationException("ACK loss setup did not retrieve one exact item.");
+    }
+
+    var ack = fixture.NewClientAck(
+        arguments.RunId,
+        "client-ack-loss",
+        store.Envelope,
+        [page.Items[0].ToAcknowledgement()],
+        now,
+        replayCounter: 3);
+    var emptyRetrieve = fixture.NewClientRetrieve(
+        arguments.RunId,
+        "client-ack-loss-empty",
+        store.Envelope,
+        now,
+        replayCounter: 4);
+    Directory.CreateDirectory(arguments.StateDirectory);
+    await File.WriteAllTextAsync(
+        Path.Combine(arguments.StateDirectory, "client-ack-loss.json"),
+        JsonSerializer.Serialize(new ClientAckLossState(
+            Convert.ToBase64String(ack),
+            Convert.ToBase64String(emptyRetrieve),
+            Mar1: null)));
+    await client.SendTransportFailureAsync(MailboxWireHttpContract.Acknowledge, ack);
+    Result("client-ack-loss", new
+    {
+        firstOutcome = "transport-unknown-after-durable-ack",
+        processRestartRequired = true,
+        retrievedItemsBeforeAck = 1,
+        mau2AckBytes = ack.Length
+    });
+}
+
+static async Task RunClientRetryAckLossAsync(Fixture fixture, Arguments arguments)
+{
+    var path = Path.Combine(arguments.StateDirectory, "client-ack-loss.json");
+    var state = JsonSerializer.Deserialize<ClientAckLossState>(
+        await File.ReadAllTextAsync(path))
+        ?? throw new InvalidDataException("ACK loss state is invalid.");
+    var ack = Convert.FromBase64String(state.Ack);
+    var emptyRetrieve = Convert.FromBase64String(state.EmptyRetrieve);
+    var client = new ExactHttpClient(arguments.ClientUrl);
+    var retry = await client.SendSuccessAsync(MailboxWireHttpContract.Acknowledge, ack);
+    var aggregate = MailboxAggregateAckCodec.DecodeMqr3(retry);
+    if (aggregate.TombstoneQuorums.Count != 1)
+    {
+        throw new InvalidOperationException("Recovered ACK did not return one native MAR1.");
+    }
+    var emptyPageBytes = await client.SendSuccessAsync(
+        MailboxWireHttpContract.Retrieve,
+        emptyRetrieve);
+    var emptyPage = MailboxClientCodec.DecodeRetrievePage(
+        emptyPageBytes,
+        fixture.ClientDecodePolicy(
+            checked((ulong)DateTimeOffset.UtcNow.ToUnixTimeSeconds())));
+    if (emptyPage.Items.Count != 0)
+    {
+        throw new InvalidOperationException("Recovered ACK left the acknowledged item in the inbox.");
+    }
+    await File.WriteAllTextAsync(
+        path,
+        JsonSerializer.Serialize(state with { Mar1 = Convert.ToBase64String(retry) }));
+    Result("client-retry-ack-loss", new
+    {
+        retry = "durable",
+        nativeMar1 = true,
+        tombstoneQuorums = aggregate.TombstoneQuorums.Count,
+        retrieveAfterAckItems = emptyPage.Items.Count,
+        processRestarted = true
+    });
+}
+
+static async Task RunClientReplayAckLossAsync(Arguments arguments)
+{
+    var state = JsonSerializer.Deserialize<ClientAckLossState>(
+        await File.ReadAllTextAsync(
+            Path.Combine(arguments.StateDirectory, "client-ack-loss.json")))
+        ?? throw new InvalidDataException("ACK loss state is invalid.");
+    if (string.IsNullOrWhiteSpace(state.Mar1))
+    {
+        throw new InvalidDataException("ACK retry receipt is missing.");
+    }
+    var replay = await new ExactHttpClient(arguments.ClientUrl).SendSuccessAsync(
+        MailboxWireHttpContract.Acknowledge,
+        Convert.FromBase64String(state.Ack));
+    _ = MailboxAggregateAckCodec.DecodeMqr3(replay);
+    if (!CryptographicOperations.FixedTimeEquals(
+            replay,
+            Convert.FromBase64String(state.Mar1)))
+    {
+        throw new InvalidOperationException("Exact ACK replay changed the native MAR1.");
+    }
+    Result("client-replay-ack-loss", new
+    {
+        exactReplay = true,
+        nativeMar1 = true
+    });
+}
+
 static void RunRetentionGc(Fixture fixture, Arguments arguments)
 {
     var directory = Path.Combine(arguments.StateDirectory, "retention-gc");
@@ -685,6 +821,11 @@ sealed record Scenario(
 sealed record ClientStoreFixture(
     byte[] CanonicalRequest,
     MailboxEncryptedEnvelope Envelope);
+
+sealed record ClientAckLossState(
+    string Ack,
+    string EmptyRetrieve,
+    string? Mar1);
 
 sealed record AuthorityWindow(
     ulong CurrentEpoch,

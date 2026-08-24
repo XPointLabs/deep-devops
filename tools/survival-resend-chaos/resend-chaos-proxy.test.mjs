@@ -32,9 +32,9 @@ function control(socketPath, token, action, ttlSeconds, fault) {
   });
 }
 
-function send(port, route, body = Buffer.alloc(0)) {
+function send(port, route, body = Buffer.alloc(0), method = 'POST') {
   return new Promise((resolve, reject) => {
-    const request = http.request({ host: '127.0.0.1', port, path: route, method: 'POST', headers: { 'content-type': 'application/octet-stream', 'content-length': body.length }, timeout: 3_000 }, (response) => {
+    const request = http.request({ host: '127.0.0.1', port, path: route, method, headers: { 'content-type': 'application/octet-stream', 'content-length': body.length }, timeout: 3_000 }, (response) => {
       const chunks = [];
       response.on('data', (chunk) => chunks.push(chunk));
       response.on('end', () => resolve({ status: response.statusCode, body: Buffer.concat(chunks).toString('utf8') }));
@@ -109,6 +109,7 @@ test('one-shot chaos drops only one completed durable response and restart/TTL d
       operationUpstreamSuccessCount: consumed.operationUpstreamSuccessCount,
       injectedFaultCount: consumed.injectedFaultCount,
       postDurableResponseDropCount: consumed.postDurableResponseDropCount,
+      postDurableAckResponseDropCount: consumed.postDurableAckResponseDropCount,
       preDispatchOutageCount: consumed.preDispatchOutageCount,
       requestCount: consumed.requestCount,
       identifiersIncluded: consumed.identifiersIncluded,
@@ -119,7 +120,8 @@ test('one-shot chaos drops only one completed durable response and restart/TTL d
       armed: false, consumed: true,
       operationAttemptCount: 2, operationUpstreamDispatchCount: 2,
       operationUpstreamSuccessCount: 2, injectedFaultCount: 1,
-      postDurableResponseDropCount: 1, preDispatchOutageCount: 0,
+      postDurableResponseDropCount: 1, postDurableAckResponseDropCount: 0,
+      preDispatchOutageCount: 0,
       requestCount: 2,
       identifiersIncluded: false, payloadInspected: false,
     });
@@ -141,6 +143,30 @@ test('one-shot chaos drops only one completed durable response and restart/TTL d
     assert.equal(items.size, 3);
     assert.equal(upstreamRequests, 4);
 
+    await control(controlSocket, token, 'arm', 5, 'post-durable-ack-response-drop');
+    const wrongRoute = await sendStore(Buffer.from('store-cannot-consume-ack-fault'));
+    assert.equal(wrongRoute.status, 200);
+    const wrongMethod = await send(proxyPort, '/api/client/mailbox/v2/acknowledge', Buffer.alloc(0), 'GET');
+    assert.equal(wrongMethod.status, 404);
+    const stillArmedForAck = await control(controlSocket, token, 'status');
+    assert.equal(stillArmedForAck.armed, true);
+    assert.equal(stillArmedForAck.operationAttemptCount, 0);
+    assert.equal(stillArmedForAck.injectedFaultCount, 0);
+    await assert.rejects(send(proxyPort, '/api/client/mailbox/v2/acknowledge', Buffer.from('ack-once')));
+    assert.equal(upstreamRequests, 6, 'ACK must reach upstream before its response is dropped');
+    const ackRetry = await send(proxyPort, '/api/client/mailbox/v2/acknowledge', Buffer.from('ack-once'));
+    assert.equal(ackRetry.status, 200);
+    assert.equal(upstreamRequests, 7);
+    const afterAck = await control(controlSocket, token, 'status');
+    assert.equal(afterAck.operation, 'mailbox-ack');
+    assert.equal(afterAck.operationAttemptCount, 2);
+    assert.equal(afterAck.operationUpstreamDispatchCount, 2);
+    assert.equal(afterAck.operationUpstreamSuccessCount, 2);
+    assert.equal(afterAck.injectedFaultCount, 1);
+    assert.equal(afterAck.postDurableAckResponseDropCount, 1);
+    assert.equal(afterAck.postDurableResponseDropCount, 0);
+    assert.equal(afterAck.preDispatchOutageCount, 0);
+
     await control(controlSocket, token, 'arm', 5, 'post-durable-response-drop');
     await new Promise((resolve) => setTimeout(resolve, 5_100));
     assert.equal((await control(controlSocket, token, 'status')).armed, false);
@@ -157,13 +183,14 @@ test('one-shot chaos drops only one completed durable response and restart/TTL d
     proxyPort = proxy.address.port;
     const restarted = await control(controlSocket, token, 'status');
     assert.equal(restarted.armed, false);
+    assert.equal(restarted.operation, null);
     assert.equal(restarted.consumed, false);
     assert.equal(restarted.injectedFaultCount, 0);
     assert.equal(restarted.requestCount, 0);
 
     const denied = await send(proxyPort, '/status');
     assert.equal(denied.status, 404, 'control state must never be exposed on the data listener');
-    assert.equal(upstreamRequests, 4);
+    assert.equal(upstreamRequests, 7);
   } finally {
     if (proxy) await proxy.close();
     await new Promise((resolve) => upstream.close(resolve));

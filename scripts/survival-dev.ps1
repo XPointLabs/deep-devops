@@ -9,7 +9,7 @@ param(
     [switch]$Reset,
     [ValidateRange(5, 300)]
     [int]$ChaosTtlSeconds = 60,
-    [ValidateSet('post-durable-response-drop','pre-dispatch-outage')]
+    [ValidateSet('post-durable-response-drop','pre-dispatch-outage','post-durable-ack-response-drop')]
     [string]$ChaosFault
 )
 
@@ -31,7 +31,7 @@ $SurvivalMailboxBuildHelperSha256 = '04c0f2cf9118b648ce4868390451afd33cd6ad9ce55
 $SurvivalMailboxDriverSha256 = @{
     'MailboxGrantProvisioner.cs' = 'f88f7ebb0c06f11fde52386341202090e8bd4205ad23bb40c31e7d79d2ac8184'
     'MailboxRuntimePublisher.cs' = 'd6aad71f65987f620ccf0d5a06394240aa199d3bb92ef38b81a9594f8e9ff94b'
-    'Program.cs' = '42bc7aa6c57f9e64e8bb7fae2f864133eba4ba64115e39948c19104a45900daf'
+    'Program.cs' = 'c420637f23aa44f2fefa2f93962149134fdf8a4b8a54539049a87d72b7c3bb24'
     'SurvivalMailboxDriver.csproj' = '4db436d69ea88ac3ff16f08c161b61cc0c048bad84cb7e529b2208fa569eafbe'
 }
 $ChainLifecycleServices = @(
@@ -669,7 +669,9 @@ function Invoke-SurvivalChaosControl([ValidateSet('arm','disarm','status')][stri
     $status = $json | ConvertFrom-Json
     if ($status.schema -cne 'deep-survival-resend-chaos-status.v2' -or
         $status.mode -cne 'development-only' -or
-        $status.operation -cne 'mailbox-store' -or
+        ($null -ne $status.operation -and
+            $status.operation -cne 'mailbox-store' -and
+            $status.operation -cne 'mailbox-ack') -or
         $status.identifiersIncluded -ne $false -or
         $status.payloadInspected -ne $false) {
         throw 'Survival resend chaos returned invalid or unsafe status.'
@@ -868,7 +870,7 @@ switch ($Action) {
                 schema = 'deep-survival-resend-chaos-status.v2'
                 mode = 'development-only'
                 running = $false
-                operation = 'mailbox-store'
+                operation = $null
                 fault = $null
                 armed = $false
                 consumed = $false
@@ -878,6 +880,7 @@ switch ($Action) {
                 operationUpstreamSuccessCount = 0
                 injectedFaultCount = 0
                 postDurableResponseDropCount = 0
+                postDurableAckResponseDropCount = 0
                 preDispatchOutageCount = 0
                 faultWindowStartedUnixMilliseconds = 0
                 faultWindowDeadlineUnixMilliseconds = 0

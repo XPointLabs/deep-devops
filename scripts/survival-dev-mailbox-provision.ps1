@@ -78,7 +78,7 @@ $expectedDriverSha256 = @{
     'MailboxRuntimePublisher.cs' =
         'd6aad71f65987f620ccf0d5a06394240aa199d3bb92ef38b81a9594f8e9ff94b'
     'Program.cs' =
-        '42bc7aa6c57f9e64e8bb7fae2f864133eba4ba64115e39948c19104a45900daf'
+        'c420637f23aa44f2fefa2f93962149134fdf8a4b8a54539049a87d72b7c3bb24'
     'SurvivalMailboxDriver.csproj' =
         '4db436d69ea88ac3ff16f08c161b61cc0c048bad84cb7e529b2208fa569eafbe'
 }

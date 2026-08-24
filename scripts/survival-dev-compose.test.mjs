@@ -528,8 +528,12 @@ test('resend uncertainty chaos is a bounded survival-only real-ingress interpose
   assert.match(launcher, /Invoke-SurvivalChaosControl 'arm'/);
   assert.match(launcher, /Stop-SurvivalChaos/);
   assert.match(resendChaosProxy, /\/api\/client\/mailbox\/v2\/store/);
+  assert.match(resendChaosProxy, /post-durable-ack-response-drop/);
+  assert.match(resendChaosProxy, /operation: 'mailbox-ack'/);
+  assert.match(resendChaosProxy, /route: '\/api\/client\/mailbox\/v2\/acknowledge'/);
   assert.match(resendChaosProxy, /upstreamResponse\.on\('end'/);
   assert.match(resendChaosProxy, /state\.postDurableResponseDropCount \+= 1/);
+  assert.match(resendChaosProxy, /state\.postDurableAckResponseDropCount \+= 1/);
   assert.match(resendChaosProxy, /state\.preDispatchOutageCount \+= 1/);
   assert.match(resendChaosProxy, /operationAttemptCount/);
   assert.match(resendChaosProxy, /response\.destroy\(\)/);
@@ -550,6 +554,11 @@ test('resend uncertainty chaos is a bounded survival-only real-ingress interpose
   assert.match(resendChaosIntegration, /serverItemCount -ne 1/);
   assert.match(resendChaosIntegration, /post-durable-response-drop/);
   assert.match(resendChaosIntegration, /pre-dispatch-outage/);
+  assert.match(resendChaosIntegration, /post-durable-ack-response-drop/);
+  assert.match(resendChaosIntegration, /client-ack-loss/);
+  assert.match(resendChaosIntegration, /client-retry-ack-loss/);
+  assert.match(resendChaosIntegration, /client-replay-ack-loss/);
+  assert.match(resendChaosIntegration, /postDurableAckResponseDropCount/);
   assert.match(resendChaosIntegration, /operationAttemptCount -ne 3/);
   assert.match(resendChaosIntegration, /https:\/\/\$\{BindHost\}:41801/);
   assert.match(resendChaosIntegration, /'ChaosEnd'/);
