@@ -352,7 +352,7 @@ test('membership catalog is a local-only one-shot with pinned packages and read-
   assert.match(launcher, /Assert-SurvivalMembershipFixtureVerified/);
   assert.match(
     launcher,
-    /@baseArguments 'ps' '-q' '--all' 'membership-fixture'/,
+    /\$baseArguments \+ @\('ps', '-q', '--all', 'membership-fixture'\)/,
     'the verified one-shot must be resolved from exited Compose services'
   );
   assert.match(launcher, /Get-SurvivalVerifiedMembershipPin/);
@@ -440,7 +440,8 @@ test('future DEV consumer contract rejects TOFU, pin mismatch, remote roots, and
 test('daily launcher always uses the fixed project without release-gate ceremony', () => {
   assert.match(launcher, /'deep-survival-dev'/);
   assert.match(launcher, /ValidateSet\('Prepare','Up','Down','Status','Logs','Build','Restart','ChaosBegin','ChaosEnd','ChaosStatus'\)/);
-  assert.match(launcher, /'compose', '-p', \$Project, '-f', \$ComposePath/);
+  assert.match(launcher,
+    /\$baseArguments = @\('compose'\) \+ \$projectDirectoryArguments \+ @\('-p', \$Project, '-f', \$ComposePath\)/);
   assert.match(launcher, /\[string\]\$LanHost/);
   assert.match(launcher, /SURVIVAL_BIND_HOST/);
   assert.match(launcher, /client\.android\.env/);
@@ -801,4 +802,16 @@ test('chaos rehearsal follows the exported LAN host and invalidates stale eviden
   assert.match(chaos, /survival-dev-verify\.mjs'\), '--host', \$RuntimeHost/);
   assert.match(chaos, /Remove-Item -LiteralPath \$EvidencePath -Force/);
   assert.doesNotMatch(chaos, /survival-dev-verify\.mjs'\), '--host', '127\.0\.0\.1'/);
+});
+
+test('physical chaos compose and host tools are a closed authority', () => {
+  assert.match(resendChaosCompose,
+    /image: node@sha256:242549cd46785b480c832479a730f4f2a20865d61ea2e404fdb2a5c3d3b73ecf/);
+  assert.doesNotMatch(resendChaosCompose, /SURVIVAL_NODE_IMAGE/);
+  assert.match(resendChaosCompose, /pull_policy: never/);
+  assert.match(resendChaosCompose, /SURVIVAL_CHAOS_TOOLS_ROOT:\?set SURVIVAL_CHAOS_TOOLS_ROOT/);
+  assert.match(launcher, /DEEP_PHYSICAL_E2E_DOCKER_COMPOSE_PATH/);
+  assert.match(launcher, /COMPOSE_DISABLE_ENV_FILE = 'true'/);
+  assert.match(launcher, /PhysicalDockerHost = 'npipe:\/{4}\.\/pipe\/docker_engine'/);
+  assert.doesNotMatch(launcher, /& docker\b|FilePath 'docker'/);
 });

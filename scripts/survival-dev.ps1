@@ -16,14 +16,120 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$Root = [IO.Path]::GetFullPath((Split-Path $PSScriptRoot -Parent))
-$ComposePath = Join-Path $Root 'docker-compose.survival.dev.yml'
-$UatTlsComposePath = Join-Path $Root 'docker-compose.survival-uat-tls.dev.yml'
-$ChaosComposePath = Join-Path $Root 'docker-compose.survival-resend-chaos.dev.yml'
+$ClosedPhysicalActions = @('Status', 'ChaosBegin', 'ChaosEnd', 'ChaosStatus')
+$PhysicalDockerHost = 'npipe:////./pipe/docker_engine'
+$DockerExecutable = $null
+$DockerComposeExecutable = $null
+
+function Initialize-PhysicalDockerAuthority() {
+    if ($Action -cnotin $ClosedPhysicalActions) { return }
+
+    $path = [Environment]::GetEnvironmentVariable('DEEP_PHYSICAL_E2E_DOCKER_PATH')
+    $expectedSha256 = [Environment]::GetEnvironmentVariable(
+        'DEEP_PHYSICAL_E2E_DOCKER_SHA256')
+    $composePath = [Environment]::GetEnvironmentVariable(
+        'DEEP_PHYSICAL_E2E_DOCKER_COMPOSE_PATH')
+    $expectedComposeSha256 = [Environment]::GetEnvironmentVariable(
+        'DEEP_PHYSICAL_E2E_DOCKER_COMPOSE_SHA256')
+    if ([string]::IsNullOrWhiteSpace($path) -or
+        $path -cnotmatch '^[A-Za-z]:[\\/]' -or
+        $expectedSha256 -cnotmatch '^[a-f0-9]{64}$' -or
+        -not [IO.File]::Exists($path)) {
+        throw 'Closed physical actions require one pinned absolute Docker executable.'
+    }
+    $full = [IO.Path]::GetFullPath($path)
+    $item = [IO.FileInfo](Get-Item -Force -LiteralPath $full)
+    if (($item.Attributes -band ([IO.FileAttributes]::Directory -bor
+            [IO.FileAttributes]::ReparsePoint)) -ne 0) {
+        throw 'Pinned Docker authority must be one regular non-reparse file.'
+    }
+    $stream = [IO.File]::Open(
+        $full, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    try {
+        $algorithm = [Security.Cryptography.SHA256]::Create()
+        try {
+            $actual = -join ($algorithm.ComputeHash($stream) |
+                ForEach-Object { $_.ToString('x2') })
+        } finally {
+            $algorithm.Dispose()
+        }
+    } finally {
+        $stream.Dispose()
+    }
+    if ($actual -cne $expectedSha256) {
+        throw 'Pinned Docker executable does not match its reviewed SHA-256.'
+    }
+    if ([string]::IsNullOrWhiteSpace($composePath) -or
+        $composePath -cnotmatch '^[A-Za-z]:[\\/]' -or
+        $expectedComposeSha256 -cnotmatch '^[a-f0-9]{64}$' -or
+        -not [IO.File]::Exists($composePath)) {
+        throw 'Closed physical actions require one pinned absolute Docker Compose executable.'
+    }
+    $composeFull = [IO.Path]::GetFullPath($composePath)
+    $composeItem = [IO.FileInfo](Get-Item -Force -LiteralPath $composeFull)
+    if (($composeItem.Attributes -band ([IO.FileAttributes]::Directory -bor
+            [IO.FileAttributes]::ReparsePoint)) -ne 0 -or
+        (Get-FileHash -LiteralPath $composeFull -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+            $expectedComposeSha256) {
+        throw 'Pinned Docker Compose executable does not match its reviewed SHA-256.'
+    }
+
+    # Compose normally consumes process variables and a repository .env file.
+    # The physical lane is a closed authority: reject all Docker/Compose inputs
+    # inherited from the caller and all Survival substitutions except the exact
+    # TLS directory supplied by the runner, then explicitly disable .env loading.
+    foreach ($entry in [Environment]::GetEnvironmentVariables().GetEnumerator()) {
+        $name = [string]$entry.Key
+        if ($name -match '^(DOCKER_|COMPOSE_)' -or
+            ($name -match '^SURVIVAL_' -and
+             -not [StringComparer]::OrdinalIgnoreCase.Equals(
+                 $name, 'SURVIVAL_UAT_TLS_SECRET_DIR'))) {
+            throw "Closed physical Docker authority rejects inherited variable '$name'."
+        }
+    }
+    $env:COMPOSE_DISABLE_ENV_FILE = 'true'
+    $env:SURVIVAL_CHAOS_TOOLS_ROOT = Join-Path $script:AuthorityRoot 'tools\survival-resend-chaos'
+    $script:DockerExecutable = $full
+    $script:DockerComposeExecutable = $composeFull
+}
+
+function Get-SurvivalDockerInvocation([string[]]$Arguments) {
+    if ($null -ne $script:DockerExecutable -and $Arguments.Count -gt 0 -and
+        $Arguments[0] -ceq 'compose') {
+        return [pscustomobject]@{
+            Executable = $script:DockerComposeExecutable
+            Arguments = @('--host', $PhysicalDockerHost) + @($Arguments | Select-Object -Skip 1)
+        }
+    }
+    return [pscustomobject]@{
+        Executable = $(if ($null -ne $script:DockerExecutable) { $script:DockerExecutable } else { 'docker' })
+        Arguments = $(if ($null -ne $script:DockerExecutable) {
+            @('--host', $PhysicalDockerHost) + $Arguments
+        } else { $Arguments })
+    }
+}
+
+$AuthorityRoot = [IO.Path]::GetFullPath((Split-Path $PSScriptRoot -Parent))
+$configuredRuntimeRoot = [Environment]::GetEnvironmentVariable(
+    'DEEP_PHYSICAL_E2E_DEVOPS_RUNTIME_ROOT')
+$Root = if ($Action -cin $ClosedPhysicalActions) {
+    if ([string]::IsNullOrWhiteSpace($configuredRuntimeRoot) -or
+        $configuredRuntimeRoot -cnotmatch '^[A-Za-z]:[\\/]' -or
+        -not [IO.Directory]::Exists($configuredRuntimeRoot)) {
+        throw 'Closed physical actions require one absolute DevOps runtime root.'
+    }
+    [IO.Path]::GetFullPath($configuredRuntimeRoot)
+} else { $AuthorityRoot }
+$ComposePath = Join-Path $AuthorityRoot 'docker-compose.survival.dev.yml'
+$UatTlsComposePath = Join-Path $AuthorityRoot 'docker-compose.survival-uat-tls.dev.yml'
+$ChaosComposePath = Join-Path $AuthorityRoot 'docker-compose.survival-resend-chaos.dev.yml'
 $Project = 'deep-survival-dev'
-$baseArguments = @('compose', '-p', $Project, '-f', $ComposePath)
-$uatTlsArguments = @('compose', '-p', $Project, '-f', $ComposePath, '-f', $UatTlsComposePath)
-$chaosArguments = @('compose', '-p', $Project, '-f', $ComposePath, '-f', $UatTlsComposePath, '-f', $ChaosComposePath, '--profile', 'resend-chaos')
+$projectDirectoryArguments = if ($Action -cin $ClosedPhysicalActions) {
+    @('--project-directory', $Root)
+} else { @() }
+$baseArguments = @('compose') + $projectDirectoryArguments + @('-p', $Project, '-f', $ComposePath)
+$uatTlsArguments = @('compose') + $projectDirectoryArguments + @('-p', $Project, '-f', $ComposePath, '-f', $UatTlsComposePath)
+$chaosArguments = @('compose') + $projectDirectoryArguments + @('-p', $Project, '-f', $ComposePath, '-f', $UatTlsComposePath, '-f', $ChaosComposePath, '--profile', 'resend-chaos')
 $ContextRoot = Join-Path $Root 'artifacts\survival-dev\build-contexts'
 $SurvivalXNodeCommit = '4d05fe7dd2dadd3f094c172a382ad675d2ff545a'
 $SurvivalXNodeContextManifestSha256 = '2b2a223c96bb3a9cb075262e14b64e083d28f3a2b4a1068b68c737250311e52a'
@@ -62,7 +168,8 @@ try {
 }
 
 function Invoke-SurvivalDocker([string[]]$Arguments) {
-    & docker @Arguments
+    $invocation = Get-SurvivalDockerInvocation $Arguments
+    & $invocation.Executable @($invocation.Arguments)
     if ($LASTEXITCODE -ne 0) {
         throw "Survival dev Docker command failed with exit code $LASTEXITCODE."
     }
@@ -84,7 +191,8 @@ function Invoke-SurvivalDockerBounded([string[]]$Arguments,[int]$TimeoutSeconds)
     $stderrPath = Join-Path ([IO.Path]::GetTempPath()) "deep-survival-docker-$runId.stderr.log"
     $process = $null
     try {
-        $process = Start-Process -FilePath 'docker' -ArgumentList $Arguments -PassThru `
+        $invocation = Get-SurvivalDockerInvocation $Arguments
+        $process = Start-Process -FilePath $invocation.Executable -ArgumentList $invocation.Arguments -PassThru `
             -WindowStyle Hidden -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
         [void]$process.Handle
         $startedAt = [DateTimeOffset]::UtcNow
@@ -95,7 +203,7 @@ function Invoke-SurvivalDockerBounded([string[]]$Arguments,[int]$TimeoutSeconds)
             if ($elapsedSeconds -ge $TimeoutSeconds) {
                 try {
                     if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
-                        & taskkill.exe /PID $process.Id /T /F *> $null
+                        & 'C:\Windows\System32\taskkill.exe' /PID $process.Id /T /F *> $null
                     } else {
                         $process.Kill()
                     }
@@ -389,18 +497,21 @@ function Remove-SurvivalClientEnvironment() {
 function Assert-SurvivalMembershipFixtureVerified() {
     # One-shot success is an exited container. Current Compose excludes exited
     # services from `ps -q` unless --all is explicit.
-    $containerId = (& docker @baseArguments 'ps' '-q' '--all' 'membership-fixture')
+    $invocation = Get-SurvivalDockerInvocation ($baseArguments + @('ps', '-q', '--all', 'membership-fixture'))
+    $containerId = (& $invocation.Executable @($invocation.Arguments))
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($containerId)) {
         throw 'DEV-LOCAL-ONLY membership fixture container is missing.'
     }
-    $state = (& docker 'inspect' '--format' '{{.State.Status}}|{{.State.ExitCode}}' $containerId)
+    $invocation = Get-SurvivalDockerInvocation @('inspect', '--format', '{{.State.Status}}|{{.State.ExitCode}}', $containerId)
+    $state = (& $invocation.Executable @($invocation.Arguments))
     if ($LASTEXITCODE -ne 0 -or ([string]$state).Trim() -ne 'exited|0') {
         throw 'DEV-LOCAL-ONLY membership fixture did not complete its Sodium read-after-publication verification.'
     }
 }
 
 function Get-SurvivalVerifiedMembershipPin() {
-    $logs = (& docker @baseArguments 'logs' '--no-color' '--no-log-prefix' 'membership-fixture')
+    $invocation = Get-SurvivalDockerInvocation ($baseArguments + @('logs', '--no-color', '--no-log-prefix', 'membership-fixture'))
+    $logs = (& $invocation.Executable @($invocation.Arguments))
     if ($LASTEXITCODE -ne 0) {
         throw 'Unable to read the verified DEV-LOCAL-ONLY membership fixture result.'
     }
@@ -665,7 +776,8 @@ function Invoke-SurvivalChaosControl([ValidateSet('arm','disarm','status')][stri
     if ($Command -eq 'arm') {
         $arguments += @('--ttl', [string]$ChaosTtlSeconds, '--fault', $ChaosFault)
     }
-    $json = (& docker @arguments | Out-String).Trim()
+    $invocation = Get-SurvivalDockerInvocation $arguments
+    $json = (& $invocation.Executable @($invocation.Arguments) | Out-String).Trim()
     if ($LASTEXITCODE -ne 0) { throw 'Survival resend chaos control failed.' }
     $status = $json | ConvertFrom-Json
     if ($status.schema -cne 'deep-survival-resend-chaos-status.v2' -or
@@ -681,10 +793,11 @@ function Invoke-SurvivalChaosControl([ValidateSet('arm','disarm','status')][stri
 }
 
 function Test-SurvivalChaosRunning() {
-    $id = (& docker ps `
-        --filter "label=com.docker.compose.project=$Project" `
-        --filter 'label=com.docker.compose.service=resend-chaos' `
-        --filter 'status=running' --quiet | Out-String).Trim()
+    $invocation = Get-SurvivalDockerInvocation @('ps',
+        '--filter', "label=com.docker.compose.project=$Project",
+        '--filter', 'label=com.docker.compose.service=resend-chaos',
+        '--filter', 'status=running', '--quiet')
+    $id = (& $invocation.Executable @($invocation.Arguments) | Out-String).Trim()
     if ($LASTEXITCODE -ne 0) { throw 'Unable to inspect survival resend chaos state.' }
     return -not [string]::IsNullOrWhiteSpace($id)
 }
@@ -734,6 +847,8 @@ function Stop-SurvivalChaos([switch]$BestEffort) {
     if ($null -ne $failure -and -not $BestEffort) { throw $failure }
     if ($null -ne $failure -and $BestEffort) { Write-Warning 'Chaos cleanup failed; protected token retained.' }
 }
+
+Initialize-PhysicalDockerAuthority
 
 switch ($Action) {
     'Prepare' {

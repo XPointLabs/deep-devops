@@ -1,7 +1,8 @@
 services:
   resend-chaos:
     profiles: [resend-chaos]
-    image: ${SURVIVAL_NODE_IMAGE:-node@sha256:242549cd46785b480c832479a730f4f2a20865d61ea2e404fdb2a5c3d3b73ecf}
+    image: node@sha256:242549cd46785b480c832479a730f4f2a20865d61ea2e404fdb2a5c3d3b73ecf
+    pull_policy: never
     platform: linux/arm64
     init: true
     restart: unless-stopped
@@ -25,7 +26,7 @@ services:
       DEEP_CHAOS_UPSTREAM_TIMEOUT_MS: "30000"
     entrypoint: [node, /opt/deep-chaos/resend-chaos-proxy.mjs]
     volumes:
-      - ./tools/survival-resend-chaos:/opt/deep-chaos:ro
+      - ${SURVIVAL_CHAOS_TOOLS_ROOT:?set SURVIVAL_CHAOS_TOOLS_ROOT}:/opt/deep-chaos:ro
     secrets:
       - source: resend-chaos-token
         target: resend-chaos-token
@@ -47,6 +48,7 @@ services:
       com.xpoint.survival.resend-chaos: development-only
 
   survival-uat-tls-ingress:
+    pull_policy: never
     environment:
       DEEP_UAT_XNODE_1_UPSTREAM: resend-chaos
     depends_on:
