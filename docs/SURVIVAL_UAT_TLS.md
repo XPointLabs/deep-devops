@@ -81,3 +81,7 @@ The integration runner exercises all supported one-shot faults, including the ex
 post-durable ACK response loss followed by a retry in a fresh driver process, and writes an atomic,
 ACL-protected, SHA-256 content-addressed v2 evidence envelope. That digest is an integrity
 check only; it does not claim a signing authority or production attestation.
+The ACK cross-process frame state is a separate private boundary: exact protected Windows
+owner/DACL and read-only file semantics, or Unix `0700` directory plus `0600` file, with no
+reparse traversal. Atomic writes are durably flushed and hash-reread; retry and replay reject
+ACL/mode, type, owner, content, or per-frame digest changes before parsing wire material.

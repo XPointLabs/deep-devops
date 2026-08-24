@@ -181,6 +181,7 @@ try {
     foreach ($name in @(
         'MailboxGrantProvisioner.cs',
         'MailboxRuntimePublisher.cs',
+        'PrivateCrossProcessState.cs',
         'Program.cs',
         'SurvivalMailboxDriver.csproj')) {
         $driverHashes[$name] = (Get-FileHash -LiteralPath (

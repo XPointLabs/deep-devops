@@ -14,6 +14,26 @@ if (args.Length > 0 && args[0] == "publish-runtime")
 }
 
 var arguments = Arguments.Parse(args);
+if (arguments.Command == "private-state-test-write")
+{
+    PrivateCrossProcessState.WriteAckLossState(
+        arguments.StateDirectory,
+        PrivateCrossProcessState.Create(
+            "test-ack"u8.ToArray(),
+            "test-empty-retrieve"u8.ToArray()));
+    Result("private-state-test-write", new { protectedCrossProcessState = true });
+    return;
+}
+if (arguments.Command == "private-state-test-read")
+{
+    var state = PrivateCrossProcessState.ReadAckLossState(arguments.StateDirectory);
+    Result("private-state-test-read", new
+    {
+        protectedCrossProcessState = true,
+        mar1Present = state.Mar1 is not null
+    });
+    return;
+}
 if (arguments.Command == "provision")
 {
     var provisioned = MailboxGrantProvisioner.Provision(arguments);
@@ -557,13 +577,9 @@ static async Task RunClientAckLossAsync(Fixture fixture, Arguments arguments)
         store.Envelope,
         now,
         replayCounter: 4);
-    Directory.CreateDirectory(arguments.StateDirectory);
-    await File.WriteAllTextAsync(
-        Path.Combine(arguments.StateDirectory, "client-ack-loss.json"),
-        JsonSerializer.Serialize(new ClientAckLossState(
-            Convert.ToBase64String(ack),
-            Convert.ToBase64String(emptyRetrieve),
-            Mar1: null)));
+    PrivateCrossProcessState.WriteAckLossState(
+        arguments.StateDirectory,
+        PrivateCrossProcessState.Create(ack, emptyRetrieve));
     await client.SendTransportFailureAsync(MailboxWireHttpContract.Acknowledge, ack);
     Result("client-ack-loss", new
     {
@@ -576,10 +592,7 @@ static async Task RunClientAckLossAsync(Fixture fixture, Arguments arguments)
 
 static async Task RunClientRetryAckLossAsync(Fixture fixture, Arguments arguments)
 {
-    var path = Path.Combine(arguments.StateDirectory, "client-ack-loss.json");
-    var state = JsonSerializer.Deserialize<ClientAckLossState>(
-        await File.ReadAllTextAsync(path))
-        ?? throw new InvalidDataException("ACK loss state is invalid.");
+    var state = PrivateCrossProcessState.ReadAckLossState(arguments.StateDirectory);
     var ack = Convert.FromBase64String(state.Ack);
     var emptyRetrieve = Convert.FromBase64String(state.EmptyRetrieve);
     var client = new ExactHttpClient(arguments.ClientUrl);
@@ -600,9 +613,9 @@ static async Task RunClientRetryAckLossAsync(Fixture fixture, Arguments argument
     {
         throw new InvalidOperationException("Recovered ACK left the acknowledged item in the inbox.");
     }
-    await File.WriteAllTextAsync(
-        path,
-        JsonSerializer.Serialize(state with { Mar1 = Convert.ToBase64String(retry) }));
+    PrivateCrossProcessState.WriteAckLossState(
+        arguments.StateDirectory,
+        PrivateCrossProcessState.WithMar1(state, retry));
     Result("client-retry-ack-loss", new
     {
         retry = "durable",
@@ -615,10 +628,7 @@ static async Task RunClientRetryAckLossAsync(Fixture fixture, Arguments argument
 
 static async Task RunClientReplayAckLossAsync(Arguments arguments)
 {
-    var state = JsonSerializer.Deserialize<ClientAckLossState>(
-        await File.ReadAllTextAsync(
-            Path.Combine(arguments.StateDirectory, "client-ack-loss.json")))
-        ?? throw new InvalidDataException("ACK loss state is invalid.");
+    var state = PrivateCrossProcessState.ReadAckLossState(arguments.StateDirectory);
     if (string.IsNullOrWhiteSpace(state.Mar1))
     {
         throw new InvalidDataException("ACK retry receipt is missing.");
@@ -821,11 +831,6 @@ sealed record Scenario(
 sealed record ClientStoreFixture(
     byte[] CanonicalRequest,
     MailboxEncryptedEnvelope Envelope);
-
-sealed record ClientAckLossState(
-    string Ack,
-    string EmptyRetrieve,
-    string? Mar1);
 
 sealed record AuthorityWindow(
     ulong CurrentEpoch,

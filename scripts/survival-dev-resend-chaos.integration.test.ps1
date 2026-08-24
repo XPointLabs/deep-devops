@@ -13,13 +13,14 @@ $Launcher = Join-Path $PSScriptRoot 'survival-dev.ps1'
 $PinnedXNode = Join-Path $Root 'artifacts\survival-dev\build-contexts\xnode'
 $DriverSource = Join-Path $Root 'tools\survival-mailbox-driver'
 $BuildHelper = Join-Path $PSScriptRoot 'survival-dev-mailbox-build-inputs.ps1'
-$ExpectedBuildHelperSha256 = '04c0f2cf9118b648ce4868390451afd33cd6ad9ce550703b24b3f429ce694b2c'
+$ExpectedBuildHelperSha256 = 'fea6132d7c3e7ba7cc6297b249df32f80a92e51d7586643e939c59cc7feb5452'
 $ExpectedXNodeCommit = '4d05fe7dd2dadd3f094c172a382ad675d2ff545a'
 $ExpectedXNodeManifestSha256 = '2b2a223c96bb3a9cb075262e14b64e083d28f3a2b4a1068b68c737250311e52a'
 $ExpectedDriverSha256 = @{
     'MailboxGrantProvisioner.cs' = 'f88f7ebb0c06f11fde52386341202090e8bd4205ad23bb40c31e7d79d2ac8184'
     'MailboxRuntimePublisher.cs' = 'd6aad71f65987f620ccf0d5a06394240aa199d3bb92ef38b81a9594f8e9ff94b'
-    'Program.cs' = 'c420637f23aa44f2fefa2f93962149134fdf8a4b8a54539049a87d72b7c3bb24'
+    'PrivateCrossProcessState.cs' = '651d8256822d41b9a7bceab1e6d6bb45740026cac00f487a564befe7777f272b'
+    'Program.cs' = '8eb6b8e04049d7dd06cb2998a0487a6b9ea4554e601f8ca63d047e83283fa0b2'
     'SurvivalMailboxDriver.csproj' = '4db436d69ea88ac3ff16f08c161b61cc0c048bad84cb7e529b2208fa569eafbe'
 }
 . (Join-Path $PSScriptRoot 'survival-dev-private-secrets.ps1')
@@ -85,6 +86,8 @@ $faultEvidence = @()
 $runtimeImages = $null
 try {
     [void](Invoke-Checked node @('--test', '--test-force-exit', (Join-Path $Root 'tools\survival-resend-chaos\resend-chaos-proxy.test.mjs')))
+    [void][IO.Directory]::CreateDirectory($State)
+    Set-MailboxDirectoryExclusiveWritable $State
     [void][IO.Directory]::CreateDirectory($BuildWork)
     Set-MailboxDirectoryExclusiveWritable $BuildWork
     $isolated = New-SurvivalMailboxIsolatedSource `

@@ -298,6 +298,16 @@ and deletes the protected binding and lab token:
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/survival-dev-resend-chaos.integration.test.ps1 -BindHost 192.168.1.43
 ```
 
+The ACK crash-window handoff is created before the first driver process in a dedicated
+non-reparse directory with exact Windows owner and protected current-user/SYSTEM/Administrators
+DACL (or Unix mode `0700`). Its sole regular, non-reparse state file is Windows read-only
+between processes with the same exact DACL (or Unix mode `0600`). Writes use a same-directory
+create-new temporary file, durable flush, atomic replacement, immediate reread, and SHA-256
+comparison. Every retry/replay revalidates directory, file type, owner/DACL or mode, canonical
+bounded JSON, and hashes of the ACK/Retrieve/MAR1 frames before decoding them; mismatch fails
+closed. The runner deletes this state in `finally`, while an abnormal exit leaves it accessible
+only through the same private directory boundary.
+
 The protected, atomically written evidence envelope is
 `deep-survival-resend-chaos-evidence-envelope.v2`. Its canonical v2 evidence is
 content-addressed with SHA-256 and immediately reread and independently verified by the same
