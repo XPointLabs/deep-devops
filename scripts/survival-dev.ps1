@@ -25,9 +25,9 @@ $SurvivalXNodeCommit = '4d05fe7dd2dadd3f094c172a382ad675d2ff545a'
 $SurvivalXNodeContextManifestSha256 = '2b2a223c96bb3a9cb075262e14b64e083d28f3a2b4a1068b68c737250311e52a'
 $SurvivalMailboxBuildHelperSha256 = '04c0f2cf9118b648ce4868390451afd33cd6ad9ce550703b24b3f429ce694b2c'
 $SurvivalMailboxDriverSha256 = @{
-    'MailboxGrantProvisioner.cs' = '4028b9c7388530c0a8071bae715d717b755d5fe5645e229ef9d205e81d8e258a'
+    'MailboxGrantProvisioner.cs' = 'f88f7ebb0c06f11fde52386341202090e8bd4205ad23bb40c31e7d79d2ac8184'
     'MailboxRuntimePublisher.cs' = 'd6aad71f65987f620ccf0d5a06394240aa199d3bb92ef38b81a9594f8e9ff94b'
-    'Program.cs' = 'c63e30740a455416a52f5d208c5d3b019abca5ae13c1b8830f63164e82db2766'
+    'Program.cs' = '6f8017cf7eb6902a99ffe98d5931e1731c3a704746c598287d1a6147e135f1c2'
     'SurvivalMailboxDriver.csproj' = '4db436d69ea88ac3ff16f08c161b61cc0c048bad84cb7e529b2208fa569eafbe'
 }
 $ChainLifecycleServices = @(
@@ -239,9 +239,11 @@ function Prepare-SurvivalMailboxPeerAuthority([string]$PinnedXNodeSource = '') {
     $clientPublicPath = Join-Path $outputDirectory 'mailbox-client-authority.public.json'
     $coordinatorHost = [Environment]::GetEnvironmentVariable('SURVIVAL_BIND_HOST')
     if ([string]::IsNullOrWhiteSpace($coordinatorHost)) { $coordinatorHost = '127.0.0.1' }
+    $authorityStatePath = Get-SurvivalMailboxAuthorityState
     Invoke-SurvivalMailboxDriverImmutable $xnodeSource @(
         'authority',
         '--secrets-dir', (Join-Path $Root '.secrets\survival-dev'),
+        '--authority-state', $authorityStatePath,
         '--output-env', $authorityPath,
         '--output-client-env', $clientAuthorityPath,
         '--coordinator-url', "http://$coordinatorHost`:41801",
@@ -251,6 +253,89 @@ function Prepare-SurvivalMailboxPeerAuthority([string]$PinnedXNodeSource = '') {
     Set-Item -Path 'Env:SURVIVAL_MAILBOX_CLIENT_AUTHORITY_ENV' -Value $clientAuthorityPath
     Set-Item -Path 'Env:SURVIVAL_MAILBOX_PUBLIC_AUTHORITY' -Value $publicPath
     Set-Item -Path 'Env:SURVIVAL_MAILBOX_CLIENT_PUBLIC_AUTHORITY' -Value $clientPublicPath
+}
+
+function Get-SurvivalMailboxAuthorityState() {
+    $directory = Join-Path $Root '.secrets\survival-dev'
+    [void][IO.Directory]::CreateDirectory($directory)
+    $path = Join-Path $directory 'mailbox-authority-state.v1.json'
+    $now = [uint64][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    $anchor = [uint64]([Math]::Floor($now / 60) * 60)
+    $state = $null
+    $changed = $false
+    if (Test-Path -LiteralPath $path -PathType Leaf) {
+        $bytes = [IO.File]::ReadAllBytes($path)
+        if ($bytes.Length -eq 0 -or $bytes.Length -gt 4096) {
+            throw 'DEV mailbox authority state has an invalid size.'
+        }
+        $state = [Text.Encoding]::UTF8.GetString($bytes) | ConvertFrom-Json
+        $names = @($state.PSObject.Properties.Name | Sort-Object)
+        $expected = @(
+            'currentEpoch', 'currentExpiresAtUnixSeconds', 'currentNotBeforeUnixSeconds',
+            'nextEpoch', 'nextExpiresAtUnixSeconds', 'nextNotBeforeUnixSeconds', 'schemaVersion')
+        if (($names -join '|') -ne (($expected | Sort-Object) -join '|') -or $state.schemaVersion -ne 1) {
+            throw 'DEV mailbox authority state schema is invalid.'
+        }
+    } else {
+        $state = [pscustomobject][ordered]@{
+            schemaVersion = 1
+            currentEpoch = [uint64]1
+            currentNotBeforeUnixSeconds = $anchor - 300
+            currentExpiresAtUnixSeconds = $anchor + 28800
+            nextEpoch = [uint64]2
+            nextNotBeforeUnixSeconds = $anchor - 60
+            nextExpiresAtUnixSeconds = $anchor + 43200
+        }
+        $changed = $true
+    }
+
+    $currentEpoch = [uint64]$state.currentEpoch
+    $currentNotBefore = [uint64]$state.currentNotBeforeUnixSeconds
+    $currentExpires = [uint64]$state.currentExpiresAtUnixSeconds
+    $nextEpoch = [uint64]$state.nextEpoch
+    $nextNotBefore = [uint64]$state.nextNotBeforeUnixSeconds
+    $nextExpires = [uint64]$state.nextExpiresAtUnixSeconds
+    if ($currentEpoch -eq 0 -or $nextEpoch -ne $currentEpoch + 1 `
+        -or $currentNotBefore -ge $nextNotBefore -or $nextNotBefore -gt $currentExpires `
+        -or $currentExpires -ge $nextExpires -or ($nextExpires - $nextNotBefore) -ne 43260) {
+        throw 'DEV mailbox authority state window is invalid.'
+    }
+
+    if ($now + 1800 -gt $currentExpires) {
+        if ($now + 1800 -gt $nextExpires) {
+            throw 'DEV mailbox authority overlap was allowed to expire; forward rotation cannot be reconstructed safely.'
+        }
+        $newNextNotBefore = $anchor - 60
+        $newNextExpires = $anchor + 43200
+        if ($newNextNotBefore -le $nextNotBefore -or $newNextNotBefore -gt $nextExpires `
+            -or $newNextExpires -le $nextExpires) {
+            throw 'DEV mailbox authority cannot form the next bounded overlap window.'
+        }
+        $state = [pscustomobject][ordered]@{
+            schemaVersion = 1
+            currentEpoch = $nextEpoch
+            currentNotBeforeUnixSeconds = $nextNotBefore
+            currentExpiresAtUnixSeconds = $nextExpires
+            nextEpoch = $nextEpoch + 1
+            nextNotBeforeUnixSeconds = $newNextNotBefore
+            nextExpiresAtUnixSeconds = $newNextExpires
+        }
+        $changed = $true
+    }
+
+    if ($changed) {
+        $temp = $path + '.' + [Guid]::NewGuid().ToString('N') + '.tmp'
+        try {
+            $json = ($state | ConvertTo-Json -Depth 3) + "`n"
+            [IO.File]::WriteAllText($temp, $json, [Text.UTF8Encoding]::new($false))
+            Protect-SurvivalDevPrivateFile $temp
+            Move-Item -LiteralPath $temp -Destination $path -Force
+            Protect-SurvivalDevPrivateFile $path
+        } finally {
+            Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue
+        }
+    }
+    return $path
 }
 
 function Prepare-SurvivalXNodeIdentitySecrets() {

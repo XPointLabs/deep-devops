@@ -53,16 +53,23 @@ static class MailboxGrantProvisioner
             var windowsMailbox = Hmac(windowsSecret, "deep.mailbox.blinded-mailbox-id.v1|windows");
             try
             {
+                var overlap = LoadReusableOverlap(
+                    outputRoot,
+                    authority,
+                    androidHolder,
+                    windowsHolder,
+                    androidMailbox,
+                    windowsMailbox);
                 var android = BuildBundle(
                     Android, androidHolder, windowsHolder,
                     androidMailbox, windowsMailbox,
                     androidSecret, windowsSecret,
-                    issuerSeed, authority);
+                    issuerSeed, authority, overlap?.Android);
                 var windows = BuildBundle(
                     Windows, windowsHolder, androidHolder,
                     windowsMailbox, androidMailbox,
                     windowsSecret, androidSecret,
-                    issuerSeed, authority);
+                    issuerSeed, authority, overlap?.Windows);
                 var androidBytes = SerializeBundle(android, issuerSeed);
                 var windowsBytes = SerializeBundle(windows, issuerSeed);
                 return PublishPair(outputRoot, authority, androidHolder, windowsHolder,
@@ -155,8 +162,8 @@ static class MailboxGrantProvisioner
         Require(source.SchemaVersion == 2
             && source.Scope == "DEV-LOCAL-ONLY"
             && source.Protocol == "P10E/MCP2/MAU2/MIP1/RIP1/PRQ2"
-            && source.MinimumGeneration == ProtocolFixture.Epoch
-            && source.MaximumGeneration == ProtocolFixture.NextEpoch
+            && source.MinimumGeneration > 0
+            && source.MaximumGeneration == checked(source.MinimumGeneration + 1)
             && source.Epochs.Count == 2
             && source.Selections.Count == 30
             && source.ReplicaIds.Count == 2
@@ -197,7 +204,7 @@ static class MailboxGrantProvisioner
             && currentSource.NotBeforeUnixSeconds < nextSource.NotBeforeUnixSeconds
             && nextSource.NotBeforeUnixSeconds <= currentSource.ExpiresAtUnixSeconds
             && currentSource.ExpiresAtUnixSeconds < nextSource.ExpiresAtUnixSeconds
-            && currentSource.ExpiresAtUnixSeconds - currentSource.NotBeforeUnixSeconds == 29100
+            && currentSource.ExpiresAtUnixSeconds - currentSource.NotBeforeUnixSeconds <= 43260
             && nextSource.ExpiresAtUnixSeconds - nextSource.NotBeforeUnixSeconds == 43260
             && now >= nextSource.NotBeforeUnixSeconds
             && now + 1800 <= currentSource.ExpiresAtUnixSeconds,
@@ -206,10 +213,12 @@ static class MailboxGrantProvisioner
         // Reuse the exact authority parser used by the mailbox driver. This
         // validates all six canonical MIP1/RIP1 proofs, descriptors, roots,
         // signing keys, validity, and exact internal xnode-N endpoints.
-        var currentParsed = Fixture.ParsePublicEpoch(currentSource, ProtocolFixture.Epoch,
-            currentSource.NotBeforeUnixSeconds, currentSource.ExpiresAtUnixSeconds, "current");
-        var nextParsed = Fixture.ParsePublicEpoch(nextSource, ProtocolFixture.NextEpoch,
-            nextSource.NotBeforeUnixSeconds, nextSource.ExpiresAtUnixSeconds, "next");
+        var currentParsed = Fixture.ParsePublicEpoch(currentSource, source.MinimumGeneration,
+            currentSource.NotBeforeUnixSeconds, currentSource.ExpiresAtUnixSeconds,
+            Fixture.PlacementDomain(source.MinimumGeneration));
+        var nextParsed = Fixture.ParsePublicEpoch(nextSource, source.MaximumGeneration,
+            nextSource.NotBeforeUnixSeconds, nextSource.ExpiresAtUnixSeconds,
+            Fixture.PlacementDomain(source.MaximumGeneration));
         var proofVerifier =
             new Deep.Protocol.DeepExtension.MembershipRoutes.MembershipRoutesMailboxReplicaProofVerifier();
         Require(currentParsed.Proofs.All(proof =>
@@ -235,8 +244,10 @@ static class MailboxGrantProvisioner
         var selectionIndex = 0;
         foreach (var epoch in new[]
         {
-            (Value: ProtocolFixture.Epoch, Placements: Fixture.BuildPlacements("current")),
-            (Value: ProtocolFixture.NextEpoch, Placements: Fixture.BuildPlacements("next"))
+            (Value: source.MinimumGeneration,
+                Placements: Fixture.BuildPlacements(Fixture.PlacementDomain(source.MinimumGeneration))),
+            (Value: source.MaximumGeneration,
+                Placements: Fixture.BuildPlacements(Fixture.PlacementDomain(source.MaximumGeneration)))
         })
         {
             for (var first = 0; first < 6; first++)
@@ -311,14 +322,15 @@ static class MailboxGrantProvisioner
     private static Bundle BuildBundle(string identity, byte[] holder, byte[] peerHolder,
         byte[] mailbox, byte[] peerMailbox,
         byte[] mailboxSecret, byte[] peerMailboxSecret,
-        byte[] issuerSeed, StrictAuthority authority)
+        byte[] issuerSeed, StrictAuthority authority,
+        ReusableOverlapBundle? overlap)
     {
         var ownRetrieve = Grants(identity, "retrieve", MailboxCapabilityDomain.Retrieve,
-            holder, mailboxSecret, issuerSeed, authority);
+            holder, mailboxSecret, issuerSeed, authority, overlap?.OwnRetrieve);
         var ownDeposit = Grants(identity, "deposit-own", MailboxCapabilityDomain.Deposit,
-            holder, mailboxSecret, issuerSeed, authority);
+            holder, mailboxSecret, issuerSeed, authority, overlap?.OwnDeposit);
         var peerDeposit = Grants(identity, "deposit-peer", MailboxCapabilityDomain.Deposit,
-            holder, peerMailboxSecret, issuerSeed, authority);
+            holder, peerMailboxSecret, issuerSeed, authority, overlap?.PeerDeposit);
         return new Bundle(
             identity,
             holder,
@@ -338,7 +350,8 @@ static class MailboxGrantProvisioner
         byte[] holder,
         byte[] targetMailboxSecret,
         byte[] issuerSeed,
-        StrictAuthority authority)
+        StrictAuthority authority,
+        Grant? reusableCurrent)
     {
         var crypto = new SodiumMailboxCapabilityCrypto();
         Grant Grant(Epoch epoch, MailboxCapabilityDomain domain)
@@ -372,8 +385,220 @@ static class MailboxGrantProvisioner
                 CryptographicOperations.ZeroMemory(serial);
             }
         }
-        return new GrantSet(Grant(authority.Current, domain), Grant(authority.Next, domain));
+        return new GrantSet(
+            reusableCurrent ?? Grant(authority.Current, domain),
+            Grant(authority.Next, domain));
     }
+
+    private static ReusableOverlapPair? LoadReusableOverlap(
+        string outputRoot,
+        StrictAuthority authority,
+        byte[] androidHolder,
+        byte[] windowsHolder,
+        byte[] androidMailbox,
+        byte[] windowsMailbox)
+    {
+        var generationsRoot = Path.Combine(outputRoot, "generations");
+        if (!Directory.Exists(generationsRoot))
+            return null;
+        AssertNoReparseTraversal(generationsRoot);
+
+        ReusableOverlapPair? selected = null;
+        foreach (var generationDirectory in Directory.EnumerateDirectories(generationsRoot)
+                     .Order(StringComparer.Ordinal))
+        {
+            AssertNoReparseTraversal(generationDirectory);
+            var generation = Path.GetFileName(generationDirectory);
+            if (generation.StartsWith(".stage-", StringComparison.Ordinal))
+                continue;
+            LowerHex(generation, 32, "retained generation");
+
+            var manifestBytes = ReadStableFile(
+                Path.Combine(generationDirectory, "pair-manifest.v1.json"));
+            var androidBytes = ReadStableFile(
+                Path.Combine(generationDirectory, "android.mailbox-credentials.v1.json"));
+            var windowsBytes = ReadStableFile(
+                Path.Combine(generationDirectory, "windows.mailbox-credentials.v1.json"));
+            using var manifest = JsonDocument.Parse(manifestBytes);
+            using var android = JsonDocument.Parse(androidBytes);
+            using var windows = JsonDocument.Parse(windowsBytes);
+            var manifestRoot = manifest.RootElement;
+            var retainedAuthorityHash = LowerHex(
+                manifestRoot.GetProperty("authoritySha256").GetString(),
+                32,
+                "retained authority hash");
+            var androidHash = Sha256(androidBytes);
+            var windowsHash = Sha256(windowsBytes);
+            var expectedGeneration = Sha256(Encoding.UTF8.GetBytes(
+                $"deep.mailbox-pair-generation.v1\n{retainedAuthorityHash}\n{androidHash}\n{windowsHash}\n"));
+            Require(manifestRoot.GetProperty("schemaVersion").GetInt32() == 1
+                && manifestRoot.GetProperty("developmentOnly").GetBoolean()
+                && manifestRoot.GetProperty("generation").GetString() == generation
+                && generation == expectedGeneration
+                && manifestRoot.GetProperty("issuerPublicKey").GetString() == authority.IssuerPublicKey
+                && LowerHex(manifestRoot.GetProperty("androidHolderPublicKey").GetString(),
+                    32, "retained android holder").Length == 64
+                && LowerHex(manifestRoot.GetProperty("windowsHolderPublicKey").GetString(),
+                    32, "retained windows holder").Length == 64
+                && manifestRoot.GetProperty("files").GetProperty("android").GetString() == androidHash
+                && manifestRoot.GetProperty("files").GetProperty("windows").GetString() == windowsHash,
+                "A retained mailbox generation is not an exact immutable pair.");
+
+            var androidOverlap = TryReadReusableOverlapBundle(
+                android.RootElement,
+                Android,
+                Windows,
+                androidHolder,
+                windowsHolder,
+                androidMailbox,
+                windowsMailbox,
+                retainedAuthorityHash,
+                authority);
+            var windowsOverlap = TryReadReusableOverlapBundle(
+                windows.RootElement,
+                Windows,
+                Android,
+                windowsHolder,
+                androidHolder,
+                windowsMailbox,
+                androidMailbox,
+                retainedAuthorityHash,
+                authority);
+            if (androidOverlap is null || windowsOverlap is null)
+                continue;
+
+            var candidate = new ReusableOverlapPair(androidOverlap, windowsOverlap!);
+            if (selected is null)
+                selected = candidate;
+            else
+                Require(EqualOverlap(selected, candidate),
+                    "Retained mailbox generations disagree about the exact E+1 overlap.");
+        }
+        return selected;
+    }
+
+    private static ReusableOverlapBundle? TryReadReusableOverlapBundle(
+        JsonElement bundle,
+        string identity,
+        string peerIdentity,
+        byte[] holder,
+        byte[] peerHolder,
+        byte[] mailbox,
+        byte[] peerMailbox,
+        string retainedAuthorityHash,
+        StrictAuthority authority)
+    {
+        Require(bundle.GetProperty("schemaVersion").GetInt32() == 1
+            && bundle.GetProperty("developmentOnly").GetBoolean()
+            && bundle.GetProperty("identity").GetString() == identity
+            && bundle.GetProperty("authorityHashSha256").GetString() == retainedAuthorityHash,
+            $"Retained {identity} mailbox generation schema is invalid.");
+        Require(bundle.GetProperty("currentEpoch").GetProperty("epoch").GetUInt64()
+                < bundle.GetProperty("nextEpoch").GetProperty("epoch").GetUInt64(),
+            $"Retained {identity} mailbox generation epochs are not ordered.");
+        if (bundle.GetProperty("nextEpoch").GetRawText() != EpochJsonText(authority.Current))
+            return null;
+        if (bundle.GetProperty("networkId").GetString() != authority.NetworkId
+            || bundle.GetProperty("issuerPublicKey").GetString() != authority.IssuerPublicKey
+            || bundle.GetProperty("holderPublicKey").GetString() != Lower(holder)
+            || bundle.GetProperty("coordinatorLanUrl").GetString()
+                != authority.Coordinator.ToString().TrimEnd('/')
+            || bundle.GetProperty("replicas").GetRawText() != ReplicasJsonText(authority.Replicas)
+            || bundle.GetProperty("ownMailbox").GetProperty("blindedMailboxId").GetString()
+                != Lower(mailbox)
+            || bundle.GetProperty("peerMailboxRoute").GetProperty("holderPublicKey").GetString()
+                != Lower(peerHolder)
+            || bundle.GetProperty("peerMailboxRoute").GetProperty("blindedMailboxId").GetString()
+                != Lower(peerMailbox))
+            return null;
+
+        var ownMailbox = bundle.GetProperty("ownMailbox");
+        var peerRoute = bundle.GetProperty("peerMailboxRoute");
+        return new ReusableOverlapBundle(
+            ReadReusableNextGrant(
+                ownMailbox.GetProperty("retrieveAndAcknowledgeGrants"),
+                MailboxCapabilityDomain.Retrieve,
+                holder,
+                authority,
+                $"retained {identity} retrieve grant"),
+            ReadReusableNextGrant(
+                ownMailbox.GetProperty("depositGrants"),
+                MailboxCapabilityDomain.Deposit,
+                holder,
+                authority,
+                $"retained {identity} own deposit grant"),
+            ReadReusableNextGrant(
+                peerRoute.GetProperty("depositGrants"),
+                MailboxCapabilityDomain.Deposit,
+                holder,
+                authority,
+                $"retained {identity}->{peerIdentity} peer deposit grant"));
+    }
+
+    private static Grant ReadReusableNextGrant(
+        JsonElement set,
+        MailboxCapabilityDomain domain,
+        byte[] holder,
+        StrictAuthority authority,
+        string label)
+    {
+        Require(set.ValueKind == JsonValueKind.Array && set.GetArrayLength() == 2,
+            $"{label} set must contain E and E+1.");
+        var item = set[1];
+        var encoded = Convert.FromBase64String(
+            item.GetProperty("canonicalGrant").GetString()!);
+        var issuer = Hex(authority.IssuerPublicKey, 32, "issuer public key");
+        var network = Hex(authority.NetworkId, 16, "network id");
+        try
+        {
+            var grant = MailboxAuthenticatedCapabilityCodec.DecodeGrant(encoded);
+            Require(item.GetProperty("epoch").GetUInt64() == authority.Current.Value
+                && item.GetProperty("sha256").GetString() == Sha256(encoded)
+                && grant.Epoch == authority.Current.Value
+                && grant.Generation == authority.Current.Value
+                && grant.Domain == domain
+                && grant.Lifecycle == MailboxCapabilityLifecycle.Active
+                && grant.NotBeforeUnixSeconds == authority.Current.NotBefore
+                && grant.ExpiresAtUnixSeconds == authority.Current.ExpiresAt
+                && grant.OverlapUntilUnixSeconds == 0
+                && grant.Serial.Span.IndexOfAnyExcept((byte)0) >= 0
+                && CryptographicOperations.FixedTimeEquals(grant.HolderPublicKey.Span, holder)
+                && CryptographicOperations.FixedTimeEquals(grant.IssuerPublicKey.Span, issuer)
+                && CryptographicOperations.FixedTimeEquals(grant.NetworkId.Span, network)
+                && CryptographicOperations.FixedTimeEquals(
+                    grant.PlacementCommitment.Span,
+                    Hex(authority.Current.PlacementCommitment, 32, "placement commitment"))
+                && CryptographicOperations.FixedTimeEquals(
+                    grant.MembershipCommitment.Span,
+                    Hex(authority.Current.MembershipCommitment, 32, "membership commitment"))
+                && new SodiumMailboxCapabilityCrypto().VerifyIssuer(
+                    issuer,
+                    MailboxAuthenticatedCapabilityCodec.GetGrantSigningBytes(grant),
+                    grant.IssuerSignature.Span)
+                && CryptographicOperations.FixedTimeEquals(
+                    encoded,
+                    MailboxAuthenticatedCapabilityCodec.EncodeGrant(grant)),
+                $"{label} is not the exact signed overlap grant.");
+            return new Grant(authority.Current.Value, Convert.ToBase64String(encoded), Sha256(encoded));
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(encoded);
+            CryptographicOperations.ZeroMemory(issuer);
+            CryptographicOperations.ZeroMemory(network);
+        }
+    }
+
+    private static bool EqualOverlap(ReusableOverlapPair left, ReusableOverlapPair right) =>
+        EqualOverlapBundle(left.Android, right.Android)
+        && EqualOverlapBundle(left.Windows, right.Windows);
+
+    private static bool EqualOverlapBundle(
+        ReusableOverlapBundle left,
+        ReusableOverlapBundle right) =>
+        left.OwnRetrieve == right.OwnRetrieve
+        && left.OwnDeposit == right.OwnDeposit
+        && left.PeerDeposit == right.PeerDeposit;
 
     private static byte[] SerializeBundle(Bundle bundle, byte[] issuerSeed)
     {
@@ -933,7 +1158,6 @@ static class MailboxGrantProvisioner
         byte[] holder,
         StrictAuthority authority)
     {
-        var authorityHash = Hex(authority.Hash, 32, "authority hash");
         var network = Hex(authority.NetworkId, 16, "network id");
         var issuer = Hex(authority.IssuerPublicKey, 32, "issuer public key");
         var membership = Hex(
@@ -962,18 +1186,23 @@ static class MailboxGrantProvisioner
             epochAndGeneration.AsSpan(0, 8), epoch.Value);
         BinaryPrimitives.WriteUInt64BigEndian(
             epochAndGeneration.AsSpan(8, 8), epoch.Value);
+        var validity = new byte[16];
+        BinaryPrimitives.WriteUInt64BigEndian(
+            validity.AsSpan(0, 8), epoch.NotBefore);
+        BinaryPrimitives.WriteUInt64BigEndian(
+            validity.AsSpan(8, 8), epoch.ExpiresAt);
         var context = new byte[
-            "deep.mailbox.grant-serial.v2"u8.Length + authorityHash.Length +
+            "deep.mailbox.grant-serial.v3"u8.Length +
             network.Length + issuer.Length + selectors.Length +
-            epochAndGeneration.Length + holder.Length + membership.Length +
+            epochAndGeneration.Length + validity.Length + holder.Length + membership.Length +
             placement.Length];
         var offset = 0;
-        Append("deep.mailbox.grant-serial.v2"u8, context, ref offset);
-        Append(authorityHash, context, ref offset);
+        Append("deep.mailbox.grant-serial.v3"u8, context, ref offset);
         Append(network, context, ref offset);
         Append(issuer, context, ref offset);
         Append(selectors, context, ref offset);
         Append(epochAndGeneration, context, ref offset);
+        Append(validity, context, ref offset);
         Append(holder, context, ref offset);
         Append(membership, context, ref offset);
         Append(placement, context, ref offset);
@@ -985,13 +1214,13 @@ static class MailboxGrantProvisioner
         }
         finally
         {
-            CryptographicOperations.ZeroMemory(authorityHash);
             CryptographicOperations.ZeroMemory(network);
             CryptographicOperations.ZeroMemory(issuer);
             CryptographicOperations.ZeroMemory(membership);
             CryptographicOperations.ZeroMemory(placement);
             CryptographicOperations.ZeroMemory(selectors);
             CryptographicOperations.ZeroMemory(epochAndGeneration);
+            CryptographicOperations.ZeroMemory(validity);
             CryptographicOperations.ZeroMemory(context);
             CryptographicOperations.ZeroMemory(digest);
         }
@@ -1030,6 +1259,13 @@ static class MailboxGrantProvisioner
         Uri Coordinator, Epoch Current, Epoch Next, Replica[] Replicas);
     private sealed record Grant(ulong Epoch, string CanonicalGrant, string Hash);
     private sealed record GrantSet(Grant Current, Grant Next);
+    private sealed record ReusableOverlapBundle(
+        Grant OwnRetrieve,
+        Grant OwnDeposit,
+        Grant PeerDeposit);
+    private sealed record ReusableOverlapPair(
+        ReusableOverlapBundle Android,
+        ReusableOverlapBundle Windows);
     private sealed record Bundle(
         string Identity,
         byte[] Holder,

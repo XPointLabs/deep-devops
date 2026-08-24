@@ -39,7 +39,10 @@ var fixture = arguments.Command == "authority"
             Path.Combine(arguments.SecretsDirectory, $"xnode-{index}-ed25519.seed")).Trim())
         .ToArray(),
         File.ReadAllText(
-            Path.Combine(arguments.SecretsDirectory, "mailbox-client-issuer.seed")).Trim())
+            Path.Combine(arguments.SecretsDirectory, "mailbox-client-issuer.seed")).Trim(),
+        arguments.AuthorityStatePath is null
+            ? AuthorityWindow.CreateDefault()
+            : AuthorityWindow.Load(arguments.AuthorityStatePath))
     : Fixture.LoadPublic(
         File.ReadAllText(Path.Combine(arguments.SecretsDirectory, "xnode-1-ed25519.seed")).Trim(),
         File.ReadAllText(Path.Combine(arguments.SecretsDirectory, "mailbox-client-issuer.seed")).Trim(),
@@ -683,10 +686,65 @@ sealed record ClientStoreFixture(
     byte[] CanonicalRequest,
     MailboxEncryptedEnvelope Envelope);
 
-static class ProtocolFixture
+sealed record AuthorityWindow(
+    ulong CurrentEpoch,
+    ulong CurrentNotBeforeUnixSeconds,
+    ulong CurrentExpiresAtUnixSeconds,
+    ulong NextEpoch,
+    ulong NextNotBeforeUnixSeconds,
+    ulong NextExpiresAtUnixSeconds)
 {
-    public const ulong Epoch = 1;
-    public const ulong NextEpoch = 2;
+    public static AuthorityWindow CreateDefault()
+    {
+        var anchor = checked((ulong)DateTimeOffset.UtcNow.ToUnixTimeSeconds() / 60 * 60);
+        return new(1, anchor - 300, anchor + 28800, 2, anchor - 60, anchor + 43200);
+    }
+
+    public static AuthorityWindow Load(string path)
+    {
+        var fullPath = Path.GetFullPath(path);
+        var bytes = File.ReadAllBytes(fullPath);
+        if (bytes.Length is 0 or > 4096)
+            throw new InvalidDataException("Mailbox authority state has an invalid size.");
+        using var document = JsonDocument.Parse(bytes);
+        var root = document.RootElement;
+        var expected = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "schemaVersion", "currentEpoch", "currentNotBeforeUnixSeconds",
+            "currentExpiresAtUnixSeconds", "nextEpoch", "nextNotBeforeUnixSeconds",
+            "nextExpiresAtUnixSeconds"
+        };
+        if (root.ValueKind != JsonValueKind.Object
+            || root.EnumerateObject().Count() != expected.Count
+            || root.EnumerateObject().Any(property => !expected.Contains(property.Name))
+            || root.GetProperty("schemaVersion").GetInt32() != 1)
+        {
+            throw new InvalidDataException("Mailbox authority state schema is invalid.");
+        }
+        var result = new AuthorityWindow(
+            root.GetProperty("currentEpoch").GetUInt64(),
+            root.GetProperty("currentNotBeforeUnixSeconds").GetUInt64(),
+            root.GetProperty("currentExpiresAtUnixSeconds").GetUInt64(),
+            root.GetProperty("nextEpoch").GetUInt64(),
+            root.GetProperty("nextNotBeforeUnixSeconds").GetUInt64(),
+            root.GetProperty("nextExpiresAtUnixSeconds").GetUInt64());
+        result.Validate();
+        return result;
+    }
+
+    public void Validate()
+    {
+        if (CurrentEpoch == 0
+            || NextEpoch != checked(CurrentEpoch + 1)
+            || CurrentNotBeforeUnixSeconds >= NextNotBeforeUnixSeconds
+            || NextNotBeforeUnixSeconds > CurrentExpiresAtUnixSeconds
+            || CurrentExpiresAtUnixSeconds >= NextExpiresAtUnixSeconds
+            || CurrentExpiresAtUnixSeconds - CurrentNotBeforeUnixSeconds > 43260
+            || NextExpiresAtUnixSeconds - NextNotBeforeUnixSeconds != 43260)
+        {
+            throw new InvalidDataException("Mailbox authority state window is invalid.");
+        }
+    }
 }
 
 sealed class Fixture
@@ -702,24 +760,27 @@ sealed class Fixture
     public required MailboxReplicaMembershipProof[] NextProofs { get; init; }
     public required byte[] NextRoot { get; init; }
     public required BlindedPlacementId[,] NextPlacements { get; init; }
+    public required ulong CurrentEpoch { get; init; }
+    public required ulong NextEpoch { get; init; }
     public required ulong CurrentNotBefore { get; init; }
     public required ulong NextNotBefore { get; init; }
     public required ulong CurrentExpiresAt { get; init; }
     public required ulong NextExpiresAt { get; init; }
     public SodiumMailboxPeerReplicationCrypto Crypto { get; } = new();
 
-    public static Fixture CreateAuthority(string[] seeds, string issuerSeedHex)
+    public static Fixture CreateAuthority(
+        string[] seeds,
+        string issuerSeedHex,
+        AuthorityWindow window)
     {
         var crypto = new SodiumMailboxPeerReplicationCrypto();
-        var anchor = checked(
-            (ulong)DateTimeOffset.UtcNow.ToUnixTimeSeconds() / 60 * 60);
-        var currentNotBefore = anchor - 300;
-        var nextNotBefore = anchor - 60;
-        // A physical Android/Windows lab lane routinely spans builds, installs,
-        // and device runs. Keep the DEV authority bounded but long enough that
-        // it cannot expire during one working session.
-        var currentExpiresAt = anchor + 28800;
-        var nextExpiresAt = anchor + 43200;
+        window.Validate();
+        var currentEpoch = window.CurrentEpoch;
+        var nextEpoch = window.NextEpoch;
+        var currentNotBefore = window.CurrentNotBeforeUnixSeconds;
+        var nextNotBefore = window.NextNotBeforeUnixSeconds;
+        var currentExpiresAt = window.CurrentExpiresAtUnixSeconds;
+        var nextExpiresAt = window.NextExpiresAtUnixSeconds;
         var ids = seeds.Select(RelayContactSigner.DeriveRouterId).ToArray();
         var expectedIds = new[]
         {
@@ -745,7 +806,7 @@ sealed class Fixture
                 RpcEndpoint = PrivatePeerOrigin(index),
                 Roles = MembershipRouteRole.Storage,
                 Capabilities = MembershipRouteCapability.Storage,
-                Epoch = ProtocolFixture.Epoch,
+                Epoch = currentEpoch,
                 ValidFromUnixSeconds = currentNotBefore,
                 ValidUntilUnixSeconds = currentExpiresAt
             };
@@ -756,7 +817,7 @@ sealed class Fixture
         {
             ReplicaId = descriptor.RouterId,
             SigningPublicKey = descriptor.Ed25519PublicKey,
-            Epoch = ProtocolFixture.Epoch,
+            Epoch = currentEpoch,
             MembershipCommitment = root,
             CanonicalInclusionProof = MailboxReplicaRouteProofCodec.Encode(descriptor, paths[index])
         }).ToArray();
@@ -771,7 +832,7 @@ sealed class Fixture
                 RpcEndpoint = PrivatePeerOrigin(index),
                 Roles = MembershipRouteRole.Storage,
                 Capabilities = MembershipRouteCapability.Storage,
-                Epoch = ProtocolFixture.NextEpoch,
+                Epoch = nextEpoch,
                 ValidFromUnixSeconds = nextNotBefore,
                 ValidUntilUnixSeconds = nextExpiresAt
             };
@@ -783,7 +844,7 @@ sealed class Fixture
             {
                 ReplicaId = descriptor.RouterId,
                 SigningPublicKey = descriptor.Ed25519PublicKey,
-                Epoch = ProtocolFixture.NextEpoch,
+                Epoch = nextEpoch,
                 MembershipCommitment = nextRoot,
                 CanonicalInclusionProof =
                     MailboxReplicaRouteProofCodec.Encode(descriptor, nextPaths[index])
@@ -796,17 +857,26 @@ sealed class Fixture
             Descriptors = descriptors,
             Proofs = proofs,
             Root = root,
-            Placements = BuildPlacements("current"),
+            Placements = BuildPlacements(PlacementDomain(currentEpoch)),
             NextDescriptors = nextDescriptors,
             NextProofs = nextProofs,
             NextRoot = nextRoot,
-            NextPlacements = BuildPlacements("next"),
+            NextPlacements = BuildPlacements(PlacementDomain(nextEpoch)),
+            CurrentEpoch = currentEpoch,
+            NextEpoch = nextEpoch,
             CurrentNotBefore = currentNotBefore,
             NextNotBefore = nextNotBefore,
             CurrentExpiresAt = currentExpiresAt,
             NextExpiresAt = nextExpiresAt
         };
     }
+
+    internal static string PlacementDomain(ulong epoch) => epoch switch
+    {
+        1 => "current",
+        2 => "next",
+        _ => $"epoch-{epoch}"
+    };
 
     public static Fixture LoadPublic(
         string senderSeedHex,
@@ -836,8 +906,8 @@ sealed class Fixture
                 || !IsLoopbackCoordinator(coordinator));
         if (authority.SchemaVersion != 2
             || authority.Protocol != "P10E/MCP2/MAU2/MIP1/RIP1/PRQ2"
-            || authority.MinimumGeneration != ProtocolFixture.Epoch
-            || authority.MaximumGeneration != ProtocolFixture.NextEpoch
+            || authority.MinimumGeneration == 0
+            || authority.MaximumGeneration != checked(authority.MinimumGeneration + 1)
             || authority.Epochs.Count != 2
             || authority.Selections.Count != 30
             || authority.ReplicaIds.Count != 2
@@ -865,7 +935,7 @@ sealed class Fixture
             || currentAuthority.ExpiresAtUnixSeconds
                 >= nextAuthority.ExpiresAtUnixSeconds
             || currentAuthority.ExpiresAtUnixSeconds
-                - currentAuthority.NotBeforeUnixSeconds != 29100
+                - currentAuthority.NotBeforeUnixSeconds > 43260
             || nextAuthority.ExpiresAtUnixSeconds
                 - nextAuthority.NotBeforeUnixSeconds != 43260
             || now < nextAuthority.NotBeforeUnixSeconds
@@ -877,16 +947,16 @@ sealed class Fixture
 
         var current = ParsePublicEpoch(
             currentAuthority,
-            ProtocolFixture.Epoch,
+            authority.MinimumGeneration,
             currentAuthority.NotBeforeUnixSeconds,
             currentAuthority.ExpiresAtUnixSeconds,
-            "current");
+            PlacementDomain(authority.MinimumGeneration));
         var next = ParsePublicEpoch(
             nextAuthority,
-            ProtocolFixture.NextEpoch,
+            authority.MaximumGeneration,
             nextAuthority.NotBeforeUnixSeconds,
             nextAuthority.ExpiresAtUnixSeconds,
-            "next");
+            PlacementDomain(authority.MaximumGeneration));
         var ids = current.Descriptors
             .Select(descriptor => RouterId.FromBytes(descriptor.RouterId.Span))
             .ToArray();
@@ -909,13 +979,13 @@ sealed class Fixture
             throw new InvalidDataException(
                 "The public mailbox client replica pair is invalid.");
         }
-        var placements = BuildPlacements("current");
-        var nextPlacements = BuildPlacements("next");
+        var placements = BuildPlacements(PlacementDomain(authority.MinimumGeneration));
+        var nextPlacements = BuildPlacements(PlacementDomain(authority.MaximumGeneration));
         var selection = 0;
         foreach (var epoch in new[]
             {
-                (Value: ProtocolFixture.Epoch, Placements: placements),
-                (Value: ProtocolFixture.NextEpoch, Placements: nextPlacements)
+                (Value: authority.MinimumGeneration, Placements: placements),
+                (Value: authority.MaximumGeneration, Placements: nextPlacements)
             })
         {
             for (var first = 0; first < 6; first++)
@@ -959,6 +1029,8 @@ sealed class Fixture
             NextProofs = next.Proofs,
             NextRoot = next.Root,
             NextPlacements = nextPlacements,
+            CurrentEpoch = authority.MinimumGeneration,
+            NextEpoch = authority.MaximumGeneration,
             CurrentNotBefore = currentAuthority.NotBeforeUnixSeconds,
             NextNotBefore = nextAuthority.NotBeforeUnixSeconds,
             CurrentExpiresAt = currentAuthority.ExpiresAtUnixSeconds,
@@ -978,10 +1050,10 @@ sealed class Fixture
         {
             "MailboxClient__Enabled=false",
             "MailboxClientAdapter__Enabled=false",
-            $"MailboxPeerAuthority__CurrentEpoch={ProtocolFixture.Epoch}",
+            $"MailboxPeerAuthority__CurrentEpoch={CurrentEpoch}",
             $"MailboxPeerAuthority__CurrentMembershipCommitment={Convert.ToHexString(Root).ToLowerInvariant()}",
             $"MailboxPeerAuthority__CurrentEpochExpiresAtUnixSeconds={CurrentExpiresAt}",
-            $"MailboxPeerAuthority__NextEpoch={ProtocolFixture.NextEpoch}",
+            $"MailboxPeerAuthority__NextEpoch={NextEpoch}",
             $"MailboxPeerAuthority__NextMembershipCommitment={Convert.ToHexString(NextRoot).ToLowerInvariant()}",
             $"MailboxPeerAuthority__NextEpochExpiresAtUnixSeconds={NextExpiresAt}"
         };
@@ -989,8 +1061,8 @@ sealed class Fixture
         var selection = 0;
         foreach (var epoch in new[]
             {
-                (Value: ProtocolFixture.Epoch, Placements),
-                (Value: ProtocolFixture.NextEpoch, Placements: NextPlacements)
+                (Value: CurrentEpoch, Placements),
+                (Value: NextEpoch, Placements: NextPlacements)
             })
         {
             for (var first = 0; first < 6; first++)
@@ -1034,8 +1106,8 @@ sealed class Fixture
             "MailboxClient__DevelopmentFixture__Enabled=true",
             $"MailboxClient__DevelopmentFixture__NetworkId={Lower(networkId)}",
             $"MailboxClient__DevelopmentFixture__IssuerPublicKey={Lower(issuerPublicKey)}",
-            $"MailboxClient__DevelopmentFixture__MinimumGeneration={ProtocolFixture.Epoch}",
-            $"MailboxClient__DevelopmentFixture__MaximumGeneration={ProtocolFixture.NextEpoch}",
+            $"MailboxClient__DevelopmentFixture__MinimumGeneration={CurrentEpoch}",
+            $"MailboxClient__DevelopmentFixture__MaximumGeneration={NextEpoch}",
             $"MailboxClient__DevelopmentFixture__IssuerValidFromUnixSeconds={CurrentNotBefore}",
             $"MailboxClient__DevelopmentFixture__IssuerValidUntilUnixSeconds={NextExpiresAt}",
             $"MailboxClient__DevelopmentFixture__CoordinatorUrl={coordinatorUrl}",
@@ -1054,8 +1126,8 @@ sealed class Fixture
             "MailboxClientAdapter__Enabled=true",
             $"MailboxClientAdapter__CurrentMembershipCommitment={Lower(Root)}",
             $"MailboxClientAdapter__NextMembershipCommitment={Lower(NextRoot)}",
-            $"MailboxClientAdapter__CurrentEpoch={ProtocolFixture.Epoch}",
-            $"MailboxClientAdapter__NextEpoch={ProtocolFixture.NextEpoch}",
+            $"MailboxClientAdapter__CurrentEpoch={CurrentEpoch}",
+            $"MailboxClientAdapter__NextEpoch={NextEpoch}",
             $"MailboxClientAdapter__CurrentNotBeforeUnixSeconds={CurrentNotBefore}",
             $"MailboxClientAdapter__NextNotBeforeUnixSeconds={NextNotBefore}",
             $"MailboxClientAdapter__CurrentExpiresAtUnixSeconds={CurrentExpiresAt}",
@@ -1069,8 +1141,8 @@ sealed class Fixture
             protocol = "P10E/MCP2/MAU2/MIP1/RIP1/PRQ2",
             networkId = Lower(networkId),
             issuerPublicKey = Lower(issuerPublicKey),
-            minimumGeneration = ProtocolFixture.Epoch,
-            maximumGeneration = ProtocolFixture.NextEpoch,
+            minimumGeneration = CurrentEpoch,
+            maximumGeneration = NextEpoch,
             issuerValidFromUnixSeconds = CurrentNotBefore,
             issuerValidUntilUnixSeconds = NextExpiresAt,
             coordinatorUrl,
@@ -1080,7 +1152,7 @@ sealed class Fixture
             epochs = new[]
             {
                 PublicEpoch(
-                    ProtocolFixture.Epoch,
+                    CurrentEpoch,
                     CurrentNotBefore,
                     CurrentExpiresAt,
                     Root,
@@ -1088,7 +1160,7 @@ sealed class Fixture
                     Descriptors,
                     Proofs),
                 PublicEpoch(
-                    ProtocolFixture.NextEpoch,
+                    NextEpoch,
                     NextNotBefore,
                     NextExpiresAt,
                     NextRoot,
@@ -1151,7 +1223,7 @@ sealed class Fixture
         var placement = Placements[senderIndex, recipientIndex];
         var envelope = new MailboxEncryptedEnvelope
         {
-            Epoch = ProtocolFixture.Epoch,
+            Epoch = CurrentEpoch,
             MailboxId = new BlindedMailboxId(SHA256.HashData(material.Concat("mailbox"u8.ToArray()).ToArray())),
             PlacementId = placement,
             OperationId = material.AsSpan(0, 16).ToArray(),
@@ -1164,7 +1236,7 @@ sealed class Fixture
         var unsigned = new MailboxPeerWireRequestV2
         {
             Operation = MailboxPeerReplicationOperation.Store,
-            Epoch = ProtocolFixture.Epoch,
+            Epoch = CurrentEpoch,
             OperationId = envelope.OperationId,
             SenderRouterId = RouterIds[senderIndex].ToBytes(),
             RecipientRouterId = RouterIds[recipientIndex].ToBytes(),
@@ -1199,10 +1271,11 @@ sealed class Fixture
         string runId,
         string name,
         ulong now,
-        ulong epoch = ProtocolFixture.Epoch)
+        ulong epoch = 0)
     {
-        var next = epoch == ProtocolFixture.NextEpoch;
-        if (epoch is not (ProtocolFixture.Epoch or ProtocolFixture.NextEpoch))
+        if (epoch == 0) epoch = CurrentEpoch;
+        var next = epoch == NextEpoch;
+        if (epoch != CurrentEpoch && epoch != NextEpoch)
         {
             throw new ArgumentOutOfRangeException(nameof(epoch));
         }
@@ -1264,7 +1337,7 @@ sealed class Fixture
         var material = Material(runId, name);
         var envelope = new MailboxEncryptedEnvelope
         {
-            Epoch = ProtocolFixture.Epoch,
+            Epoch = CurrentEpoch,
             MailboxId = new BlindedMailboxId(
                 SHA256.HashData(material.Concat("client-mailbox"u8.ToArray()).ToArray())),
             PlacementId = Placements[0, 1],
@@ -1299,7 +1372,7 @@ sealed class Fixture
     {
         var operationId = Material(runId, name)[..16];
         var binding = MailboxAuthenticatedRequestTranscript.ForRetrieve(
-            ProtocolFixture.Epoch,
+            CurrentEpoch,
             operationId,
             envelope.MailboxId,
             envelope.PlacementId,
@@ -1325,7 +1398,7 @@ sealed class Fixture
     {
         var operationId = Material(runId, name)[..16];
         var binding = MailboxAuthenticatedRequestTranscript.ForAck(
-            ProtocolFixture.Epoch,
+            CurrentEpoch,
             operationId,
             envelope.MailboxId,
             envelope.PlacementId,
@@ -1346,8 +1419,8 @@ sealed class Fixture
         NowUnixSeconds = now,
         EpochWindow = new MailboxEpochWindow
         {
-            CurrentEpoch = ProtocolFixture.Epoch,
-            NextEpoch = ProtocolFixture.NextEpoch,
+            CurrentEpoch = this.CurrentEpoch,
+            NextEpoch = this.NextEpoch,
             CurrentNotBeforeUnixSeconds = CurrentNotBefore,
             NextNotBeforeUnixSeconds = NextNotBefore,
             CurrentExpiresAtUnixSeconds = CurrentExpiresAt,
@@ -1356,7 +1429,7 @@ sealed class Fixture
         CapabilityPolicy = new MailboxCapabilityDecodePolicy
         {
             CurrentBucket = checked((uint)now),
-            MinimumGeneration = ProtocolFixture.Epoch,
+            MinimumGeneration = CurrentEpoch,
             AllowLegacyMirrorOverlap = false,
             AllowRevoked = false,
             AllowRecovery = false
@@ -1405,8 +1478,8 @@ sealed class Fixture
                 Domain = domain,
                 Lifecycle = MailboxCapabilityLifecycle.Active,
                 NetworkId = NetworkId(),
-                Epoch = ProtocolFixture.Epoch,
-                Generation = ProtocolFixture.Epoch,
+                Epoch = CurrentEpoch,
+                Generation = CurrentEpoch,
                 Serial = serial,
                 NotBeforeUnixSeconds = notBefore,
                 ExpiresAtUnixSeconds = expiresAt,
@@ -1462,7 +1535,7 @@ sealed class Fixture
         public ulong ReplayValidityEndsAt(
             MailboxCapabilityAuthorityQuery query,
             MailboxAuthenticatedGrant grant) =>
-            query.Epoch == ProtocolFixture.NextEpoch
+            query.Epoch == fixture.NextEpoch
                 ? fixture.NextExpiresAt
                 : fixture.CurrentExpiresAt;
 
@@ -1470,14 +1543,14 @@ sealed class Fixture
             MailboxCapabilityAuthorityQuery query,
             out MailboxAuthenticatedVerificationPolicy? policy)
         {
-            var next = query.Epoch == ProtocolFixture.NextEpoch;
+            var next = query.Epoch == fixture.NextEpoch;
             var placement = next ? fixture.NextPlacements[0, 1] : fixture.Placements[0, 1];
             var membership = next ? fixture.NextRoot : fixture.Root;
             if (query.Operation != MailboxAuthenticatedOperation.Store
                 || query.Domain != MailboxCapabilityDomain.Deposit
                 || query.Lifecycle != MailboxCapabilityLifecycle.Active
                 || query.Generation != query.Epoch
-                || query.Epoch is not (ProtocolFixture.Epoch or ProtocolFixture.NextEpoch)
+                || (query.Epoch != fixture.CurrentEpoch && query.Epoch != fixture.NextEpoch)
                 || !CryptographicOperations.FixedTimeEquals(query.NetworkId.Span, _network)
                 || !CryptographicOperations.FixedTimeEquals(query.IssuerPublicKey.Span, _issuer)
                 || !CryptographicOperations.FixedTimeEquals(
@@ -1495,7 +1568,7 @@ sealed class Fixture
                 PlacementCommitment = query.PlacementCommitment.ToArray(),
                 MembershipCommitment = query.MembershipCommitment.ToArray(),
                 NowUnixSeconds = 0,
-                MinimumGeneration = ProtocolFixture.Epoch,
+                MinimumGeneration = fixture.CurrentEpoch,
                 TrustedIssuers =
                 [
                     new MailboxCapabilityIssuerAuthority
@@ -1503,8 +1576,8 @@ sealed class Fixture
                         PublicKey = _issuer.ToArray(),
                         Domain = MailboxCapabilityDomain.Deposit,
                         AllowedLifecycle = MailboxCapabilityLifecycle.Active,
-                        MinimumGeneration = ProtocolFixture.Epoch,
-                        MaximumGeneration = ProtocolFixture.NextEpoch,
+                        MinimumGeneration = fixture.CurrentEpoch,
+                        MaximumGeneration = fixture.NextEpoch,
                         ValidFromUnixSeconds = fixture.CurrentNotBefore,
                         ValidUntilUnixSeconds = fixture.NextExpiresAt
                     }
@@ -1839,6 +1912,7 @@ sealed record Arguments(
     string? ExpectedRuntimeAuthoritySha256,
     string? ExpectedIssuerPublicKey,
     string? PairDirectory,
+    string? AuthorityStatePath,
     bool FailAfterStage,
     bool FailAfterPromotion,
     string? FailAfterDurabilityBarrier)
@@ -1884,6 +1958,7 @@ sealed record Arguments(
             Optional("--expected-runtime-authority-sha256"),
             Optional("--expected-issuer-public-key"),
             Optional("--pair-directory"),
+            Optional("--authority-state"),
             values.Contains("--fail-after-stage", StringComparer.Ordinal),
             values.Contains("--fail-after-promotion", StringComparer.Ordinal),
             Optional("--fail-after-durability-barrier"));

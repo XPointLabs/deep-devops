@@ -74,11 +74,11 @@ $expectedXNodeManifestSha256 =
     '2b2a223c96bb3a9cb075262e14b64e083d28f3a2b4a1068b68c737250311e52a'
 $expectedDriverSha256 = @{
     'MailboxGrantProvisioner.cs' =
-        '4028b9c7388530c0a8071bae715d717b755d5fe5645e229ef9d205e81d8e258a'
+        'f88f7ebb0c06f11fde52386341202090e8bd4205ad23bb40c31e7d79d2ac8184'
     'MailboxRuntimePublisher.cs' =
         'd6aad71f65987f620ccf0d5a06394240aa199d3bb92ef38b81a9594f8e9ff94b'
     'Program.cs' =
-        'c63e30740a455416a52f5d208c5d3b019abca5ae13c1b8830f63164e82db2766'
+        '6f8017cf7eb6902a99ffe98d5931e1731c3a704746c598287d1a6147e135f1c2'
     'SurvivalMailboxDriver.csproj' =
         '4db436d69ea88ac3ff16f08c161b61cc0c048bad84cb7e529b2208fa569eafbe'
 }
