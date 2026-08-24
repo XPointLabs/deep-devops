@@ -22,7 +22,7 @@ Set-StrictMode -Version Latest
 $root = [IO.Path]::GetFullPath((Split-Path $PSScriptRoot -Parent))
 $buildHelper = Join-Path $PSScriptRoot 'survival-dev-mailbox-build-inputs.ps1'
 $expectedBuildHelperSha256 =
-    'fea6132d7c3e7ba7cc6297b249df32f80a92e51d7586643e939c59cc7feb5452'
+    'c5e0f08e0816296734195a27b2c8a47a207b0f1ade88f0186caffe02334f1456'
 if (((Get-Item -Force -LiteralPath $buildHelper).Attributes -band
     [IO.FileAttributes]::ReparsePoint)) {
     throw 'The mailbox immutable-build helper cannot be a reparse point.'

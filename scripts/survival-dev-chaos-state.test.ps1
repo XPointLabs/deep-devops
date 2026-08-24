@@ -220,6 +220,39 @@ try {
     [void](Invoke-StateDriver 'private-state-test-read' $wrongType -ExpectFailure)
     $tests++
 
+    $cleanup = New-PrivateStateDirectory 'cleanup'
+    [void](Invoke-StateDriver 'private-state-test-write' $cleanup)
+    $cleanupFile = Join-Path $cleanup 'client-ack-loss.json'
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+        if (-not ((Get-Item -Force -LiteralPath $cleanupFile).Attributes -band
+            [IO.FileAttributes]::ReadOnly)) {
+            throw 'Cleanup regression requires the state file to begin read-only.'
+        }
+        $lock = [IO.FileStream]::new(
+            $cleanupFile,
+            [IO.FileMode]::Open,
+            [IO.FileAccess]::Read,
+            [IO.FileShare]::Read)
+        try {
+            $deleteFailed = $false
+            try {
+                Remove-MailboxPrivateStateDirectory $cleanup $Work
+            } catch {
+                $deleteFailed = $true
+            }
+            if (-not $deleteFailed -or -not (Test-Path -LiteralPath $cleanup)) {
+                throw 'Locked private state deletion did not fail closed and preserve the target.'
+            }
+        } finally {
+            $lock.Dispose()
+        }
+    }
+    Remove-MailboxPrivateStateDirectory $cleanup $Work
+    if (Test-Path -LiteralPath $cleanup) {
+        throw 'Private state cleanup did not remove the unlocked read-only state.'
+    }
+    $tests++
+
     [pscustomobject]@{
         schemaVersion = 1
         passed = $true
@@ -232,6 +265,9 @@ try {
         ownerBoundaryEnforced = $ownerBoundaryEnforced
         reparseRejected = $true
         nonRegularFileRejected = $true
+        lockedDeleteFailureRejected =
+            [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
+        readOnlyCleanupSucceeded = $true
     } | ConvertTo-Json -Compress
 } finally {
     if (Test-Path -LiteralPath $Work) {

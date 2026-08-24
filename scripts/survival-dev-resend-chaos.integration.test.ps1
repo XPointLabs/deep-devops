@@ -13,7 +13,7 @@ $Launcher = Join-Path $PSScriptRoot 'survival-dev.ps1'
 $PinnedXNode = Join-Path $Root 'artifacts\survival-dev\build-contexts\xnode'
 $DriverSource = Join-Path $Root 'tools\survival-mailbox-driver'
 $BuildHelper = Join-Path $PSScriptRoot 'survival-dev-mailbox-build-inputs.ps1'
-$ExpectedBuildHelperSha256 = 'fea6132d7c3e7ba7cc6297b249df32f80a92e51d7586643e939c59cc7feb5452'
+$ExpectedBuildHelperSha256 = 'c5e0f08e0816296734195a27b2c8a47a207b0f1ade88f0186caffe02334f1456'
 $ExpectedXNodeCommit = '4d05fe7dd2dadd3f094c172a382ad675d2ff545a'
 $ExpectedXNodeManifestSha256 = '2b2a223c96bb3a9cb075262e14b64e083d28f3a2b4a1068b68c737250311e52a'
 $ExpectedDriverSha256 = @{
@@ -42,8 +42,12 @@ $artifactsPrefix = ([IO.Path]::GetFullPath((Join-Path $Root 'artifacts'))).TrimE
 if (-not $EvidencePath.StartsWith($artifactsPrefix, [StringComparison]::OrdinalIgnoreCase)) {
     throw 'Resend chaos evidence path must remain inside the artifacts directory.'
 }
-Remove-Item -LiteralPath $EvidencePath -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath $State -Recurse -Force -ErrorAction SilentlyContinue
+if (Test-Path -LiteralPath $EvidencePath) {
+    Remove-Item -LiteralPath $EvidencePath -Force -ErrorAction Stop
+}
+if (Test-Path -LiteralPath $EvidencePath) {
+    throw 'Stale resend chaos evidence survived terminating initial cleanup.'
+}
 
 $helperBytes = [IO.File]::ReadAllBytes($BuildHelper)
 try {
@@ -61,6 +65,12 @@ try {
     . ([ScriptBlock]::Create([Text.Encoding]::UTF8.GetString($helperBytes)))
 } finally {
     [Array]::Clear($helperBytes, 0, $helperBytes.Length)
+}
+Remove-MailboxPrivateStateDirectory `
+    -Path $State `
+    -ExpectedParent (Join-Path $Root 'artifacts\survival-dev')
+if (Test-Path -LiteralPath $State) {
+    throw 'Stale private ACK state survived terminating initial cleanup.'
 }
 
 function Invoke-Checked([string]$File, [string[]]$Arguments) {
@@ -84,6 +94,7 @@ $chaosStarted = $false
 $sourceLocks = $null
 $faultEvidence = @()
 $runtimeImages = $null
+$runFailure = $null
 try {
     [void](Invoke-Checked node @('--test', '--test-force-exit', (Join-Path $Root 'tools\survival-resend-chaos\resend-chaos-proxy.test.mjs')))
     [void][IO.Directory]::CreateDirectory($State)
@@ -302,32 +313,79 @@ try {
             }
         }
     }
-}
-finally {
+} catch {
+    $runFailure = $_.Exception
+} finally {
+    $cleanupFailures = [Collections.Generic.List[Exception]]::new()
+    if ($null -ne $runFailure) { $cleanupFailures.Add($runFailure) }
     try {
         if ($chaosStarted) {
-            [void](Invoke-Checked powershell @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $Launcher, '-Action', 'ChaosEnd'))
+            [void](Invoke-Checked powershell @(
+                '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $Launcher,
+                '-Action', 'ChaosEnd'))
+            $chaosStarted = $false
         }
-    } finally {
-        Remove-Item -LiteralPath $State -Recurse -Force -ErrorAction SilentlyContinue
-        if ($null -ne $sourceLocks) {
-            foreach ($sourceLock in $sourceLocks) { $sourceLock.Dispose() }
+    } catch { $cleanupFailures.Add($_.Exception) }
+    try {
+        Remove-MailboxPrivateStateDirectory `
+            -Path $State `
+            -ExpectedParent (Join-Path $Root 'artifacts\survival-dev')
+        if (Test-Path -LiteralPath $State) {
+            throw 'Private ACK state survived terminating final cleanup.'
         }
-        foreach ($temporaryRoot in @($VerificationRoot, $SourceRoot)) {
-            if (Test-Path -LiteralPath $temporaryRoot) {
-                Set-MailboxTreeWritable $temporaryRoot
-            }
+    } catch { $cleanupFailures.Add($_.Exception) }
+    if ($null -ne $sourceLocks) {
+        foreach ($sourceLock in $sourceLocks) {
+            try { $sourceLock.Dispose() }
+            catch { $cleanupFailures.Add($_.Exception) }
         }
-        Remove-Item -LiteralPath $BuildWork -Recurse -Force -ErrorAction SilentlyContinue
     }
-}
-
-if ((Get-RunningStackCount) -ne 14) { throw 'Ordinary survival stack was not fully restored.' }
-$proxyCount = @(& docker ps -a --filter 'label=com.xpoint.survival.resend-chaos=development-only' --format '{{.Names}}').Count
-$tokenExists = Test-Path -LiteralPath (Join-Path $Secrets 'resend-chaos.token')
-$bindingExists = Test-Path -LiteralPath (Join-Path $Secrets 'resend-chaos.binding.json')
-if ($proxyCount -ne 0 -or $tokenExists -or $bindingExists) {
-    throw 'Chaos cleanup did not remove the proxy, protected token, and protected binding.'
+    foreach ($temporaryRoot in @($VerificationRoot, $SourceRoot)) {
+        if (Test-Path -LiteralPath $temporaryRoot) {
+            try { Set-MailboxTreeWritable $temporaryRoot }
+            catch { $cleanupFailures.Add($_.Exception) }
+        }
+    }
+    if (Test-Path -LiteralPath $BuildWork) {
+        try {
+            Set-MailboxTreeWritable $BuildWork
+            Remove-Item -LiteralPath $BuildWork -Recurse -Force -ErrorAction Stop
+            if (Test-Path -LiteralPath $BuildWork) {
+                throw 'Isolated resend-chaos build directory survived final cleanup.'
+            }
+        } catch { $cleanupFailures.Add($_.Exception) }
+    }
+    try {
+        $finalStatusOutput = Invoke-Checked powershell @(
+            '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $Launcher,
+            '-Action', 'ChaosStatus')
+        $finalStatus = ($finalStatusOutput | Where-Object {
+                $_ -match '^\{"schema":"deep-survival-resend-chaos-status\.v2"'
+            } | Select-Object -Last 1) | ConvertFrom-Json
+        if ($finalStatus.running -ne $false -or $finalStatus.armed -ne $false -or
+            $null -ne $finalStatus.operation -or $null -ne $finalStatus.fault) {
+            throw 'Final chaos status is not the exact off baseline.'
+        }
+    } catch { $cleanupFailures.Add($_.Exception) }
+    try {
+        if ((Get-RunningStackCount) -ne 14) {
+            throw 'Ordinary survival stack was not fully restored.'
+        }
+        $proxyCount = @(& docker ps -a `
+            --filter 'label=com.xpoint.survival.resend-chaos=development-only' `
+            --format '{{.Names}}').Count
+        $tokenExists = Test-Path -LiteralPath (Join-Path $Secrets 'resend-chaos.token')
+        $bindingExists = Test-Path -LiteralPath (Join-Path $Secrets 'resend-chaos.binding.json')
+        if ($proxyCount -ne 0 -or $tokenExists -or $bindingExists -or
+            (Test-Path -LiteralPath $State)) {
+            throw 'Chaos cleanup left proxy, token, binding, or private ACK state.'
+        }
+    } catch { $cleanupFailures.Add($_.Exception) }
+    if ($cleanupFailures.Count -gt 0) {
+        throw [AggregateException]::new(
+            'Resend chaos run or fail-closed cleanup did not complete.',
+            [Exception[]]$cleanupFailures.ToArray())
+    }
 }
 
 function Get-FileSha256Lower([string]$Path) {

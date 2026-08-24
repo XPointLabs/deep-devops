@@ -85,3 +85,6 @@ The ACK cross-process frame state is a separate private boundary: exact protecte
 owner/DACL and read-only file semantics, or Unix `0700` directory plus `0600` file, with no
 reparse traversal. Atomic writes are durably flushed and hash-reread; retry and replay reject
 ACL/mode, type, owner, content, or per-frame digest changes before parsing wire material.
+Final state removal is fail-closed: it restores the exact private deletion ACL/mode, clears
+Windows read-only state, uses terminating deletion, asserts absence, and withholds passed
+evidence on any cleanup failure while still attempting ChaosEnd and the full baseline audit.

@@ -318,6 +318,80 @@ function Set-MailboxDirectoryExclusiveWritable([string]$Path) {
     }
 }
 
+function Set-MailboxFileExclusiveWritable([string]$Path) {
+    Assert-NoMailboxBuildReparseTraversal $Path
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "Mailbox private-state cleanup requires a regular file: $Path"
+    }
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+        $current = [Security.Principal.WindowsIdentity]::GetCurrent().User
+        $system = [Security.Principal.SecurityIdentifier]::new('S-1-5-18')
+        $administrators = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
+        $item = [IO.FileInfo](Get-Item -Force -LiteralPath $Path)
+        $owner = $item.GetAccessControl(
+            [Security.AccessControl.AccessControlSections]::Owner).GetOwner(
+                [Security.Principal.SecurityIdentifier])
+        if (-not $owner.Equals($current)) {
+            throw 'Mailbox private-state file owner must be the exact current Windows identity.'
+        }
+        $security = [Security.AccessControl.FileSecurity]::new()
+        $security.SetAccessRuleProtection($true, $false)
+        foreach ($identity in @($current, $system, $administrators)) {
+            $security.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
+                $identity,
+                [Security.AccessControl.FileSystemRights]::FullControl,
+                [Security.AccessControl.AccessControlType]::Allow))
+        }
+        $item.SetAccessControl($security)
+        [IO.File]::SetAttributes(
+            $Path,
+            [IO.File]::GetAttributes($Path) -band (-bnot [IO.FileAttributes]::ReadOnly))
+    } else {
+        [IO.File]::SetUnixFileMode(
+            $Path,
+            [IO.UnixFileMode]::UserRead -bor [IO.UnixFileMode]::UserWrite)
+    }
+}
+
+function Remove-MailboxPrivateStateDirectory(
+    [Parameter(Mandatory)][string]$Path,
+    [Parameter(Mandatory)][string]$ExpectedParent) {
+    $full = [IO.Path]::GetFullPath($Path)
+    $parent = [IO.Path]::GetFullPath($ExpectedParent).TrimEnd(
+        [IO.Path]::DirectorySeparatorChar,
+        [IO.Path]::AltDirectorySeparatorChar)
+    $comparison = if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+        [StringComparison]::OrdinalIgnoreCase
+    } else {
+        [StringComparison]::Ordinal
+    }
+    if (-not [string]::Equals(
+            [IO.Path]::GetDirectoryName($full), $parent, $comparison)) {
+        throw 'Mailbox private-state cleanup target must be a direct child of its exact parent.'
+    }
+    if (-not (Test-Path -LiteralPath $full)) { return }
+    Assert-NoMailboxBuildReparseTraversal $full
+    if (-not (Test-Path -LiteralPath $full -PathType Container)) {
+        throw 'Mailbox private-state cleanup target must be a directory.'
+    }
+    $directory = Get-Item -Force -LiteralPath $full
+    if ($directory.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+        throw 'Mailbox private-state cleanup target cannot be a reparse point.'
+    }
+    Set-MailboxDirectoryExclusiveWritable $full
+    foreach ($child in @(Get-ChildItem -Force -LiteralPath $full)) {
+        if ($child.PSIsContainer -or
+            ($child.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw 'Mailbox private-state cleanup rejects nested directories and reparse points.'
+        }
+        Set-MailboxFileExclusiveWritable $child.FullName
+    }
+    Remove-Item -LiteralPath $full -Recurse -Force -ErrorAction Stop
+    if (Test-Path -LiteralPath $full) {
+        throw 'Mailbox private-state directory still exists after terminating deletion.'
+    }
+}
+
 function Set-MailboxTreeReadOnly([string]$Root) {
     if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
         $current = [Security.Principal.WindowsIdentity]::GetCurrent().User

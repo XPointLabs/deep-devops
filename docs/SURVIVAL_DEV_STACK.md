@@ -307,6 +307,11 @@ comparison. Every retry/replay revalidates directory, file type, owner/DACL or m
 bounded JSON, and hashes of the ACK/Retrieve/MAR1 frames before decoding them; mismatch fails
 closed. The runner deletes this state in `finally`, while an abnormal exit leaves it accessible
 only through the same private directory boundary.
+Deletion first restores the exact current-owner private ACL and clears the Windows read-only
+attribute (or restores Unix `0600/0700`), then performs a terminating removal and proves the
+directory is absent. Cleanup failures are aggregated only after `ChaosEnd`, exact-off status,
+container count, and proxy/token/binding checks have all been attempted; no passed evidence is
+written if state deletion or any baseline check fails.
 
 The protected, atomically written evidence envelope is
 `deep-survival-resend-chaos-evidence-envelope.v2`. Its canonical v2 evidence is

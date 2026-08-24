@@ -33,6 +33,7 @@ const resendChaosProxy = readFileSync(new URL('../tools/survival-resend-chaos/re
 const mailboxDriver = readFileSync(new URL('../tools/survival-mailbox-driver/Program.cs', import.meta.url), 'utf8');
 const privateCrossProcessState = readFileSync(new URL('../tools/survival-mailbox-driver/PrivateCrossProcessState.cs', import.meta.url), 'utf8');
 const chaosStateTest = readFileSync(new URL('./survival-dev-chaos-state.test.ps1', import.meta.url), 'utf8');
+const mailboxBuildInputs = readFileSync(new URL('./survival-dev-mailbox-build-inputs.ps1', import.meta.url), 'utf8');
 const membershipNuget = readFileSync(new URL('../tools/membership-fixture/NuGet.Config', import.meta.url), 'utf8');
 const membershipLock = JSON.parse(readFileSync(new URL('../tools/membership-fixture/packages.lock.json', import.meta.url), 'utf8'));
 const hardhatEntrypoint = readFileSync(new URL('./survival-hardhat-entrypoint.sh', import.meta.url), 'utf8');
@@ -588,6 +589,17 @@ test('resend uncertainty chaos is a bounded survival-only real-ingress interpose
   assert.match(chaosStateTest, /S-1-5-11/);
   assert.match(chaosStateTest, /Junction|SymbolicLink/);
   assert.match(chaosStateTest, /wrong-type/);
+  assert.match(chaosStateTest, /locked private state deletion did not fail closed/i);
+  assert.match(chaosStateTest, /read-only state/i);
+  assert.match(mailboxBuildInputs, /function Remove-MailboxPrivateStateDirectory/);
+  assert.match(mailboxBuildInputs, /direct child of its exact parent/);
+  assert.match(mailboxBuildInputs, /Remove-Item -LiteralPath \$full -Recurse -Force -ErrorAction Stop/);
+  assert.match(mailboxBuildInputs, /still exists after terminating deletion/);
+  assert.match(resendChaosIntegration, /AggregateException/);
+  assert.match(resendChaosIntegration, /Final chaos status is not the exact off baseline/);
+  assert.match(resendChaosIntegration, /Private ACK state survived terminating final cleanup/);
+  assert.ok(resendChaosIntegration.indexOf('Private ACK state survived terminating final cleanup')
+    < resendChaosIntegration.indexOf("schema = 'deep-survival-resend-chaos-evidence.v2'"));
   assert.match(mailboxDriver, /PrivatePeerOrigin\(int zeroBasedNodeIndex\)/);
   assert.match(mailboxDriver, /http:\/\/172\.30\.82\.\{zeroBasedNodeIndex \+ 11\}:8081/);
   assert.match(mailboxDriver, /coordinator\.Scheme == expectedCoordinator\.Scheme/);
