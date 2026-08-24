@@ -1,0 +1,74 @@
+services:
+  membership-fixture:
+    command: [--advertised-host, "${SURVIVAL_BIND_HOST:?set SURVIVAL_BIND_HOST}", --advertised-scheme, https]
+
+  xnode-1: { ports: !reset [] }
+  xnode-2: { ports: !reset [] }
+  xnode-3: { ports: !reset [] }
+  xnode-4: { ports: !reset [] }
+  xnode-5: { ports: !reset [] }
+  xnode-6: { ports: !reset [] }
+  registry: { ports: !reset [] }
+  storage: { ports: !reset [] }
+  file: { ports: !reset [] }
+  push: { ports: !reset [] }
+  calls: { ports: !reset [] }
+
+  survival-uat-tls-ingress:
+    image: haproxy:3.2.4-alpine3.22@sha256:436a5691e6fd563ca4090e351048fda1066bec93b595cc8eaf26988c65eb1152
+    init: true
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: [no-new-privileges:true]
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777"]
+    ports:
+      - "${SURVIVAL_BIND_HOST:?set SURVIVAL_BIND_HOST}:41801:41801"
+      - "${SURVIVAL_BIND_HOST:?set SURVIVAL_BIND_HOST}:41802:41802"
+      - "${SURVIVAL_BIND_HOST:?set SURVIVAL_BIND_HOST}:41803:41803"
+      - "${SURVIVAL_BIND_HOST:?set SURVIVAL_BIND_HOST}:41804:41804"
+      - "${SURVIVAL_BIND_HOST:?set SURVIVAL_BIND_HOST}:41805:41805"
+      - "${SURVIVAL_BIND_HOST:?set SURVIVAL_BIND_HOST}:41806:41806"
+      - "${SURVIVAL_BIND_HOST:?set SURVIVAL_BIND_HOST}:41810:41810"
+      - "${SURVIVAL_BIND_HOST:?set SURVIVAL_BIND_HOST}:41821:41821"
+      - "${SURVIVAL_BIND_HOST:?set SURVIVAL_BIND_HOST}:41822:41822"
+      - "${SURVIVAL_BIND_HOST:?set SURVIVAL_BIND_HOST}:41823:41823"
+    volumes:
+      - ./config/survival-uat-tls/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+      - ${SURVIVAL_UAT_TLS_SECRET_DIR:?set SURVIVAL_UAT_TLS_SECRET_DIR}:/run/deep-uat-tls:ro
+    networks: [runtime]
+    depends_on:
+      xnode-1: { condition: service_healthy }
+      xnode-2: { condition: service_healthy }
+      xnode-3: { condition: service_healthy }
+      xnode-4: { condition: service_healthy }
+      xnode-5: { condition: service_healthy }
+      xnode-6: { condition: service_healthy }
+      registry: { condition: service_healthy }
+      file: { condition: service_healthy }
+      push: { condition: service_healthy }
+      calls: { condition: service_healthy }
+
+  survival-uat-crl:
+    image: node:24-alpine@sha256:f70403e87646dc51b45295f4b8b70cdad0b63d2297c4c9899119b03f7af7a6b3
+    init: true
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=8m,mode=1777"]
+    ports: ["${SURVIVAL_BIND_HOST:?set SURVIVAL_BIND_HOST}:41824:8080"]
+    volumes:
+      - ${SURVIVAL_UAT_TLS_SECRET_DIR:?set SURVIVAL_UAT_TLS_SECRET_DIR}/public:/public:ro
+    command:
+      - node
+      - --eval
+      - |
+        const http=require('node:http'),fs=require('node:fs');
+        const body=fs.readFileSync('/public/deep-physical-uat-ca.crl');
+        http.createServer((req,res)=>{
+          if(req.method!=='GET'||req.url!=='/deep-physical-uat-ca.crl'){res.writeHead(404);res.end();return}
+          res.writeHead(200,{'Content-Type':'application/pkix-crl','Content-Length':body.length,'Cache-Control':'public,max-age=3600'});
+          res.end(body)
+        }).listen(8080,'0.0.0.0');

@@ -297,11 +297,12 @@ test('membership catalog is a local-only one-shot with pinned packages and read-
   assert.match(fixture, /DEV-LOCAL-ONLY/);
   assert.match(fixture, /ParseOptions\(args\)/);
   assert.match(fixture, /"--advertised-host"/);
+  assert.match(fixture, /"--advertised-scheme"/);
   assert.match(fixture, /octets\[0\] == 127/);
   assert.match(fixture, /octets\[0\] == 192 && octets\[1\] == 168/);
   assert.match(fixture, /octets\[0\] == 172 && octets\[1\] is >= 16 and <= 31/);
   assert.match(fixture, /octets\[0\] == 169 && octets\[1\] == 254/);
-  assert.match(fixture, /RpcEndpoint = \$"http:\/\/\{advertisedHost\}:\{41801 \+ index\}\//);
+  assert.match(fixture, /RpcEndpoint = \$"\{advertisedScheme\}:\/\/\{advertisedHost\}:\{41801 \+ index\}\//);
   assert.match(fixture, /Enumerable\.Range\(41801, 6\)/);
   assert.match(fixture, /seenEndpoints\.SetEquals\(requiredEndpoints\)/);
   assert.doesNotMatch(fixture, /xnode-\{index \+ 1\}|:8080|0\.0\.0\.0/);
@@ -313,7 +314,7 @@ test('membership catalog is a local-only one-shot with pinned packages and read-
   assert.doesNotMatch(fixture, /x25519-local-only/);
   assert.match(fixture, /PublicKeyAuth\.SignDetached\(framed, signer\.PrivateKey\)/);
   assert.match(fixture, /PublicKeyAuth\.VerifyDetached\(signature\.ToArray\(\), signingBytes\.ToArray\(\), publicKey\.ToArray\(\)\)/);
-  assert.match(fixture, /VerifyPublishedArtifact\(target, genesis, genesisLkg, delegation, context, verifier, descriptors, advertisedHost\)/);
+  assert.match(fixture, /VerifyPublishedArtifact\(target, genesis, genesisLkg, delegation, context, verifier, descriptors, advertisedHost, advertisedScheme\)/);
   assert.match(fixture, /trustBootstrap = new/);
   assert.match(fixture, /expectedCanonicalGenesisSha256/);
   assert.match(fixture, /signedDelegation = Convert\.ToBase64String\(canonicalDelegation\)/);

@@ -19,6 +19,7 @@ catch (ArgumentException exception)
 }
 var outputDirectory = options.OutputDirectory;
 var advertisedHost = options.AdvertisedHost;
+var advertisedScheme = options.AdvertisedScheme;
 Directory.CreateDirectory(outputDirectory);
 if (!OperatingSystem.IsWindows())
 {
@@ -85,7 +86,7 @@ var x25519PublicKeys = routerIds.Zip(devNodeSeeds, (routerId, seed) =>
 var descriptors = routerIds.Select((id, index) => new MembershipRouteDescriptor {
     RouterId = Convert.FromHexString(id), Ed25519PublicKey = Convert.FromHexString(id),
     X25519PublicKey = x25519PublicKeys[index],
-    RpcEndpoint = $"http://{advertisedHost}:{41801 + index}/", Roles = MembershipRouteRole.Ingress | MembershipRouteRole.Core | MembershipRouteRole.Storage,
+    RpcEndpoint = $"{advertisedScheme}://{advertisedHost}:{41801 + index}/", Roles = MembershipRouteRole.Ingress | MembershipRouteRole.Core | MembershipRouteRole.Storage,
     Capabilities = MembershipRouteCapability.SessionRpc | MembershipRouteCapability.OnionV1 | MembershipRouteCapability.Storage,
     Epoch = 3, ValidFromUnixSeconds = validFrom, ValidUntilUnixSeconds = validUntil
 }).OrderBy(x => Convert.ToHexStringLower(x.RouterId.Span), StringComparer.Ordinal).ToArray();
@@ -143,7 +144,7 @@ var target = Path.Combine(outputDirectory, outputName);
 var temporary = Path.Combine(outputDirectory, $".{outputName}.{Guid.NewGuid():N}.tmp");
 File.WriteAllBytes(temporary, artifact);
 File.Move(temporary, target, true); // same-volume replace is the publication boundary.
-VerifyPublishedArtifact(target, genesis, genesisLkg, delegation, context, verifier, descriptors, advertisedHost);
+VerifyPublishedArtifact(target, genesis, genesisLkg, delegation, context, verifier, descriptors, advertisedHost, advertisedScheme);
 var publishedArtifactSha256 = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(target)));
 DevFixtureTrust.ValidateDerivedProfileKey(publishedArtifactSha256);
 foreach (var signer in roots.Concat(online))
@@ -193,7 +194,8 @@ static void VerifyPublishedArtifact(
     MembershipVerificationContext context,
     IMembershipSignatureVerifier verifier,
     IReadOnlyList<MembershipRouteDescriptor> expectedDescriptors,
-    string advertisedHost)
+    string advertisedHost,
+    string advertisedScheme)
 {
     // This is deliberately a read-after-publication integration check.  It
     // validates the exact bytes mounted by the consumers, rather than merely
@@ -322,7 +324,7 @@ static void VerifyPublishedArtifact(
             throw new InvalidOperationException("Published MRL1 proof verification failed.");
     }
     var requiredEndpoints = Enumerable.Range(41801, 6)
-        .Select(port => $"http://{advertisedHost}:{port}/")
+        .Select(port => $"{advertisedScheme}://{advertisedHost}:{port}/")
         .ToHashSet(StringComparer.Ordinal);
     if (!seenEndpoints.SetEquals(requiredEndpoints))
         throw new InvalidOperationException("Published MRL1 endpoints do not match the exact advertised development ports.");
@@ -331,6 +333,7 @@ static void VerifyPublishedArtifact(
 static FixtureOptions ParseOptions(string[] arguments)
 {
     string? advertisedHost = null;
+    var advertisedScheme = "http";
     var outputDirectory = "/out";
     var seen = new HashSet<string>(StringComparer.Ordinal);
     if (arguments.Length == 0 || arguments.Length % 2 != 0)
@@ -346,6 +349,16 @@ static FixtureOptions ParseOptions(string[] arguments)
             case "--advertised-host":
                 advertisedHost = CanonicalDevLocalIpv4(value);
                 break;
+            case "--advertised-scheme":
+                if (++index >= arguments.Length)
+                    throw new ArgumentException("--advertised-scheme requires a value.");
+                advertisedScheme = arguments[index] switch
+                {
+                    "http" => "http",
+                    "https" => "https",
+                    _ => throw new ArgumentException("--advertised-scheme must be exactly http or https.")
+                };
+                break;
             case "--output":
                 outputDirectory = value;
                 break;
@@ -355,7 +368,7 @@ static FixtureOptions ParseOptions(string[] arguments)
     }
     if (advertisedHost is null)
         throw Usage();
-    return new FixtureOptions(outputDirectory, advertisedHost);
+    return new FixtureOptions(outputDirectory, advertisedHost, advertisedScheme);
 }
 
 static string CanonicalDevLocalIpv4(string value)
@@ -388,7 +401,7 @@ static ArgumentException Usage() =>
     new("Usage: MembershipFixture --advertised-host IPv4 [--output DIRECTORY]");
 
 sealed record DevSigner(MembershipSignerDescriptor Descriptor, byte[] PrivateKey);
-sealed record FixtureOptions(string OutputDirectory, string AdvertisedHost);
+sealed record FixtureOptions(string OutputDirectory, string AdvertisedHost, string AdvertisedScheme);
 
 static class DevFixtureTrust
 {
