@@ -1,10 +1,7 @@
 **
 !.dockerignore
-!docker-compose.p15-compat.yml
 !scripts/
-!scripts/p15-compat-contracts.mjs
-!scripts/p15-evidence-sanitizer.mjs
-!scripts/p15c-package-json-normalizer.mjs
+!scripts/package-json-normalizer.mjs
 !tools/
 !tools/compat-services/
 !tools/compat-services/blake2b.mjs

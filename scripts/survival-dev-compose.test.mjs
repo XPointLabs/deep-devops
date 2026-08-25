@@ -206,7 +206,7 @@ test('every stateful service uses a named volume and operator commands are docum
   assert.match(docs, /docker compose -f docker-compose\.survival\.dev\.yml ps/);
   assert.match(docs, /docker compose -f docker-compose\.survival\.dev\.yml logs -f --tail=200/);
   assert.match(docs, /docker compose -f docker-compose\.survival\.dev\.yml down/);
-  assert.match(docs, /formal P15C release gate/i);
+  assert.match(docs, /current strict\s+client, service and production-readiness gates/i);
   assert.match(docs, /raw `docker compose .*up.*` is not supported/i);
   assert.doesNotMatch(docs, /The chain profile is currently unsupported/i);
   assert.match(docs, /Direct `docker compose` chain\s+restarts are unsupported/i);

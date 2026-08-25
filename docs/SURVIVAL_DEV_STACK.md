@@ -4,8 +4,8 @@
 It uses the fixed `deep-survival-dev` project, a private bridge network,
 persistent named volumes, and filtered exports of local source trees. It
 contains no remote chain, release evidence, retained receipt, or one-shot
-cleanup workflow. The formal P15C release gate remains separate in
-`docker-compose.p15c-headless.yml`.
+cleanup workflow. Release evidence is produced only by the current strict
+client, service and production-readiness gates.
 
 From the `deep-devops` repository, start the loopback-only messenger stack:
 

@@ -306,11 +306,11 @@ services:
         ARG NODE_IMAGE
         FROM $${NODE_IMAGE}
         WORKDIR /workspace
-        COPY scripts/p15c-package-json-normalizer.mjs /survival/
+        COPY scripts/package-json-normalizer.mjs /survival/
         COPY --from=contracts_source package.json pnpm-lock.yaml ./
-        RUN node /survival/p15c-package-json-normalizer.mjs package.json && mkdir -p /opt/corepack && COREPACK_HOME=/opt/corepack corepack prepare pnpm@9.1.3 --activate && corepack enable && COREPACK_HOME=/opt/corepack pnpm install --frozen-lockfile
+        RUN node /survival/package-json-normalizer.mjs package.json && mkdir -p /opt/corepack && COREPACK_HOME=/opt/corepack corepack prepare pnpm@9.1.3 --activate && corepack enable && COREPACK_HOME=/opt/corepack pnpm install --frozen-lockfile
         COPY --from=contracts_source . .
-        RUN node /survival/p15c-package-json-normalizer.mjs package.json && COREPACK_HOME=/opt/corepack pnpm exec hardhat compile && cp -a /workspace/cache /opt/hardhat-cache && chown -R node:node /workspace /opt/corepack /opt/hardhat-cache
+        RUN node /survival/package-json-normalizer.mjs package.json && COREPACK_HOME=/opt/corepack pnpm exec hardhat compile && cp -a /workspace/cache /opt/hardhat-cache && chown -R node:node /workspace /opt/corepack /opt/hardhat-cache
         COPY --chmod=0555 scripts/survival-hardhat-entrypoint.sh /usr/local/bin/survival-hardhat-entrypoint
         ENV COREPACK_HOME=/opt/corepack
         ENV COREPACK_ENABLE_NETWORK=0

@@ -1,0 +1,13 @@
+{
+  "schema": "deep.release-source-baseline.v1",
+  "xnode": {
+    "commit": "d817977c72699f58144892b7784250f21e62a892"
+  },
+  "clientExpectations": {
+    "commit": "01b7054eb7c6107d3f196478d0bdd91b2642ce02",
+    "sha256": "75ee3d01bb32c84a4ee30ea38ac0fd38106510018c7a5650e2c6c8bb18f06bc2"
+  },
+  "updateTrustFixture": {
+    "programRevisionSha256": "361c93ac16a51f2e83731548a6fcb09da7f805a9e0ba78ca5b496a896f3c2b1c"
+  }
+}

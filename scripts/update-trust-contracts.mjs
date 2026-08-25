@@ -29,15 +29,14 @@ const DEFAULT_ARTIFACT_DIR = path.join(repositoryRoot, 'artifacts', 'survival', 
 const FIXED_UPDATE_START = '2030-01-01T00:00:00Z';
 const GOOD_EXPIRY = '2030-01-03T00:00:00Z';
 const ROOT_EXPIRY = '2035-01-01T00:00:00Z';
-const EXPECTED_MANIFEST_SHA256 =
-  '6527338b3e5b888a22fb2cc55323259306e9f41bff69e9554706701a86dc7824';
+const EXPECTED_SOURCE_BASELINE_SHA256 =
+  'd1727be7885c6f46efa06dc168de3c21c7835c62437624378152822480563fca';
 const EXPECTED_PROGRAM_SHA256 =
-  'ca5ad9f0c9d4dfb509dedcbf8133524c15867fce5534816da21ff86a07057383';
-const MANIFEST_PATH = path.join(
+  '361c93ac16a51f2e83731548a6fcb09da7f805a9e0ba78ca5b496a896f3c2b1c';
+const SOURCE_BASELINE_PATH = path.join(
   repositoryRoot,
   'release',
-  'manifests',
-  'survival-v2.0.1-i01b.local.json'
+  'source-baseline-v1.json'
 );
 
 function fixtureVerifierArtifactBytes(signerDigest, apkSha256) {
@@ -363,12 +362,12 @@ function parseOptions(argv) {
 }
 
 export function runUpdateTrustContracts({ artifactDir = DEFAULT_ARTIFACT_DIR } = {}) {
-  const manifestBytes = readFileSync(MANIFEST_PATH);
-  assert(sha256(manifestBytes) === EXPECTED_MANIFEST_SHA256,
-    'pinned survival manifest SHA-256 changed');
-  const manifest = JSON.parse(manifestBytes.toString('utf8'));
-  assert(manifest.programRevision?.sha256 === EXPECTED_PROGRAM_SHA256,
-    'pinned survival program revision changed');
+  const sourceBaselineBytes = readFileSync(SOURCE_BASELINE_PATH);
+  assert(sha256(sourceBaselineBytes) === EXPECTED_SOURCE_BASELINE_SHA256,
+    'release source baseline SHA-256 changed');
+  const sourceBaseline = JSON.parse(sourceBaselineBytes.toString('utf8'));
+  assert(sourceBaseline.updateTrustFixture?.programRevisionSha256 === EXPECTED_PROGRAM_SHA256,
+    'release source baseline update-trust revision changed');
 
   const fixture = createUpdateTrustFixture();
   const happyBundle = fixture.createBundle();
@@ -685,8 +684,8 @@ export function runUpdateTrustContracts({ artifactDir = DEFAULT_ARTIFACT_DIR } =
       schema: 'deep.update-trust.contract-summary.v1',
       generatedAtUtc,
       sourceCommitSha,
-      sourceManifest: path.relative(repositoryRoot, MANIFEST_PATH).replaceAll('\\', '/'),
-      sourceManifestSha256: EXPECTED_MANIFEST_SHA256,
+      sourceBaseline: path.relative(repositoryRoot, SOURCE_BASELINE_PATH).replaceAll('\\', '/'),
+      sourceBaselineSha256: EXPECTED_SOURCE_BASELINE_SHA256,
       programRevisionSha256: EXPECTED_PROGRAM_SHA256,
       tufSpecificationVersion: '1.0.35',
       fixtureOnly: true,

@@ -18,7 +18,7 @@ node scripts/metadata-privacy-gate.mjs `
   --expected-artifact-files <exact-positive-count> `
   --expected-metric-files <exact-positive-count> `
   --xnode-dir <clean-pinned-xnode-checkout> `
-  --client-expectations <P01-metadata-expectations.v1.json> `
+  --client-expectations <metadata-expectations.v1.json> `
   --summary <isolated-summary-path>
 ```
 
@@ -36,7 +36,7 @@ node scripts/metadata-privacy-gate.mjs `
 The gate accepts explicit UTF-8 text inputs only. Each selected root must contain at least one file,
 and the aggregate artifact and metric counts must equal the separately declared positive counts.
 Empty/zero-match selections, unsupported or binary content, malformed selected JSON/JSONL, wrong
-profile, symlinks, oversized inputs, dirty or unpinned XNode source, mismatched P01 fixture, invalid
+profile, symlinks, oversized inputs, dirty or unpinned XNode source, mismatched client fixture, invalid
 Compose configuration, and scanner findings fail closed. A metadata finding exits `1`; an incomplete
 selection, parse error or harness/contract failure exits `2`.
 
@@ -94,23 +94,23 @@ reviewed topology contract.
 
 ## Proxy and Xray
 
-The pinned XNode source in the local `2.0.1-i01b` manifest generates Xray logging at `warning` and
-does not configure an `access` destination. The metadata-safe Compose overlay additionally raises
+The XNode commit pinned by `release/source-baseline-v1.json` generates Xray logging at `warning`
+and does not configure an `access` destination. The metadata-safe Compose overlay additionally raises
 ASP.NET/XNode categories to `Warning`; errors, degraded state and supervisor restarts remain visible.
 The gate rejects an Xray generator that introduces an access sink or debug/info logging.
 
 This is static source plus Compose-config evidence. No live Xray/REALITY traffic or runtime log
-capture was performed in P01B.
+capture is implied by this gate.
 
 ## Metrics and evidence
 
 Allowed labels are low-cardinality operational fields only: service, operation, status code, error
-class, route index, transport and result. Session IDs, sender/recipient/public keys, mailbox IDs,
+class, route index, transport and result. Deep IDs, sender/recipient/public keys, mailbox IDs,
 push/device tokens, capabilities, source/client IPs, paths, URLs and stable correlation IDs are
 blocked.
 
 JSON and JSONL inputs are parsed structurally and inspected recursively; text formats receive the
-same fallback regex scan. IPv4, IPv6, request targets, Session IDs, mailbox/push capabilities and
+same fallback regex scan. IPv4, IPv6, request targets, Deep IDs, mailbox/push capabilities and
 stable correlation fields are rejected in nested objects, arrays, quoted fields and free-form text.
 
 Findings contain only rule ID, a generic input ordinal, optional line and a separate finding

@@ -3,9 +3,9 @@
   "profile": "metadata-safe-v1",
   "featureFlag": "DEEP_INFRA_PRIVACY_PROFILE",
   "humanOwner": "Mr. X",
-  "clientP01": {
-    "commit": "fb310d05a4b8bd5450695ab00569deb62aba1ff1",
-    "expectationsSha256": "59e854b60901ddcbf2243235bfad5aab23bb6a2bd4e7a545b0c8a02a5ac0e73e"
+  "clientExpectations": {
+    "commit": "01b7054eb7c6107d3f196478d0bdd91b2642ce02",
+    "sha256": "75ee3d01bb32c84a4ee30ea38ac0fd38106510018c7a5650e2c6c8bb18f06bc2"
   },
   "components": [
     {

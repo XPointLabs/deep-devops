@@ -336,8 +336,8 @@ export function validateRetentionPolicy(policy) {
   assert.equal(policy.profile, metadataSafeProfile);
   assert.equal(policy.featureFlag, featureFlag);
   assert.equal(policy.humanOwner, 'Mr. X');
-  assert.match(policy.clientP01?.commit ?? '', /^[0-9a-f]{40}$/);
-  assert.match(policy.clientP01?.expectationsSha256 ?? '', /^[0-9a-f]{64}$/);
+  assert.match(policy.clientExpectations?.commit ?? '', /^[0-9a-f]{40}$/);
+  assert.match(policy.clientExpectations?.sha256 ?? '', /^[0-9a-f]{64}$/);
   assert.equal(policy.components?.length, 7);
   const components = new Map((policy.components ?? []).map(item => [item.component, item]));
   assert.equal(components.size, 7);
@@ -1047,28 +1047,32 @@ function readPinnedGitFile(repositoryDirectory, commit, absoluteFilePath) {
 
 export async function validatePinnedInputs({ xnodeDir, clientExpectationsPath }) {
   const policyPath = path.join(repositoryRoot, 'config', 'metadata-safe', 'retention-policy.v1.json');
-  const manifestPath = path.join(repositoryRoot, 'release', 'manifests', 'survival-v2.0.1-i01b.local.json');
+  const baselinePath = path.join(repositoryRoot, 'release', 'source-baseline-v1.json');
   const policy = validateRetentionPolicy(JSON.parse(await readFile(policyPath, 'utf8')));
-  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
-  const xnode = manifest.repositories.find(item => item.name === 'xnode');
-  assert.ok(xnode, 'pinned manifest lacks xnode');
+  const baseline = JSON.parse(await readFile(baselinePath, 'utf8'));
+  assert.equal(baseline.schema, 'deep.release-source-baseline.v1');
+  assert.match(baseline.xnode?.commit ?? '', /^[0-9a-f]{40}$/);
+  assert.deepEqual(baseline.clientExpectations, {
+    commit: policy.clientExpectations.commit,
+    sha256: policy.clientExpectations.sha256
+  });
   const xraySource = readPinnedGitFile(
     xnodeDir,
-    xnode.sha,
+    baseline.xnode.commit,
     path.join(xnodeDir, 'src', 'XNode.Transport.Vless', 'XrayConfigGenerator.cs')
   ).toString('utf8');
   validateXrayGeneratorSource(xraySource);
   const clientRepository = gitValue(path.dirname(clientExpectationsPath), ['rev-parse', '--show-toplevel']);
   const expectationsBytes = readPinnedGitFile(
     clientRepository,
-    policy.clientP01.commit,
+    policy.clientExpectations.commit,
     clientExpectationsPath
   );
   assert.equal(
     createHash('sha256').update(expectationsBytes).digest('hex'),
-    policy.clientP01.expectationsSha256
+    policy.clientExpectations.sha256
   );
-  return { policy, xnodeCommit: xnode.sha };
+  return { policy, xnodeCommit: baseline.xnode.commit };
 }
 
 async function readCanonicalJsonFile(filePath, { protectedInventory = false } = {}) {
@@ -1146,8 +1150,8 @@ export async function runGate(options) {
     status: findings.length === 0 ? 'ok' : 'failed',
     productionReady: false,
     providerDeletionGuaranteed: false,
-    p01Commit: policy.clientP01.commit,
-    p01ExpectationsSha256: policy.clientP01.expectationsSha256,
+    clientExpectationsCommit: policy.clientExpectations.commit,
+    clientExpectationsSha256: policy.clientExpectations.sha256,
     xnodeCommit,
     topologyServices: Object.keys(topology.services).length,
     scannedArtifactFiles: artifactScan.scannedFiles,

@@ -173,11 +173,10 @@ node .\scripts\secret-scan.mjs `
 No command contacts a mirror, blockchain, signing service or HSM. All mirrors
 are local directories. Do not publish the generated TEST metadata.
 
-`artifacts/survival/P02C` is a tracked handoff/report directory and is never a
-runner output. The contract runner accepts only a path below `artifacts` that
-contains a distinct `generated` segment, checks that boundary before cleanup,
-and only replaces that narrow ignored directory. Tests prove that the tracked
-handoff sentinel remains byte-identical.
+The contract runner accepts only a path below `artifacts` that contains a
+distinct `generated` segment, rejects the historical `artifacts/survival`
+namespace, checks the boundary before cleanup, and only replaces that narrow
+ignored directory.
 
 ## Cleanup
 

@@ -177,14 +177,12 @@ test('negative async drill helper rejects an accepted mutation path', async () =
   );
 });
 
-test('contract runner preserves tracked P02C handoff and only replaces generated output', async () => {
-  const trackedHandoff = path.join(repositoryRoot, 'artifacts', 'survival', 'P02C', 'handoff.md');
-  const before = await readFile(trackedHandoff);
+test('contract runner rejects historical evidence paths and only replaces generated output', async () => {
   await assert.rejects(
     () => runUpdateCeremonyContracts({
       artifactDir: path.join(repositoryRoot, 'artifacts', 'survival', 'P02C')
     }),
-    /generated subdirectory|immutable/
+    /generated subdirectory|historical survival evidence namespace/
   );
   const generated = path.join(
     repositoryRoot,
@@ -195,7 +193,6 @@ test('contract runner preserves tracked P02C handoff and only replaces generated
   try {
     await mkdir(generated, { recursive: true });
     await runUpdateCeremonyContracts({ artifactDir: generated });
-    assert.deepEqual(await readFile(trackedHandoff), before);
   } finally {
     await rm(generated, { recursive: true, force: true });
   }

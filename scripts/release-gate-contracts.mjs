@@ -22,8 +22,6 @@ const negativeStaleClientDeviceAcceptancePath = path.join(negativeStaleEvidenceR
 const summaryPath = path.join(releaseDir, 'release-gate-contract-summary.json');
 
 const scriptNames = [
-  'pinned-integration-manifest.mjs',
-  'w1w2-dependency-closure-gate.mjs',
   'metadata-privacy-gate.mjs',
   'secret-scan.mjs',
   'artifact-upload-manifest.mjs',
@@ -135,51 +133,6 @@ for (const scriptName of scriptNames) {
   if (!result.passed) {
     break;
   }
-}
-
-if (commandResults.every(result => result.passed)) {
-  runNode(
-    ['scripts/pinned-integration-manifest.mjs', '--validate-only'],
-    'pinned-integration-manifest:validate-v2.0.0'
-  );
-}
-
-if (commandResults.every(result => result.passed)) {
-  runNode(
-    [
-      'scripts/pinned-integration-manifest.mjs',
-      '--manifest',
-      'release/manifests/survival-v2.0.1-i01b.local.json',
-      '--validate-only'
-    ],
-    'pinned-integration-manifest:validate-v2.0.1-i01b-local'
-  );
-}
-
-if (commandResults.every(result => result.passed)) {
-  runNode(
-    [
-      'scripts/pinned-integration-manifest.mjs',
-      '--manifest',
-      'release/manifests/survival-v2.0.2-w0.detached.local.json',
-      '--validate-only'
-    ],
-    'pinned-integration-manifest:validate-v2.0.2-w0-detached-local'
-  );
-}
-
-if (commandResults.every(result => result.passed)) {
-  runNode(
-    ['scripts/w1w2-dependency-closure-gate.mjs'],
-    'w1w2-dependency-closure:strict-producer-and-evidence-gate'
-  );
-}
-
-if (commandResults.every(result => result.passed)) {
-  runNode(
-    ['--test', 'scripts/pinned-integration-manifest.test.mjs'],
-    'pinned-integration-manifest:tests'
-  );
 }
 
 if (commandResults.every(result => result.passed)) {

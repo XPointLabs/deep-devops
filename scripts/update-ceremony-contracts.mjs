@@ -38,9 +38,14 @@ function assertSafeArtifactDirectory(candidate) {
       && segments.includes('generated'),
     'P02C generated output must remain in a distinct repository artifacts/**/generated subdirectory'
   );
-  const trackedHandoff = path.resolve(repositoryRoot, 'artifacts', 'survival', 'P02C');
-  assert.notEqual(candidate, trackedHandoff,
-    'tracked P02C handoff directory is immutable to the generated runner');
+  const historicalEvidenceRoot = path.resolve(repositoryRoot, 'artifacts', 'survival');
+  const historicalRelative = path.relative(historicalEvidenceRoot, candidate);
+  assert.ok(
+    path.isAbsolute(historicalRelative)
+      || historicalRelative === '..'
+      || historicalRelative.startsWith(`..${path.sep}`),
+    'generated output cannot enter the historical survival evidence namespace'
+  );
   let existingAncestor = candidate;
   while (!existsSync(existingAncestor)) {
     const parent = path.dirname(existingAncestor);
@@ -64,7 +69,6 @@ export async function runUpdateCeremonyContracts({ artifactDir = defaultArtifact
   const resolved = path.resolve(artifactDir);
   assertSafeArtifactDirectory(resolved);
   // Only the narrowly guarded ignored generated directory is replaceable.
-  // The tracked artifacts/survival/P02C handoff is never touched.
   rmSync(resolved, { recursive: true, force: true });
   mkdirSync(resolved, { recursive: true });
   assertSafeArtifactDirectory(realpathSync(resolved));

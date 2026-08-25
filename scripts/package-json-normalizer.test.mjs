@@ -4,10 +4,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { normalizePackageJson } from './p15c-package-json-normalizer.mjs';
+import { normalizePackageJson } from './package-json-normalizer.mjs';
 
 async function withTempFile(bytes, action) {
-  const root = await mkdtemp(join(tmpdir(), 'p15c-package-json-'));
+  const root = await mkdtemp(join(tmpdir(), 'deep-package-json-'));
   const path = join(root, 'package.json');
   try {
     await writeFile(path, bytes);
