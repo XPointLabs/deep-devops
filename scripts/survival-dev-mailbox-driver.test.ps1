@@ -17,6 +17,8 @@ try {
     $authorityEnv = Join-Path $work 'authority.env'
     $clientEnv = Join-Path $work 'client.env'
     $authorityPublic = Join-Path $work 'authority.public.json'
+    $privacyRoutesAndroid = Join-Path $work 'privacy-routes.android.v1.json'
+    $privacyRoutesWindows = Join-Path $work 'privacy-routes.windows.v1.json'
     $state = Join-Path $work 'state'
     $artifacts = Join-Path $work 'build-artifacts'
     $common = @(
@@ -27,6 +29,9 @@ try {
         '--output-env' $authorityEnv `
         '--output-client-env' $clientEnv `
         '--output-public' $authorityPublic `
+        '--output-privacy-routes-android' $privacyRoutesAndroid `
+        '--output-privacy-routes-windows' $privacyRoutesWindows `
+        '--privacy-entry-host' '127.0.0.1' `
         '--coordinator-url' 'http://127.0.0.1:41801')
     if ($LASTEXITCODE -ne 0) { throw 'Host-only authority generation failed.' }
     $resultLines = @(& dotnet @common retention-gc `

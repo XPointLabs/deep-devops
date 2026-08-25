@@ -1,3 +1,4 @@
 release/**/*.json text eol=lf
 tools/fixtures/*.json text eol=lf
 scripts/survival-hardhat-entrypoint.sh text eol=lf
+scripts/coturn-entrypoint.sh text eol=lf

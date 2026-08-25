@@ -38,8 +38,15 @@ docker compose --env-file .env.production \
   -f docker-compose.staking.prod.local.yml up -d --build registry
 
 docker compose -f docker-compose.client-services.prod.yml \
+  --env-file .env.production \
   up -d turn-service
 ```
+
+Set `DEEP_TURN_PUBLIC_HOST` to the exact DNS name on the coturn certificate and,
+when automatic public-IP discovery is unsuitable, set `DEEP_TURN_EXTERNAL_IP` to
+the origin address. The startup boundary validates those values and secret/cert
+files, creates a mode-`0600` runtime config on `tmpfs`, and starts coturn with only
+the config path in argv.
 
 Nginx must route `/api/calls` on `registry.xpoint.network` to the registry API (`http://127.0.0.1:28180`), not to port `19103`.
 

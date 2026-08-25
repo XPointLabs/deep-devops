@@ -12,7 +12,7 @@ test('all Node compatibility-service builds pass one immutable digest-pinned NOD
   const pin = compose.match(/^\s{2}NODE_IMAGE: (node:24-bookworm-slim@sha256:[0-9a-f]{64})\s*$/m)?.[1];
   assert.match(pin ?? '', digestPinnedNode);
   const expectedServices = [
-    'storage', 'storage-service', 'file', 'file-service', 'calls', 'calls-service', 'push-service'
+    'storage', 'storage-service', 'file', 'file-service', 'calls', 'push-service'
   ];
   for (const name of expectedServices) {
     const block = compose.match(new RegExp(`^  ${name}:\\r?\\n([\\s\\S]*?)(?=^  [a-zA-Z0-9-]+:|(?![\\s\\S]))`, 'm'))?.[1] ?? '';
@@ -21,7 +21,7 @@ test('all Node compatibility-service builds pass one immutable digest-pinned NOD
 });
 
 test('mandatory NODE_IMAGE Dockerfiles and production storage build use the reviewed pin', async () => {
-  const dockerfiles = ['storage-service', 'file-service', 'calls-service', 'push-service'];
+  const dockerfiles = ['storage-service', 'file-service', 'push-service'];
   for (const name of dockerfiles) {
     const source = await readFile(path.join(repositoryRoot, 'docker', `${name}.Dockerfile`), 'utf8');
     assert.match(source, /^ARG NODE_IMAGE\s*$/m, `${name} must not define a mutable Dockerfile default`);

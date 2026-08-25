@@ -213,6 +213,7 @@ function buildChecklist(blockers, releaseCandidate) {
         'artifacts/runtime.gate.json',
         'artifacts/test-results/backend-load-smoke.json',
         'artifacts/test-results/backend-restart-smoke.json',
+        'artifacts/test-results/mau2-call-result.json',
         'artifacts/test-results/push-provider-canary.json',
         'artifacts/test-results/multi-node-topology.json',
         'artifacts/test-results/registry-recovery.json',

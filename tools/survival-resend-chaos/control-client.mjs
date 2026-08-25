@@ -11,6 +11,7 @@ if (action === 'arm' && (!Number.isSafeInteger(ttlSeconds) || ttlSeconds < 5 || 
 if (action === 'arm' && ![
   'post-durable-response-drop',
   'pre-dispatch-outage',
+  'primary-ingress-rejected-before-forward',
   'post-durable-ack-response-drop',
 ].includes(fault)) throw new Error('Expected an exact supported fault.');
 const token = fs.readFileSync(process.env.DEEP_CHAOS_TOKEN_FILE, 'utf8').trim();

@@ -10,12 +10,11 @@ export const composePath = path.join(repositoryRoot, 'docker-compose.uat-private
 export const syntheticRouterIds = Object.freeze(['a1'.repeat(32), 'b2'.repeat(32), 'c3'.repeat(32)]);
 
 const routers = Object.freeze(['xnode-1', 'xnode-2', 'xnode-3']);
-const services = Object.freeze(['calls', 'file', 'push', 'storage', ...routers]);
+const services = Object.freeze(['file', 'push', 'storage', ...routers]);
 const ips = Object.freeze(['172.30.81.11', '172.30.81.12', '172.30.81.13']);
 const networkName = 'i01b-private-uat';
-const ancillaryPorts = Object.freeze({ file: '29101', push: '29102', calls: '29103' });
+const ancillaryPorts = Object.freeze({ file: '29101', push: '29102' });
 const stateTargets = Object.freeze({
-  calls: '/var/lib/deep/i01b-private-uat/calls',
   file: '/var/lib/deep/i01b-private-uat/file',
   push: '/var/lib/deep/i01b-private-uat/push',
   storage: '/var/lib/deep/i01b-private-uat/storage',
@@ -326,14 +325,14 @@ export function validateTopology(topology, inputs) {
 
   validateGlobalEscapeHatches(topology);
   routers.forEach((name, index) => validateRouter(topology, name, index, inputs));
-  ['storage', 'file', 'push', 'calls'].forEach(name =>
+  ['storage', 'file', 'push'].forEach(name =>
     validateAncillary(topology.services[name], name, inputs));
   validateSourcePlaceholders(inputs);
 
   return {
     schemaVersion: '2.0.0',
     status: 'static-private-topology-contract-accepted',
-    serviceCount: 7,
+    serviceCount: 6,
     routerCount: 3,
     allowlistMappingCount: 9,
     readinessBeforeBootstrap: 503,
@@ -409,7 +408,7 @@ export async function loadContractInputs(rendered = renderTopology()) {
     readFile(path.join(repositoryRoot, '.env.uat-private.example'), 'utf8'),
     readFile(path.join(repositoryRoot, 'docker', 'xnode-xray.Dockerfile'), 'utf8'),
     readFile(path.join(repositoryRoot, 'config', 'retired-uat-public-identities.json'), 'utf8').then(JSON.parse),
-    ...['storage', 'file', 'push', 'calls'].map(name => readFile(
+    ...['storage', 'file', 'push'].map(name => readFile(
       path.join(repositoryRoot, 'docker', `${name}-service.Dockerfile`),
       'utf8'
     )),
@@ -419,9 +418,9 @@ export async function loadContractInputs(rendered = renderTopology()) {
     ))
   ]);
   const reviewedAncillaryDockerfiles = Object.fromEntries(
-    ['storage', 'file', 'push', 'calls'].map((name, index) => [name, remaining[index]])
+    ['storage', 'file', 'push'].map((name, index) => [name, remaining[index]])
   );
-  const secretTemplates = remaining.slice(4);
+  const secretTemplates = remaining.slice(3);
   return {
     ...rendered,
     source,

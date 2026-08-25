@@ -342,7 +342,7 @@ async function main() {
   captureComposePs('before');
 
   try {
-    compose(['--profile', 'backend-external', 'up', '--build', '-d', '--wait', 'storage-service', 'file-service', 'push-service', 'calls-service'], { inherit: true });
+    compose(['--profile', 'backend-external', 'up', '--build', '-d', '--wait', 'storage-service', 'file-service', 'push-service'], { inherit: true });
     cleanup.push('backend-external');
     compose(['up', '--build', '-d', '--wait', 'xnode', 'registry', 'staking-backend', 'contracts-devnet'], { inherit: true });
     cleanup.push('core');

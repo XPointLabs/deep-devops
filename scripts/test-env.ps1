@@ -135,15 +135,13 @@ else {
         Set-DefaultProcessEnvironmentVariable -Name "DEEP_STORAGE_URL" -Value "http://host.docker.internal:19100"
         Set-DefaultProcessEnvironmentVariable -Name "DEEP_FILE_URL" -Value "http://host.docker.internal:19101"
         Set-DefaultProcessEnvironmentVariable -Name "DEEP_PUSH_URL" -Value "http://host.docker.internal:19102"
-        Set-DefaultProcessEnvironmentVariable -Name "DEEP_CALL_SIGNALING_BASE_URL" -Value "http://host.docker.internal:19103"
         Set-DefaultProcessEnvironmentVariable -Name "DEEP_STORAGE_STATS_URL" -Value "http://127.0.0.1:19100/stats"
         Set-DefaultProcessEnvironmentVariable -Name "DEEP_FILE_STATS_URL" -Value "http://127.0.0.1:19101/stats"
         Set-DefaultProcessEnvironmentVariable -Name "DEEP_PUSH_STATS_URL" -Value "http://127.0.0.1:19102/stats"
-        Set-DefaultProcessEnvironmentVariable -Name "DEEP_CALL_STATS_URL" -Value "http://127.0.0.1:19103/stats"
         Set-DefaultProcessEnvironmentVariable -Name "DEEP_STORAGE_PUSH_NOTIFY_URL" -Value "http://push-service:8080"
         [Environment]::SetEnvironmentVariable("DEEP_EXTERNAL_PROFILE", $ManagedExternalProfile, "Process")
 
-        $managedExternalServices = @("storage-service", "file-service", "push-service", "calls-service")
+        $managedExternalServices = @("storage-service", "file-service", "push-service")
     }
 
     $requiredExternalUrls = @(
@@ -237,10 +235,6 @@ finally {
                 "file-external-stats",
                 "push-external-stats"
             )
-            if (-not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable("DEEP_CALL_SIGNALING_BASE_URL")) -or
-                -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable("DEEP_CALL_STATS_URL"))) {
-                $softRequiredChecks += "calls-external-stats"
-            }
         }
 
         $snapshot = Get-Content -Raw $snapshotPath | ConvertFrom-Json

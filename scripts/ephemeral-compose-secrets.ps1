@@ -42,6 +42,31 @@ function Initialize-DeepEphemeralComposeSecrets {
         }
     }
 
+    if ([string]::IsNullOrWhiteSpace(
+        [Environment]::GetEnvironmentVariable('DEEP_TEST_TURN_SHARED_SECRET_FILE', 'Process'))) {
+        $devopsRoot = [IO.Path]::GetFullPath((Join-Path $ScriptDirectory '..'))
+        $secretDirectory = Join-Path $devopsRoot '.secrets\test-env'
+        [IO.Directory]::CreateDirectory($secretDirectory) | Out-Null
+        $secretPath = Join-Path $secretDirectory 'turn-shared-secret'
+        if (-not (Test-Path -LiteralPath $secretPath -PathType Leaf)) {
+            $random = [byte[]]::new(48)
+            $generator = [Security.Cryptography.RandomNumberGenerator]::Create()
+            try {
+                $generator.GetBytes($random)
+                [IO.File]::WriteAllText(
+                    $secretPath,
+                    [Convert]::ToBase64String($random) + [Environment]::NewLine,
+                    [Text.UTF8Encoding]::new($false))
+            } finally {
+                [Array]::Clear($random, 0, $random.Length)
+                $generator.Dispose()
+            }
+        }
+        [Environment]::SetEnvironmentVariable(
+            'DEEP_TEST_TURN_SHARED_SECRET_FILE', $secretPath, 'Process')
+        $generatedNames.Add('DEEP_TEST_TURN_SHARED_SECRET_FILE')
+    }
+
     return $generatedNames.ToArray()
 }
 

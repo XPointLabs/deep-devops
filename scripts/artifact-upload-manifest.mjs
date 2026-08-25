@@ -59,6 +59,107 @@ function exactKeys(value, expected, label) {
   }
 }
 
+function purlEncode(value) {
+  return encodeURIComponent(value)
+    .replace(/[!'()*]/g, character => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
+}
+
+function expectedComponentPurl(name, version, ecosystem) {
+  if (ecosystem === 'npm') {
+    if (name.startsWith('@') && name.includes('/')) {
+      const separator = name.indexOf('/');
+      return `pkg:npm/${purlEncode(name.slice(0, separator))}/${purlEncode(name.slice(separator + 1))}@${purlEncode(version)}`;
+    }
+    return `pkg:npm/${purlEncode(name)}@${purlEncode(version)}`;
+  }
+  if (ecosystem === 'nuget') {
+    return `pkg:nuget/${purlEncode(name)}@${purlEncode(version)}`;
+  }
+  if (ecosystem === 'generic') {
+    return `pkg:generic/${purlEncode(name)}@${purlEncode(version)}`;
+  }
+  return null;
+}
+
+function containsHostPath(value) {
+  if (typeof value === 'string') {
+    return /^[A-Za-z]:[\\/]/.test(value)
+      || /^file:\/\//i.test(value)
+      || value.startsWith('/')
+      || value.startsWith('\\\\');
+  }
+  if (Array.isArray(value)) {
+    return value.some(containsHostPath);
+  }
+  if (value && typeof value === 'object') {
+    return Object.entries(value).some(([key, nested]) => /workspaceRoot|artifactDir/i.test(key) || containsHostPath(nested));
+  }
+  return false;
+}
+
+function validCycloneDxComponent(component, ecosystem) {
+  try {
+    exactKeys(component, ['type', 'bom-ref', 'name', 'version', 'purl'], 'CycloneDX component');
+  } catch {
+    return false;
+  }
+  if (!['application', 'library'].includes(component.type)
+    || typeof component.name !== 'string' || component.name.trim() !== component.name || component.name.length === 0
+    || typeof component.version !== 'string' || component.version.trim() !== component.version || component.version.length === 0
+    || typeof component.purl !== 'string'
+    || component['bom-ref'] !== component.purl) {
+    return false;
+  }
+  return component.purl === expectedComponentPurl(component.name, component.version, ecosystem);
+}
+
+function validCycloneDxSbom(document) {
+  try {
+    exactKeys(document, ['bomFormat', 'specVersion', 'version', 'metadata', 'components'], 'CycloneDX SBOM');
+    exactKeys(
+      document.metadata,
+      document.metadata?.timestamp === undefined ? ['component'] : ['component', 'timestamp'],
+      'CycloneDX metadata'
+    );
+  } catch {
+    return false;
+  }
+  if (document.bomFormat !== 'CycloneDX'
+    || document.specVersion !== '1.6'
+    || document.version !== 1
+    || containsHostPath(document)
+    || !validCycloneDxComponent(document.metadata.component, 'generic')
+    || document.metadata.component.type !== 'application'
+    || document.metadata.component.name !== 'network.xpoint.deep'
+    || !Array.isArray(document.components)
+    || document.components.length === 0) {
+    return false;
+  }
+  if (document.metadata.timestamp !== undefined) {
+    const parsedTimestamp = new Date(document.metadata.timestamp);
+    if (Number.isNaN(parsedTimestamp.getTime()) || parsedTimestamp.toISOString() !== document.metadata.timestamp) {
+      return false;
+    }
+  }
+
+  const purls = [];
+  for (const component of document.components) {
+    const ecosystem = component?.purl?.startsWith('pkg:npm/')
+      ? 'npm'
+      : component?.purl?.startsWith('pkg:nuget/') ? 'nuget' : null;
+    if (component?.type !== 'library' || ecosystem === null || !validCycloneDxComponent(component, ecosystem)) {
+      return false;
+    }
+    purls.push(component.purl);
+  }
+  const sorted = [...purls].sort((left, right) => {
+    if (left === right) return 0;
+    return left < right ? -1 : 1;
+  });
+  return new Set(purls).size === purls.length
+    && purls.every((purl, index) => purl === sorted[index]);
+}
+
 function normalizeRequiredPath(value) {
   const normalized = String(value).normalize('NFKC').replaceAll('\\', '/');
   if (!normalized
@@ -342,8 +443,29 @@ function validateKnownEvidence(required, document, failures) {
   }
   if (required.endsWith('/backend-restart-smoke.json')) {
     positiveStatus(document, required, failures);
-    if (!document.retrievedAfterRestart || !document.retrievedFinal || !document.statsAfterRehearsal) {
+    if (!document.retrievedAfterRestart
+      || !document.retrievedFinal
+      || !document.statsAfterRehearsal
+      || document.callRegistry?.authenticatedSignalAcceptedBeforeRestart !== true
+      || document.callRegistry?.registryRestarted !== true
+      || document.callRegistry?.authenticatedInboxRetrievedAfterRestart !== true
+      || document.callRegistry?.exactSignalCountAfterRestart !== 1) {
       failures.push(`${required}: restart smoke lacks post-restart retrieval evidence`);
+    }
+    return;
+  }
+  if (required.endsWith('/mau2-call-result.json')) {
+    positiveStatus(document, required, failures);
+    const requiredTrue = [
+      'outgoingOfferStarted', 'incomingRingingObserved', 'incomingAnswerAccepted',
+      'selectedIceCandidatePairObserved', 'bidirectionalAudioRtpObserved',
+      'microphoneMuteApplied', 'microphoneRestoreApplied', 'remoteHangupObserved',
+      'authenticatedMau2EnvironmentValidated', 'productionPackageUntouched'
+    ];
+    if (document.schema !== 'deep.physical-mau2-phase.v1'
+      || document.phase !== 'Call'
+      || requiredTrue.some(field => document[field] !== true)) {
+      failures.push(`${required}: authenticated physical call evidence is incomplete`);
     }
     return;
   }
@@ -413,11 +535,8 @@ function validateKnownEvidence(required, document, failures) {
     return;
   }
   if (required === 'sbom.json') {
-    if (document.bomFormat !== 'Deep-SBOM'
-      || !Array.isArray(document.components)
-      || document.componentCount !== document.components.length
-      || document.componentCount <= 0) {
-      failures.push(`${required}: SBOM must contain an exact nonempty component inventory`);
+    if (!validCycloneDxSbom(document)) {
+      failures.push(`${required}: SBOM must be sanitized deterministic CycloneDX 1.6 with an exact nonempty component inventory`);
     }
     return;
   }
@@ -464,12 +583,15 @@ export async function validateRequiredEvidence(
       document.generatedAt,
       document.capturedAt,
       document.capturedAtUtc,
-      document.evaluatedAtUtc
+      document.evaluatedAtUtc,
+      required === 'sbom.json' ? document.metadata?.timestamp : null
     ].find(value => typeof value === 'string' && value.length > 0);
     freshnessChecked += 1;
     const generated = Date.parse(observedGeneratedAt ?? '');
     const age = now.getTime() - generated;
-    if (!Number.isFinite(generated) || age < -5 * 60 * 1000 || age > MAX_EVIDENCE_AGE_MS) {
+    const immutableSbom = required === 'sbom.json';
+    if (!immutableSbom
+      && (!Number.isFinite(generated) || age < -5 * 60 * 1000 || age > MAX_EVIDENCE_AGE_MS)) {
       failures.push(`${required}: evidence timestamp is missing, invalid, stale, or from the future`);
     }
     evidenceBindings.push({

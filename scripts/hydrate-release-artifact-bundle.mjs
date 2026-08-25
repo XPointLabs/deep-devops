@@ -32,6 +32,11 @@ const artifactMappings = [
     target: path.join(artifactRoot, 'test-results', 'backend-restart-smoke.json')
   },
   {
+    id: 'physical-call',
+    fileName: 'mau2-call-result.json',
+    target: path.join(artifactRoot, 'test-results', 'mau2-call-result.json')
+  },
+  {
     id: 'push-provider-canary',
     fileName: 'push-provider-canary.json',
     target: path.join(artifactRoot, 'test-results', 'push-provider-canary.json')

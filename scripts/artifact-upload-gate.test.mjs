@@ -298,6 +298,74 @@ test('multi-node evidence cannot omit registry or distinct-hop counters', async 
   }
 });
 
+test('SBOM evidence rejects legacy, host-bound, duplicate, and unsorted inventories', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'deep-upload-sbom-'));
+  try {
+    const source = path.join(root, 'source');
+    await mkdir(source);
+    const sbomPath = path.join(source, 'sbom.json');
+    const component = (name, version = '1.0.0') => ({
+      type: 'library',
+      'bom-ref': `pkg:npm/${name}@${version}`,
+      name,
+      version,
+      purl: `pkg:npm/${name}@${version}`
+    });
+    const valid = {
+      bomFormat: 'CycloneDX',
+      specVersion: '1.6',
+      version: 1,
+      metadata: {
+        timestamp: '2026-06-02T00:00:00.000Z',
+        component: {
+          type: 'application',
+          'bom-ref': 'pkg:generic/network.xpoint.deep@rc.1',
+          name: 'network.xpoint.deep',
+          version: 'rc.1',
+          purl: 'pkg:generic/network.xpoint.deep@rc.1'
+        }
+      },
+      components: [component('alpha'), component('zulu')]
+    };
+
+    const invalidDocuments = [
+      {
+        bomFormat: 'Deep-SBOM',
+        specVersion: '0.1',
+        componentCount: 1,
+        components: [component('alpha')]
+      },
+      { ...structuredClone(valid), workspaceRoot: 'C:\\Users\\builder\\workspace' },
+      { ...structuredClone(valid), components: [component('alpha'), component('alpha')] },
+      { ...structuredClone(valid), components: [component('zulu'), component('alpha')] }
+    ];
+
+    for (const document of invalidDocuments) {
+      await writeFile(sbomPath, `${JSON.stringify(document)}\n`);
+      await assert.rejects(
+        prepareUpload({
+          roots: [source],
+          requiredFiles: ['sbom.json'],
+          staging: path.join(root, 'staging'),
+          manifest: path.join(root, 'manifest.json')
+        }),
+        /sanitized deterministic CycloneDX 1\.6/
+      );
+    }
+
+    await writeFile(sbomPath, `${JSON.stringify(valid)}\n`);
+    const manifest = await prepareUpload({
+      roots: [source],
+      requiredFiles: ['sbom.json'],
+      staging: path.join(root, 'staging'),
+      manifest: path.join(root, 'manifest.json')
+    });
+    assert.equal(manifest.requiredEvidenceValidation.schemaContractsValidated, 1);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('P6 explicit file set requires all nine semantically valid fresh manifests', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'deep-upload-p6-'));
   try {

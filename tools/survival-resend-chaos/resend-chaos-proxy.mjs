@@ -18,6 +18,7 @@ const ROUTES = new Map([
 const FAULTS = new Map([
   ['post-durable-response-drop', { operation: 'mailbox-store', route: '/api/ingress/v1/frame', phase: 'post-durable' }],
   ['pre-dispatch-outage', { operation: 'mailbox-store', route: '/api/ingress/v1/frame', phase: 'pre-dispatch' }],
+  ['primary-ingress-rejected-before-forward', { operation: 'mailbox-store', route: '/api/ingress/v1/frame', phase: 'canonical-before-forward' }],
   ['post-durable-ack-response-drop', { operation: 'mailbox-ack', route: '/api/ingress/v1/frame', phase: 'post-durable' }],
 ]);
 const HOP_HEADERS = new Set([
@@ -40,16 +41,27 @@ function copyHeaders(headers, upstreamHost) {
   return result;
 }
 
-function copyHttp2RequestHeaders(request, requestPath, upstreamHost) {
+function copyHttp2RequestHeaders(request, requestPath, upstreamScheme) {
+  const authority = request.headers[':authority'] ?? request.headers.host;
+  if (typeof authority !== 'string' || authority.length === 0) {
+    throw new Error('Public ingress authority is missing.');
+  }
   const result = {
     ':method': request.method,
     ':path': requestPath,
-    ':scheme': 'http',
-    ':authority': upstreamHost,
+    // This hop is h2c. Kestrel validates the HTTP/2 pseudo-header against
+    // the transport; the original public HTTPS scheme is carried only in the
+    // trusted, exact X-Forwarded-Proto boundary below.
+    ':scheme': upstreamScheme,
+    ':authority': authority,
+    'x-forwarded-proto': 'https',
   };
   for (const [name, value] of Object.entries(request.headers)) {
     const lower = name.toLowerCase();
-    if (!HOP_HEADERS.has(lower) && lower !== 'host' && value !== undefined) result[lower] = value;
+    if (!lower.startsWith(':') && !HOP_HEADERS.has(lower)
+      && lower !== 'host' && lower !== 'x-forwarded-proto' && value !== undefined) {
+      result[lower] = value;
+    }
   }
   return result;
 }
@@ -144,7 +156,7 @@ export async function startResendChaosProxy(options) {
     expiryTimer.unref();
   };
 
-  const dataServer = http.createServer((request, response) => {
+  const dataServer = http2.createServer((request, response) => {
     let requestPath;
     try { requestPath = new URL(request.url, 'http://chaos.invalid').pathname; }
     catch { response.writeHead(404).end(); return; }
@@ -157,20 +169,38 @@ export async function startResendChaosProxy(options) {
     if (eligibleOperation) {
       state.operationAttemptCount += 1;
       const snapshot = publicState(state);
-      if (snapshot.armed && state.faultPhase === 'pre-dispatch') {
+      if (snapshot.armed && (state.faultPhase === 'pre-dispatch'
+        || state.faultPhase === 'canonical-before-forward')) {
         disarm();
         state.consumed = true;
         state.injectedFaultCount += 1;
         state.preDispatchOutageCount += 1;
         request.resume();
-        response.writeHead(503, { connection: 'close', 'retry-after': '1' }).end();
+        if (state.faultPhase === 'canonical-before-forward') {
+          const errorFrame = Buffer.alloc(64);
+          errorFrame.write('DIE1', 0, 4, 'ascii');
+          errorFrame[4] = 1;
+          errorFrame[5] = 1;
+          errorFrame[6] = 9;
+          errorFrame[7] = 1;
+          errorFrame[8] = 1;
+          errorFrame.writeUInt16BE(1, 10);
+          response.writeHead(503, {
+            'cache-control': 'no-store',
+            'content-length': String(errorFrame.length),
+            'content-type': 'application/vnd.xpoint.deep.ingress-error-v1',
+            'retry-after': '1',
+          }).end(errorFrame);
+        } else {
+          response.writeHead(503, { 'retry-after': '1' }).end();
+        }
         return;
       }
       state.operationUpstreamDispatchCount += 1;
     }
     const upstreamSession = http2.connect(upstream.origin);
     const upstreamRequest = upstreamSession.request(
-      copyHttp2RequestHeaders(request, requestPath, upstream.host));
+      copyHttp2RequestHeaders(request, requestPath, upstream.protocol.slice(0, -1)));
     const timeout = setTimeout(
       () => upstreamRequest.close(http2.constants.NGHTTP2_CANCEL),
       upstreamTimeoutMs);
@@ -203,11 +233,19 @@ export async function startResendChaosProxy(options) {
           state.injectedFaultCount += 1;
           if (state.operation === 'mailbox-ack') state.postDurableAckResponseDropCount += 1;
           else state.postDurableResponseDropCount += 1;
-          response.destroy();
+          // Model a lost response as a connection failure after the upstream
+          // durable result. Closing only one compatibility stream can leave an
+          // h2 intermediary waiting on a reusable but poisoned connection.
+          // Destroy the downstream h2 session so HAProxy observes a definite
+          // transport failure and establishes a fresh connection for retry.
+          response.stream.session.destroy();
           return;
         }
         const headers = copyHeaders(Object.fromEntries(
           Object.entries(upstreamHeaders).filter(([name]) => !name.startsWith(':'))));
+        // The interposer has already bounded and fully buffered the body. Emit
+        // an exact downstream length even when an h2 upstream omitted it.
+        headers['content-length'] = String(length);
         response.writeHead(status, headers);
         response.end(Buffer.concat(chunks));
       });
@@ -222,6 +260,14 @@ export async function startResendChaosProxy(options) {
     request.pipe(upstreamRequest);
   });
   dataServer.on('clientError', (_error, socket) => socket.destroy());
+  const dataSessions = new Set();
+  dataServer.on('session', (session) => {
+    dataSessions.add(session);
+    session.once('close', () => dataSessions.delete(session));
+  });
+  const closeDataSessions = () => {
+    for (const session of dataSessions) session.destroy();
+  };
 
   const controlServer = http.createServer((request, response) => {
     if (!exactTokenEqual(request.headers.authorization, `Bearer ${token}`)) { response.writeHead(404).end(); return; }
@@ -268,7 +314,7 @@ export async function startResendChaosProxy(options) {
     disarm();
     if (dataServer.listening) dataServer.close();
     if (controlServer.listening) controlServer.close();
-    dataServer.closeAllConnections();
+    closeDataSessions();
     controlServer.closeAllConnections();
     if (!windowsPipe) fs.rmSync(controlSocket, { force: true });
     throw error;
@@ -280,7 +326,7 @@ export async function startResendChaosProxy(options) {
       disarm();
       const dataClosed = new Promise((resolve) => dataServer.close(resolve));
       const controlClosed = new Promise((resolve) => controlServer.close(resolve));
-      dataServer.closeAllConnections();
+      closeDataSessions();
       controlServer.closeAllConnections();
       await Promise.all([dataClosed, controlClosed]);
       if (!windowsPipe) fs.rmSync(controlSocket, { force: true });

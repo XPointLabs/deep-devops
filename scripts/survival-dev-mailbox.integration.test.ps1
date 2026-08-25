@@ -27,12 +27,24 @@ if (-not $EvidencePath.StartsWith($ArtifactsPrefix, [StringComparison]::OrdinalI
 # failed rehearsal must never leave stale passed:true evidence discoverable.
 Remove-Item -LiteralPath $EvidencePath -Force -ErrorAction SilentlyContinue
 $ComposePath = Join-Path $Root 'docker-compose.survival.dev.yml'
+$UatTlsComposePath = Join-Path $Root 'docker-compose.survival-uat-tls.dev.yml'
 $Launcher = Join-Path $PSScriptRoot 'survival-dev.ps1'
 $Project = 'deep-survival-dev'
-$expectedCommit = '828bb09246b58b73b23f24540d7edf863e2f43c2'
-$expectedManifest = 'def5a44c57666f474980c8f12facbe7033e9a5944b797c6fb726865e7363ffad'
-$base = @('compose', '-p', $Project, '-f', $ComposePath)
+$expectedCommit = '19517d176793a37e258766be39ca9adba30369fa'
+$expectedManifest = 'f759eeeffcf19b9ec97bef8d34bc740b38a0bdb22f0d554c4094c303f7f219e2'
+$base = @('compose', '-p', $Project, '-f', $ComposePath, '-f', $UatTlsComposePath)
 $nodes = 1..6 | ForEach-Object { "xnode-$_" }
+$TlsSecretDirectory = [Environment]::GetEnvironmentVariable('SURVIVAL_UAT_TLS_SECRET_DIR')
+if ([string]::IsNullOrWhiteSpace($TlsSecretDirectory)) {
+    throw 'SURVIVAL_UAT_TLS_SECRET_DIR is required for the clean-break HTTPS privacy-route rehearsal.'
+}
+$TlsSecretDirectory = [IO.Path]::GetFullPath($TlsSecretDirectory)
+$env:SURVIVAL_UAT_TLS_SECRET_DIR = $TlsSecretDirectory
+$TlsCaPath = Join-Path $TlsSecretDirectory 'ca.crt'
+if (-not (Test-Path -LiteralPath $TlsCaPath -PathType Leaf)) {
+    throw 'The clean-break HTTPS privacy-route rehearsal requires ca.crt in SURVIVAL_UAT_TLS_SECRET_DIR.'
+}
+$PrivacyRoutesPath = Join-Path $Root 'artifacts\survival-dev\privacy-routes.android.v1.json'
 
 function Invoke-Checked([string]$File, [string[]]$Arguments) {
     & $File @Arguments
@@ -43,13 +55,38 @@ function Invoke-Docker([string[]]$Arguments) {
     Invoke-Checked docker ($base + $Arguments)
 }
 
+function Invoke-TlsTopologyVerify() {
+    $priorExtraCa = [Environment]::GetEnvironmentVariable('NODE_EXTRA_CA_CERTS')
+    try {
+        $env:NODE_EXTRA_CA_CERTS = $TlsCaPath
+        Invoke-Checked node @(
+            (Join-Path $PSScriptRoot 'survival-dev-verify.mjs'),
+            '--host', $BindHost,
+            '--scheme', 'https')
+    }
+    finally {
+        if ($null -eq $priorExtraCa) {
+            Remove-Item Env:NODE_EXTRA_CA_CERTS -ErrorAction SilentlyContinue
+        } else {
+            $env:NODE_EXTRA_CA_CERTS = $priorExtraCa
+        }
+    }
+}
+
 function Invoke-Driver([string]$Phase, [string]$RunId = '') {
+    if (-not (Test-Path -LiteralPath $PrivacyRoutesPath -PathType Leaf)) {
+        throw 'The launcher did not publish the required clean-break privacy routes.'
+    }
     $arguments = @(
         '--profile', 'mailbox-rehearsal', 'run', '--rm', '--no-deps',
+        '--volume', "${PrivacyRoutesPath}:/run/survival/privacy-routes.v1.json:ro",
+        '--volume', "${TlsCaPath}:/run/survival/ca.crt:ro",
+        '--env', 'SSL_CERT_FILE=/run/survival/ca.crt',
         'mailbox-driver', $Phase,
         '--state-dir', '/state/driver',
-        '--client-url', 'http://xnode-1:8080',
-        '--coordinator-url', "http://${BindHost}:41801"
+        '--client-url', "https://${BindHost}:41801",
+        '--privacy-routes', '/run/survival/privacy-routes.v1.json',
+        '--coordinator-url', "https://${BindHost}:41801"
     )
     if (-not [Net.IPAddress]::IsLoopback([Net.IPAddress]::Parse($BindHost))) {
         $arguments += '--require-non-loopback-coordinator'
@@ -66,21 +103,38 @@ function Invoke-Driver([string]$Phase, [string]$RunId = '') {
     return $result
 }
 
-function Get-HttpStatus([string]$Uri) {
-    try {
-        return (Invoke-WebRequest -UseBasicParsing -Uri $Uri -Method Post -TimeoutSec 5).StatusCode
-    } catch {
-        if ($null -ne $_.Exception.Response) { return [int]$_.Exception.Response.StatusCode }
-        throw
+function Get-XNodeInternalDocument([int]$Index,[string]$Path) {
+    if ($Path -notmatch '^/[a-z/]+$') { throw 'Internal XNode probe path is invalid.' }
+    $container = "$Project-xnode-$Index-1"
+    $health = (& docker inspect $container --format '{{.State.Health.Status}}').Trim()
+    if ($LASTEXITCODE -ne 0 -or $health -cne 'healthy') {
+        throw "xnode-$Index is not healthy."
     }
+    $probe = "exec 3<>/dev/tcp/127.0.0.1/8080; printf 'GET $Path HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3; cat <&3"
+    $response = @(& docker exec $container bash -ec $probe)
+    $separator = [Array]::IndexOf($response, '')
+    if ($LASTEXITCODE -ne 0 -or $response.Count -gt 64 -or
+        $separator -lt 2 -or $response[0] -notmatch '^HTTP/1\.1 200 ' -or
+        -not (@($response[1..($separator - 1)]) -contains 'Transfer-Encoding: chunked')) {
+        throw "xnode-$Index did not return one bounded internal JSON document for $Path."
+    }
+    $chunk = @($response[($separator + 1)..($response.Count - 1)] | Where-Object { $_ -ne '' })
+    $declaredBytes = 0
+    if ($chunk.Count -ne 3 -or $chunk[0] -notmatch '^[0-9a-f]+$' -or
+        -not [int]::TryParse($chunk[0], [Globalization.NumberStyles]::HexNumber,
+            [Globalization.CultureInfo]::InvariantCulture, [ref]$declaredBytes) -or
+        $declaredBytes -le 0 -or $declaredBytes -gt 65536 -or $chunk[2] -cne '0' -or
+        [Text.Encoding]::UTF8.GetByteCount($chunk[1]) -ne $declaredBytes) {
+        throw "xnode-$Index returned malformed or oversized chunked JSON for $Path."
+    }
+    return $chunk[1] | ConvertFrom-Json
 }
 
 function Assert-Runtime() {
     $runtime = @()
     foreach ($index in 1..6) {
-        $port = 41800 + $index
-        $ready = Invoke-RestMethod -Uri "http://${BindHost}:$port/health/ready" -TimeoutSec 5
-        $status = Invoke-RestMethod -Uri "http://${BindHost}:$port/status" -TimeoutSec 5
+        $ready = Get-XNodeInternalDocument $index '/health/ready'
+        $status = Get-XNodeInternalDocument $index '/status'
         if ($ready.ready -ne $true -or $ready.mailboxPeer -ne 'ready' -or $status.mailbox.peerRuntime -ne 'ready') {
             throw "xnode-$index did not report peer-runtime readiness."
         }
@@ -98,9 +152,6 @@ function Assert-Runtime() {
                 throw "xnode-$index does not truthfully report dormant-unmapped client ingress."
             }
             $clientIngress = 'dormant-unmapped'
-        }
-        if ((Get-HttpStatus "http://${BindHost}:$port/api/peer/mailbox/v2/store") -ne 404) {
-            throw "xnode-$index exposed its peer mailbox route on the public listener."
         }
         $runtime += [pscustomobject]@{
             node = "xnode-$index"
@@ -191,16 +242,24 @@ try {
     Invoke-Checked powershell @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $PSScriptRoot 'survival-dev-mailbox-driver.test.ps1'))
     Invoke-Checked dotnet @('test', (Join-Path $XNodeRepository 'tests\XNode.IntegrationTests\XNode.IntegrationTests.csproj'), '--no-restore', '--filter', 'FullyQualifiedName~ReplicatedMailboxIntegrationTests', '--logger', 'console;verbosity=minimal')
     Invoke-Checked dotnet @('test', (Join-Path $XNodeRepository 'tests\XNode.IntegrationTests\XNode.IntegrationTests.csproj'), '--no-restore', '--filter', 'FullyQualifiedName~MailboxClientActivatedEndToEndTests', '--logger', 'console;verbosity=minimal')
-    # Converge the complete stack onto one exact advertised LAN address before
-    # the rehearsal. Reusing loopback-bound support services or authority from
-    # another host would make a partial dev stack look healthier than UAT.
-    & $Launcher -Action Up -LanHost $BindHost
+    # Build without starting the cleartext base topology, then publish fresh
+    # authority for the exact LAN host. Only the merged TLS topology below is
+    # allowed to create runtime containers for this rehearsal.
+    & $Launcher -Action Build
+    if ($LASTEXITCODE -ne 0) { throw 'Survival build failed before the privacy-route rehearsal.' }
+    & $Launcher -Action Prepare -LanHost $BindHost
+    if ($LASTEXITCODE -ne 0) { throw 'Survival authority preparation failed before the privacy-route rehearsal.' }
     & $Launcher -Action Build -Service @('mailbox-driver')
+    if ($LASTEXITCODE -ne 0) { throw 'Mailbox driver build failed before the privacy-route rehearsal.' }
 
-    # Recreate, never reset, each peer so all six receive the real authority
-    # and exact labelled image while preserving their named state volumes.
-    Invoke-Docker (@('up', '-d', '--no-deps', '--force-recreate', '--wait', '--wait-timeout', '180') + $nodes)
-    Invoke-Docker @('--profile', 'mailbox-rehearsal', 'up', '--no-deps', 'mailbox-driver-state-init')
+    # Recreate, never reset, the peers behind the CA-trusted UAT ingress so
+    # public MAU2 traverses exact HTTPS privacy routes. The merged Compose model
+    # removes every direct cleartext XNode host port while preserving volumes.
+    Invoke-Docker (@('up', '-d', '--no-build', '--force-recreate', '--wait', '--wait-timeout', '180') +
+        $nodes + @('survival-uat-tls-ingress', 'survival-uat-crl', 'turn'))
+    # This is a one-shot ownership initializer. `compose up` remains attached
+    # after the container exits successfully, so use a bounded disposable run.
+    Invoke-Docker @('--profile', 'mailbox-rehearsal', 'run', '--rm', '--no-deps', 'mailbox-driver-state-init')
     $phases += Invoke-Driver 'reset'
     $phases += Invoke-Driver 'retention-gc'
     $phases += Invoke-Driver 'client-lifecycle' $runId
@@ -229,7 +288,7 @@ try {
 
     [void](Assert-Runtime)
     [void](Get-ImageBinding)
-    Invoke-Checked node @((Join-Path $PSScriptRoot 'survival-dev-verify.mjs'), '--host', $BindHost)
+    Invoke-TlsTopologyVerify
 }
 finally {
     # Restore the selected peer and converge all XNodes to healthy without
@@ -246,7 +305,7 @@ if (($volumeBindingsBefore | ConvertTo-Json -Compress) -cne
     ($volumeBindingsAfter | ConvertTo-Json -Compress)) {
     throw 'One or more XNode state volumes changed during the live rehearsal.'
 }
-Invoke-Checked node @((Join-Path $PSScriptRoot 'survival-dev-verify.mjs'), '--host', $BindHost)
+Invoke-TlsTopologyVerify
 
 $evidence = [pscustomobject]@{
     schemaVersion = 3
@@ -262,6 +321,8 @@ $evidence = [pscustomobject]@{
         realPeerNetwork = $true
         publicStoreRetrieveAck = $true
         publicStoreExactReplay = $true
+        publicClientPrivacyRouted = $true
+        directCleartextClientIngress = $false
         publicSelectedPeerLossNeverQuorum = $true
         publicSelectedPeerRestartExactRetryQuorum = $true
         boundedReplayRetirementGcSourceRegression = $true

@@ -634,7 +634,7 @@ export function verifySbomAndReproducibility({
   assert(custom.sbom.sha256 === sha256(sbomBytes), 'SBOM custom hash mismatch');
 
   const sbom = parseJsonBytes(sbomBytes, 'SBOM');
-  assert(sbom.bomFormat === 'CycloneDX' && typeof sbom.specVersion === 'string' &&
+  assert(sbom.bomFormat === 'CycloneDX' && sbom.specVersion === '1.6' &&
     sbom.metadata?.component?.name === 'network.xpoint.deep',
   'SBOM contract is invalid');
 

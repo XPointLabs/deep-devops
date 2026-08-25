@@ -17,7 +17,7 @@ services:
       - /run/deep-chaos:rw,noexec,nosuid,nodev,size=1m,mode=0700,uid=1000,gid=1000
       - /tmp:rw,noexec,nosuid,nodev,size=8m,mode=1777
     environment:
-      DEEP_CHAOS_UPSTREAM_ORIGIN: http://xnode-1:8080
+      DEEP_CHAOS_UPSTREAM_ORIGIN: http://xnode-3:8082
       DEEP_CHAOS_TOKEN_FILE: /run/secrets/resend-chaos-token
       DEEP_CHAOS_CONTROL_SOCKET: /run/deep-chaos/control.sock
       DEEP_CHAOS_DATA_HOST: 0.0.0.0
@@ -31,9 +31,9 @@ services:
       - source: resend-chaos-token
         target: resend-chaos-token
         mode: 0444
-    networks: [runtime]
+    networks: { runtime: { ipv4_address: 172.30.82.8 } }
     depends_on:
-      xnode-1: { condition: service_healthy }
+      xnode-3: { condition: service_healthy }
     healthcheck:
       test: [CMD, node, /opt/deep-chaos/control-client.mjs, status]
       interval: 2s
@@ -50,7 +50,7 @@ services:
   survival-uat-tls-ingress:
     pull_policy: never
     environment:
-      DEEP_UAT_XNODE_1_UPSTREAM: resend-chaos
+      DEEP_UAT_XNODE_3_UPSTREAM: resend-chaos:8080
     depends_on:
       resend-chaos: { condition: service_healthy }
 

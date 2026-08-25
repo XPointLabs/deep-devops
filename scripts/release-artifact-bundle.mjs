@@ -37,6 +37,11 @@ const requiredArtifacts = [
     path: path.join(artifactRoot, 'test-results', 'backend-restart-smoke.json')
   },
   {
+    id: 'physical-call',
+    area: 'Client device acceptance',
+    path: path.join(artifactRoot, 'test-results', 'mau2-call-result.json')
+  },
+  {
     id: 'push-provider-canary',
     area: 'Release evidence',
     path: path.join(artifactRoot, 'test-results', 'push-provider-canary.json')

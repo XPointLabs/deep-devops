@@ -2,9 +2,10 @@
 
 This lane exposes application traffic only through a dedicated internal CA and
 HAProxy. The upstream HTTP listeners remain private to the Compose network.
-Port `41824` is the sole cleartext exception and publishes only the CA revocation
-list named in the leaf certificate; it is PKI distribution, not application
-traffic.
+Port `41824` is the sole cleartext HTTP exception and publishes only the CA
+revocation list named in the leaf certificate; it is PKI distribution, not
+application traffic. Coturn publishes STUN/TURN on `3478` and TLS TURN on `5349`,
+with the bounded relay range `49160-49200` over TCP and UDP.
 
 ## Create or rotate certificates
 
@@ -16,7 +17,10 @@ traffic.
 
 Use `-RotateLeaf` to replace the short-lived server certificate. Do not replace
 the CA during a run. CA and leaf keys stay below the secret root; only the public
-CA certificate is embedded in the physical client build.
+CA certificate is embedded in the physical client build. The initializer also
+creates `turn-shared-secret` once under the same protected secret root. Registry
+and coturn consume that value through Docker secret files; coturn writes a private
+runtime config in `tmpfs`, so the shared secret is not present in process argv.
 
 ## Start the HTTPS lane
 
@@ -65,8 +69,11 @@ docker ps --filter label=com.docker.compose.project=deep-survival-dev `
 ```
 
 Only the ingress may publish `41801-41806`, `41810`, and `41821-41823`.
-Storage `41820` must remain internal. Plain HTTP to any application port must
-fail during the TLS handshake, and `/health/*` is not a public route.
+Storage `41820` must remain internal. Port `41823` exposes only registry-owned
+`/api/calls/signal`, authenticated inbox, and authenticated ICE credential routes.
+HAProxy re-resolves every registry and XNode backend through Docker DNS after
+container replacement. Plain HTTP to any application port must fail during the
+TLS handshake, and `/health/*` is not a public route.
 
 ## HTTPS-preserving retry chaos
 

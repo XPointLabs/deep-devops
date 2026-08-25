@@ -153,9 +153,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/survival-dev.ps1 -Ac
 ## P10E mailbox client and peer rehearsal
 
 The survival stack pins its filtered XNode context to accepted source
-`828bb09246b58b73b23f24540d7edf863e2f43c2`; a dirty checkout, another revision,
+`19517d176793a37e258766be39ca9adba30369fa`; a dirty checkout, another revision,
 or a filtered-source manifest other than
-`def5a44c57666f474980c8f12facbe7033e9a5944b797c6fb726865e7363ffad`
+`f759eeeffcf19b9ec97bef8d34bc740b38a0bdb22f0d554c4094c303f7f219e2`
 fails closed before build. The source exporter writes a deterministic
 `.survival-source-manifest.json`, and the shared XNode image carries both the exact
 revision and manifest SHA-256 as OCI labels. The live rehearsal requires all six
@@ -263,19 +263,26 @@ or a production-readiness claim.
 
 The resend-chaos overlay is development-only and is absent from staging and production
 Compose. Do not start it with raw Compose commands. `ChaosBegin` requires the CA-trusted
-physical UAT TLS lane, keeps HAProxy as the sole `:41801` publisher, and changes only its
-private xnode-1 backend from `xnode-1:8080` to the opaque interposer. The client therefore
-continues to use the exact `https://<LAN-IP>:41801` origin, public route, certificate chain,
+physical UAT TLS lane, keeps HAProxy as the sole public publisher, and changes only the
+primary privacy entry backend for `:41803` from the dedicated `xnode-3:8082` h2 ingress to the opaque interposer. The
+client therefore continues to use the exact `https://<LAN-IP>:41803` primary origin, public route, certificate chain,
 hostname/IP validation, revocation validation, and TLS policy. Cleartext application HTTP
 remains rejected.
+Authenticated router-to-router privacy hops and Store/Tombstone replication stay
+Docker-network-only on each node's dedicated exact-h2 `8083` listener. HAProxy translates the
+external TLS request scheme to `http` for the cleartext h2c backend while setting the trusted
+`X-Forwarded-Proto: https` boundary; XNode accepts that forwarded scheme only from the pinned
+HAProxy/chaos addresses. The mixed peer-RPC `8081` listener is not used by those privacy paths.
 
 The required `-ChaosFault` is `post-durable-response-drop`, `pre-dispatch-outage`, or
 `post-durable-ack-response-drop`. The first and third consume their one shot only after the
-upstream XNode has returned a complete 2xx response for the exact Store or Acknowledge route;
-the second returns one 503 without dispatching the Store upstream. A Store can never consume
-the ACK fault and an ACK can never consume either Store fault. The proxy never decodes or logs a
-payload or identifier. The protected random lab token, private Unix control socket, exact
-operation counters, 5–300 second deadline, process restart default-disarm, and idempotent
+upstream privacy ingress has returned a complete 2xx response; the second returns one 503
+without dispatching the privacy frame upstream. The proxy cannot and does not distinguish
+Store, Retrieve, or ACK inside the opaque frame. The runner therefore arms each Store fault
+immediately before the Store sequence, and prepares Store/Retrieve plus the private ACK state
+before arming the ACK-only crash window. The proxy never decodes or logs a payload or
+identifier. The protected random lab token, private Unix control socket, bounded ingress
+counters, 5–300 second deadline, process restart default-disarm, and idempotent
 `ChaosEnd` cleanup bound the fault to one local rehearsal.
 
 Manual use is intentionally explicit:
@@ -289,7 +296,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/survival-dev.ps1 -Ac
 
 Always run `ChaosEnd` in a `finally` block. The checked live lane does this automatically. It
 uses the real MAU2 Store, observes a transport-unknown first outcome, sends the byte-identical
-request again, requires native MQR3 2xx and an identical replay, and retrieves exactly one
+MAU2 again inside a fresh three-hop privacy frame, requires native MQR3 2xx and an identical
+replay, and retrieves exactly one
 item. It runs all supported fault modes, including a two-process ACK crash/retry window,
 restores the ordinary HTTPS ingress after each,
 and deletes the protected binding and lab token:
@@ -323,7 +331,7 @@ device identifiers. The digest detects evidence mutation; it deliberately makes 
 authority or production-attestation claim.
 
 Rollback is volume-preserving: run `ChaosEnd`, which removes the private interposer and
-force-recreates only HAProxy with its ordinary xnode-1 backend. No XNode is restarted and no
+force-recreates only HAProxy with its ordinary xnode-3 backend. No XNode is restarted and no
 named volume is deleted.
 
 The launcher verifies the six fresh DPC1 privacy contacts exposed by the
@@ -416,7 +424,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/survival-dev.ps1 -Ac
 ```
 
 Default messenger host ports are XNodes `41801-41806`, registry `41810`,
-storage `41820`, file `41821`, push `41822`, and calls `41823`. The local-only
+storage `41820`, file `41821`, and push `41822`. Registry also owns the authenticated
+call signal/inbox/ICE listener on `41823`; there is no standalone calls service or
+calls state volume. The local-only
 chain profile additionally uses Hardhat `41545` and staking `41811`. All traffic
 is Debug HTTP intended only for loopback or the exact trusted developer IPv4
 interface selected with `-LanHost`.

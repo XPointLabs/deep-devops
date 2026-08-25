@@ -1,7 +1,7 @@
 {
   "schema": "deep.release-source-baseline.v1",
   "xnode": {
-    "commit": "828bb09246b58b73b23f24540d7edf863e2f43c2"
+    "commit": "19517d176793a37e258766be39ca9adba30369fa"
   },
   "clientExpectations": {
     "commit": "b8bb4dcbe521cf01d4f9b742986db2c95985dfd8",

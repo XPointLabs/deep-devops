@@ -19,9 +19,9 @@ export const repositoryRoot = path.resolve(scriptDirectory, '..');
 export const metadataSafeProfile = 'metadata-safe-v1';
 export const featureFlag = 'DEEP_INFRA_PRIVACY_PROFILE';
 const maximumTextBytes = 5 * 1024 * 1024;
-const services = Object.freeze(['calls', 'file', 'push', 'storage', 'xnode-1', 'xnode-2', 'xnode-3']);
+const services = Object.freeze(['file', 'push', 'storage', 'xnode-1', 'xnode-2', 'xnode-3']);
 const routers = Object.freeze(['xnode-1', 'xnode-2', 'xnode-3']);
-const ancillaryServices = Object.freeze(['calls', 'file', 'push', 'storage']);
+const ancillaryServices = Object.freeze(['file', 'push', 'storage']);
 const safeMetricLabels = new Set([
   'service',
   'operation',
@@ -661,9 +661,8 @@ function expectedServiceEnvironment(name) {
     DEEP_INFRA_PRIVACY_PROFILE: metadataSafeProfile
   };
   if (!routers.includes(name)) {
-    const stateKey = name === 'calls' ? 'CALLS_STATE_DIR' : 'COMPAT_STATE_DIR';
     return {
-      [stateKey]: `/var/lib/deep/i01b-private-uat/${name}`,
+      COMPAT_STATE_DIR: `/var/lib/deep/i01b-private-uat/${name}`,
       ...common,
       PORT: '8080',
       ...(name === 'storage' ? { PUSH_COMPAT_NOTIFY_URL: 'http://push:8080' } : {}),
@@ -824,7 +823,6 @@ export function validateMetadataSafeTopology(topology) {
   }
 
   const serviceKeySets = {
-    calls: ['build', 'cap_drop', 'command', 'entrypoint', 'environment', 'healthcheck', 'labels', 'logging', 'networks', 'ports', 'security_opt', 'volumes'],
     file: ['build', 'cap_drop', 'command', 'entrypoint', 'environment', 'healthcheck', 'labels', 'logging', 'networks', 'ports', 'security_opt', 'volumes'],
     push: ['build', 'cap_drop', 'command', 'entrypoint', 'environment', 'healthcheck', 'labels', 'logging', 'networks', 'ports', 'security_opt', 'volumes'],
     storage: ['build', 'cap_drop', 'command', 'entrypoint', 'environment', 'healthcheck', 'labels', 'logging', 'networks', 'security_opt', 'volumes'],
@@ -833,7 +831,6 @@ export function validateMetadataSafeTopology(topology) {
     'xnode-3': ['build', 'cap_drop', 'command', 'depends_on', 'entrypoint', 'environment', 'healthcheck', 'labels', 'logging', 'networks', 'ports', 'secrets', 'security_opt', 'volumes']
   };
   const publishedPorts = {
-    calls: '29103',
     file: '29101',
     push: '29102',
     'xnode-1': '29311',

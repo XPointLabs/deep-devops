@@ -4,6 +4,11 @@ import { isIP } from 'node:net';
 const hostArgument = process.argv.indexOf('--host');
 const host = hostArgument >= 0 ? process.argv[hostArgument + 1] : '127.0.0.1';
 if (isIP(host) !== 4) throw new Error('verification host must be an IPv4 address');
+const schemeArgument = process.argv.indexOf('--scheme');
+const scheme = schemeArgument >= 0 ? process.argv[schemeArgument + 1] : 'http';
+if (scheme !== 'http' && scheme !== 'https') {
+  throw new Error('verification scheme must be exactly http or https');
+}
 
 const expectedRouterIds = [
   '4cb5abf6ad79fbf5abbccafcc269d85cd2651ed4b885b5869f241aedf0a5ba29',
@@ -17,10 +22,10 @@ const expectedRouterIds = [
 const contacts = [];
 for (let index = 1; index <= 6; index += 1) {
   const port = 41800 + index;
-  const response = await fetch(`http://${host}:${port}/api/network/privacy-contact`);
+  const response = await fetch(`${scheme}://${host}:${port}/api/network/privacy-contact`);
   if (!response.ok) throw new Error(`privacy contact endpoint on ${port} returned ${response.status}`);
   const contact = await response.json();
-  const expectedPeerEndpoint = `http://172.30.82.${10 + index}:8081/api/peer/privacy/v1/frame`;
+  const expectedPeerEndpoint = `http://172.30.82.${10 + index}:8083/api/peer/privacy/v1/frame`;
   if (contact.routerId !== expectedRouterIds[index - 1] ||
       !/^[0-9a-f]{64}$/.test(contact.x25519PublicKey ?? '') ||
       !/^[0-9a-f]{128}$/.test(contact.signature ?? '') ||
@@ -52,7 +57,7 @@ for (let index = 1; index <= 6; index += 1) {
 }
 
 async function artifact(port) {
-  const response = await fetch(`http://${host}:${port}/api/network/membership-route-catalog`);
+  const response = await fetch(`${scheme}://${host}:${port}/api/network/membership-route-catalog`);
   if (!response.ok) throw new Error(`membership artifact endpoint on ${port} returned ${response.status}`);
   const body = await response.json();
   if (body.version !== 'deep-membership-route-catalog-v1' || !Array.isArray(body.members) || body.members.length !== 6) {

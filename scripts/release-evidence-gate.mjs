@@ -262,6 +262,41 @@ if (restartSmoke) {
   checkNoErrors('restart:storage-errors-zero', restartSmoke.statsAfterRehearsal?.storage);
   checkNoErrors('restart:file-errors-zero', restartSmoke.statsAfterRehearsal?.file);
   checkNoErrors('restart:push-errors-zero', restartSmoke.statsAfterRehearsal?.push);
+  addCheck('restart:registry-call-signal-accepted', restartSmoke.callRegistry?.authenticatedSignalAcceptedBeforeRestart === true, {
+    observed: restartSmoke.callRegistry?.authenticatedSignalAcceptedBeforeRestart
+  });
+  addCheck('restart:registry-restarted', restartSmoke.callRegistry?.registryRestarted === true, {
+    observed: restartSmoke.callRegistry?.registryRestarted
+  });
+  addCheck('restart:registry-call-inbox-durable',
+    restartSmoke.callRegistry?.authenticatedInboxRetrievedAfterRestart === true
+      && restartSmoke.callRegistry?.exactSignalCountAfterRestart === 1,
+    { observed: restartSmoke.callRegistry ?? null });
+}
+
+const physicalCall = await readJson('physical-call', path.join(artifactRoot, 'test-results', 'mau2-call-result.json'));
+if (physicalCall) {
+  addCheck('physical-call:schema', physicalCall.schema === 'deep.physical-mau2-phase.v1', {
+    observed: physicalCall.schema
+  });
+  addCheck('physical-call:phase', physicalCall.phase === 'Call', { observed: physicalCall.phase });
+  addCheck('physical-call:status-passed', physicalCall.status === 'passed', { observed: physicalCall.status });
+  for (const field of [
+    'outgoingOfferStarted',
+    'incomingRingingObserved',
+    'incomingAnswerAccepted',
+    'selectedIceCandidatePairObserved',
+    'bidirectionalAudioRtpObserved',
+    'microphoneMuteApplied',
+    'microphoneRestoreApplied',
+    'remoteHangupObserved',
+    'authenticatedMau2EnvironmentValidated',
+    'productionPackageUntouched'
+  ]) {
+    addCheck(`physical-call:${field}`, physicalCall[field] === true, {
+      observed: physicalCall[field]
+    });
+  }
 }
 
 const pushCanary = await readJson('push-provider-canary', path.join(artifactRoot, 'test-results', 'push-provider-canary.json'));

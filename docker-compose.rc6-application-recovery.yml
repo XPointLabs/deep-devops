@@ -1,0 +1,291 @@
+name: deep-rc6-application-recovery
+
+# This is a standalone recovery overlay. It deliberately has no build sections,
+# published ports, membership bootstrap/clear jobs, or writable protected binds.
+# Every runtime image and restored volume name must be supplied by the operator.
+
+x-runtime: &runtime
+  init: true
+  restart: "no"
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
+  networks: [recovery]
+  labels:
+    com.xpoint.rc6.recovery: application-contour
+
+x-health: &health
+  interval: 2s
+  timeout: 2s
+  retries: 45
+  start_period: 5s
+
+x-xnode: &xnode
+  <<: *runtime
+  image: ${RC6_RECOVERY_XNODE_IMAGE:?set an immutable xnode image reference containing @sha256}
+  environment: &xnode-environment
+    # The restored Survival authority and insecure peer links are explicitly
+    # Development-only. This isolated drill makes no production-runtime claim.
+    ASPNETCORE_ENVIRONMENT: Development
+    ASPNETCORE_URLS: http://0.0.0.0:8080
+    Node__ApiListenUrl: http://0.0.0.0:8080
+    Node__PeerRpcListenUrl: http://0.0.0.0:8081
+    Node__Network: recovery
+    Node__PublicPort: "8080"
+    PrivacyRouting__Enabled: "true"
+    PrivacyRouting__X25519PrivateKeyPath: /run/secrets/xnode-x25519.private
+    PrivacyRouting__AllowInsecureHttpPeerTransport: "true"
+    PrivacyRouting__MaximumConcurrentRequests: "64"
+    PrivacyRouting__RequestsPerMinute: "600"
+    PrivacyRouting__RequestTimeoutSeconds: "30"
+    PrivacyRouting__ReplyPaddingBlockBytes: "4096"
+    PrivacyRouting__ReplayCapacity: "100000"
+    PrivacyRouting__ReplayTtlSeconds: "300"
+    StorageRpc__BaseUrl: http://storage:8080
+    RegistryHeartbeat__Enabled: "false"
+    Vless__Enabled: "false"
+    MembershipArtifact__ArtifactPath: /run/deep-membership/membership-route-catalog.json
+    MembershipArtifact__MaximumBytes: "2097152"
+    Mailbox__Enabled: "true"
+    Mailbox__DirectoryName: mailbox-p10c
+    Mailbox__PeerReplayDirectoryName: mailbox-peer-replay-p10c
+    Mailbox__PeerMutationDirectoryName: mailbox-peer-mutations-p10c
+    Mailbox__ReplicationFactor: "2"
+    Mailbox__WriteQuorum: "2"
+    Mailbox__PeerTimeout: "00:00:15"
+    Mailbox__AllowInsecureHttpPeerTransport: "true"
+  healthcheck:
+    <<: *health
+    test: [CMD, bash, -c, 'exec 3<>/dev/tcp/127.0.0.1/8080; printf "GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3; read -r status <&3; case "$$status" in *" 200 "*) exit 0;; *) exit 1;; esac']
+  depends_on:
+    storage: { condition: service_healthy }
+
+services:
+  registry:
+    <<: *runtime
+    image: ${RC6_RECOVERY_REGISTRY_IMAGE:?set an immutable registry image reference containing @sha256}
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://0.0.0.0:8080
+      Registry__StatePath: /state/registry.json
+      Registry__MembershipRouteArtifactPath: /run/deep-membership/membership-route-catalog.json
+      Registry__MembershipRouteArtifactMaximumBytes: "2097152"
+      Calls__Required: "true"
+      Calls__Enabled: "true"
+      Calls__StatePath: /state/calls-v2.json
+      Calls__TurnSharedSecretFile: /run/secrets/turn-shared-secret
+      Calls__CredentialLifetimeSeconds: "3600"
+      Calls__IceUrls__0: stun:turn:3478
+      Calls__IceUrls__1: turn:turn:3478?transport=udp
+      Calls__IceUrls__2: turn:turn:3478?transport=tcp
+    volumes:
+      - recovery-registry-state:/state
+      - recovery-membership-artifact:/run/deep-membership:ro
+    secrets:
+      - source: recovery-turn-shared-secret
+        target: turn-shared-secret
+    healthcheck:
+      <<: *health
+      test: [CMD, bash, -c, 'exec 3<>/dev/tcp/127.0.0.1/8080; printf "GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3; read -r status <&3; case "$$status" in *" 200 "*) exit 0;; *) exit 1;; esac']
+
+  storage:
+    <<: *runtime
+    image: ${RC6_RECOVERY_COMPAT_IMAGE:?set an immutable compat image reference containing @sha256}
+    command: [node, tools/storage-service/storage-service.mjs]
+    environment:
+      PORT: "8080"
+      SERVICE_NAME: recovery-storage
+      COMPAT_STATE_DIR: /state
+      PUSH_COMPAT_NOTIFY_URL: http://push:8080
+    volumes: [recovery-storage-state:/state]
+    healthcheck:
+      <<: *health
+      test: [CMD, node, --eval, "fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+
+  file:
+    <<: *runtime
+    image: ${RC6_RECOVERY_COMPAT_IMAGE:?set an immutable compat image reference containing @sha256}
+    command: [node, tools/file-service/file-service.mjs]
+    environment:
+      PORT: "8080"
+      SERVICE_NAME: recovery-file
+      COMPAT_STATE_DIR: /state
+    volumes: [recovery-file-state:/state]
+    healthcheck:
+      <<: *health
+      test: [CMD, node, --eval, "fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+
+  push:
+    <<: *runtime
+    image: ${RC6_RECOVERY_COMPAT_IMAGE:?set an immutable compat image reference containing @sha256}
+    command: [node, tools/push-service/push-service.mjs]
+    environment:
+      PORT: "8080"
+      SERVICE_NAME: recovery-push
+      COMPAT_STATE_DIR: /state
+    volumes: [recovery-push-state:/state]
+    healthcheck:
+      <<: *health
+      test: [CMD, node, --eval, "fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+
+  xnode-1:
+    <<: *xnode
+    env_file:
+      - ${RC6_RECOVERY_MAILBOX_AUTHORITY_ENV_FILE:?set protected mailbox authority env file}
+      - ${RC6_RECOVERY_MAILBOX_CLIENT_AUTHORITY_ENV_FILE:?set protected mailbox client authority env file}
+      - ${RC6_RECOVERY_XNODE_1_PRIVACY_ENV_FILE:?set protected xnode-1 privacy env file}
+    environment:
+      <<: *xnode-environment
+      Node__DataDirectory: /state
+      Node__PublicHost: ${RC6_RECOVERY_XNODE_1_PUBLIC_HOST:?set xnode-1 recovery host}
+      Node__RouterId: ${RC6_RECOVERY_XNODE_1_ROUTER_ID:?set xnode-1 public router id}
+      Node__Ed25519PrivateKeyPath: /run/secrets/xnode-ed25519.seed
+      PrivacyRouting__PublicPeerBaseUrl: ${RC6_RECOVERY_XNODE_1_PUBLIC_PEER_BASE_URL:?set xnode-1 recovery peer URL}
+    volumes: [recovery-xnode-1-state:/state, recovery-membership-artifact:/run/deep-membership:ro]
+    secrets:
+      - { source: recovery-xnode-1-ed25519, target: xnode-ed25519.seed }
+      - { source: recovery-xnode-1-x25519, target: xnode-x25519.private }
+
+  xnode-2:
+    <<: *xnode
+    env_file:
+      - ${RC6_RECOVERY_MAILBOX_AUTHORITY_ENV_FILE:?set protected mailbox authority env file}
+      - ${RC6_RECOVERY_XNODE_2_PRIVACY_ENV_FILE:?set protected xnode-2 privacy env file}
+    environment:
+      <<: *xnode-environment
+      Node__DataDirectory: /state
+      Node__PublicHost: ${RC6_RECOVERY_XNODE_2_PUBLIC_HOST:?set xnode-2 recovery host}
+      Node__RouterId: ${RC6_RECOVERY_XNODE_2_ROUTER_ID:?set xnode-2 public router id}
+      Node__Ed25519PrivateKeyPath: /run/secrets/xnode-ed25519.seed
+      PrivacyRouting__PublicPeerBaseUrl: ${RC6_RECOVERY_XNODE_2_PUBLIC_PEER_BASE_URL:?set xnode-2 recovery peer URL}
+    volumes: [recovery-xnode-2-state:/state, recovery-membership-artifact:/run/deep-membership:ro]
+    secrets:
+      - { source: recovery-xnode-2-ed25519, target: xnode-ed25519.seed }
+      - { source: recovery-xnode-2-x25519, target: xnode-x25519.private }
+
+  xnode-3:
+    <<: *xnode
+    env_file:
+      - ${RC6_RECOVERY_MAILBOX_AUTHORITY_ENV_FILE:?set protected mailbox authority env file}
+      - ${RC6_RECOVERY_XNODE_3_PRIVACY_ENV_FILE:?set protected xnode-3 privacy env file}
+    environment:
+      <<: *xnode-environment
+      Node__DataDirectory: /state
+      Node__PublicHost: ${RC6_RECOVERY_XNODE_3_PUBLIC_HOST:?set xnode-3 recovery host}
+      Node__RouterId: ${RC6_RECOVERY_XNODE_3_ROUTER_ID:?set xnode-3 public router id}
+      Node__Ed25519PrivateKeyPath: /run/secrets/xnode-ed25519.seed
+      PrivacyRouting__PublicPeerBaseUrl: ${RC6_RECOVERY_XNODE_3_PUBLIC_PEER_BASE_URL:?set xnode-3 recovery peer URL}
+    volumes: [recovery-xnode-3-state:/state, recovery-membership-artifact:/run/deep-membership:ro]
+    secrets: [{ source: recovery-xnode-3-ed25519, target: xnode-ed25519.seed }, { source: recovery-xnode-3-x25519, target: xnode-x25519.private }]
+
+  xnode-4:
+    <<: *xnode
+    env_file:
+      - ${RC6_RECOVERY_MAILBOX_AUTHORITY_ENV_FILE:?set protected mailbox authority env file}
+      - ${RC6_RECOVERY_XNODE_4_PRIVACY_ENV_FILE:?set protected xnode-4 privacy env file}
+    environment:
+      <<: *xnode-environment
+      Node__DataDirectory: /state
+      Node__PublicHost: ${RC6_RECOVERY_XNODE_4_PUBLIC_HOST:?set xnode-4 recovery host}
+      Node__RouterId: ${RC6_RECOVERY_XNODE_4_ROUTER_ID:?set xnode-4 public router id}
+      Node__Ed25519PrivateKeyPath: /run/secrets/xnode-ed25519.seed
+      PrivacyRouting__PublicPeerBaseUrl: ${RC6_RECOVERY_XNODE_4_PUBLIC_PEER_BASE_URL:?set xnode-4 recovery peer URL}
+    volumes: [recovery-xnode-4-state:/state, recovery-membership-artifact:/run/deep-membership:ro]
+    secrets: [{ source: recovery-xnode-4-ed25519, target: xnode-ed25519.seed }, { source: recovery-xnode-4-x25519, target: xnode-x25519.private }]
+
+  xnode-5:
+    <<: *xnode
+    env_file:
+      - ${RC6_RECOVERY_MAILBOX_AUTHORITY_ENV_FILE:?set protected mailbox authority env file}
+      - ${RC6_RECOVERY_XNODE_5_PRIVACY_ENV_FILE:?set protected xnode-5 privacy env file}
+    environment:
+      <<: *xnode-environment
+      Node__DataDirectory: /state
+      Node__PublicHost: ${RC6_RECOVERY_XNODE_5_PUBLIC_HOST:?set xnode-5 recovery host}
+      Node__RouterId: ${RC6_RECOVERY_XNODE_5_ROUTER_ID:?set xnode-5 public router id}
+      Node__Ed25519PrivateKeyPath: /run/secrets/xnode-ed25519.seed
+      PrivacyRouting__PublicPeerBaseUrl: ${RC6_RECOVERY_XNODE_5_PUBLIC_PEER_BASE_URL:?set xnode-5 recovery peer URL}
+    volumes: [recovery-xnode-5-state:/state, recovery-membership-artifact:/run/deep-membership:ro]
+    secrets: [{ source: recovery-xnode-5-ed25519, target: xnode-ed25519.seed }, { source: recovery-xnode-5-x25519, target: xnode-x25519.private }]
+
+  xnode-6:
+    <<: *xnode
+    env_file:
+      - ${RC6_RECOVERY_MAILBOX_AUTHORITY_ENV_FILE:?set protected mailbox authority env file}
+      - ${RC6_RECOVERY_XNODE_6_PRIVACY_ENV_FILE:?set protected xnode-6 privacy env file}
+    environment:
+      <<: *xnode-environment
+      Node__DataDirectory: /state
+      Node__PublicHost: ${RC6_RECOVERY_XNODE_6_PUBLIC_HOST:?set xnode-6 recovery host}
+      Node__RouterId: ${RC6_RECOVERY_XNODE_6_ROUTER_ID:?set xnode-6 public router id}
+      Node__Ed25519PrivateKeyPath: /run/secrets/xnode-ed25519.seed
+      PrivacyRouting__PublicPeerBaseUrl: ${RC6_RECOVERY_XNODE_6_PUBLIC_PEER_BASE_URL:?set xnode-6 recovery peer URL}
+    volumes: [recovery-xnode-6-state:/state, recovery-membership-artifact:/run/deep-membership:ro]
+    secrets: [{ source: recovery-xnode-6-ed25519, target: xnode-ed25519.seed }, { source: recovery-xnode-6-x25519, target: xnode-x25519.private }]
+
+  recovery-verifier:
+    <<: *runtime
+    image: ${RC6_RECOVERY_VERIFIER_IMAGE:?set an immutable Node verifier image reference containing @sha256}
+    restart: "no"
+    user: "65532:65532"
+    entrypoint: [node, /opt/recovery/rc6-application-recovery-verifier.mjs]
+    command: [--probe]
+    environment:
+      RC6_RECOVERY_EXPECTATIONS_FILE: /run/recovery-public/expectations.json
+      RC6_RECOVERY_CANARY_SIGNER_FILE: /run/recovery-protected/canary-signer.pem
+      RC6_RECOVERY_CHECKPOINT_FILE: /state/calls-v2-checkpoint.json
+      RC6_RECOVERY_XNODE_IMAGE: ${RC6_RECOVERY_XNODE_IMAGE:?set an immutable xnode image reference containing @sha256}
+      RC6_RECOVERY_REGISTRY_IMAGE: ${RC6_RECOVERY_REGISTRY_IMAGE:?set an immutable registry image reference containing @sha256}
+      RC6_RECOVERY_COMPAT_IMAGE: ${RC6_RECOVERY_COMPAT_IMAGE:?set an immutable compat image reference containing @sha256}
+      RC6_RECOVERY_VERIFIER_IMAGE: ${RC6_RECOVERY_VERIFIER_IMAGE:?set an immutable Node verifier image reference containing @sha256}
+    volumes:
+      - ${RC6_RECOVERY_EXPECTATIONS_FILE:?set public recovery expectations file}:/run/recovery-public/expectations.json:ro
+      - ${RC6_RECOVERY_CANARY_SIGNER_FILE:?set protected canary signer file}:/run/recovery-protected/canary-signer.pem:ro
+      - recovery-verifier-state:/state
+    depends_on:
+      registry: { condition: service_healthy }
+      storage: { condition: service_healthy }
+      file: { condition: service_healthy }
+      push: { condition: service_healthy }
+      xnode-1: { condition: service_healthy }
+      xnode-2: { condition: service_healthy }
+      xnode-3: { condition: service_healthy }
+      xnode-4: { condition: service_healthy }
+      xnode-5: { condition: service_healthy }
+      xnode-6: { condition: service_healthy }
+
+networks:
+  recovery:
+    internal: true
+    driver: bridge
+
+volumes:
+  recovery-membership-artifact: { external: true, name: "${RC6_RECOVERY_MEMBERSHIP_VOLUME:?set restored membership volume name}" }
+  recovery-registry-state: { external: true, name: "${RC6_RECOVERY_REGISTRY_VOLUME:?set restored registry volume name}" }
+  recovery-storage-state: { external: true, name: "${RC6_RECOVERY_STORAGE_VOLUME:?set restored storage volume name}" }
+  recovery-file-state: { external: true, name: "${RC6_RECOVERY_FILE_VOLUME:?set restored file volume name}" }
+  recovery-push-state: { external: true, name: "${RC6_RECOVERY_PUSH_VOLUME:?set restored push volume name}" }
+  recovery-xnode-1-state: { external: true, name: "${RC6_RECOVERY_XNODE_1_VOLUME:?set restored xnode-1 volume name}" }
+  recovery-xnode-2-state: { external: true, name: "${RC6_RECOVERY_XNODE_2_VOLUME:?set restored xnode-2 volume name}" }
+  recovery-xnode-3-state: { external: true, name: "${RC6_RECOVERY_XNODE_3_VOLUME:?set restored xnode-3 volume name}" }
+  recovery-xnode-4-state: { external: true, name: "${RC6_RECOVERY_XNODE_4_VOLUME:?set restored xnode-4 volume name}" }
+  recovery-xnode-5-state: { external: true, name: "${RC6_RECOVERY_XNODE_5_VOLUME:?set restored xnode-5 volume name}" }
+  recovery-xnode-6-state: { external: true, name: "${RC6_RECOVERY_XNODE_6_VOLUME:?set restored xnode-6 volume name}" }
+  recovery-verifier-state: { external: true, name: "${RC6_RECOVERY_VERIFIER_STATE_VOLUME:?set isolated verifier state volume name}" }
+
+secrets:
+  recovery-turn-shared-secret: { file: "${RC6_RECOVERY_TURN_SHARED_SECRET_FILE:?set protected TURN shared secret file}" }
+  recovery-xnode-1-ed25519: { file: "${RC6_RECOVERY_XNODE_1_ED25519_FILE:?set protected xnode-1 Ed25519 file}" }
+  recovery-xnode-2-ed25519: { file: "${RC6_RECOVERY_XNODE_2_ED25519_FILE:?set protected xnode-2 Ed25519 file}" }
+  recovery-xnode-3-ed25519: { file: "${RC6_RECOVERY_XNODE_3_ED25519_FILE:?set protected xnode-3 Ed25519 file}" }
+  recovery-xnode-4-ed25519: { file: "${RC6_RECOVERY_XNODE_4_ED25519_FILE:?set protected xnode-4 Ed25519 file}" }
+  recovery-xnode-5-ed25519: { file: "${RC6_RECOVERY_XNODE_5_ED25519_FILE:?set protected xnode-5 Ed25519 file}" }
+  recovery-xnode-6-ed25519: { file: "${RC6_RECOVERY_XNODE_6_ED25519_FILE:?set protected xnode-6 Ed25519 file}" }
+  recovery-xnode-1-x25519: { file: "${RC6_RECOVERY_XNODE_1_X25519_FILE:?set protected xnode-1 X25519 file}" }
+  recovery-xnode-2-x25519: { file: "${RC6_RECOVERY_XNODE_2_X25519_FILE:?set protected xnode-2 X25519 file}" }
+  recovery-xnode-3-x25519: { file: "${RC6_RECOVERY_XNODE_3_X25519_FILE:?set protected xnode-3 X25519 file}" }
+  recovery-xnode-4-x25519: { file: "${RC6_RECOVERY_XNODE_4_X25519_FILE:?set protected xnode-4 X25519 file}" }
+  recovery-xnode-5-x25519: { file: "${RC6_RECOVERY_XNODE_5_X25519_FILE:?set protected xnode-5 X25519 file}" }
+  recovery-xnode-6-x25519: { file: "${RC6_RECOVERY_XNODE_6_X25519_FILE:?set protected xnode-6 X25519 file}" }

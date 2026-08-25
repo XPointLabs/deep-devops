@@ -18,7 +18,7 @@ test('compose config satisfies the complete static private topology contract', (
     restart: result.uatRestartAuthorized,
     production: result.productionReady
   }, {
-    services: 7,
+    services: 6,
     routers: 3,
     mappings: 9,
     readiness: 503,
@@ -29,12 +29,12 @@ test('compose config satisfies the complete static private topology contract', (
 });
 
 const mutations = [
-  ['privileged', value => { value.services.calls.privileged = true; }, /privileged is forbidden/],
+  ['privileged', value => { value.services.file.privileged = true; }, /privileged is forbidden/],
   ['host pid', value => { value.services.push.pid = 'host'; }, /pid namespace is forbidden/],
   ['host ipc', value => { value.services.file.ipc = 'host'; }, /ipc namespace is forbidden/],
   ['device', value => { value.services.storage.devices = ['/dev/kvm:/dev/kvm']; }, /devices are forbidden/],
   ['docker socket', value => {
-    value.services.calls.volumes = [{
+    value.services.file.volumes = [{
       type: 'bind', source: '/var/run/docker.sock', target: '/var/run/docker.sock'
     }];
   }, /docker\.sock is forbidden/],
@@ -45,13 +45,13 @@ const mutations = [
   ['host-gateway', value => {
     value.services.storage.extra_hosts = ['host.docker.internal:host-gateway'];
   }, /extra_hosts/],
-  ['host network mode', value => { value.services.calls.network_mode = 'host'; }, /network_mode is forbidden/],
-  ['host build network', value => { value.services.calls.build.network = 'host'; }, /build network host/],
-  ['unexpected service key', value => { value.services.calls.user = 'root'; }, /service must have exact keys/],
+  ['host network mode', value => { value.services.file.network_mode = 'host'; }, /network_mode is forbidden/],
+  ['host build network', value => { value.services.file.build.network = 'host'; }, /build network host/],
+  ['unexpected service key', value => { value.services.file.user = 'root'; }, /service must have exact keys/],
   ['extra network', value => { value.networks.default = { name: 'unexpected' }; }, /compose networks/],
-  ['extra service network', value => { value.services.calls.networks.default = null; }, /calls networks/],
+  ['extra service network', value => { value.services.file.networks.default = null; }, /file networks/],
   ['router cap add', value => { value.services['xnode-1'].cap_add = ['NET_ADMIN']; }, /cap_add/],
-  ['ancillary cap add', value => { value.services.calls.cap_add = ['NET_BIND_SERVICE']; }, /service must have exact keys/],
+  ['ancillary cap add', value => { value.services.file.cap_add = ['NET_BIND_SERVICE']; }, /service must have exact keys/],
   ['cap drop', value => { value.services.push.cap_drop = []; }, /cap_drop/],
   ['security option', value => { value.services.file.security_opt = []; }, /security_opt/],
   ['API listener', value => {
@@ -82,8 +82,8 @@ const mutations = [
     value.services['xnode-3'].environment.Runtime__PrivatePeerEndpointAllowlist__1__Port = '8082';
   }, /allowlist/],
   ['volume source', value => {
-    value.services.calls.volumes[0].source = 'foreign-volume';
-  }, /calls volume/],
+    value.services.file.volumes[0].source = 'foreign-volume';
+  }, /file volume/],
   ['volume target', value => {
     value.services.file.volumes[0].target = '/tmp/file';
   }, /file volume/],
@@ -103,7 +103,7 @@ const mutations = [
     value.services['xnode-3'].build.args.SDK_IMAGE = 'mcr.microsoft.com/dotnet/sdk:10.0';
   }, /build args/],
   ['Node digest removal', value => {
-    value.services.calls.build.args.NODE_IMAGE = 'node:24-bookworm-slim';
+    value.services.file.build.args.NODE_IMAGE = 'node:24-bookworm-slim';
   }, /build args/],
   ['compat content hash mutation', value => {
     value.services.storage.labels['io.deep.i01b.compat-content-sha256'] = '00'.repeat(32);
@@ -164,7 +164,7 @@ test('fails closed if the reviewed Dockerfile restores image defaults or optiona
     ...inputs,
     reviewedAncillaryDockerfiles: {
       ...inputs.reviewedAncillaryDockerfiles,
-      calls: inputs.reviewedAncillaryDockerfiles.calls.replace(
+      file: inputs.reviewedAncillaryDockerfiles.file.replace(
         'ARG NODE_IMAGE',
         'ARG NODE_IMAGE=node:24-bookworm-slim'
       )

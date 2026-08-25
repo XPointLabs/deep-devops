@@ -1,10 +1,17 @@
 # Deep UAT Deployment
 
-Last updated: 2026-07-18.
+Last updated: 2026-08-26.
 
 This runbook brings up the first QA UAT stack on the LAN host `192.168.1.44`.
 It uses Arbitrum Sepolia for XPNT staking contracts and Docker on this machine
-for the backend, staking portal, product storage/file/calls services, push compatibility service, and three router nodes.
+for the backend, staking portal, product storage/file services, registry-owned
+authenticated calls, push compatibility service, and three router nodes.
+
+This is a blocked operator-side legacy deployment record, not a current client
+handoff. Its `http://` LAN listeners are private administrative/debug surfaces
+and must not be embedded in a client or treated as release evidence. The
+supported client-facing UAT ingress and trust workflow is
+`docs/SURVIVAL_UAT_TLS.md`.
 
 ## Stop-the-line: credentials retired
 
@@ -90,7 +97,7 @@ STAKING_REQUIREMENT_ATOMIC=120000000000
 This section is blocked until Mr. X provisions a new wallet through the
 protected secret procedure. Never reuse the retired deployer.
 
-Run from `C:\Work\Deep\xpoint-staking-contracts`.
+Run from the `xpoint-staking-contracts` repository in the current workspace.
 
 ```powershell
 $env:ARB_SEPOLIA_RPC_URL = "https://arb-sepolia.g.alchemy.com/v2/<alchemy-key>"
@@ -116,7 +123,7 @@ at the first relevant contract event.
 
 ## Configure UAT Docker
 
-Run from `C:\Work\Deep\deep-devops`.
+Run from this `deep-devops` repository.
 
 ```powershell
 Copy-Item .env.uat.example .env.uat
@@ -191,6 +198,13 @@ until a separate reviewed chain verifier or Mr. X-approved independent chain
 review has confirmed the referenced events and the overall I01A re-review has
 removed the restart block.
 
+Before starting, set `DEEP_UAT_TURN_PUBLIC_HOST` to the exact TURN certificate
+DNS name, point `DEEP_UAT_TURN_CERT_ROOT` at the directory containing
+`fullchain.pem` and `privkey.pem`, and set `DEEP_UAT_TURN_SHARED_SECRET_FILE` to
+the protected secret file shared with registry. Optional
+`DEEP_UAT_TURN_EXTERNAL_IP` overrides coturn public-IP discovery. Open TCP/UDP
+`3478`, `5349`, and the exact relay range `49160-49200`.
+
 ```powershell
 docker compose -f docker-compose.uat.yml --env-file .env.uat up -d --build
 ```
@@ -204,7 +218,8 @@ Staking portal:        http://192.168.1.44:28083
 Storage service:       http://192.168.1.44:28100
 File service:          http://192.168.1.44:28101
 Push service:          http://192.168.1.44:28102
-Call signaling:        http://192.168.1.44:28103
+Registry call API:     http://192.168.1.44:28103
+STUN/TURN:             192.168.1.44:3478, 192.168.1.44:5349
 Router node 1 API:     http://192.168.1.44:29281
 Router node 2 API:     http://192.168.1.44:29282
 Router node 3 API:     http://192.168.1.44:29283
@@ -299,77 +314,19 @@ Invoke-RestMethod http://192.168.1.44:28080/api/nodes
 Invoke-RestMethod http://192.168.1.44:28082/registrations/0xb0cE3b1229c00d1B85c7083E31Dae531f3B352C0
 ```
 
-Onion route smoke check:
-
-```powershell
-dotnet run --project tools\uat-onion-smoke\XNode.UatOnionSmoke.csproj -- `
-  --routers http://192.168.1.44:29281,http://192.168.1.44:29282,http://192.168.1.44:29283
-```
-
-The smoke uses the same `XNodeRpcClient` as the MAUI client. It stores
-and retrieves a message through `onion_request` and fails unless the active
-route is `onion-storage` with three router nodes.
+Privacy-route verification is performed by the current survival UAT lane. It
+uses authenticated HTTPS managed ingress, two identity-disjoint three-hop
+routes, and independently generated X25519 agreement keys. Follow
+`docs/SURVIVAL_UAT_TLS.md`; the retired onion RPC smoke is not release evidence.
 
 The current full BLS12-381 public keys and proof-of-possession signatures are
 recorded in `docs/UAT_BLS12_REGISTRATIONS.md`.
 
-Manual registry API shape, only if a router heartbeat must be reproduced by hand:
-
-```powershell
-$body = @{
-  nodeId = "<ed25519-node-id>"
-  operatorAddress = "0xb0cE3b1229c00d1B85c7083E31Dae531f3B352C0"
-  rewardsAddress = "0xb0cE3b1229c00d1B85c7083E31Dae531f3B352C0"
-  blsPublicKey = @{ data = "<128-byte EIP-2537 G1 public key hex>" }
-  blsSignature = "<256-byte EIP-2537 G2 proof-of-possession signature hex>"
-  ed25519PublicKey = "<ed25519>"
-  ed25519Signature1 = "<sig1>"
-  ed25519Signature2 = "<sig2>"
-  operatorFeeBps = 0
-  stakeAtomic = 120000000000
-  contributors = @(@{
-    address = "<operator-wallet>"
-    beneficiary = "<rewards-wallet>"
-    amountAtomic = 120000000000
-  })
-  transport = @{
-    protocol = "vless"
-    host = "192.168.1.44"
-    port = 20443
-    uuid = "<from http://192.168.1.44:29281/api/bootstrap/client>"
-    security = "none"
-    flow = ""
-    sni = ""
-    publicKey = ""
-    shortId = ""
-    fingerprint = "chrome"
-    path = ""
-    alpn = @()
-  }
-  relayContact = @{
-    routerId = "<ed25519-node-id>"
-    publicHost = "192.168.1.44"
-    publicPort = 20443
-    x25519PublicKey = "<32-byte X25519 public key hex derived from key_ed25519>"
-    rpcEndpoint = "http://xnode-1:8080"
-    signedAt = (Get-Date).ToUniversalTime()
-    expiresAt = (Get-Date).ToUniversalTime().AddDays(30)
-    routerVersion = "manual"
-    isReachable = $true
-    capabilities = @("vless-ingress", "session-rpc", "onion-v1")
-    signatureAlgorithm = "ed25519"
-    signature = "<relay contact signature>"
-  }
-} | ConvertTo-Json -Depth 8
-
-Invoke-RestMethod http://192.168.1.44:28080/api/nodes/register `
-  -Method Post `
-  -ContentType "application/json" `
-  -Body $body
-```
-
-For node 2 use API `29282` and VLESS port `20444`; for node 3 use API `29283`
-and VLESS port `20445`.
+Manual relay-contact injection is retired. Do not reconstruct a heartbeat by
+hand or derive an X25519 key from an Ed25519 identity. Each XNode must load an
+independently generated X25519 private scalar from its protected secret file,
+publish the current signed privacy contact, and pass the registry and privacy
+route verification gates.
 
 ## Reset UAT State After Contract Redeploy
 
@@ -385,18 +342,12 @@ docker compose -f docker-compose.uat.yml --env-file .env.uat up -d --build
 
 ## QA Clients
 
-Release MAUI builds read `deep.release.env` from the app output
-directory. It is already set to:
-
-```text
-XNODE_URLS=http://192.168.1.44:29281;http://192.168.1.44:29282;http://192.168.1.44:29283
-DEEP_CALL_SIGNALING_BASE_URL=http://192.168.1.44:28103
-DEEP_FILE_URL=http://192.168.1.44:28101
-DEEP_PUSH_URL=http://192.168.1.44:28102
-```
-
-Build and install desktop/Android clients after the Docker stack is up. The
-Android device must be on the same LAN and able to reach `192.168.1.44`.
+Do not copy the private operator/debug listeners above into `deep.release.env`.
+Generate the platform-specific authenticated HTTPS client environment and
+privacy-route artifact through the current survival UAT workflow, then verify
+its CA pin, route authority, and exact runtime binding before installing a
+desktop or Android build. See `docs/SURVIVAL_UAT_TLS.md` and
+`docs/SURVIVAL_DEV_MAUI_MAILBOX_GRANTS.md`.
 
 ## Stop UAT
 
@@ -411,5 +362,7 @@ State is kept in Docker volumes:
 - `deep-uat_registry-state`
 - `deep-uat_storage-state`
 - `deep-uat_file-state`
-- `deep-uat_calls-state`
 - `deep-uat_compat-state` for push compatibility state
+
+Call signal/inbox state is stored inside `deep-uat_registry-state`; there is no
+standalone calls container or calls volume.

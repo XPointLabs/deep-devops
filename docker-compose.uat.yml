@@ -114,10 +114,22 @@ services:
       Registry__StakingRequirementAtomic: ${STAKING_REQUIREMENT_ATOMIC:-120000000000}
       Registry__StatePath: /var/lib/deep/registry/registry-state.json
       Registry__StakingBackendBaseUrl: http://staking-backend:8080
+      Calls__Required: "true"
+      Calls__Enabled: "true"
+      Calls__StatePath: /var/lib/deep/registry/calls-v2.json
+      Calls__TurnSharedSecretFile: /run/secrets/turn-shared-secret
+      Calls__CredentialLifetimeSeconds: "3600"
+      Calls__IceUrls__0: stun:${DEEP_UAT_TURN_PUBLIC_HOST:?set DEEP_UAT_TURN_PUBLIC_HOST}:3478
+      Calls__IceUrls__1: turn:${DEEP_UAT_TURN_PUBLIC_HOST:?set DEEP_UAT_TURN_PUBLIC_HOST}:3478?transport=udp
+      Calls__IceUrls__2: turn:${DEEP_UAT_TURN_PUBLIC_HOST:?set DEEP_UAT_TURN_PUBLIC_HOST}:3478?transport=tcp
+      Calls__IceUrls__3: turns:${DEEP_UAT_TURN_PUBLIC_HOST:?set DEEP_UAT_TURN_PUBLIC_HOST}:5349?transport=tcp
     volumes:
       - registry-state:/var/lib/deep/registry
+    secrets:
+      - turn-shared-secret
     ports:
       - "28080:8080"
+      - "28103:8080"
     depends_on:
       staking-backend:
         condition: service_healthy
@@ -341,23 +353,41 @@ services:
       timeout: 3s
       retries: 30
 
-  calls:
-    build:
-      context: ${DEEP_DEVOPS_DIR:-.}
-      dockerfile: docker/calls-service.Dockerfile
+  turn:
+    image: coturn/coturn:4.12.0-alpine@sha256:faca4aa57efc436916c31546f3867bd1a3fb1077723291bcfba0bf814bcaf48a
+    restart: unless-stopped
+    read_only: true
+    user: "0:0"
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: [no-new-privileges:true]
+    entrypoint: ["/usr/local/bin/deep-coturn-entrypoint"]
     environment:
-      PORT: "8080"
-      SERVICE_NAME: deep-calls
-      CALLS_STATE_DIR: /var/lib/deep/calls
+      DEEP_TURN_PUBLIC_HOST: ${DEEP_UAT_TURN_PUBLIC_HOST:?set DEEP_UAT_TURN_PUBLIC_HOST}
+      DEEP_TURN_EXTERNAL_IP: ${DEEP_UAT_TURN_EXTERNAL_IP:-auto}
+      DEEP_TURN_CERT_FILE: ${DEEP_UAT_TURN_CERT_FILE:-/run/deep-turn-certs/fullchain.pem}
+      DEEP_TURN_PKEY_FILE: ${DEEP_UAT_TURN_PKEY_FILE:-/run/deep-turn-certs/privkey.pem}
+      DEEP_TURN_SHARED_SECRET_FILE: /run/secrets/turn-shared-secret
+    tmpfs:
+      - /run/coturn-runtime:rw,noexec,nosuid,nodev,size=1m,mode=0700
     volumes:
-      - calls-state:/var/lib/deep/calls
+      - ./config/coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
+      - ./scripts/coturn-entrypoint.sh:/usr/local/bin/deep-coturn-entrypoint:ro
+      - ${DEEP_UAT_TURN_CERT_ROOT:-./secrets/turn-certs}:/run/deep-turn-certs:ro
+    secrets:
+      - turn-shared-secret
     ports:
-      - "28103:8080"
+      - "3478:3478/tcp"
+      - "3478:3478/udp"
+      - "5349:5349/tcp"
+      - "5349:5349/udp"
+      - "49160-49200:49160-49200/tcp"
+      - "49160-49200:49160-49200/udp"
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
-      interval: 3s
+      test: ["CMD-SHELL", "pidof turnserver >/dev/null"]
+      interval: 5s
       timeout: 3s
-      retries: 30
+      retries: 12
 
 volumes:
   staking-backend-state:
@@ -365,5 +395,8 @@ volumes:
   registry-state:
   storage-state:
   file-state:
-  calls-state:
   compat-state:
+
+secrets:
+  turn-shared-secret:
+    file: ${DEEP_UAT_TURN_SHARED_SECRET_FILE:-./secrets/turn-shared-secret}

@@ -1,8 +1,12 @@
+using System.Buffers;
+using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Deep.Protocol.DeepExtension.MailboxCapabilities;
+using Deep.Protocol.DeepExtension.ManagedIngress;
 using Deep.Protocol.DeepExtension.MembershipRoutes;
+using Deep.Protocol.DeepExtension.PrivacyRouting;
 using Sodium;
 using XNode.Core;
 using XNode.Core.Mailbox;
@@ -134,8 +138,11 @@ switch (arguments.Command)
     case "client-uncertain-resend":
         await RunClientUncertainResendAsync(fixture, arguments);
         break;
+    case "client-prepare-ack-loss":
+        await RunClientPrepareAckLossAsync(fixture, arguments);
+        break;
     case "client-ack-loss":
-        await RunClientAckLossAsync(fixture, arguments);
+        await RunClientAckLossAsync(arguments);
         break;
     case "client-retry-ack-loss":
         await RunClientRetryAckLossAsync(fixture, arguments);
@@ -450,7 +457,7 @@ static async Task RunClientLifecycleAsync(Fixture fixture, Arguments arguments)
     }
     var now = checked((ulong)DateTimeOffset.UtcNow.ToUnixTimeSeconds());
     var store = fixture.NewClientStore(arguments.RunId, "client-primary", now);
-    var client = new ExactHttpClient(arguments.ClientUrl);
+    var client = new ExactHttpClient(arguments.ClientUrl, arguments.PrivacyRoutesPath);
     var firstStore = await client.SendSuccessAsync(
         MailboxWireHttpContract.Store,
         store.CanonicalRequest);
@@ -548,7 +555,7 @@ static async Task RunClientLossAsync(Fixture fixture, Arguments arguments)
     await File.WriteAllBytesAsync(
         Path.Combine(arguments.StateDirectory, "client-loss.mau2"),
         store.CanonicalRequest);
-    await new ExactHttpClient(arguments.ClientUrl).SendFailureAsync(
+    await new ExactHttpClient(arguments.ClientUrl, arguments.PrivacyRoutesPath).SendFailureAsync(
         MailboxWireHttpContract.Store,
         store.CanonicalRequest,
         MailboxHttpFailure.DependencyUnavailable);
@@ -564,11 +571,11 @@ static async Task RunClientRetryLossAsync(Arguments arguments)
 {
     var canonical = await File.ReadAllBytesAsync(
         Path.Combine(arguments.StateDirectory, "client-loss.mau2"));
-    var response = await new ExactHttpClient(arguments.ClientUrl).SendSuccessAsync(
+    var response = await new ExactHttpClient(arguments.ClientUrl, arguments.PrivacyRoutesPath).SendSuccessAsync(
         MailboxWireHttpContract.Store,
         canonical);
     _ = MailboxReceiptV3Codec.DecodeDurableQuorum(response);
-    var replay = await new ExactHttpClient(arguments.ClientUrl).SendSuccessAsync(
+    var replay = await new ExactHttpClient(arguments.ClientUrl, arguments.PrivacyRoutesPath).SendSuccessAsync(
         MailboxWireHttpContract.Store,
         canonical);
     if (!CryptographicOperations.FixedTimeEquals(response, replay))
@@ -594,7 +601,7 @@ static async Task RunClientUncertainResendAsync(Fixture fixture, Arguments argum
     }
     var now = checked((ulong)DateTimeOffset.UtcNow.ToUnixTimeSeconds());
     var store = fixture.NewClientStore(arguments.RunId, "client-uncertain-resend", now);
-    var client = new ExactHttpClient(arguments.ClientUrl);
+    var client = new ExactHttpClient(arguments.ClientUrl, arguments.PrivacyRoutesPath);
     await client.SendTransportFailureAsync(
         MailboxWireHttpContract.Store,
         store.CanonicalRequest);
@@ -641,7 +648,7 @@ static async Task RunClientUncertainResendAsync(Fixture fixture, Arguments argum
     });
 }
 
-static async Task RunClientAckLossAsync(Fixture fixture, Arguments arguments)
+static async Task RunClientPrepareAckLossAsync(Fixture fixture, Arguments arguments)
 {
     if (string.IsNullOrWhiteSpace(arguments.RunId))
     {
@@ -649,7 +656,7 @@ static async Task RunClientAckLossAsync(Fixture fixture, Arguments arguments)
     }
     var now = checked((ulong)DateTimeOffset.UtcNow.ToUnixTimeSeconds());
     var store = fixture.NewClientStore(arguments.RunId, "client-ack-loss-store", now);
-    var client = new ExactHttpClient(arguments.ClientUrl);
+    var client = new ExactHttpClient(arguments.ClientUrl, arguments.PrivacyRoutesPath);
     var storeReceipt = await client.SendSuccessAsync(
         MailboxWireHttpContract.Store,
         store.CanonicalRequest);
@@ -688,7 +695,29 @@ static async Task RunClientAckLossAsync(Fixture fixture, Arguments arguments)
     PrivateCrossProcessState.WriteAckLossState(
         arguments.StateDirectory,
         PrivateCrossProcessState.Create(ack, emptyRetrieve));
-    await client.SendTransportFailureAsync(MailboxWireHttpContract.Acknowledge, ack);
+    Result("client-prepare-ack-loss", new
+    {
+        prepared = true,
+        ackDispatched = false,
+        retrievedItemsBeforeAck = page.Items.Count,
+        mau2AckBytes = ack.Length
+    });
+}
+
+static async Task RunClientAckLossAsync(Arguments arguments)
+{
+    var state = PrivateCrossProcessState.ReadAckLossState(arguments.StateDirectory);
+    if (state.Mar1 is not null)
+    {
+        throw new InvalidDataException(
+            "ACK loss rehearsal state already contains a durable retry receipt.");
+    }
+    var ack = Convert.FromBase64String(state.Ack);
+    await new ExactHttpClient(
+        arguments.ClientUrl,
+        arguments.PrivacyRoutesPath).SendTransportFailureAsync(
+            MailboxWireHttpContract.Acknowledge,
+            ack);
     Result("client-ack-loss", new
     {
         firstOutcome = "transport-unknown-after-durable-ack",
@@ -703,7 +732,7 @@ static async Task RunClientRetryAckLossAsync(Fixture fixture, Arguments argument
     var state = PrivateCrossProcessState.ReadAckLossState(arguments.StateDirectory);
     var ack = Convert.FromBase64String(state.Ack);
     var emptyRetrieve = Convert.FromBase64String(state.EmptyRetrieve);
-    var client = new ExactHttpClient(arguments.ClientUrl);
+    var client = new ExactHttpClient(arguments.ClientUrl, arguments.PrivacyRoutesPath);
     var retry = await client.SendSuccessAsync(MailboxWireHttpContract.Acknowledge, ack);
     var aggregate = MailboxAggregateAckCodec.DecodeMqr3(retry);
     if (aggregate.TombstoneQuorums.Count != 1)
@@ -741,7 +770,7 @@ static async Task RunClientReplayAckLossAsync(Arguments arguments)
     {
         throw new InvalidDataException("ACK retry receipt is missing.");
     }
-    var replay = await new ExactHttpClient(arguments.ClientUrl).SendSuccessAsync(
+    var replay = await new ExactHttpClient(arguments.ClientUrl, arguments.PrivacyRoutesPath).SendSuccessAsync(
         MailboxWireHttpContract.Acknowledge,
         Convert.FromBase64String(state.Ack));
     _ = MailboxAggregateAckCodec.DecodeMqr3(replay);
@@ -1783,7 +1812,7 @@ sealed class Fixture
         {
             throw new ArgumentOutOfRangeException(nameof(zeroBasedNodeIndex));
         }
-        return $"http://172.30.82.{zeroBasedNodeIndex + 11}:8081";
+        return $"http://172.30.82.{zeroBasedNodeIndex + 11}:8083";
     }
 
     private static byte[] NetworkId() =>
@@ -2039,13 +2068,36 @@ sealed record ParsedPublicEpoch(
     MailboxReplicaMembershipProof[] Proofs,
     byte[] Root);
 
-sealed class ExactHttpClient(string baseUrl)
+sealed class ExactHttpClient
 {
-    private readonly HttpClient _client = new()
+    private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(20);
+    private readonly HttpClient? directClient;
+    private readonly HttpClient? privacyClient;
+    private readonly ExactPrivacyRoutes? privacyRoutes;
+
+    public ExactHttpClient(string baseUrl, string? privacyRoutesPath)
     {
-        BaseAddress = new Uri(baseUrl.TrimEnd('/') + "/"),
-        Timeout = TimeSpan.FromSeconds(20)
-    };
+        if (privacyRoutesPath is null)
+        {
+            directClient = new HttpClient
+            {
+                BaseAddress = new Uri(baseUrl.TrimEnd('/') + "/"),
+                Timeout = RequestTimeout
+            };
+            return;
+        }
+
+        privacyRoutes = ExactPrivacyRoutes.Load(privacyRoutesPath);
+        privacyClient = new HttpClient(new SocketsHttpHandler
+        {
+            AllowAutoRedirect = false,
+            AutomaticDecompression = DecompressionMethods.None,
+            UseCookies = false
+        }, disposeHandler: true)
+        {
+            Timeout = Timeout.InfiniteTimeSpan
+        };
+    }
 
     public async Task<byte[]> SendSuccessAsync(
         MailboxHttpEndpointContract contract,
@@ -2117,7 +2169,7 @@ sealed class ExactHttpClient(string baseUrl)
         }
     }
 
-    private Task<HttpResponseMessage> SendAsync(
+    private async Task<HttpResponseMessage> SendAsync(
         MailboxHttpEndpointContract contract,
         byte[] canonicalRequest)
     {
@@ -2127,10 +2179,598 @@ sealed class ExactHttpClient(string baseUrl)
             throw new InvalidOperationException(
                 $"Public mailbox {contract.RequestFrame} request violates its exact byte bound.");
         }
-        var content = new ByteArrayContent(canonicalRequest);
-        content.Headers.ContentType =
-            new MediaTypeHeaderValue(contract.RequestContentType);
-        return _client.PostAsync(contract.Route.TrimStart('/'), content);
+        if (privacyRoutes is null)
+        {
+            var content = new ByteArrayContent(canonicalRequest);
+            content.Headers.ContentType =
+                new MediaTypeHeaderValue(contract.RequestContentType);
+            return await directClient!.PostAsync(contract.Route.TrimStart('/'), content);
+        }
+
+        var authenticatedOperation = contract.AuthenticatedOperation ??
+            throw new InvalidOperationException(
+                "Privacy-routed ExactHttpClient accepts only authenticated MAU2 endpoints.");
+        ValidateCanonicalMau2(canonicalRequest, authenticatedOperation);
+        var operation = authenticatedOperation switch
+        {
+            MailboxAuthenticatedOperation.Store => PrivacyRoutingOperation.Store,
+            MailboxAuthenticatedOperation.Retrieve => PrivacyRoutingOperation.Retrieve,
+            MailboxAuthenticatedOperation.Ack => PrivacyRoutingOperation.Acknowledge,
+            _ => throw new InvalidOperationException(
+                "Privacy-routed ExactHttpClient accepts only authenticated Store, Retrieve, and ACK MAU2.")
+        };
+
+        try
+        {
+            return await DispatchPrivacyAsync(
+                privacyRoutes.Primary,
+                operation,
+                contract,
+                canonicalRequest);
+        }
+        catch (ExactPrivacyBeforeForwardException exception) when (exception.Retryable)
+        {
+            try
+            {
+                return await DispatchPrivacyAsync(
+                    privacyRoutes.Fallback,
+                    operation,
+                    contract,
+                    canonicalRequest);
+            }
+            catch (ExactPrivacyBeforeForwardException)
+            {
+                return MailboxFailure(MailboxHttpFailure.DependencyUnavailable);
+            }
+        }
+        catch (ExactPrivacyBeforeForwardException)
+        {
+            return MailboxFailure(MailboxHttpFailure.DependencyUnavailable);
+        }
+    }
+
+    private static void ValidateCanonicalMau2(
+        byte[] canonicalRequest,
+        MailboxAuthenticatedOperation expectedOperation)
+    {
+        MailboxAuthenticatedClientRequest decoded;
+        byte[] roundTrip;
+        try
+        {
+            decoded = MailboxAuthenticatedClientRequestCodec.Decode(canonicalRequest);
+            roundTrip = MailboxAuthenticatedClientRequestCodec.Encode(decoded);
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException or OverflowException or
+                MailboxClientException or MailboxAuthenticatedCapabilityException)
+        {
+            throw new InvalidDataException(
+                "Privacy-routed ExactHttpClient rejected malformed MAU2.",
+                exception);
+        }
+
+        try
+        {
+            if (decoded.Binding.Operation != expectedOperation ||
+                decoded.Presentation.Operation != expectedOperation ||
+                !CryptographicOperations.FixedTimeEquals(roundTrip, canonicalRequest))
+            {
+                throw new InvalidDataException(
+                    "Privacy-routed ExactHttpClient rejected non-canonical or mismatched MAU2.");
+            }
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(roundTrip);
+        }
+    }
+
+    private async Task<HttpResponseMessage> DispatchPrivacyAsync(
+        ExactPrivacyRoute route,
+        PrivacyRoutingOperation operation,
+        MailboxHttpEndpointContract contract,
+        byte[] canonicalRequest)
+    {
+        using var built = PrivacyRoutingRequestBuilder.BuildForCanonicalMailboxRequest(
+            route.Hops,
+            operation,
+            canonicalRequest);
+        var frame = built.Frame.ToArray();
+        try
+        {
+            using var deadline = new CancellationTokenSource(RequestTimeout);
+            using var request = new HttpRequestMessage(
+                HttpMethod.Post,
+                new Uri(route.EntryOrigin, ManagedIngressH2Contract.FramePath))
+            {
+                Version = HttpVersion.Version20,
+                VersionPolicy = HttpVersionPolicy.RequestVersionExact,
+                Content = new ByteArrayContent(frame)
+            };
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(
+                ManagedIngressH2Contract.OpaqueMediaType));
+            request.Content.Headers.ContentType = new MediaTypeHeaderValue(
+                ManagedIngressH2Contract.OpaqueMediaType);
+
+            HttpResponseMessage response;
+            try
+            {
+                response = await privacyClient!.SendAsync(
+                    request,
+                    HttpCompletionOption.ResponseHeadersRead,
+                    deadline.Token);
+            }
+            catch (HttpRequestException exception) when (IsDefinitelyBeforeForward(exception))
+            {
+                throw new ExactPrivacyBeforeForwardException(retryable: true, exception);
+            }
+            catch (OperationCanceledException exception)
+            {
+                throw OutcomeUnknown(
+                    "Privacy ingress outcome is unknown because dispatch timed out.",
+                    exception);
+            }
+            catch (Exception exception) when (exception is HttpRequestException or IOException)
+            {
+                throw OutcomeUnknown(
+                    "Privacy ingress outcome is unknown after dispatch began.",
+                    exception);
+            }
+
+            using (response)
+            {
+                EnsureUnchangedOrigin(request, response);
+                var declaredLength = response.Content.Headers.ContentLength;
+                if (declaredLength < 0 ||
+                    declaredLength > ManagedIngressLimits.MaximumOpaqueFrameBytes)
+                {
+                    throw OutcomeUnknown(
+                        "Privacy ingress returned an invalid response length.");
+                }
+
+                byte[] body;
+                try
+                {
+                    body = declaredLength is null
+                        ? await ReadBoundedAsync(response.Content, deadline.Token)
+                        : await ReadExactBoundedAsync(
+                            response.Content,
+                            declaredLength.Value,
+                            deadline.Token);
+                }
+                catch (OperationCanceledException exception)
+                {
+                    throw OutcomeUnknown(
+                        "Privacy ingress response read timed out.",
+                        exception);
+                }
+                catch (Exception exception) when (exception is IOException or HttpRequestException)
+                {
+                    throw OutcomeUnknown(
+                        "Privacy ingress response was truncated.",
+                        exception);
+                }
+
+                var metadata = ResponseMetadata(response, body.Length);
+                if (response.StatusCode != HttpStatusCode.OK)
+                {
+                    var classification = ManagedIngressH2Contract.ClassifyErrorResponse(
+                        metadata,
+                        body);
+                    if (classification.Result ==
+                            ManagedIngressTransportResult.RejectedBeforeForward &&
+                        classification.Error is { } error)
+                    {
+                        throw new ExactPrivacyBeforeForwardException(error.Retryable);
+                    }
+
+                    throw OutcomeUnknown(
+                        $"Privacy ingress returned outcome-unknown HTTP {(int)response.StatusCode}.");
+                }
+
+                if (ManagedIngressH2Contract.ClassifyFrameResponse(metadata, body) !=
+                    ManagedIngressTransportResult.TransitCompleted)
+                {
+                    throw OutcomeUnknown(
+                        "Privacy ingress success response is not canonical.");
+                }
+
+                PrivacyRoutingTerminalResult terminal;
+                try
+                {
+                    var opened = PrivacyRoutingResponseCodec.Open(
+                        body,
+                        built.ReplyContext);
+                    terminal = PrivacyRoutingResultCodec.Decode(opened.Payload.Span);
+                }
+                catch (PrivacyRoutingProtocolException exception)
+                {
+                    throw OutcomeUnknown(
+                        "Privacy ingress response authentication or terminal decoding failed.",
+                        exception);
+                }
+
+                if (terminal.Operation != operation)
+                {
+                    throw OutcomeUnknown(
+                        "Privacy ingress terminal result changed the mailbox operation.");
+                }
+
+                if (terminal.Kind == PrivacyRoutingResultKind.Success)
+                {
+                    var success = new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Version = HttpVersion.Version20,
+                        Content = new ByteArrayContent(terminal.Body.ToArray())
+                    };
+                    success.Content.Headers.ContentType = new MediaTypeHeaderValue(
+                        contract.ResponseContentType);
+                    return success;
+                }
+
+                return TerminalFailure(terminal);
+            }
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(frame);
+        }
+    }
+
+    private static HttpResponseMessage TerminalFailure(
+        PrivacyRoutingTerminalResult terminal)
+    {
+        var failureCode = terminal.FailureCode ??
+            throw OutcomeUnknown("Privacy ingress terminal failure omitted its code.");
+        if (failureCode == PrivacyRoutingFailureCode.OutcomeUnknown)
+        {
+            throw OutcomeUnknown(
+                "Mailbox exit reported an outcome-unknown terminal failure.");
+        }
+
+        var failure = failureCode switch
+        {
+            PrivacyRoutingFailureCode.MalformedRequest =>
+                MailboxHttpFailure.MalformedCanonicalBody,
+            PrivacyRoutingFailureCode.AuthenticationRejected =>
+                MailboxHttpFailure.AuthenticationFailed,
+            PrivacyRoutingFailureCode.AuthorizationRejected =>
+                MailboxHttpFailure.AuthorizationFailed,
+            PrivacyRoutingFailureCode.ReplayRejected or
+                PrivacyRoutingFailureCode.Conflict =>
+                MailboxHttpFailure.ReplayOrIdempotencyConflict,
+            PrivacyRoutingFailureCode.MailboxNotFound =>
+                MailboxHttpFailure.ExpiredOrStale,
+            PrivacyRoutingFailureCode.CapacityExceeded =>
+                MailboxHttpFailure.RateOrConcurrencyExceeded,
+            PrivacyRoutingFailureCode.Unavailable or
+                PrivacyRoutingFailureCode.InternalFailure =>
+                MailboxHttpFailure.DependencyUnavailable,
+            _ => throw OutcomeUnknown(
+                "Mailbox exit reported an unsupported terminal failure.")
+        };
+        return MailboxFailure(failure);
+    }
+
+    private static HttpResponseMessage MailboxFailure(MailboxHttpFailure failure) =>
+        new((HttpStatusCode)MailboxWireHttpContract.StatusCode(failure))
+        {
+            Version = HttpVersion.Version20,
+            Content = new ByteArrayContent([])
+        };
+
+    private static ManagedIngressResponseMetadata ResponseMetadata(
+        HttpResponseMessage response,
+        int bodyLength)
+    {
+        var headers = new List<ManagedIngressHeader>();
+        AddSupplementalHeaders(headers, response.Headers);
+        AddSupplementalHeaders(headers, response.Content.Headers);
+        return new ManagedIngressResponseMetadata(
+            (int)response.StatusCode,
+            response.Version,
+            response.Content.Headers.ContentType?.ToString(),
+            response.Content.Headers.ContentEncoding.Count == 0
+                ? null
+                : string.Join(",", response.Content.Headers.ContentEncoding),
+            bodyLength,
+            headers);
+    }
+
+    private static void AddSupplementalHeaders(
+        ICollection<ManagedIngressHeader> destination,
+        HttpHeaders source)
+    {
+        foreach (var header in source)
+        {
+            var name = header.Key.ToLowerInvariant();
+            if (name is "content-type" or "content-length" or "content-encoding")
+            {
+                continue;
+            }
+
+            var values = header.Value.ToArray();
+            destination.Add(new ManagedIngressHeader(
+                name,
+                values.Length == 1 ? values[0] : string.Join(",", values)));
+        }
+    }
+
+    private static async Task<byte[]> ReadExactBoundedAsync(
+        HttpContent content,
+        long declaredLength,
+        CancellationToken cancellationToken)
+    {
+        if (declaredLength > ManagedIngressLimits.MaximumOpaqueFrameBytes)
+        {
+            throw new InvalidDataException(
+                "Privacy ingress response exceeds its hostile bound.");
+        }
+
+        var expected = checked((int)declaredLength);
+        var result = new byte[expected];
+        await using var stream = await content.ReadAsStreamAsync(cancellationToken);
+        var offset = 0;
+        while (offset < expected)
+        {
+            var read = await stream.ReadAsync(
+                result.AsMemory(offset, expected - offset),
+                cancellationToken);
+            if (read == 0)
+            {
+                throw new EndOfStreamException(
+                    "Privacy ingress response is truncated.");
+            }
+
+            offset += read;
+        }
+
+        var probe = ArrayPool<byte>.Shared.Rent(1);
+        try
+        {
+            if (await stream.ReadAsync(probe.AsMemory(0, 1), cancellationToken) != 0)
+            {
+                throw new InvalidDataException(
+                    "Privacy ingress response exceeds its declared length.");
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(probe, clearArray: true);
+        }
+
+        return result;
+    }
+
+    private static async Task<byte[]> ReadBoundedAsync(
+        HttpContent content,
+        CancellationToken cancellationToken)
+    {
+        await using var stream = await content.ReadAsStreamAsync(cancellationToken);
+        using var output = new MemoryStream();
+        var buffer = ArrayPool<byte>.Shared.Rent(16 * 1024);
+        try
+        {
+            while (true)
+            {
+                var remaining = ManagedIngressLimits.MaximumOpaqueFrameBytes
+                    - checked((int)output.Length);
+                var requested = Math.Min(buffer.Length, remaining + 1);
+                var read = await stream.ReadAsync(
+                    buffer.AsMemory(0, requested),
+                    cancellationToken);
+                if (read == 0)
+                {
+                    return output.ToArray();
+                }
+                if (read > remaining)
+                {
+                    throw new InvalidDataException(
+                        "Privacy ingress response exceeds its hostile bound.");
+                }
+                output.Write(buffer, 0, read);
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer, clearArray: true);
+        }
+    }
+
+    private static void EnsureUnchangedOrigin(
+        HttpRequestMessage request,
+        HttpResponseMessage response)
+    {
+        var expected = request.RequestUri;
+        var actual = response.RequestMessage?.RequestUri;
+        if (expected is null ||
+            actual is null ||
+            Uri.Compare(
+                expected,
+                actual,
+                UriComponents.SchemeAndServer,
+                UriFormat.SafeUnescaped,
+                StringComparison.OrdinalIgnoreCase) != 0 ||
+            !string.Equals(
+                expected.PathAndQuery,
+                actual.PathAndQuery,
+                StringComparison.Ordinal))
+        {
+            throw OutcomeUnknown("Privacy ingress redirected or changed origin.");
+        }
+    }
+
+    private static bool IsDefinitelyBeforeForward(HttpRequestException exception) =>
+        exception.HttpRequestError is
+            HttpRequestError.NameResolutionError or
+            HttpRequestError.SecureConnectionError or
+            HttpRequestError.ProxyTunnelError;
+
+    private static ExactMailboxOutcomeUnknownException OutcomeUnknown(
+        string message,
+        Exception? innerException = null) => new(message, innerException);
+}
+
+sealed class ExactPrivacyBeforeForwardException : IOException
+{
+    public ExactPrivacyBeforeForwardException(
+        bool retryable,
+        Exception? innerException = null)
+        : base("Privacy ingress rejected the frame before forwarding.", innerException)
+    {
+        Retryable = retryable;
+    }
+
+    public bool Retryable { get; }
+}
+
+sealed class ExactMailboxOutcomeUnknownException : HttpRequestException
+{
+    public ExactMailboxOutcomeUnknownException(
+        string message,
+        Exception? innerException = null)
+        : base(message, innerException)
+    {
+    }
+}
+
+sealed record ExactPrivacyRoute(
+    Uri EntryOrigin,
+    IReadOnlyList<PrivacyRoutingHop> Hops);
+
+sealed record ExactPrivacyRoutes(
+    ExactPrivacyRoute Primary,
+    ExactPrivacyRoute Fallback)
+{
+    private const int MaximumDocumentBytes = 64 * 1024;
+    private static readonly string[] RootProperties =
+        ["schemaVersion", "developmentOnly", "platform", "primary", "fallback"];
+    private static readonly string[] RouteProperties = ["entryOrigin", "hops"];
+    private static readonly string[] HopProperties = ["routerId", "x25519PublicKey"];
+
+    public static ExactPrivacyRoutes Load(string path)
+    {
+        var fullPath = Path.GetFullPath(path);
+        var file = new FileInfo(fullPath);
+        Require(file.Exists && file.Length is > 0 and <= MaximumDocumentBytes,
+            "Privacy routes file is missing or outside its byte bound.");
+        var bytes = File.ReadAllBytes(fullPath);
+        Require(bytes.Length is > 0 and <= MaximumDocumentBytes,
+            "Privacy routes file changed outside its byte bound while being read.");
+        using var document = JsonDocument.Parse(bytes, new JsonDocumentOptions
+        {
+            AllowTrailingCommas = false,
+            CommentHandling = JsonCommentHandling.Disallow,
+            MaxDepth = 8
+        });
+        var root = document.RootElement;
+        ExactProperties(root, RootProperties, "privacy routes");
+        Require(root.GetProperty("schemaVersion").GetInt32() == 1,
+            "Privacy routes schema version is unsupported.");
+        Require(root.GetProperty("developmentOnly").GetBoolean(),
+            "Privacy routes must be explicitly development-only.");
+        var platform = root.GetProperty("platform").GetString();
+        Require(platform is "android" or "windows",
+            "Privacy routes platform is unsupported.");
+
+        var routerIds = new HashSet<string>(StringComparer.Ordinal);
+        var agreementKeys = new HashSet<string>(StringComparer.Ordinal);
+        var origins = new HashSet<string>(StringComparer.Ordinal);
+        var primary = ParseRoute(
+            root.GetProperty("primary"),
+            routerIds,
+            agreementKeys,
+            origins);
+        var fallback = ParseRoute(
+            root.GetProperty("fallback"),
+            routerIds,
+            agreementKeys,
+            origins);
+        Require(routerIds.Count == 6 && agreementKeys.Count == 6 && origins.Count == 2,
+            "Privacy routes must be two origin- and identity-disjoint three-hop routes.");
+        return new ExactPrivacyRoutes(primary, fallback);
+    }
+
+    private static ExactPrivacyRoute ParseRoute(
+        JsonElement element,
+        ISet<string> routerIds,
+        ISet<string> agreementKeys,
+        ISet<string> origins)
+    {
+        ExactProperties(element, RouteProperties, "privacy route");
+        var originText = element.GetProperty("entryOrigin").GetString();
+        if (originText is null ||
+            !Uri.TryCreate(originText, UriKind.Absolute, out var origin))
+        {
+            throw new InvalidDataException(
+                "Privacy route entry origin must be an absolute URI.");
+        }
+        Require(
+                origin.Scheme == Uri.UriSchemeHttps &&
+                origin.AbsolutePath == "/" &&
+                string.IsNullOrEmpty(origin.UserInfo) &&
+                string.IsNullOrEmpty(origin.Query) &&
+                string.IsNullOrEmpty(origin.Fragment) &&
+                string.Equals(origin.AbsoluteUri, originText, StringComparison.Ordinal) &&
+                origins.Add(origin.AbsoluteUri),
+            "Privacy route entry origins must be distinct canonical HTTPS origins.");
+
+        var hopsElement = element.GetProperty("hops");
+        Require(hopsElement.ValueKind == JsonValueKind.Array &&
+                hopsElement.GetArrayLength() == PrivacyRoutingLimits.RouteHopCount,
+            "Privacy route must contain exactly three hops.");
+        var hops = new List<PrivacyRoutingHop>(PrivacyRoutingLimits.RouteHopCount);
+        foreach (var hopElement in hopsElement.EnumerateArray())
+        {
+            ExactProperties(hopElement, HopProperties, "privacy route hop");
+            var routerIdText = CanonicalLowerHex(
+                hopElement.GetProperty("routerId"),
+                "Privacy route router id");
+            var agreementKeyText = CanonicalLowerHex(
+                hopElement.GetProperty("x25519PublicKey"),
+                "Privacy route X25519 public key");
+            Require(routerIds.Add(routerIdText) && agreementKeys.Add(agreementKeyText),
+                "Privacy routes repeat a router id or X25519 public key.");
+            hops.Add(new PrivacyRoutingHop(
+                Convert.FromHexString(routerIdText),
+                Convert.FromHexString(agreementKeyText)));
+        }
+
+        return new ExactPrivacyRoute(origin, hops);
+    }
+
+    private static string CanonicalLowerHex(JsonElement element, string label)
+    {
+        var value = element.GetString();
+        Require(value is not null &&
+                value.Length == 64 &&
+                value.All(static character => character is
+                    >= '0' and <= '9' or >= 'a' and <= 'f'),
+            $"{label} must be canonical lowercase 32-byte hex.");
+        return value!;
+    }
+
+    private static void ExactProperties(
+        JsonElement element,
+        IReadOnlyCollection<string> expected,
+        string label)
+    {
+        Require(element.ValueKind == JsonValueKind.Object,
+            $"{label} must be one JSON object.");
+        var names = element.EnumerateObject()
+            .Select(static property => property.Name)
+            .ToArray();
+        Require(names.Length == expected.Count &&
+                names.ToHashSet(StringComparer.Ordinal).SetEquals(expected),
+            $"{label} contains missing, duplicate, or unknown properties.");
+    }
+
+    private static void Require(bool condition, string message)
+    {
+        if (!condition)
+        {
+            throw new InvalidDataException(message);
+        }
     }
 }
 
@@ -2149,8 +2789,18 @@ sealed class ExactHttpPeerClient : IMailboxReplicaPeerClient
             : MailboxWireHttpContract.PeerTombstone;
         using var content = new ByteArrayContent(canonicalPrq2.ToArray());
         content.Headers.ContentType = new MediaTypeHeaderValue(contract.RequestContentType);
-        using var response = await _client.PostAsync(peer.Endpoint, content, cancellationToken);
-        if ((int)response.StatusCode != contract.SuccessStatusCode
+        using var request = new HttpRequestMessage(HttpMethod.Post, peer.Endpoint)
+        {
+            Version = HttpVersion.Version20,
+            VersionPolicy = HttpVersionPolicy.RequestVersionExact,
+            Content = content
+        };
+        using var response = await _client.SendAsync(
+            request,
+            HttpCompletionOption.ResponseHeadersRead,
+            cancellationToken);
+        if (response.Version != HttpVersion.Version20
+            || (int)response.StatusCode != contract.SuccessStatusCode
             || response.Content.Headers.ContentLength != contract.MaximumResponseBytes
             || !string.Equals(response.Content.Headers.ContentType?.ToString(), contract.ResponseContentType, StringComparison.Ordinal)
             || response.Content.Headers.ContentEncoding.Count != 0)
@@ -2169,6 +2819,7 @@ sealed record Arguments(
     string AuthorityPublicPath,
     string CoordinatorUrl,
     string ClientUrl,
+    string? PrivacyRoutesPath,
     bool RequireNonLoopbackCoordinator,
     string? RunId,
     string? OutputEnvironment,
@@ -2216,6 +2867,7 @@ sealed record Arguments(
             Option("--authority-public", "/run/survival/mailbox-peer-authority.public.json"),
             Option("--coordinator-url", "http://127.0.0.1:41801"),
             Option("--client-url", "http://xnode-1:8080"),
+            Optional("--privacy-routes"),
             values.Contains(
                 "--require-non-loopback-coordinator",
                 StringComparer.Ordinal),

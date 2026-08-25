@@ -14,13 +14,13 @@ $PinnedXNode = Join-Path $Root 'artifacts\survival-dev\build-contexts\xnode'
 $DriverSource = Join-Path $Root 'tools\survival-mailbox-driver'
 $BuildHelper = Join-Path $PSScriptRoot 'survival-dev-mailbox-build-inputs.ps1'
 $ExpectedBuildHelperSha256 = 'c5e0f08e0816296734195a27b2c8a47a207b0f1ade88f0186caffe02334f1456'
-$ExpectedXNodeCommit = '828bb09246b58b73b23f24540d7edf863e2f43c2'
-$ExpectedXNodeManifestSha256 = 'def5a44c57666f474980c8f12facbe7033e9a5944b797c6fb726865e7363ffad'
+$ExpectedXNodeCommit = '19517d176793a37e258766be39ca9adba30369fa'
+$ExpectedXNodeManifestSha256 = 'f759eeeffcf19b9ec97bef8d34bc740b38a0bdb22f0d554c4094c303f7f219e2'
 $ExpectedDriverSha256 = @{
     'MailboxGrantProvisioner.cs' = 'f88f7ebb0c06f11fde52386341202090e8bd4205ad23bb40c31e7d79d2ac8184'
-    'MailboxRuntimePublisher.cs' = 'd6aad71f65987f620ccf0d5a06394240aa199d3bb92ef38b81a9594f8e9ff94b'
+    'MailboxRuntimePublisher.cs' = 'aa725b67ddfd48193a3e5cc3f39f529130e589e05fa14b1569123c8a8cf42866'
     'PrivateCrossProcessState.cs' = '651d8256822d41b9a7bceab1e6d6bb45740026cac00f487a564befe7777f272b'
-    'Program.cs' = '8eb6b8e04049d7dd06cb2998a0487a6b9ea4554e601f8ca63d047e83283fa0b2'
+    'Program.cs' = '5162fbeb990dd045664f5c2ef873e012dd9ac9ad6a5d02903d9ec097a3f7927d'
     'SurvivalMailboxDriver.csproj' = '4db436d69ea88ac3ff16f08c161b61cc0c048bad84cb7e529b2208fa569eafbe'
 }
 . (Join-Path $PSScriptRoot 'survival-dev-private-secrets.ps1')
@@ -81,11 +81,30 @@ function Invoke-Checked([string]$File, [string[]]$Arguments) {
     return $output
 }
 
-function Get-RunningStackCount() {
-    return @(& docker ps --filter 'label=com.docker.compose.project=deep-survival-dev' --format '{{.Names}}').Count
+function Assert-OrdinaryStack() {
+    $expected = @(
+        'file', 'push', 'registry', 'storage', 'survival-uat-crl',
+        'survival-uat-tls-ingress', 'turn',
+        'xnode-1', 'xnode-2', 'xnode-3', 'xnode-4', 'xnode-5', 'xnode-6'
+    ) | Sort-Object
+    $rows = @(& docker ps `
+        --filter 'label=com.docker.compose.project=deep-survival-dev' `
+        --format json)
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Unable to inspect the ordinary survival service topology.'
+    }
+    $actual = @($rows | ForEach-Object {
+        $labels = ([string]($_ | ConvertFrom-Json).Labels)
+        $match = [regex]::Match($labels, '(?:^|,)com\.docker\.compose\.service=([^,]+)')
+        if (-not $match.Success) { throw 'A survival container has no Compose service label.' }
+        $match.Groups[1].Value
+    }) | Sort-Object
+    if (($actual -join "`n") -cne ($expected -join "`n")) {
+        throw 'Resend chaos integration requires the exact ordinary survival service topology.'
+    }
 }
 
-if ((Get-RunningStackCount) -ne 14) { throw 'Resend chaos integration requires the ordinary 14-container survival stack.' }
+Assert-OrdinaryStack
 $initial = @(& powershell -NoProfile -ExecutionPolicy Bypass -File $Launcher -Action ChaosStatus)
 $initialStatus = ($initial | Where-Object { $_ -match '^\{"schema":"deep-survival-resend-chaos-status\.v2"' } | Select-Object -Last 1) | ConvertFrom-Json
 if ($initialStatus.running -ne $false -or $initialStatus.armed -ne $false) { throw 'Resend chaos must start fully off.' }
@@ -148,10 +167,38 @@ try {
         '--output-client-env', (Join-Path $BuildWork 'mailbox-client-authority.https.env'),
         '--coordinator-url', "https://${BindHost}:41801",
         '--output-public', $HttpsAuthority,
-        '--output-client-public', (Join-Path $BuildWork 'mailbox-client-authority.https.public.json')))
+        '--output-client-public', (Join-Path $BuildWork 'mailbox-client-authority.https.public.json'),
+        '--output-privacy-routes-android', (Join-Path $BuildWork 'privacy-routes.android.v1.json'),
+        '--output-privacy-routes-windows', (Join-Path $BuildWork 'privacy-routes.windows.v1.json'),
+        '--privacy-entry-host', $BindHost))
 
     foreach ($fault in @('post-durable-response-drop', 'pre-dispatch-outage', 'post-durable-ack-response-drop')) {
         try {
+            $runId = [Guid]::NewGuid().ToString('N')
+            $commonDriverArguments = @(
+                '--secrets-dir', $Secrets,
+                '--state-dir', $State,
+                '--authority-public', $HttpsAuthority,
+                '--coordinator-url', "https://${BindHost}:41801",
+                '--client-url', "https://${BindHost}:41801",
+                '--privacy-routes', (Join-Path $BuildWork 'privacy-routes.android.v1.json'),
+                '--require-non-loopback-coordinator')
+            if ($fault -ceq 'post-durable-ack-response-drop') {
+                # MAU2 is opaque at public ingress, so prepare Store/Retrieve before
+                # arming the one-shot fault and expose only the ACK to that window.
+                $prepareArguments = @($DriverDll, 'client-prepare-ack-loss') +
+                    $commonDriverArguments + @('--run-id', $runId)
+                $prepareOutput = Invoke-Checked dotnet $prepareArguments
+                $prepare = ($prepareOutput | Where-Object {
+                    $_ -match '^\{"schemaVersion":1,"phase":"client-prepare-ack-loss"'
+                } | Select-Object -Last 1) | ConvertFrom-Json
+                if ($prepare.passed -ne $true -or
+                    $prepare.details.retrievedItemsBeforeAck -ne 1 -or
+                    $prepare.details.prepared -ne $true -or
+                    $prepare.details.ackDispatched -ne $false) {
+                    throw 'Real ACK loss preparation did not persist one exact pending ACK.'
+                }
+            }
             $beginOutput = Invoke-Checked powershell @(
                 '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $Launcher,
                 '-Action', 'ChaosBegin', '-LanHost', $BindHost,
@@ -162,14 +209,6 @@ try {
                 ([long]$begin.faultWindowDeadlineUnixMilliseconds - [long]$begin.faultWindowStartedUnixMilliseconds) -ne ($TtlSeconds * 1000L)) {
                 throw 'ChaosBegin did not return the exact armed fault/deadline binding.'
             }
-            $runId = [Guid]::NewGuid().ToString('N')
-            $commonDriverArguments = @(
-                '--secrets-dir', $Secrets,
-                '--state-dir', $State,
-                '--authority-public', $HttpsAuthority,
-                '--coordinator-url', "https://${BindHost}:41801",
-                '--client-url', "https://${BindHost}:41801",
-                '--require-non-loopback-coordinator')
             $preRestartCounters = $null
             $postRestartCounters = $null
             $driverAssertions = $null
@@ -184,7 +223,7 @@ try {
                 $preRestartOutput = Invoke-Checked powershell @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $Launcher, '-Action', 'ChaosStatus')
                 $preRestart = ($preRestartOutput | Where-Object { $_ -match '^\{"schema":"deep-survival-resend-chaos-status\.v2"' } | Select-Object -Last 1) | ConvertFrom-Json
                 if ($preRestart.operation -cne 'mailbox-ack' -or $preRestart.fault -cne $fault -or
-                    $preRestart.requestCount -ne 3 -or $preRestart.operationAttemptCount -ne 1 -or
+                    $preRestart.requestCount -ne 1 -or $preRestart.operationAttemptCount -ne 1 -or
                     $preRestart.operationUpstreamDispatchCount -ne 1 -or
                     $preRestart.operationUpstreamSuccessCount -ne 1 -or
                     $preRestart.injectedFaultCount -ne 1 -or
@@ -192,7 +231,7 @@ try {
                     throw "ACK crash-window counters were not exact before process restart: $($preRestart | ConvertTo-Json -Compress)"
                 }
                 $preRestartCounters = [ordered]@{
-                    requestCount = 3
+                    requestCount = 1
                     operationAttemptCount = 1
                     operationUpstreamDispatchCount = 1
                     operationUpstreamSuccessCount = 1
@@ -208,18 +247,18 @@ try {
                 }
                 $postRestartOutput = Invoke-Checked powershell @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $Launcher, '-Action', 'ChaosStatus')
                 $postRestart = ($postRestartOutput | Where-Object { $_ -match '^\{"schema":"deep-survival-resend-chaos-status\.v2"' } | Select-Object -Last 1) | ConvertFrom-Json
-                if ($postRestart.requestCount -ne 5 -or $postRestart.operationAttemptCount -ne 2 -or
-                    $postRestart.operationUpstreamDispatchCount -ne 2 -or
-                    $postRestart.operationUpstreamSuccessCount -ne 2 -or
+                if ($postRestart.requestCount -ne 3 -or $postRestart.operationAttemptCount -ne 3 -or
+                    $postRestart.operationUpstreamDispatchCount -ne 3 -or
+                    $postRestart.operationUpstreamSuccessCount -ne 3 -or
                     $postRestart.injectedFaultCount -ne 1 -or
                     $postRestart.postDurableAckResponseDropCount -ne 1) {
                     throw "ACK counters were not exact after process restart and one retry: $($postRestart | ConvertTo-Json -Compress)"
                 }
                 $postRestartCounters = [ordered]@{
-                    requestCount = 5
-                    operationAttemptCount = 2
-                    operationUpstreamDispatchCount = 2
-                    operationUpstreamSuccessCount = 2
+                    requestCount = 3
+                    operationAttemptCount = 3
+                    operationUpstreamDispatchCount = 3
+                    operationUpstreamSuccessCount = 3
                     injectedFaultCount = 1
                 }
                 $replayArguments = @($DriverDll, 'client-replay-ack-loss') + $commonDriverArguments
@@ -256,15 +295,15 @@ try {
             $chaos = ($statusOutput | Where-Object { $_ -match '^\{"schema":"deep-survival-resend-chaos-status\.v2"' } | Select-Object -Last 1) | ConvertFrom-Json
             $ackFault = $fault -ceq 'post-durable-ack-response-drop'
             $expectedOperation = if ($ackFault) { 'mailbox-ack' } else { 'mailbox-store' }
-            $expectedRequests = if ($ackFault) { 6 } else { 4 }
-            $expectedDispatches = if ($fault -ceq 'pre-dispatch-outage') { 2 } else { 3 }
+            $expectedRequests = 4
+            $expectedDispatches = if ($fault -ceq 'pre-dispatch-outage') { 3 } else { 4 }
             $expectedPostDrop = if ($fault -ceq 'post-durable-response-drop') { 1 } else { 0 }
             $expectedAckDrop = if ($ackFault) { 1 } else { 0 }
             $expectedPreOutage = if ($fault -ceq 'pre-dispatch-outage') { 1 } else { 0 }
             if ($chaos.armed -ne $false -or $chaos.consumed -ne $true -or
                 $chaos.operation -cne $expectedOperation -or $chaos.fault -cne $fault -or
                 $chaos.requestCount -ne $expectedRequests -or
-                $chaos.operationAttemptCount -ne 3 -or
+                $chaos.operationAttemptCount -ne 4 -or
                 $chaos.operationUpstreamDispatchCount -ne $expectedDispatches -or
                 $chaos.operationUpstreamSuccessCount -ne $expectedDispatches -or
                 $chaos.injectedFaultCount -ne 1 -or
@@ -306,6 +345,30 @@ try {
                 postRestartCounters = $postRestartCounters
                 outcome = $driverAssertions
             }
+        } catch {
+            $faultFailure = $_.Exception
+            try {
+                $failureStatusOutput = Invoke-Checked powershell @(
+                    '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $Launcher,
+                    '-Action', 'ChaosStatus')
+                $failureStatus = ($failureStatusOutput | Where-Object {
+                        $_ -match '^\{"schema":"deep-survival-resend-chaos-status\.v2"'
+                    } | Select-Object -Last 1) | ConvertFrom-Json
+                throw [InvalidOperationException]::new(
+                    ('Fault {0} failed with sanitized proxy counters: requests={1}, attempts={2}, dispatches={3}, successes={4}, injections={5}.' -f
+                        $fault,
+                        $failureStatus.requestCount,
+                        $failureStatus.operationAttemptCount,
+                        $failureStatus.operationUpstreamDispatchCount,
+                        $failureStatus.operationUpstreamSuccessCount,
+                        $failureStatus.injectedFaultCount),
+                    $faultFailure)
+            } catch {
+                if ($_.Exception.InnerException -eq $faultFailure) { throw }
+                throw [AggregateException]::new(
+                    'Fault run and sanitized failure-status collection both failed.',
+                    [Exception[]]@($faultFailure, $_.Exception))
+            }
         } finally {
             if ($chaosStarted) {
                 [void](Invoke-Checked powershell @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $Launcher, '-Action', 'ChaosEnd'))
@@ -315,6 +378,32 @@ try {
     }
 } catch {
     $runFailure = $_.Exception
+    try {
+        $failureBindingExists = Test-Path -LiteralPath (
+            Join-Path $Secrets 'resend-chaos.binding.json')
+        $runningChaos = @(& docker ps `
+            --filter 'label=com.xpoint.survival.resend-chaos=development-only' `
+            --filter 'status=running' --format '{{.Names}}')
+        if ($failureBindingExists -and $runningChaos.Count -eq 1) {
+            $failedStatusOutput = @(& powershell -NoProfile -ExecutionPolicy Bypass `
+                -File $Launcher -Action ChaosStatus)
+            $failedStatus = ($failedStatusOutput | Where-Object {
+                    $_ -match '^\{"schema":"deep-survival-resend-chaos-status\.v2"'
+                } | Select-Object -Last 1) | ConvertFrom-Json
+            $runFailure = [InvalidOperationException]::new(
+                ('Chaos run failed with sanitized proxy counters: requests={0}, attempts={1}, dispatches={2}, successes={3}, injections={4}.' -f
+                    $failedStatus.requestCount,
+                    $failedStatus.operationAttemptCount,
+                    $failedStatus.operationUpstreamDispatchCount,
+                    $failedStatus.operationUpstreamSuccessCount,
+                    $failedStatus.injectedFaultCount),
+                $runFailure)
+        }
+    } catch {
+        $runFailure = [AggregateException]::new(
+            'Chaos run and sanitized failure-status collection both failed.',
+            [Exception[]]@($runFailure, $_.Exception))
+    }
 } finally {
     $cleanupFailures = [Collections.Generic.List[Exception]]::new()
     if ($null -ne $runFailure) { $cleanupFailures.Add($runFailure) }
@@ -368,9 +457,7 @@ try {
         }
     } catch { $cleanupFailures.Add($_.Exception) }
     try {
-        if ((Get-RunningStackCount) -ne 14) {
-            throw 'Ordinary survival stack was not fully restored.'
-        }
+        Assert-OrdinaryStack
         $proxyCount = @(& docker ps -a `
             --filter 'label=com.xpoint.survival.resend-chaos=development-only' `
             --format '{{.Names}}').Count

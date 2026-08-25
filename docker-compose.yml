@@ -207,6 +207,18 @@ services:
     environment:
       ASPNETCORE_URLS: http://0.0.0.0:8080
       Registry__StakingRequirementAtomic: "25000000000000"
+      Registry__StatePath: /var/lib/deep/registry/registry-state.json
+      Calls__Required: "true"
+      Calls__Enabled: "true"
+      Calls__StatePath: /var/lib/deep/registry/calls-v2.json
+      Calls__TurnSharedSecretFile: /run/secrets/turn-shared-secret
+      Calls__CredentialLifetimeSeconds: "3600"
+      Calls__IceUrls__0: stun:127.0.0.1:3478
+      Calls__IceUrls__1: turn:127.0.0.1:3478?transport=udp
+    volumes:
+      - registry-state:/var/lib/deep/registry
+    secrets:
+      - turn-shared-secret
     ports:
       - "18080:8080"
     healthcheck:
@@ -337,26 +349,6 @@ services:
       - file-service-state:/var/lib/deep/file-service
     ports:
       - "19101:8080"
-    healthcheck:
-      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
-      interval: 3s
-      timeout: 3s
-      retries: 30
-
-  calls-service:
-    profiles: ["backend-external"]
-    build:
-      context: ${DEEP_DEVOPS_DIR:-.}
-      dockerfile: docker/calls-service.Dockerfile
-      args: *node-runtime-build-args
-    environment:
-      PORT: "8080"
-      SERVICE_NAME: deep-calls-service
-      CALLS_STATE_DIR: /var/lib/deep/calls-service
-    volumes:
-      - calls-service-state:/var/lib/deep/calls-service
-    ports:
-      - "19103:8080"
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval: 3s
@@ -495,10 +487,14 @@ services:
         condition: service_healthy
 
 volumes:
+  registry-state:
   storage-state:
   file-state:
   calls-state:
   storage-service-state:
   file-service-state:
-  calls-service-state:
   push-service-state:
+
+secrets:
+  turn-shared-secret:
+    file: ${DEEP_TEST_TURN_SHARED_SECRET_FILE:-./.secrets/test-env/turn-shared-secret}

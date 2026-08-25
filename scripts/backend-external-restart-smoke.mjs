@@ -1,5 +1,6 @@
 ﻿import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createTestStorageSigningIdentity } from '../tools/compat-services/storage-signatures.mjs';
@@ -58,6 +59,21 @@ async function postJson(baseUrl, path, payload) {
   return response.json();
 }
 
+async function postAccepted(baseUrl, path, payload) {
+  const response = await fetch(new URL(path, baseUrl), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  assert.equal(response.status, 202, `POST ${path} must be accepted`);
+}
+
+async function getJsonWithHeaders(baseUrl, path, headers) {
+  const response = await fetch(new URL(path, baseUrl), { headers });
+  await assertOk(response, `GET ${path}`);
+  return response.json();
+}
+
 async function postBytes(baseUrl, path, bytes, contentType = 'application/octet-stream') {
   const response = await fetch(new URL(path, baseUrl), {
     method: 'POST',
@@ -78,12 +94,12 @@ function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function waitForReady(serviceName, baseUrl, timeoutMs = restartPlan.readyTimeoutMs) {
+async function waitForReady(serviceName, baseUrl, healthPath = '/health/ready', timeoutMs = restartPlan.readyTimeoutMs) {
   const deadline = Date.now() + timeoutMs;
 
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(new URL('/health/ready', baseUrl));
+      const response = await fetch(new URL(healthPath, baseUrl));
       if (response.ok) {
         const body = await response.json();
         assert.equal(body.ok, true, `${serviceName} reported non-ready health payload`);
@@ -181,14 +197,14 @@ function createPushUnsubscribePayload(identity, subscription) {
 }
 
 async function getServiceStats(urls) {
-  const [storage, file, push, calls] = await Promise.all([
+  const [storage, file, push, registry] = await Promise.all([
     getJson(urls.storage, '/stats'),
     getJson(urls.file, '/stats'),
     getJson(urls.push, '/stats'),
-    getJson(urls.calls, '/stats')
+    getJson(urls.registry, '/health/live')
   ]);
 
-  return { storage, file, push, calls };
+  return { storage, file, push, registry };
 }
 
 function restartManagedExternalServices() {
@@ -198,7 +214,7 @@ function restartManagedExternalServices() {
   const profile = process.env.DEEP_EXTERNAL_PROFILE ?? 'backend-external';
   const restart = spawnSync(
     'docker',
-    ['compose', '-f', composeFile, '--profile', profile, 'restart', 'storage-service', 'file-service', 'push-service', 'calls-service'],
+    ['compose', '-f', composeFile, '--profile', profile, 'restart', 'storage-service', 'file-service', 'push-service', 'registry'],
     {
       stdio: 'inherit',
       env: process.env
@@ -216,19 +232,65 @@ function sortStrings(values) {
   return [...values].map(value => String(value)).sort((left, right) => left.localeCompare(right));
 }
 
+function createSignedCallSignal(senderIdentity, recipientIdentity) {
+  const createdAtUnixMs = Date.now();
+  const nonce = randomBytes(16).toString('hex');
+  const request = {
+    callId: `restart-call-${createdAtUnixMs}`,
+    conversationId: recipientIdentity.sessionPubkey,
+    sender: { value: senderIdentity.sessionPubkey },
+    recipient: { value: recipientIdentity.sessionPubkey },
+    type: 0,
+    payload: `sealed-v1:${Buffer.from('restart-call-envelope').toString('base64')}`,
+    createdAt: new Date(createdAtUnixMs).toISOString(),
+    senderEd25519: senderIdentity.pubkeyEd25519,
+    signature: null,
+    nonce
+  };
+  request.signature = senderIdentity.signMessage(JSON.stringify({
+    version: 'deep-call-signal-v2',
+    callId: request.callId,
+    conversationId: request.conversationId,
+    sender: request.sender.value,
+    recipient: request.recipient.value,
+    type: 'Offer',
+    payload: request.payload,
+    createdAtUnixMs,
+    senderEd25519: request.senderEd25519,
+    nonce
+  }));
+  return request;
+}
+
+function createSignedCallGet(identity, route, purpose) {
+  const timestamp = Math.floor(Date.now() / 1000);
+  const nonce = randomBytes(16).toString('hex');
+  const path = `/api/calls/${route}/${identity.sessionPubkey}`;
+  return {
+    path,
+    headers: {
+      'X-Deep-Ed25519': identity.pubkeyEd25519,
+      'X-Deep-Timestamp': String(timestamp),
+      'X-Deep-Nonce': nonce,
+      'X-Deep-Signature': identity.signMessage(
+        `${purpose}\nGET\n${path}\n${identity.sessionPubkey}\n${timestamp}\n${nonce}`)
+    }
+  };
+}
+
 async function main() {
   const urls = {
     storage: resolveHostServiceBaseUrl('DEEP_STORAGE_URL', 'DEEP_STORAGE_STATS_URL', 'http://127.0.0.1:19100'),
     file: resolveHostServiceBaseUrl('DEEP_FILE_URL', 'DEEP_FILE_STATS_URL', 'http://127.0.0.1:19101'),
     push: resolveHostServiceBaseUrl('DEEP_PUSH_URL', 'DEEP_PUSH_STATS_URL', 'http://127.0.0.1:19102'),
-    calls: resolveHostServiceBaseUrl('DEEP_CALL_SIGNALING_BASE_URL', 'DEEP_CALL_STATS_URL', 'http://127.0.0.1:19103')
+    registry: process.env.DEEP_REGISTRY_URL ?? 'http://127.0.0.1:18080'
   };
 
   await Promise.all([
     waitForReady('storage-service', urls.storage),
     waitForReady('file-service', urls.file),
     waitForReady('push-service', urls.push),
-    waitForReady('calls-service', urls.calls)
+    waitForReady('registry', urls.registry, '/health/live')
   ]);
 
   const storageIdentity = createTestStorageSigningIdentity();
@@ -242,16 +304,9 @@ async function main() {
   });
   const filePayload = Buffer.from(`backend-external-restart-file-${Date.now()}`, 'utf8');
   const avatarPayload = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x01]);
-  const callRecipient = `05${'d'.repeat(64)}`;
-  const callSignal = {
-    callId: `restart-call-${Date.now()}`,
-    conversationId: callRecipient,
-    sender: { value: storageIdentity.directPubkey },
-    recipient: { value: callRecipient },
-    type: 0,
-    payload: '{"sdp":"offer"}',
-    createdAt: new Date().toISOString()
-  };
+  const callSender = createTestStorageSigningIdentity();
+  const callRecipient = createTestStorageSigningIdentity();
+  const callSignal = createSignedCallSignal(callSender, callRecipient);
 
   const pushSubscribe = await postJson(urls.push, '/subscribe', pushSubscription);
   assert.equal(pushSubscribe.success, true);
@@ -293,12 +348,9 @@ async function main() {
   assert.equal(avatarInfoBeforeRestart.contentType, 'image/png');
   assert.deepEqual(avatarBytesBeforeRestart, avatarPayload);
 
-  const callSignalBeforeRestart = await postJson(urls.calls, '/api/calls/signal', callSignal);
-  assert.equal(callSignalBeforeRestart.accepted, true);
-  assert.equal(callSignalBeforeRestart.callId, callSignal.callId);
+  await postAccepted(urls.registry, '/api/calls/signal', callSignal);
 
   const statsBeforeRestart = await getServiceStats(urls);
-  assert.equal(statsBeforeRestart.calls.inventory.callSignals, 1);
 
   restartManagedExternalServices();
 
@@ -306,7 +358,7 @@ async function main() {
     waitForReady('storage-service', urls.storage),
     waitForReady('file-service', urls.file),
     waitForReady('push-service', urls.push),
-    waitForReady('calls-service', urls.calls)
+    waitForReady('registry', urls.registry, '/health/live')
   ]);
 
   const statsAfterRestart = await getServiceStats(urls);
@@ -335,12 +387,6 @@ async function main() {
     statsBeforeRestart.push.inventory.pushDeliveries,
     'push delivery inventory changed across compose restart'
   );
-  assert.equal(
-    statsAfterRestart.calls.inventory.callSignals,
-    statsBeforeRestart.calls.inventory.callSignals,
-    'call signal inventory changed across compose restart'
-  );
-
   const retrievedAfterRestart = await postJson(
     urls.storage,
     '/storage/retrieve',
@@ -378,7 +424,11 @@ async function main() {
   assert.equal(subscriptionsAfterRestart.deliveries[0].hash, storedBeforeRestart.hash);
   assert.equal(subscriptionsAfterRestart.deliveries[0].token, pushToken);
 
-  const callInboxAfterRestart = await getJson(urls.calls, `/api/calls/inbox/${encodeURIComponent(callRecipient)}`);
+  const inboxRequest = createSignedCallGet(callRecipient, 'inbox', 'deep-call-inbox-v2');
+  const callInboxAfterRestart = await getJsonWithHeaders(
+    urls.registry,
+    inboxRequest.path,
+    inboxRequest.headers);
   assert.equal(callInboxAfterRestart.length, 1);
   assert.equal(callInboxAfterRestart[0].callId, callSignal.callId);
 
@@ -443,12 +493,6 @@ async function main() {
     statsAfterRehearsal.push.inventory.pushDeliveries >= statsAfterRestart.push.inventory.pushDeliveries + 1,
     'push delivery inventory did not reflect post-restart notify activity'
   );
-  assert.equal(
-    statsAfterRehearsal.calls.inventory.callSignals,
-    0,
-    'call signal inventory did not drain after post-restart inbox retrieval'
-  );
-
   writeArtifact('backend-restart-smoke.json', {
     status: 'ok',
     backendMode: process.env.DEEP_BACKEND_MODE ?? 'external',
@@ -461,14 +505,18 @@ async function main() {
     fileInfoBeforeRestart,
     avatarBeforeRestart,
     avatarInfoBeforeRestart,
-    callSignalBeforeRestart,
+    callRegistry: {
+      authenticatedSignalAcceptedBeforeRestart: true,
+      registryRestarted: true,
+      authenticatedInboxRetrievedAfterRestart: true,
+      exactSignalCountAfterRestart: callInboxAfterRestart.length
+    },
     statsBeforeRestart,
     statsAfterRestart,
     retrievedAfterRestart,
     fileInfoAfterRestart,
     avatarInfoAfterRestart,
     subscriptionsAfterRestart,
-    callInboxAfterRestart,
     extendedAfterRestart,
     storedAfterRestart,
     retrievedFinal,

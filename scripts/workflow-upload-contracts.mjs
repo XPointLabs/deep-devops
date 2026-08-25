@@ -8,6 +8,7 @@ const workflowRoot = path.join(repositoryRoot, '.github', 'workflows');
 const requiredLaneEvidence = new Map([
   ['p6-release-evidence.yml', [
     'release-artifact-hydration-summary.json',
+    'mau2-call-result.json',
     'client-device-acceptance.json',
     'client-device-acceptance-summary.json',
     'ops-deployment-evidence.json',

@@ -22,6 +22,7 @@ const negativeStaleClientDeviceAcceptancePath = path.join(negativeStaleEvidenceR
 const summaryPath = path.join(releaseDir, 'release-gate-contract-summary.json');
 
 const scriptNames = [
+  'security-gate.mjs',
   'metadata-privacy-gate.mjs',
   'secret-scan.mjs',
   'artifact-upload-manifest.mjs',
@@ -133,6 +134,13 @@ for (const scriptName of scriptNames) {
   if (!result.passed) {
     break;
   }
+}
+
+if (commandResults.every(result => result.passed)) {
+  runNode(
+    ['--test', 'scripts/security-gate.test.mjs'],
+    'security-gate:tests'
+  );
 }
 
 if (commandResults.every(result => result.passed)) {
@@ -407,11 +415,37 @@ async function writeFixtureArtifacts() {
     avatarInfoBeforeRestart: { fileId: 'avatar-file-id' },
     avatarInfoAfterRestart: { fileId: 'avatar-file-id' },
     subscriptionsAfterRestart: { deliveries: [{ id: 'delivery-after-restart' }] },
+    callRegistry: {
+      authenticatedSignalAcceptedBeforeRestart: true,
+      registryRestarted: true,
+      authenticatedInboxRetrievedAfterRestart: true,
+      exactSignalCountAfterRestart: 1
+    },
     statsAfterRehearsal: {
       storage: { stats: { errors: 0 } },
       file: { stats: { errors: 0 } },
       push: { stats: { errors: 0 } }
     }
+  });
+
+  await writeJson(path.join(testResultsDir, 'mau2-call-result.json'), {
+    schema: 'deep.physical-mau2-phase.v1',
+    phase: 'Call',
+    sourceCommit: 'a'.repeat(40),
+    policyId: 'contract-fixture',
+    storageReplication: 'shared-dev-storage-non-replicated',
+    outgoingOfferStarted: true,
+    incomingRingingObserved: true,
+    incomingAnswerAccepted: true,
+    selectedIceCandidatePairObserved: true,
+    bidirectionalAudioRtpObserved: true,
+    microphoneMuteApplied: true,
+    microphoneRestoreApplied: true,
+    remoteHangupObserved: true,
+    authenticatedMau2EnvironmentValidated: true,
+    productionPackageUntouched: true,
+    windowsOutputTreeSha256: 'b'.repeat(64),
+    status: 'passed'
   });
 
   await writeJson(path.join(testResultsDir, 'push-provider-canary.json'), {
@@ -490,6 +524,29 @@ async function writeFixtureArtifacts() {
     secretFindings: 0,
     dependencyFailures: 0,
     sbomComponents: 42
+  });
+
+  await writeJson(path.join(securityDir, 'sbom.json'), {
+    bomFormat: 'CycloneDX',
+    specVersion: '1.6',
+    version: 1,
+    metadata: {
+      timestamp: '2026-06-02T00:00:00.000Z',
+      component: {
+        type: 'application',
+        'bom-ref': 'pkg:generic/network.xpoint.deep@deep-messenger-rc.1',
+        name: 'network.xpoint.deep',
+        version: 'deep-messenger-rc.1',
+        purl: 'pkg:generic/network.xpoint.deep@deep-messenger-rc.1'
+      }
+    },
+    components: [{
+      type: 'library',
+      'bom-ref': 'pkg:npm/example-package@1.0.0',
+      name: 'example-package',
+      version: '1.0.0',
+      purl: 'pkg:npm/example-package@1.0.0'
+    }]
   });
 
   await writeJson(path.join(observabilityDir, 'observability-gate-summary.json'), {

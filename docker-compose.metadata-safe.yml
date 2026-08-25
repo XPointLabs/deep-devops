@@ -60,9 +60,3 @@ services:
     logging: *metadata-safe-logging
     labels:
       io.deep.infrastructure-privacy-profile: metadata-safe-v1
-
-  calls:
-    environment: *metadata-safe-environment
-    logging: *metadata-safe-logging
-    labels:
-      io.deep.infrastructure-privacy-profile: metadata-safe-v1

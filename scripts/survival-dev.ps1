@@ -9,7 +9,7 @@ param(
     [switch]$Reset,
     [ValidateRange(5, 300)]
     [int]$ChaosTtlSeconds = 60,
-    [ValidateSet('post-durable-response-drop','pre-dispatch-outage','post-durable-ack-response-drop')]
+    [ValidateSet('post-durable-response-drop','pre-dispatch-outage','primary-ingress-rejected-before-forward','post-durable-ack-response-drop')]
     [string]$ChaosFault
 )
 
@@ -131,14 +131,14 @@ $baseArguments = @('compose') + $projectDirectoryArguments + @('-p', $Project, '
 $uatTlsArguments = @('compose') + $projectDirectoryArguments + @('-p', $Project, '-f', $ComposePath, '-f', $UatTlsComposePath)
 $chaosArguments = @('compose') + $projectDirectoryArguments + @('-p', $Project, '-f', $ComposePath, '-f', $UatTlsComposePath, '-f', $ChaosComposePath, '--profile', 'resend-chaos')
 $ContextRoot = Join-Path $Root 'artifacts\survival-dev\build-contexts'
-$SurvivalXNodeCommit = '828bb09246b58b73b23f24540d7edf863e2f43c2'
-$SurvivalXNodeContextManifestSha256 = 'def5a44c57666f474980c8f12facbe7033e9a5944b797c6fb726865e7363ffad'
+$SurvivalXNodeCommit = '19517d176793a37e258766be39ca9adba30369fa'
+$SurvivalXNodeContextManifestSha256 = 'f759eeeffcf19b9ec97bef8d34bc740b38a0bdb22f0d554c4094c303f7f219e2'
 $SurvivalMailboxBuildHelperSha256 = 'c5e0f08e0816296734195a27b2c8a47a207b0f1ade88f0186caffe02334f1456'
 $SurvivalMailboxDriverSha256 = @{
     'MailboxGrantProvisioner.cs' = 'f88f7ebb0c06f11fde52386341202090e8bd4205ad23bb40c31e7d79d2ac8184'
-    'MailboxRuntimePublisher.cs' = 'd6aad71f65987f620ccf0d5a06394240aa199d3bb92ef38b81a9594f8e9ff94b'
+    'MailboxRuntimePublisher.cs' = 'aa725b67ddfd48193a3e5cc3f39f529130e589e05fa14b1569123c8a8cf42866'
     'PrivateCrossProcessState.cs' = '651d8256822d41b9a7bceab1e6d6bb45740026cac00f487a564befe7777f272b'
-    'Program.cs' = '8eb6b8e04049d7dd06cb2998a0487a6b9ea4554e601f8ca63d047e83283fa0b2'
+    'Program.cs' = '5162fbeb990dd045664f5c2ef873e012dd9ac9ad6a5d02903d9ec097a3f7927d'
     'SurvivalMailboxDriver.csproj' = '4db436d69ea88ac3ff16f08c161b61cc0c048bad84cb7e529b2208fa569eafbe'
 }
 $ChainLifecycleServices = @(
@@ -508,6 +508,27 @@ function Prepare-SurvivalXNodeIdentitySecrets() {
     }
     Protect-SurvivalDevPrivateFile $issuerPath
 
+    $turnSecretPath = Join-Path $directory 'turn-shared-secret'
+    if (-not (Test-Path -LiteralPath $turnSecretPath -PathType Leaf)) {
+        $temporaryTurnSecret = "$turnSecretPath.$([Guid]::NewGuid().ToString('N')).tmp"
+        $randomTurnSecret = [byte[]]::new(48)
+        $generator = [Security.Cryptography.RandomNumberGenerator]::Create()
+        try {
+            $generator.GetBytes($randomTurnSecret)
+            [IO.File]::WriteAllText(
+                $temporaryTurnSecret,
+                [Convert]::ToBase64String($randomTurnSecret) + "`n",
+                [Text.UTF8Encoding]::new($false))
+            Protect-SurvivalDevPrivateFile $temporaryTurnSecret
+            Move-Item -LiteralPath $temporaryTurnSecret -Destination $turnSecretPath
+        } finally {
+            [Array]::Clear($randomTurnSecret, 0, $randomTurnSecret.Length)
+            $generator.Dispose()
+            Remove-Item -LiteralPath $temporaryTurnSecret -Force -ErrorAction SilentlyContinue
+        }
+    }
+    Assert-SurvivalDevPrivateFile $turnSecretPath
+
     $privacyOutput = Join-Path $Root 'artifacts\survival-dev'
     [void][IO.Directory]::CreateDirectory($privacyOutput)
     $routerIds = @(
@@ -525,7 +546,7 @@ function Prepare-SurvivalXNodeIdentitySecrets() {
             if ($candidateIndex -eq $localIndex) { continue }
             $nodeNumber = $candidateIndex + 1
             $lines.Add("PrivacyRouting__Peers__$peerIndex`__RouterId=$($routerIds[$candidateIndex])")
-            $lines.Add("PrivacyRouting__Peers__$peerIndex`__BaseUrl=http://172.30.82.$(10 + $nodeNumber):8081/")
+            $lines.Add("PrivacyRouting__Peers__$peerIndex`__BaseUrl=http://172.30.82.$(10 + $nodeNumber):8083/")
             $peerIndex++
         }
         if ($peerIndex -ne 5) { throw 'Privacy-routing DEV peer fixture is incomplete.' }
@@ -757,12 +778,24 @@ function Get-SurvivalUatTlsSecretDirectory() {
 }
 
 function Assert-SurvivalUatTlsEndpoint([string]$HostName) {
-    try {
-        $response = Invoke-WebRequest -UseBasicParsing `
-            -Uri "https://$HostName`:41801/api/network/privacy-contact" -TimeoutSec 5
-        if ($response.StatusCode -ne 200) { throw 'unexpected HTTPS status' }
-    } catch {
-        throw "The CA-trusted HTTPS XNode ingress is not ready: $_"
+    $ready = $false
+    $lastFailure = $null
+    foreach ($attempt in 1..60) {
+        try {
+            $response = Invoke-WebRequest -UseBasicParsing `
+                -Uri "https://$HostName`:41801/api/network/privacy-contact" -TimeoutSec 5
+            if ($response.StatusCode -eq 200) {
+                $ready = $true
+                break
+            }
+            $lastFailure = "unexpected HTTPS status $($response.StatusCode)"
+        } catch {
+            $lastFailure = $_
+        }
+        Start-Sleep -Milliseconds 500
+    }
+    if (-not $ready) {
+        throw "The CA-trusted HTTPS XNode ingress is not ready: $lastFailure"
     }
     $acceptedCleartext = $false
     try {

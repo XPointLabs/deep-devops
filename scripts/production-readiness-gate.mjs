@@ -125,6 +125,7 @@ function validateReleaseArtifactBundle(bundleSummary) {
     'runtime-gate',
     'backend-load-smoke',
     'backend-restart-smoke',
+    'physical-call',
     'push-provider-canary',
     'multi-node-topology',
     'rollback-drill',

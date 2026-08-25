@@ -259,32 +259,6 @@ services:
       timeout: 3s
       retries: 30
 
-  calls:
-    build:
-      context: .
-      dockerfile: docker/calls-service.Dockerfile
-      args: *ancillary-build-args
-    environment:
-      PORT: "8080"
-      SERVICE_NAME: deep-i01b-private-uat-calls
-      CALLS_STATE_DIR: /var/lib/deep/i01b-private-uat/calls
-    volumes:
-      - i01b-private-uat-calls-state:/var/lib/deep/i01b-private-uat/calls
-    ports:
-      - "127.0.0.1:29103:8080"
-    networks:
-      - i01b-private-uat
-    labels: *ancillary-labels
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    healthcheck:
-      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
-      interval: 3s
-      timeout: 3s
-      retries: 30
-
 networks:
   i01b-private-uat:
     name: deep-i01b-private-uat-isolated
@@ -307,9 +281,6 @@ volumes:
     name: deep-i01b-private-uat-file-state
   i01b-private-uat-push-state:
     name: deep-i01b-private-uat-push-state
-  i01b-private-uat-calls-state:
-    name: deep-i01b-private-uat-calls-state
-
 secrets:
   i01b-private-uat-node-1-ed25519:
     name: deep-i01b-private-uat-node-1-ed25519

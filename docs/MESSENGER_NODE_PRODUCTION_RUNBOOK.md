@@ -24,7 +24,7 @@ Production rehearsal requires:
 - at least three production-capable router nodes for final multi-node sign-off;
 - one storage service, one file service, and one push service with persistent volumes;
 - provider proxy endpoints for APNs/FCM/Huawei or the provider selected for the release lane;
-- artifact storage for `runtime.gate.json`, `backend-load-smoke.json`, `backend-restart-smoke.json`, `push-provider-canary.json`, `registry-recovery.json`, and security gate outputs.
+- artifact storage for `runtime.gate.json`, `backend-load-smoke.json`, `backend-restart-smoke.json`, `mau2-call-result.json`, `push-provider-canary.json`, `registry-recovery.json`, and security gate outputs.
 
 Local single-node rehearsal is allowed only as a preflight. It is not the production sign-off topology.
 
@@ -278,6 +278,7 @@ Release sign-off requires all of these:
 - `artifacts/runtime.gate.json` with `requireRouterNoMock=true`, `routerTransportMocked=false`, and no hard gate failures;
 - `artifacts/test-results/backend-load-smoke.json` with non-zero storage/file/avatar/push deltas;
 - `artifacts/test-results/backend-restart-smoke.json` proving storage/file/avatar/push persistence across restart;
+- `artifacts/test-results/mau2-call-result.json` proving authenticated ringing/accept, a selected ICE pair, bidirectional RTP audio, mute/restore, and remote hangup on the physical Android/Windows pair;
 - `artifacts/test-results/push-provider-canary.json` with provider status `delivered`, `hasConfiguredUrl=true`, staging release lane, env-sourced canary token, configured provider auth, and non-local provider host for release sign-off;
 - the manual `supporting-release-evidence.yml` workflow must fail on staging lanes when the selected provider service lacks a base or service-specific provider URL/auth pair, or when `DEEP_PUSH_PROVIDER_CANARY_TOKEN` is missing; use `release_lane=local`, `dev`, `test`, or `smoke` only for non-release provider-sink smoke runs;
 - the selected run's `artifacts/rehearsals/multi-node/<run-id>/test-results/multi-node-topology.json` with three no-mock routers, registry runtime node count `>= 3`, no reconciliation issues for those nodes, and a `select_path` result with three distinct hops;

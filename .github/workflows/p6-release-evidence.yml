@@ -73,13 +73,23 @@ jobs:
         run: >
           node deep-devops/scripts/hydrate-release-artifact-bundle.mjs
           --input-dir deep-devops/artifacts/hydrated/p6-release-evidence-extracted
-          --only client-device-acceptance,ops-deployment-evidence,security-audit-signoff,ga-decision
+          --only physical-call,client-device-acceptance,ops-deployment-evidence,security-audit-signoff,ga-decision
 
       - name: Validate raw P6 manifest set
         shell: pwsh
         run: |
           $releaseCandidate = '${{ inputs.release_candidate }}'.Trim()
           $releaseDir = Join-Path $PWD 'deep-devops/artifacts/release'
+          $physicalCallPath = Join-Path $PWD 'deep-devops/artifacts/test-results/mau2-call-result.json'
+          if (-not (Test-Path -LiteralPath $physicalCallPath)) {
+            throw 'Raw P6 evidence source is missing mau2-call-result.json'
+          }
+          $physicalCall = Get-Content -LiteralPath $physicalCallPath -Raw | ConvertFrom-Json
+          if ($physicalCall.schema -ne 'deep.physical-mau2-phase.v1' -or
+              $physicalCall.phase -ne 'Call' -or
+              $physicalCall.status -ne 'passed') {
+            throw 'mau2-call-result.json is not passed physical Call evidence'
+          }
           $required = @(
             'client-device-acceptance.json',
             'ops-deployment-evidence.json',
@@ -144,6 +154,7 @@ jobs:
         run: >
           node deep-devops/scripts/artifact-upload-manifest.mjs
           --file deep-devops/artifacts/release/release-artifact-hydration-summary.json
+          --file deep-devops/artifacts/test-results/mau2-call-result.json
           --file deep-devops/artifacts/release/client-device-acceptance.json
           --file deep-devops/artifacts/release/client-device-acceptance-summary.json
           --file deep-devops/artifacts/release/ops-deployment-evidence.json
@@ -153,6 +164,7 @@ jobs:
           --file deep-devops/artifacts/release/ga-decision.json
           --file deep-devops/artifacts/release/ga-decision-summary.json
           --require release-artifact-hydration-summary.json
+          --require mau2-call-result.json
           --require client-device-acceptance.json
           --require client-device-acceptance-summary.json
           --require ops-deployment-evidence.json
@@ -172,6 +184,7 @@ jobs:
           --manifest "${{ runner.temp }}/deep-upload/p6-manifest.json"
           --staging-root "${{ runner.temp }}/deep-upload/p6"
           --require release-artifact-hydration-summary.json
+          --require mau2-call-result.json
           --require client-device-acceptance.json
           --require client-device-acceptance-summary.json
           --require ops-deployment-evidence.json

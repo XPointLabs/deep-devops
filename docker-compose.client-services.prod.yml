@@ -109,21 +109,27 @@ services:
       retries: 30
 
   turn-service:
-    image: coturn/coturn:4.12.0-alpine
+    image: coturn/coturn:4.12.0-alpine@sha256:faca4aa57efc436916c31546f3867bd1a3fb1077723291bcfba0bf814bcaf48a
     restart: unless-stopped
     logging: *prod-logging
     network_mode: host
     user: "0:0"
-    entrypoint: ["/bin/sh", "-ec"]
-    command:
-      - |
-        public_ip="$$(detect-external-ip)"
-        exec turnserver -c /etc/coturn/turnserver.conf \
-          --external-ip="$$public_ip" \
-          --relay-ip="$$public_ip" \
-          --static-auth-secret="$$(cat /run/secrets/turn-shared-secret)"
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: [no-new-privileges:true]
+    entrypoint: ["/usr/local/bin/deep-coturn-entrypoint"]
+    environment:
+      DEEP_TURN_PUBLIC_HOST: ${DEEP_TURN_PUBLIC_HOST:?set DEEP_TURN_PUBLIC_HOST}
+      DEEP_TURN_EXTERNAL_IP: ${DEEP_TURN_EXTERNAL_IP:-auto}
+      DEEP_TURN_CERT_FILE: /etc/letsencrypt/live/${DEEP_TURN_PUBLIC_HOST:?set DEEP_TURN_PUBLIC_HOST}/fullchain.pem
+      DEEP_TURN_PKEY_FILE: /etc/letsencrypt/live/${DEEP_TURN_PUBLIC_HOST:?set DEEP_TURN_PUBLIC_HOST}/privkey.pem
+      DEEP_TURN_SHARED_SECRET_FILE: /run/secrets/turn-shared-secret
+    tmpfs:
+      - /run/coturn-runtime:rw,noexec,nosuid,nodev,size=1m,mode=0700
     volumes:
       - ./config/coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
+      - ./scripts/coturn-entrypoint.sh:/usr/local/bin/deep-coturn-entrypoint:ro
       - ${DEEP_TURN_CERT_ROOT:-/etc/letsencrypt}:/etc/letsencrypt:ro
     secrets:
       - turn-shared-secret

@@ -47,7 +47,7 @@ selection, parse error or harness/contract failure exits `2`.
 | Xray access | Disabled; generated config has no access sink | 0 hours | Pinned generator-source contract |
 | Xray error | Warning/error class; operational process failures | 24-hour target | Exact local wall-clock archive observation |
 | XNode | Warning/error categories and aggregate health | 24-hour target | Exact local wall-clock archive observation and scanner |
-| Storage/file/push/calls | Startup, health and operational failures; no request-body/path capture | 24-hour target | Exact local wall-clock archive observation and scanner |
+| Storage/file/push and registry-owned calls | Startup, health and operational failures; no request-body/path capture | 24-hour target | Exact local wall-clock archive observation and scanner |
 | Metrics | Aggregate service/operation/status/error/route-index labels | 7 days | Allowlist metric-label lint |
 | Sanitized evidence | Rule IDs, counts, generic input ordinals and policy state | 30 days | Metadata and secret scanners |
 | Push provider | Provider-controlled delivery/device metadata | Unknown locally | Provider contract and Mr. X deletion request evidence |
@@ -78,7 +78,7 @@ three deployment-bound inputs, the repository gate reports `not-run`, never a fa
 ## Exact Compose topology
 
 The gate validates the fully merged Compose render, not just the privacy overlay. It accepts exactly
-seven services, one internal bridge network, seven named state volumes, three node secrets and the
+six services, one internal bridge network, six named state volumes, three node secrets and the
 reviewed loopback-only host ports. It rejects host network/PID/IPC sharing, public or additional
 ports, Docker socket and bind mounts, devices, privileged mode, added capabilities, weakened
 `cap_drop`/`security_opt`, host-gateway mappings, extra services/networks/listeners and unexpected

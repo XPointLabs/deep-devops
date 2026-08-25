@@ -29,7 +29,7 @@ test('source preflight accepts only the exact clean commit, context, Dockerfile 
   await mkdir(devopsDockerDirectory, { recursive: true });
   await writeFile(path.join(xnodeContext, 'XNode.csproj'), '<Project />\n', 'utf8');
   await writeFile(dockerfile, 'FROM scratch\n', 'utf8');
-  for (const name of ['calls', 'file', 'push', 'storage']) {
+  for (const name of ['file', 'push', 'storage']) {
     await writeFile(
       path.join(devopsDockerDirectory, `${name}-service.Dockerfile`),
       'ARG NODE_IMAGE\nFROM ${NODE_IMAGE}\n',

@@ -30,7 +30,7 @@ const FIXED_UPDATE_START = '2030-01-01T00:00:00Z';
 const GOOD_EXPIRY = '2030-01-03T00:00:00Z';
 const ROOT_EXPIRY = '2035-01-01T00:00:00Z';
 const EXPECTED_SOURCE_BASELINE_SHA256 =
-  '8170b4bf5cfd60170e31a19e7f7174379234ad72827933c0288197fdd81039df';
+  '1c9e27857b09eff02d254cecd649d8543175161012480b7614fa888fba6e9318';
 const EXPECTED_PROGRAM_SHA256 =
   '361c93ac16a51f2e83731548a6fcb09da7f805a9e0ba78ca5b496a896f3c2b1c';
 const SOURCE_BASELINE_PATH = path.join(
@@ -98,7 +98,7 @@ function jsonBytes(value) {
   return Buffer.from(`${JSON.stringify(value, null, 2)}\n`, 'utf8');
 }
 
-export function createUpdateTrustFixture() {
+export function createUpdateTrustFixture({ sbomSpecVersion = '1.6' } = {}) {
   const labels = [
     'root-a', 'root-b', 'root-c', 'root-d', 'root-e', 'root-f',
     'targets-a', 'targets-b', 'targets-c',
@@ -165,7 +165,7 @@ export function createUpdateTrustFixture() {
   );
   const sbomBytes = jsonBytes({
     bomFormat: 'CycloneDX',
-    specVersion: '1.6',
+    specVersion: sbomSpecVersion,
     serialNumber: 'urn:uuid:00000000-0000-4000-8000-000000000002',
     version: 1,
     metadata: {

@@ -113,6 +113,22 @@ authorityKeyIdentifier=keyid,issuer
     }
 }
 
+$turnSecretPath = Join-Path $root 'turn-shared-secret'
+if (-not (Test-Path -LiteralPath $turnSecretPath -PathType Leaf)) {
+    $turnSecret = [byte[]]::new(48)
+    $generator = [Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $generator.GetBytes($turnSecret)
+        [IO.File]::WriteAllText(
+            $turnSecretPath,
+            [Convert]::ToBase64String($turnSecret) + [Environment]::NewLine,
+            [Text.UTF8Encoding]::new($false))
+    } finally {
+        [Array]::Clear($turnSecret, 0, $turnSecret.Length)
+        $generator.Dispose()
+    }
+}
+
 Invoke-OpenSsl @('ca','-gencrl','-config','/certs/openssl-ca.cnf',
     '-out','/certs/public/deep-physical-uat-ca.crl')
 Invoke-OpenSsl @('verify','-CAfile','/certs/ca.crt','-verify_ip',$LanHost,'/certs/server.crt')

@@ -27,8 +27,8 @@ x-xnode-build: &xnode-build
   args:
     SDK_IMAGE: ${SURVIVAL_DOTNET_SDK_IMAGE:-mcr.microsoft.com/dotnet/sdk@sha256:7e964ea8bc6c1e18ea9fbc76ed403da41c9b19aeee2aab6bf9c845f25e891380}
     RUNTIME_IMAGE: ${SURVIVAL_DOTNET_RUNTIME_IMAGE:-mcr.microsoft.com/dotnet/aspnet@sha256:e3736b0d423db99c6988e1ddf5ea725c14b12579bb120024e5ff7ff204a14080}
-    XNODE_REVISION: 828bb09246b58b73b23f24540d7edf863e2f43c2
-    XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: def5a44c57666f474980c8f12facbe7033e9a5944b797c6fb726865e7363ffad
+    XNODE_REVISION: 19517d176793a37e258766be39ca9adba30369fa
+    XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: f759eeeffcf19b9ec97bef8d34bc740b38a0bdb22f0d554c4094c303f7f219e2
   dockerfile_inline: |
     ARG SDK_IMAGE
     ARG RUNTIME_IMAGE
@@ -74,6 +74,10 @@ x-xnode: &xnode
     ASPNETCORE_URLS: http://0.0.0.0:8080
     Node__ApiListenUrl: http://0.0.0.0:8080
     Node__PeerRpcListenUrl: http://0.0.0.0:8081
+    Node__ManagedIngressH2ListenUrl: http://0.0.0.0:8082
+    Node__PrivacyPeerH2ListenUrl: http://0.0.0.0:8083
+    Node__ManagedIngressTrustedProxyAddresses__0: 172.30.82.7
+    Node__ManagedIngressTrustedProxyAddresses__1: 172.30.82.8
     Node__DataDirectory: /state
     Node__Network: local
     Node__PublicPort: "8080"
@@ -91,7 +95,7 @@ x-xnode: &xnode
     Vless__Enabled: "false"
     MembershipArtifact__ArtifactPath: /run/deep-membership/membership-route-catalog.json
     MembershipArtifact__MaximumBytes: "2097152"
-    # The privacy peer listener remains Docker-network-only on 8081. Generated route
+    # The exact HTTP/2 privacy peer listener remains Docker-network-only on 8083. Generated route
     # authority selects the two mailbox-capable exits without public MAU2 access.
     Mailbox__Enabled: "true"
     Mailbox__DirectoryName: mailbox-p10c
@@ -113,8 +117,8 @@ x-mailbox-driver-build: &mailbox-driver-build
   args:
     SDK_IMAGE: ${SURVIVAL_DOTNET_SDK_IMAGE:-mcr.microsoft.com/dotnet/sdk@sha256:7e964ea8bc6c1e18ea9fbc76ed403da41c9b19aeee2aab6bf9c845f25e891380}
     RUNTIME_IMAGE: ${SURVIVAL_DOTNET_RUNTIME_IMAGE:-mcr.microsoft.com/dotnet/aspnet@sha256:e3736b0d423db99c6988e1ddf5ea725c14b12579bb120024e5ff7ff204a14080}
-    XNODE_REVISION: 828bb09246b58b73b23f24540d7edf863e2f43c2
-    XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: def5a44c57666f474980c8f12facbe7033e9a5944b797c6fb726865e7363ffad
+    XNODE_REVISION: 19517d176793a37e258766be39ca9adba30369fa
+    XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: f759eeeffcf19b9ec97bef8d34bc740b38a0bdb22f0d554c4094c303f7f219e2
   dockerfile_inline: |
     ARG SDK_IMAGE
     ARG RUNTIME_IMAGE
@@ -170,7 +174,6 @@ x-compat-build: &compat-build
     COPY --chown=node:node tools/storage-service ./tools/storage-service
     COPY --chown=node:node tools/file-service ./tools/file-service
     COPY --chown=node:node tools/push-service ./tools/push-service
-    COPY --chown=node:node tools/calls-service ./tools/calls-service
     RUN mkdir /state && chown node:node /state
     USER node
 
@@ -374,7 +377,7 @@ services:
       Node__PublicPort: "41801"
       Node__RouterId: 4cb5abf6ad79fbf5abbccafcc269d85cd2651ed4b885b5869f241aedf0a5ba29
       Node__Ed25519PrivateKeyPath: /run/secrets/xnode-ed25519.seed
-      PrivacyRouting__PublicPeerBaseUrl: http://172.30.82.11:8081/
+      PrivacyRouting__PublicPeerBaseUrl: http://172.30.82.11:8083/
     ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41801:8080"]
     networks: { runtime: { ipv4_address: 172.30.82.11 } }
     volumes: [xnode-1-state:/state, membership-route-artifact:/run/deep-membership:ro]
@@ -390,14 +393,13 @@ services:
     <<: *xnode
     env_file:
       - ${SURVIVAL_MAILBOX_AUTHORITY_ENV:-./artifacts/survival-dev/mailbox-peer-authority.env}
-      - ${SURVIVAL_MAILBOX_CLIENT_AUTHORITY_ENV:-./artifacts/survival-dev/mailbox-client-xnode-1.env}
       - ./artifacts/survival-dev/privacy-routing-xnode-2.env
     environment:
       <<: *xnode-environment
       Node__PublicHost: xnode-2
       Node__RouterId: 7422b9887598068e32c4448a949adb290d0f4e35b9e01b0ee5f1a1e600fe2674
       Node__Ed25519PrivateKeyPath: /run/secrets/xnode-ed25519.seed
-      PrivacyRouting__PublicPeerBaseUrl: http://172.30.82.12:8081/
+      PrivacyRouting__PublicPeerBaseUrl: http://172.30.82.12:8083/
     ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41802:8080"]
     networks: { runtime: { ipv4_address: 172.30.82.12 } }
     volumes: [xnode-2-state:/state, membership-route-artifact:/run/deep-membership:ro]
@@ -419,7 +421,7 @@ services:
       Node__PublicHost: xnode-3
       Node__RouterId: f381626e41e7027ea431bfe3009e94bdd25a746beec468948d6c3c7c5dc9a54b
       Node__Ed25519PrivateKeyPath: /run/secrets/xnode-ed25519.seed
-      PrivacyRouting__PublicPeerBaseUrl: http://172.30.82.13:8081/
+      PrivacyRouting__PublicPeerBaseUrl: http://172.30.82.13:8083/
     ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41803:8080"]
     networks: { runtime: { ipv4_address: 172.30.82.13 } }
     volumes: [xnode-3-state:/state, membership-route-artifact:/run/deep-membership:ro]
@@ -441,7 +443,7 @@ services:
       Node__PublicHost: xnode-4
       Node__RouterId: fd50b8e3b144ea244fbf7737f550bc8dd0c2650bbc1aada833ca17ff8dbf329b
       Node__Ed25519PrivateKeyPath: /run/secrets/xnode-ed25519.seed
-      PrivacyRouting__PublicPeerBaseUrl: http://172.30.82.14:8081/
+      PrivacyRouting__PublicPeerBaseUrl: http://172.30.82.14:8083/
     ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41804:8080"]
     networks: { runtime: { ipv4_address: 172.30.82.14 } }
     volumes: [xnode-4-state:/state, membership-route-artifact:/run/deep-membership:ro]
@@ -463,7 +465,7 @@ services:
       Node__PublicHost: xnode-5
       Node__RouterId: fde4fba030ad002f7c2f7d4c331f49d13fb0ec747eceebec634f1ff4cbca9def
       Node__Ed25519PrivateKeyPath: /run/secrets/xnode-ed25519.seed
-      PrivacyRouting__PublicPeerBaseUrl: http://172.30.82.15:8081/
+      PrivacyRouting__PublicPeerBaseUrl: http://172.30.82.15:8083/
     ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41805:8080"]
     networks: { runtime: { ipv4_address: 172.30.82.15 } }
     volumes: [xnode-5-state:/state, membership-route-artifact:/run/deep-membership:ro]
@@ -485,7 +487,7 @@ services:
       Node__PublicHost: xnode-6
       Node__RouterId: b4c92afb3ba57f3ab959ffe6d319c98484a2155a0f4c65b2c37011ffd197b075
       Node__Ed25519PrivateKeyPath: /run/secrets/xnode-ed25519.seed
-      PrivacyRouting__PublicPeerBaseUrl: http://172.30.82.16:8081/
+      PrivacyRouting__PublicPeerBaseUrl: http://172.30.82.16:8083/
     ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41806:8080"]
     networks: { runtime: { ipv4_address: 172.30.82.16 } }
     volumes: [xnode-6-state:/state, membership-route-artifact:/run/deep-membership:ro]
@@ -527,8 +529,22 @@ services:
       Registry__StakingBackendBaseUrl: http://staking-backend:8080
       Registry__MembershipRouteArtifactPath: /run/deep-membership/membership-route-catalog.json
       Registry__MembershipRouteArtifactMaximumBytes: "2097152"
-    ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41810:8080"]
+      Calls__Required: "true"
+      Calls__Enabled: "true"
+      Calls__StatePath: /state/calls-v2.json
+      Calls__TurnSharedSecretFile: /run/secrets/turn-shared-secret
+      Calls__CredentialLifetimeSeconds: "3600"
+      Calls__IceUrls__0: stun:${SURVIVAL_BIND_HOST:-127.0.0.1}:3478
+      Calls__IceUrls__1: turn:${SURVIVAL_BIND_HOST:-127.0.0.1}:3478?transport=udp
+      Calls__IceUrls__2: turn:${SURVIVAL_BIND_HOST:-127.0.0.1}:3478?transport=tcp
+      Calls__IceUrls__3: turns:${SURVIVAL_BIND_HOST:-127.0.0.1}:5349?transport=tcp
+    ports:
+      - "${SURVIVAL_BIND_HOST:-127.0.0.1}:41810:8080"
+      - "${SURVIVAL_BIND_HOST:-127.0.0.1}:41823:8080"
     volumes: [registry-state:/state, membership-route-artifact:/run/deep-membership:ro]
+    secrets:
+      - source: turn-shared-secret
+        target: turn-shared-secret
     depends_on:
       membership-fixture: { condition: service_completed_successfully }
     healthcheck: { <<: *health, test: [CMD, bash, -c, 'exec 3<>/dev/tcp/127.0.0.1/8080; printf "GET /health/live HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3; read -r status <&3; case "$$status" in *" 200 "*) exit 0;; *) exit 1;; esac'] }
@@ -606,15 +622,6 @@ services:
     volumes: [push-state:/state]
     healthcheck: { <<: *health, test: [CMD, node, --eval, "fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"] }
 
-  calls:
-    <<: *service
-    image: deep-survival/compat:dev
-    command: [node, tools/calls-service/calls-service.mjs]
-    environment: { PORT: "8080", SERVICE_NAME: survival-calls, CALLS_STATE_DIR: /state }
-    ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41823:8080"]
-    volumes: [calls-state:/state]
-    healthcheck: { <<: *health, test: [CMD, node, --eval, "fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"] }
-
 networks:
   runtime:
     driver: bridge
@@ -635,7 +642,6 @@ volumes:
   storage-state:
   file-state:
   push-state:
-  calls-state:
   mailbox-rehearsal-state:
 
 secrets:
@@ -652,3 +658,4 @@ secrets:
   xnode-5-x25519: { file: ./.secrets/survival-dev/xnode-5-x25519.private }
   xnode-6-x25519: { file: ./.secrets/survival-dev/xnode-6-x25519.private }
   mailbox-client-issuer: { file: ./.secrets/survival-dev/mailbox-client-issuer.seed }
+  turn-shared-secret: { file: ./.secrets/survival-dev/turn-shared-secret }

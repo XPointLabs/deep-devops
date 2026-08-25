@@ -35,14 +35,35 @@ function control(socketPath, token, action, ttlSeconds, fault) {
 
 function send(port, route, body = Buffer.alloc(0), method = 'POST') {
   return new Promise((resolve, reject) => {
-    const request = http.request({ host: '127.0.0.1', port, path: route, method, headers: { 'content-type': 'application/octet-stream', 'content-length': body.length }, timeout: 3_000 }, (response) => {
-      const chunks = [];
-      response.on('data', (chunk) => chunks.push(chunk));
-      response.on('end', () => resolve({ status: response.statusCode, body: Buffer.concat(chunks).toString('utf8') }));
+    const session = http2.connect(`http://127.0.0.1:${port}`);
+    const request = session.request({
+      ':method': method,
+      ':path': route,
+      ':scheme': 'https',
+      ':authority': 'uat.test:41803',
+      'content-type': 'application/octet-stream',
+      'content-length': String(body.length),
+    }, { endStream: body.length === 0 });
+    let responseHeaders;
+    const chunks = [];
+    request.on('response', (headers) => { responseHeaders = headers; });
+    request.on('data', (chunk) => chunks.push(chunk));
+    request.on('end', () => {
+      session.close();
+      if (!responseHeaders) {
+        reject(new Error('response stream ended before headers'));
+        return;
+      }
+      resolve({
+        status: Number(responseHeaders?.[':status']),
+        headers: responseHeaders ?? {},
+        body: Buffer.concat(chunks),
+      });
     });
-    request.on('timeout', () => request.destroy(new Error('request timed out')));
-    request.on('error', reject);
-    request.end(body);
+    request.on('error', (error) => { session.destroy(); reject(error); });
+    session.on('error', reject);
+    request.setTimeout(3_000, () => request.close(http2.constants.NGHTTP2_CANCEL));
+    if (body.length !== 0) request.end(body);
   });
 }
 
@@ -57,11 +78,15 @@ test('one-shot chaos drops only one completed durable response and restart/TTL d
   const items = new Set();
   let duplicateStores = 0;
   let upstreamRequests = 0;
+  let upstreamForwardedProto;
+  let upstreamScheme;
   const upstream = http2.createServer((request, response) => {
     const chunks = [];
     request.on('data', (chunk) => chunks.push(chunk));
     request.on('end', () => {
       upstreamRequests += 1;
+      upstreamForwardedProto = request.headers['x-forwarded-proto'];
+      upstreamScheme = request.headers[':scheme'];
       const key = crypto.createHash('sha256').update(Buffer.concat(chunks)).digest('hex');
       if (items.has(key)) duplicateStores += 1; else items.add(key);
       response.writeHead(200, { 'content-type': 'application/octet-stream' });
@@ -84,7 +109,10 @@ test('one-shot chaos drops only one completed durable response and restart/TTL d
 
     const passthrough = await sendIngress(Buffer.from('first-opaque-frame'));
     assert.equal(passthrough.status, 200);
-    assert.equal(passthrough.body, 'durable-response');
+    assert.equal(upstreamForwardedProto, 'https');
+    assert.equal(upstreamScheme, 'http');
+    assert.equal(passthrough.headers['content-length'], String('durable-response'.length));
+    assert.equal(passthrough.body.toString('utf8'), 'durable-response');
     assert.equal(items.size, 1);
 
     const armed = await control(controlSocket, token, 'arm', 5, 'post-durable-response-drop');
@@ -94,7 +122,7 @@ test('one-shot chaos drops only one completed durable response and restart/TTL d
 
     const retry = await sendIngress(Buffer.from('uncertain-opaque-frame'));
     assert.equal(retry.status, 200);
-    assert.equal(retry.body, 'durable-response');
+    assert.equal(retry.body.toString('utf8'), 'durable-response');
     assert.equal(items.size, 2, 'exact retry must not create another server item');
     assert.equal(duplicateStores, 1);
     assert.equal(upstreamRequests, 3);
@@ -143,6 +171,25 @@ test('one-shot chaos drops only one completed durable response and restart/TTL d
     assert.equal(outageRetry.status, 200);
     assert.equal(items.size, 3);
     assert.equal(upstreamRequests, 4);
+
+    await control(controlSocket, token, 'arm', 5, 'primary-ingress-rejected-before-forward');
+    const beforeForward = await sendIngress(Buffer.from('fallback-candidate'));
+    assert.equal(beforeForward.status, 503);
+    assert.equal(beforeForward.headers['content-type'], 'application/vnd.xpoint.deep.ingress-error-v1');
+    assert.equal(beforeForward.headers['content-length'], '64');
+    assert.equal(beforeForward.headers['retry-after'], '1');
+    assert.equal(beforeForward.headers['cache-control'], 'no-store');
+    assert.equal(beforeForward.body.length, 64);
+    assert.equal(beforeForward.body.subarray(0, 4).toString('ascii'), 'DIE1');
+    assert.deepEqual([...beforeForward.body.subarray(4, 12)], [1, 1, 9, 1, 1, 0, 0, 1]);
+    assert.ok(beforeForward.body.subarray(12).every((value) => value === 0));
+    assert.equal(upstreamRequests, 4, 'canonical before-forward fault must not reach the primary router');
+    const afterBeforeForward = await control(controlSocket, token, 'status');
+    assert.equal(afterBeforeForward.operationAttemptCount, 1);
+    assert.equal(afterBeforeForward.operationUpstreamDispatchCount, 0);
+    assert.equal(afterBeforeForward.operationUpstreamSuccessCount, 0);
+    assert.equal(afterBeforeForward.injectedFaultCount, 1);
+    assert.equal(afterBeforeForward.preDispatchOutageCount, 1);
 
     await control(controlSocket, token, 'arm', 5, 'post-durable-ack-response-drop');
     const wrongMethod = await send(proxyPort, '/api/ingress/v1/frame', Buffer.alloc(0), 'GET');

@@ -9,11 +9,9 @@ const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 export const repositoryRoot = path.resolve(scriptDirectory, '..');
 export const canonicalDockerfilePath = path.join(repositoryRoot, 'docker', 'xnode-xray.Dockerfile');
 const compatBuildRoots = Object.freeze([
-  'docker/calls-service.Dockerfile',
   'docker/file-service.Dockerfile',
   'docker/push-service.Dockerfile',
   'docker/storage-service.Dockerfile',
-  'tools/calls-service',
   'tools/compat-services',
   'tools/file-service',
   'tools/push-service',

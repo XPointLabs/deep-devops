@@ -603,6 +603,34 @@ test('SBOM, provenance, APK hash and package signer mutations reject', async () 
   }
 });
 
+test('offline artifact verification rejects pre-1.6 CycloneDX SBOM', async () => {
+  const fixture = createUpdateTrustFixture({ sbomSpecVersion: '1.5' });
+  const verifiedBundle = verifyUpdateBundle(fixture.createBundle());
+  const sandbox = await mkdtemp(path.join(tmpdir(), 'deep-p02-old-sbom-'));
+  try {
+    const apkFile = path.join(sandbox, 'fixture.apk');
+    await writeFile(apkFile, fixture.apkBytes);
+    const tempRoot = path.join(sandbox, 'private-temp');
+    await mkdir(tempRoot, { mode: 0o700 });
+    const verifier = await writePinnedFixtureVerifier(sandbox, 'good-verifier', {
+      signerDigest: fixture.packageSignerSha256,
+      apkSha256: sha256(fixture.apkBytes)
+    });
+    assert.throws(() => verifyOfflineAndroidArtifact({
+      verifiedBundle,
+      apkPath: fixture.apkPath,
+      apkFile,
+      artifactFiles: {
+        [fixture.sbomPath]: fixture.sbomBytes,
+        [fixture.provenancePath]: fixture.provenanceBytes
+      },
+      ...verifierOptions(verifier, tempRoot)
+    }), /SBOM contract is invalid/);
+  } finally {
+    await rm(sandbox, { recursive: true, force: true });
+  }
+});
+
 test('apksigner parser rejects missing or ambiguous signer sets', () => {
   const signer = sha256(Buffer.from('signer'));
   assert.deepEqual(parseApkSignerDigests(
