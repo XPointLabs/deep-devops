@@ -668,6 +668,8 @@ test('P10E uses real current/next MIP1/RIP1 authority, bounded client ingress, a
   assert.match(launcher, /mailbox-client-xnode-1\.env/);
   assert.match(launcher, /'Prepare' \{/);
   assert.match(launcher, /function Invoke-SurvivalMailboxDriverImmutable/);
+  assert.match(launcher, /function Get-PinnedSurvivalXNodeContext/);
+  assert.match(launcher, /Mailbox authority generation requires the exact verified pinned XNode build context/);
   assert.match(launcher, /New-SurvivalMailboxIsolatedSource/);
   assert.match(launcher, /Set-MailboxTreeReadOnly \$sourceRoot/);
   assert.match(launcher, /Open-MailboxTreeReadLocks \$sourceRoot/);

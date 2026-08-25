@@ -291,6 +291,17 @@ function Prepare-SurvivalBuildContexts([switch]$IncludeChain) {
     }
 }
 
+function Get-PinnedSurvivalXNodeContext() {
+    $context = Join-Path $ContextRoot 'xnode'
+    $manifest = Join-Path $context '.survival-source-manifest.json'
+    if (-not (Test-Path -LiteralPath $manifest -PathType Leaf) -or
+        (Get-FileHash -LiteralPath $manifest -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+            $SurvivalXNodeContextManifestSha256) {
+        throw 'Mailbox authority generation requires the exact verified pinned XNode build context.'
+    }
+    return $context
+}
+
 function Invoke-SurvivalMailboxDriverImmutable([string]$PinnedXNodeSource,[string[]]$Arguments) {
     $work = Join-Path ([IO.Path]::GetTempPath()) (
         'deep-survival-mailbox-driver-' + [Guid]::NewGuid().ToString('N'))
