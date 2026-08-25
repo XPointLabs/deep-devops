@@ -147,6 +147,7 @@ function isPlaceholder(value) {
     || /^\$\{\{\s*(?:github\.(?:actor|token)|secrets\.[A-Za-z_][A-Za-z0-9_]*|env\.[A-Za-z_][A-Za-z0-9_]*)\s*\}\}$/.test(normalized)
     || /^\$env:[A-Za-z_][A-Za-z0-9_]*$/i.test(normalized)
     || /^\/run\/secrets\/[A-Za-z0-9._-]+$/.test(normalized)
+    || /^\/certs\/[A-Za-z0-9._-]+\.key$/.test(normalized)
     || /^process\.env\.[A-Za-z_][A-Za-z0-9_]*$/.test(normalized)
     || /^<(?:(?:removed-)?compromised-value|redacted|load-from-protected-secret-store|alchemy-key)>$/i.test(normalized)
     || /^__(?:REQUIRED_[A-Z0-9_]+|REDACTED|NOT_COMMITTED|SECRET_FILE)__$/.test(normalized)

@@ -26,6 +26,7 @@ test('accepts placeholders and records only repository-relative paths', async ()
       'UAT_DEPLOYER_MNEMONIC=__REQUIRED_SECRET_NOT_COMMITTED__',
       'Node__Ed25519PrivateKey=${UAT_NODE_PRIVATE_KEY}',
       'TOKEN_FILE=/run/secrets/provider_token',
+      'private_key = /certs/ca.key',
       ''
     ].join('\n'));
     spawnSync('git', ['add', 'safe.env'], { cwd: root, windowsHide: true });
