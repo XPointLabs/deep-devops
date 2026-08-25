@@ -14,8 +14,8 @@ $PinnedXNode = Join-Path $Root 'artifacts\survival-dev\build-contexts\xnode'
 $DriverSource = Join-Path $Root 'tools\survival-mailbox-driver'
 $BuildHelper = Join-Path $PSScriptRoot 'survival-dev-mailbox-build-inputs.ps1'
 $ExpectedBuildHelperSha256 = 'c5e0f08e0816296734195a27b2c8a47a207b0f1ade88f0186caffe02334f1456'
-$ExpectedXNodeCommit = 'd817977c72699f58144892b7784250f21e62a892'
-$ExpectedXNodeManifestSha256 = 'cb74d02427de9d4bf18933cad8f254647c388eaec6969a1959f38ae0eecebbf6'
+$ExpectedXNodeCommit = '828bb09246b58b73b23f24540d7edf863e2f43c2'
+$ExpectedXNodeManifestSha256 = 'def5a44c57666f474980c8f12facbe7033e9a5944b797c6fb726865e7363ffad'
 $ExpectedDriverSha256 = @{
     'MailboxGrantProvisioner.cs' = 'f88f7ebb0c06f11fde52386341202090e8bd4205ad23bb40c31e7d79d2ac8184'
     'MailboxRuntimePublisher.cs' = 'd6aad71f65987f620ccf0d5a06394240aa199d3bb92ef38b81a9594f8e9ff94b'
@@ -401,10 +401,7 @@ $evidenceCore = [ordered]@{
         origin = "https://${BindHost}:41801"
         platformTlsValidation = $true
         cleartextApplicationHttpRejected = $true
-        publicRoutes = @(
-            '/api/client/mailbox/v2/store',
-            '/api/client/mailbox/v2/acknowledge'
-        )
+        publicRoutes = @('/api/ingress/v1/frame')
     }
     sourceBindings = [ordered]@{
         xnodeCommit = $ExpectedXNodeCommit

@@ -18,10 +18,8 @@ const productionCompose = readFileSync(new URL('../docker-compose.node.prod.yml'
 const productionNodeEnvironment = readFileSync(new URL('../.env.node.prod.example', import.meta.url), 'utf8');
 const docs = readFileSync(new URL('../docs/SURVIVAL_DEV_STACK.md', import.meta.url), 'utf8');
 const launcher = readFileSync(new URL('./survival-dev.ps1', import.meta.url), 'utf8');
-const seed = readFileSync(new URL('./survival-dev-seed.mjs', import.meta.url), 'utf8');
 const verify = readFileSync(new URL('./survival-dev-verify.mjs', import.meta.url), 'utf8');
 const contextExport = readFileSync(new URL('./survival-dev-context-export.mjs', import.meta.url), 'utf8');
-const bootstrap = readFileSync(new URL('../tools/relay-bootstrap/relay-bootstrap.mjs', import.meta.url), 'utf8');
 const fixture = readFileSync(new URL('../tools/membership-fixture/Program.cs', import.meta.url), 'utf8');
 const artifactInit = readFileSync(new URL('../tools/membership-artifact-init/membership-artifact-init.mjs', import.meta.url), 'utf8');
 const membershipRepeat = readFileSync(new URL('./survival-dev-membership-fixture-repeat.ps1', import.meta.url), 'utf8');
@@ -51,7 +49,7 @@ test('daily stack has a fixed isolated project, persistent services, and one cha
   const servicesSection = compose.match(/^services:\r?\n([\s\S]*?)(?=^networks:)/m)?.[1] ?? '';
   const services = [...servicesSection.matchAll(/^  ([a-z][a-z0-9-]*):$/gm)].map(match => match[1]).sort();
   assert.deepEqual(services, [
-    'calls', 'contracts-deploy', 'contracts-deployments-init', 'contracts-devnet', 'contracts-smoke', 'file', 'mailbox-driver', 'mailbox-driver-state-init', 'membership-artifact-init', 'membership-artifact-owner-init', 'membership-fixture', 'push', 'registry', 'relay-bootstrap', 'staking-backend',
+    'calls', 'contracts-deploy', 'contracts-deployments-init', 'contracts-devnet', 'contracts-smoke', 'file', 'mailbox-driver', 'mailbox-driver-state-init', 'membership-artifact-init', 'membership-artifact-owner-init', 'membership-fixture', 'push', 'registry', 'staking-backend',
     'storage', 'xnode-1', 'xnode-2', 'xnode-3', 'xnode-4', 'xnode-5', 'xnode-6'
   ]);
   assert.match(compose, /^networks:\r?\n  runtime:\r?\n    driver: bridge$/m);
@@ -155,7 +153,7 @@ test('runtime root filesystems are immutable and writable paths are explicitly b
   assert.match(sharedRuntime, /^  read_only: true$/m);
   assert.match(sharedRuntime, /^  tmpfs:\r?\n    - \/tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777$/m);
   assert.match(compose.match(/^x-xnode: &xnode\r?\n([\s\S]*?)(?=^x-membership-fixture-build:)/m)?.[1] ?? '', /<<: \*service/);
-  for (const role of ['registry', 'staking-backend', 'storage', 'file', 'push', 'calls', 'relay-bootstrap', 'contracts-devnet']) {
+  for (const role of ['registry', 'staking-backend', 'storage', 'file', 'push', 'calls', 'contracts-devnet']) {
     assert.match(serviceBlock(role), /<<: \*service/);
     assert.doesNotMatch(serviceBlock(role), /read_only: false|tmpfs:\s*\[\s*\]/);
   }
@@ -175,7 +173,7 @@ test('runtime root filesystems are immutable and writable paths are explicitly b
   assert.doesNotMatch(hardhatEntrypoint, /curl|wget|pnpm|npm|corepack/);
   assert.match(gitAttributes, /^scripts\/survival-hardhat-entrypoint\.sh text eol=lf$/m);
 
-  for (const role of ['xnode-1', 'xnode-2', 'xnode-3', 'xnode-4', 'xnode-5', 'xnode-6', 'registry', 'staking-backend', 'storage', 'file', 'push', 'calls', 'relay-bootstrap']) {
+  for (const role of ['xnode-1', 'xnode-2', 'xnode-3', 'xnode-4', 'xnode-5', 'xnode-6', 'registry', 'staking-backend', 'storage', 'file', 'push', 'calls']) {
     const volumes = serviceBlock(role).match(/volumes: \[[^\]]+\]|volumes:\r?\n(?:      - [^\r\n]+\r?\n?)+/)?.[0] ?? '';
     assert.match(volumes, /\/state/);
     assert.doesNotMatch(volumes, /:(?:\/app|\/service|\/workspace)(?::|\s|$)/);
@@ -188,9 +186,7 @@ test('LAN opt-in binds only the supplied IPv4 address and documents exact device
   assert.match(launcher, /\$env:SURVIVAL_BIND_HOST = \$advertisedHost/);
   assert.doesNotMatch(launcher, /SURVIVAL_BIND_HOST\s*=.*0\.0\.0\.0/);
   assert.match(launcher, /Name = 'client\.windows\.env'; Host = \$HostName/);
-  assert.match(launcher, /survival-dev-seed\.mjs'\) '--host' \$advertisedHost/);
   assert.match(launcher, /survival-dev-verify\.mjs'\) '--host' \$advertisedHost/);
-  assert.match(seed, /isIP\(host\) !== 4/);
   assert.match(verify, /isIP\(host\) !== 4/);
   assert.match(docs, /41801, 41802, 41803, 41804, 41805, 41806, 41810, 41821, 41822, 41823/);
   assert.match(docs, /41545, 41811/);
@@ -456,7 +452,7 @@ test('daily launcher always uses the fixed project without release-gate ceremony
     'fde4fba030ad002f7c2f7d4c331f49d13fb0ec747eceebec634f1ff4cbca9def',
     'b4c92afb3ba57f3ab959ffe6d319c98484a2155a0f4c65b2c37011ffd197b075'
   ]) assert.match(launcher, new RegExp(routerId));
-  assert.match(launcher, /survival-dev-seed\.mjs/);
+  assert.doesNotMatch(launcher, /survival-dev-seed\.mjs|relay-bootstrap/);
   assert.match(launcher, /survival-dev-context-export\.mjs/);
   assert.match(launcher, /function Reset-SurvivalChainLifecycle/);
   assert.match(launcher, /function Invoke-SurvivalDockerBounded/);
@@ -475,37 +471,19 @@ test('daily launcher always uses the fixed project without release-gate ceremony
   assert.match(launcher, /eth_chainId/);
   assert.match(launcher, /tokenAddress/);
   assert.doesNotMatch(launcher, /Up requires -LanHost/);
-  assert.match(seed, /api\/network\/contact/);
-  assert.match(seed, /relay-bootstrap/);
-  assert.match(verify, /JSON\.stringify\(\{ id: `survival-\$\{method\}`, method, payload \}\)/);
-  assert.match(verify, /rpc\(port, 'storage_route'/);
-  assert.match(verify, /routeIds\.length !== 3/);
-  assert.match(verify, /selected a route outside the exact private endpoint allowlist/);
-  assert.doesNotMatch(verify, /params:/);
-  assert.match(verify, /api\/peer\/onion/);
-  assert.match(verify, /non-canonical onion peer endpoint/);
-  assert.match(bootstrap, /api\/relay-contacts/);
-  assert.match(bootstrap, /\/seed/);
-  assert.match(
-    bootstrap,
-    /\^http:\\\/\\\/172\\\.30\\\.82\\\.1\[1-6\]:8081\\\/api\\\/peer\\\/onion\$/);
+  assert.match(verify, /api\/network\/privacy-contact/);
+  assert.match(verify, /api\/peer\/privacy\/v1\/frame/);
+  assert.match(verify, /privacy-routing-v1/);
+  assert.match(verify, /exact other-five/);
+  assert.doesNotMatch(verify, /api\/session\/rpc|api\/peer\/onion/);
   assert.match(serviceBlock('contracts-devnet'), /profiles: \[chain\]/);
   assert.match(serviceBlock('staking-backend'), /profiles: \[chain\]/);
-  assert.match(compose, /Runtime__BootstrapFromStorage: "true"/);
-  assert.doesNotMatch(compose, /Runtime__AllowLoopbackPeerEndpoints/);
-  assert.doesNotMatch(compose, /Runtime__AllowPrivatePeerEndpoints/);
-  assert.match(compose, /Runtime__EnablePrivatePeerEndpoints: "true"/);
-  assert.match(compose, /Runtime__AllowPublicPeerEndpoints: "false"/);
-  assert.match(compose, /Runtime__PrivatePeerNetworkIdentity: local/);
+  assert.doesNotMatch(compose, /Runtime__|RegistryBootstrap__|relay-bootstrap/);
+  assert.match(compose, /PrivacyRouting__Enabled: "true"/);
+  assert.match(compose, /PrivacyRouting__X25519PrivateKeyPath: \/run\/secrets\/xnode-x25519\.private/);
   for (let index = 0; index < 6; index += 1) {
-    const suffix = index.toString();
-    assert.match(compose, new RegExp(`Runtime__PrivatePeerEndpointAllowlist__${suffix}__RouterId:`));
-    assert.match(compose, new RegExp(`Runtime__PrivatePeerEndpointAllowlist__${suffix}__IpAddress: 172\\.30\\.82\\.${11 + index}`));
-    assert.match(compose, new RegExp(`Runtime__PrivatePeerEndpointAllowlist__${suffix}__Port: "8081"`));
-    assert.match(compose, new RegExp(`Runtime__PrivatePeerEndpointAllowlist__${suffix}__Path: /api/peer/onion`));
     assert.match(compose, new RegExp(`ipv4_address: 172\\.30\\.82\\.${11 + index}`));
   }
-  assert.match(compose, /RegistryBootstrap__BaseUrl: http:\/\/relay-bootstrap:8080/);
   assert.doesNotMatch(launcher, /nonce|evidence|receipt|P15C_/i);
   assert.match(contextExport, /git.*ls-files/si);
   assert.match(contextExport, /safe\.directory=\$\{source\}/);
@@ -531,11 +509,12 @@ test('resend uncertainty chaos is a bounded survival-only real-ingress interpose
   assert.match(launcher, /Assert-SurvivalUatTlsEndpoint/);
   assert.match(launcher, /Invoke-SurvivalChaosControl 'arm'/);
   assert.match(launcher, /Stop-SurvivalChaos/);
-  assert.match(resendChaosProxy, /\/api\/client\/mailbox\/v2\/store/);
+  assert.match(resendChaosProxy, /\/api\/ingress\/v1\/frame/);
+  assert.match(resendChaosProxy, /node:http2/);
   assert.match(resendChaosProxy, /post-durable-ack-response-drop/);
   assert.match(resendChaosProxy, /operation: 'mailbox-ack'/);
-  assert.match(resendChaosProxy, /route: '\/api\/client\/mailbox\/v2\/acknowledge'/);
-  assert.match(resendChaosProxy, /upstreamResponse\.on\('end'/);
+  assert.match(resendChaosProxy, /route: '\/api\/ingress\/v1\/frame'/);
+  assert.match(resendChaosProxy, /upstreamRequest\.on\('end'/);
   assert.match(resendChaosProxy, /state\.postDurableResponseDropCount \+= 1/);
   assert.match(resendChaosProxy, /state\.postDurableAckResponseDropCount \+= 1/);
   assert.match(resendChaosProxy, /state\.preDispatchOutageCount \+= 1/);
@@ -608,7 +587,7 @@ test('resend uncertainty chaos is a bounded survival-only real-ingress interpose
   assert.match(mailboxDriver, /body\.Length <= 4096/);
 });
 
-test('post-seed XNode restart cannot rerun membership one-shot dependencies or duplicate the pin', () => {
+test('native privacy authority needs no legacy seed or post-start XNode restart', () => {
   const upAction = launcher.match(/'Up' \{([\s\S]*?)\r?\n    \}\r?\n    'Down'/)?.[1] ?? '';
   assert.notEqual(upAction, '', 'launcher Up action is missing');
   assert.equal(
@@ -619,20 +598,13 @@ test('post-seed XNode restart cannot rerun membership one-shot dependencies or d
     (upAction.match(/Get-SurvivalVerifiedMembershipPin/g) ?? []).length,
     1,
     'supported Up must derive exactly one Sodium-verified pin');
-  const restart = upAction.match(
-    /Invoke-SurvivalDocker \(\$baseArguments \+ @\('restart', 'xnode-1', 'xnode-2', 'xnode-3', 'xnode-4', 'xnode-5', 'xnode-6'\)\)/);
-  assert.ok(restart, 'post-seed six-XNode restart is missing');
-  const afterRestart = upAction.slice((restart.index ?? 0) + restart[0].length);
-  assert.doesNotMatch(
-    afterRestart,
-    /Invoke-SurvivalDocker[\s\S]*?@\('up'[\s\S]*?'xnode-[1-6]'/,
-    'compose up after restart would rerun completed membership dependencies');
+  assert.doesNotMatch(upAction, /survival-dev-seed|relay-bootstrap|@\('restart', 'xnode-1'/);
+  const afterReadiness = upAction.slice(upAction.indexOf('Assert-SurvivalHostEndpoints'));
   assert.match(
-    afterRestart,
-    /^\s*Assert-SurvivalHostEndpoints \$advertisedHost -IncludeChain:\$Chain/,
-    'bounded endpoint readiness must immediately follow Docker restart');
-  assert.match(afterRestart, /survival-dev-verify\.mjs/);
-  assert.match(afterRestart, /Get-SurvivalVerifiedMembershipPin/);
+    afterReadiness,
+    /Assert-SurvivalHostEndpoints \$advertisedHost -IncludeChain:\$Chain[\s\S]*?survival-dev-verify\.mjs/,
+    'bounded endpoint readiness must immediately precede native privacy verification');
+  assert.match(afterReadiness, /Get-SurvivalVerifiedMembershipPin/);
 });
 
 test('P10E uses real current/next MIP1/RIP1 authority, bounded client ingress, a live driver, and pinned image provenance', () => {
@@ -647,20 +619,22 @@ test('P10E uses real current/next MIP1/RIP1 authority, bounded client ingress, a
   assert.match(serviceBlock('xnode-1'), /SURVIVAL_MAILBOX_CLIENT_AUTHORITY_ENV/);
   assert.match(serviceBlock('xnode-1'), /Node__PublicHost: \$\{SURVIVAL_BIND_HOST:-127\.0\.0\.1\}/);
   assert.match(serviceBlock('xnode-1'), /Node__PublicPort: "41801"/);
-  for (const index of [2, 3, 4, 5, 6]) {
+  for (const index of [3, 4, 5, 6]) {
     assert.doesNotMatch(serviceBlock(`xnode-${index}`), /SURVIVAL_MAILBOX_CLIENT_AUTHORITY_ENV/);
   }
+  assert.match(serviceBlock('xnode-2'), /SURVIVAL_MAILBOX_CLIENT_AUTHORITY_ENV/);
   assert.doesNotMatch(compose, /:4180[1-6]:8081/);
   for (const index of [1, 2, 3, 4, 5, 6]) {
-    assert.match(
-      serviceBlock(`xnode-${index}`),
-      new RegExp(
-        `Node__PublicPeerRpcEndpoint: http:\\/\\/172\\.30\\.82\\.${10 + index}:8081\\/api\\/peer\\/onion`));
+    assert.match(serviceBlock(`xnode-${index}`), new RegExp(`privacy-routing-xnode-${index}\\.env`));
+    assert.match(serviceBlock(`xnode-${index}`), new RegExp(`PrivacyRouting__PublicPeerBaseUrl: http:\\/\\/172\\.30\\.82\\.${10 + index}:8081\\/`));
     assert.match(serviceBlock(`xnode-${index}`), new RegExp(`source: xnode-${index}-ed25519`));
     assert.match(serviceBlock(`xnode-${index}`), /target: xnode-ed25519\.seed/);
+    assert.match(serviceBlock(`xnode-${index}`), new RegExp(`source: xnode-${index}-x25519`));
+    assert.match(serviceBlock(`xnode-${index}`), /target: xnode-x25519\.private/);
     assert.match(compose, new RegExp(`xnode-${index}-ed25519: \\{ file: \\.\\/.secrets\\/survival-dev\\/xnode-${index}-ed25519\\.seed \\}`));
+    assert.match(compose, new RegExp(`xnode-${index}-x25519: \\{ file: \\.\\/.secrets\\/survival-dev\\/xnode-${index}-x25519\\.private \\}`));
   }
-  assert.match(launcher, /\$SurvivalXNodeCommit = 'd817977c72699f58144892b7784250f21e62a892'/);
+  assert.match(launcher, /\$SurvivalXNodeCommit = '828bb09246b58b73b23f24540d7edf863e2f43c2'/);
   assert.match(launcher, /Prepare-SurvivalXNodeIdentitySecrets/);
   assert.match(launcher, /Prepare-SurvivalMailboxPeerAuthority/);
   assert.match(launcher, /'--coordinator-url', "https:\/\/\$coordinatorHost`:41801"/);
@@ -691,7 +665,7 @@ test('P10E uses real current/next MIP1/RIP1 authority, bounded client ingress, a
     mailboxDriverStateInit,
     /chown 65532:65532 \/state \/state\/driver/);
   assert.doesNotMatch(mailboxDriverStateInit, /chmod|777|DAC_OVERRIDE/);
-  assert.match(compose, /XNODE_REVISION: d817977c72699f58144892b7784250f21e62a892/);
+  assert.match(compose, /XNODE_REVISION: 828bb09246b58b73b23f24540d7edf863e2f43c2/);
   assert.match(compose, /XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: [0-9a-f]{64}/);
   assert.match(compose, /org\.opencontainers\.image\.revision/);
   assert.match(compose, /com\.xpoint\.source-context\.manifest-sha256/);

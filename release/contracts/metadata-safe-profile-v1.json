@@ -4,10 +4,10 @@
   "featureFlag": "DEEP_INFRA_PRIVACY_PROFILE",
   "sourceBaseline": {
     "path": "release/source-baseline-v1.json",
-    "sha256": "d1727be7885c6f46efa06dc168de3c21c7835c62437624378152822480563fca"
+    "sha256": "8170b4bf5cfd60170e31a19e7f7174379234ad72827933c0288197fdd81039df"
   },
   "clientExpectations": {
-    "commit": "01b7054eb7c6107d3f196478d0bdd91b2642ce02",
+    "commit": "b8bb4dcbe521cf01d4f9b742986db2c95985dfd8",
     "sha256": "75ee3d01bb32c84a4ee30ea38ac0fd38106510018c7a5650e2c6c8bb18f06bc2"
   },
   "compose": [

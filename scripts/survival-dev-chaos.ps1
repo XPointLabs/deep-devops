@@ -133,23 +133,23 @@ Remove-Item -LiteralPath $EvidencePath -Force -ErrorAction SilentlyContinue
 # one storage service and therefore cannot prove per-node durability or dedupe.
 Invoke-ContractEvidence `
     'pre-dispatch-ingress-fallback' `
-    'Deep.Client.Shared.Tests.Services.SessionTransportTests.RoutedStorage_StoreRouteAcquisitionFailureUsesFallbackBeforeSingleDispatch' `
-    'A classified route-acquisition failure may use the next pinned ingress before any onion store dispatch.' `
-    'The injected failure is a transport contract test; this does not prove an arbitrary stopped node was the selected ingress in a live message flow.'
+    'Deep.Client.Shared.Tests.Services.PrivacyRoutedMailboxBinaryIngressTests.RetryableBeforeForward_UsesFreshDisjointFallback' `
+    'A canonical before-forward failure uses the pinned, strictly disjoint three-hop fallback before any mailbox mutation.' `
+    'The injected failure is a transport contract test; it does not prove that an arbitrary stopped node was selected in a live message flow.'
 Invoke-ContractEvidence `
-    'retrieve-postdispatch-fallback' `
-    'Deep.Client.Shared.Tests.Services.SessionTransportTests.RoutedStorage_RetrievePostDispatchTransportFailureRetriesOnceOnStrictlyDisjointRoute' `
-    'A retrieve transport failure is retried once using a route that excludes the first route nodes.' `
-    'Development-only privacy-degraded behavior: the second route request carries excluded router IDs. It is not a production anonymity claim.'
+    'postdispatch-outcome-unknown' `
+    'Deep.Client.Shared.Tests.Services.PrivacyRoutedMailboxBinaryIngressTests.OutcomeUnknown_NeverUsesFallback' `
+    'A post-dispatch transport failure is outcome-unknown and never redispatched on the fallback route.' `
+    'This proves client-layer no-redispatch only; storage reconciliation remains a separate survival responsibility.'
 Invoke-ContractEvidence `
     'store-ambiguous-outcome-no-redispatch' `
-    'Deep.Client.Shared.Tests.Services.SessionTransportTests.RoutedStorage_StoreCommittedButResponseTransportFailsDoesNotRedispatch' `
-    'After an ambiguous store dispatch the client returns an outcome-unknown error and performs exactly one onion dispatch.' `
+    'Deep.Client.Shared.Tests.Services.PrivacyRoutedMailboxBinaryIngressTests.TerminalOutcomeUnknown_NeverUsesFallback' `
+    'After an authenticated ambiguous terminal result the client returns outcome-unknown and performs exactly one privacy-route dispatch.' `
     'This proves client-layer no-redispatch only; it neither proves storage replication nor server-side cross-node deduplication.'
 Invoke-ContractEvidence `
-    'store-signed-peer-failure-no-redispatch' `
-    'Deep.Client.Shared.Tests.Services.SessionTransportTests.RoutedStorage_StoreSignedPeerTransportFailureDoesNotRedispatch' `
-    'A signed peer transport failure on a store is outcome-unknown rather than a second store attempt.' `
+    'unauthenticated-reply-no-redispatch' `
+    'Deep.Client.Shared.Tests.Services.PrivacyRoutedMailboxBinaryIngressTests.UnauthenticatedReply_IsOutcomeUnknownAndDoesNotFallback' `
+    'An unauthenticated reply is outcome-unknown rather than a second privacy-route dispatch.' `
     'This proves client-layer no-redispatch only; it neither proves storage replication nor server-side cross-node deduplication.'
 
 Invoke-Checked docker @('compose', '-p', 'deep-survival-dev', '-f', $ComposePath, 'ps')
@@ -196,7 +196,7 @@ $evidence = [pscustomobject]@{
         arbitraryIntermediateWriteContinuityClaimed = $false
         crossNodeDeduplicationClaimed = $false
         preDispatchIngressFallback = 'source-contract-tested'
-        retrievePostDispatchFallback = 'source-contract-tested-privacy-degraded-development-only'
+        postDispatchNoRedispatch = 'source-contract-tested-client-layer-only'
         ambiguousStoreNoRedispatch = 'source-contract-tested-client-layer-only'
         containerRecovery = 'live-container-availability-tested'
     }

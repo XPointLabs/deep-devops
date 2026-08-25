@@ -1,26 +1,24 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
+import http2 from 'node:http2';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const ROUTES = new Map([
   ['GET', new Set([
     '/api/bootstrap/client',
-    '/api/network/contact',
+    '/api/network/privacy-contact',
     '/api/network/membership-route-catalog',
   ])],
   ['POST', new Set([
-    '/api/session/rpc',
-    '/api/client/mailbox/v2/store',
-    '/api/client/mailbox/v2/retrieve',
-    '/api/client/mailbox/v2/acknowledge',
+    '/api/ingress/v1/frame',
   ])],
 ]);
 const FAULTS = new Map([
-  ['post-durable-response-drop', { operation: 'mailbox-store', route: '/api/client/mailbox/v2/store', phase: 'post-durable' }],
-  ['pre-dispatch-outage', { operation: 'mailbox-store', route: '/api/client/mailbox/v2/store', phase: 'pre-dispatch' }],
-  ['post-durable-ack-response-drop', { operation: 'mailbox-ack', route: '/api/client/mailbox/v2/acknowledge', phase: 'post-durable' }],
+  ['post-durable-response-drop', { operation: 'mailbox-store', route: '/api/ingress/v1/frame', phase: 'post-durable' }],
+  ['pre-dispatch-outage', { operation: 'mailbox-store', route: '/api/ingress/v1/frame', phase: 'pre-dispatch' }],
+  ['post-durable-ack-response-drop', { operation: 'mailbox-ack', route: '/api/ingress/v1/frame', phase: 'post-durable' }],
 ]);
 const HOP_HEADERS = new Set([
   'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
@@ -39,6 +37,20 @@ function copyHeaders(headers, upstreamHost) {
     if (!HOP_HEADERS.has(name.toLowerCase()) && value !== undefined) result[name] = value;
   }
   if (upstreamHost) result.host = upstreamHost;
+  return result;
+}
+
+function copyHttp2RequestHeaders(request, requestPath, upstreamHost) {
+  const result = {
+    ':method': request.method,
+    ':path': requestPath,
+    ':scheme': 'http',
+    ':authority': upstreamHost,
+  };
+  for (const [name, value] of Object.entries(request.headers)) {
+    const lower = name.toLowerCase();
+    if (!HOP_HEADERS.has(lower) && lower !== 'host' && value !== undefined) result[lower] = value;
+  }
   return result;
 }
 
@@ -156,32 +168,32 @@ export async function startResendChaosProxy(options) {
       }
       state.operationUpstreamDispatchCount += 1;
     }
-    const upstreamRequest = http.request({
-      protocol: upstream.protocol,
-      hostname: upstream.hostname,
-      port: upstream.port || 80,
-      method: request.method,
-      path: requestPath,
-      headers: copyHeaders(request.headers, upstream.host),
-      timeout: upstreamTimeoutMs,
-    }, (upstreamResponse) => {
+    const upstreamSession = http2.connect(upstream.origin);
+    const upstreamRequest = upstreamSession.request(
+      copyHttp2RequestHeaders(request, requestPath, upstream.host));
+    const timeout = setTimeout(
+      () => upstreamRequest.close(http2.constants.NGHTTP2_CANCEL),
+      upstreamTimeoutMs);
+    timeout.unref();
+    upstreamRequest.on('response', (upstreamHeaders) => {
       const chunks = [];
       let length = 0;
       let overflow = false;
-      upstreamResponse.on('data', (chunk) => {
+      upstreamRequest.on('data', (chunk) => {
         length += chunk.length;
-        if (length > maximumResponseBytes) { overflow = true; upstreamResponse.destroy(); return; }
+        if (length > maximumResponseBytes) { overflow = true; upstreamRequest.close(http2.constants.NGHTTP2_CANCEL); return; }
         chunks.push(chunk);
       });
       const failUpstreamResponse = () => {
         if (!response.headersSent && !response.destroyed) response.writeHead(502).end();
       };
-      upstreamResponse.on('aborted', failUpstreamResponse);
-      upstreamResponse.on('error', failUpstreamResponse);
-      upstreamResponse.on('end', () => {
+      upstreamRequest.on('aborted', failUpstreamResponse);
+      upstreamRequest.on('end', () => {
+        clearTimeout(timeout);
+        upstreamSession.close();
         if (overflow) { failUpstreamResponse(); return; }
         if (response.destroyed) return;
-        const status = upstreamResponse.statusCode ?? 502;
+        const status = Number(upstreamHeaders[':status'] ?? 502);
         const successful = status >= 200 && status <= 299;
         if (successful && eligibleOperation) state.operationUpstreamSuccessCount += 1;
         const snapshot = publicState(state);
@@ -194,14 +206,19 @@ export async function startResendChaosProxy(options) {
           response.destroy();
           return;
         }
-        const headers = copyHeaders(upstreamResponse.headers);
+        const headers = copyHeaders(Object.fromEntries(
+          Object.entries(upstreamHeaders).filter(([name]) => !name.startsWith(':'))));
         response.writeHead(status, headers);
         response.end(Buffer.concat(chunks));
       });
     });
-    upstreamRequest.on('timeout', () => upstreamRequest.destroy(new Error('upstream timeout')));
-    upstreamRequest.on('error', () => { if (!response.headersSent && !response.destroyed) response.writeHead(502).end(); });
-    request.on('aborted', () => upstreamRequest.destroy());
+    upstreamSession.on('error', () => { if (!response.headersSent && !response.destroyed) response.writeHead(502).end(); });
+    upstreamRequest.on('error', () => {
+      clearTimeout(timeout);
+      upstreamSession.destroy();
+      if (!response.headersSent && !response.destroyed) response.writeHead(502).end();
+    });
+    request.on('aborted', () => upstreamRequest.close(http2.constants.NGHTTP2_CANCEL));
     request.pipe(upstreamRequest);
   });
   dataServer.on('clientError', (_error, socket) => socket.destroy());

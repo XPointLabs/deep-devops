@@ -69,18 +69,18 @@ if ([string]::IsNullOrWhiteSpace($OutputDirectory)) { $OutputDirectory = Join-Pa
 if ([string]::IsNullOrWhiteSpace($MailboxSecretDirectory)) { $MailboxSecretDirectory = Join-Path $root '.secrets\survival-dev\maui-mailbox-grants' }
 
 # This wrapper intentionally does not call Docker or export the issuer seed.
-$expectedXNodeCommit = 'd817977c72699f58144892b7784250f21e62a892'
+$expectedXNodeCommit = '828bb09246b58b73b23f24540d7edf863e2f43c2'
 $expectedXNodeManifestSha256 =
-    'cb74d02427de9d4bf18933cad8f254647c388eaec6969a1959f38ae0eecebbf6'
+    'def5a44c57666f474980c8f12facbe7033e9a5944b797c6fb726865e7363ffad'
 $expectedDriverSha256 = @{
     'MailboxGrantProvisioner.cs' =
         'f88f7ebb0c06f11fde52386341202090e8bd4205ad23bb40c31e7d79d2ac8184'
     'MailboxRuntimePublisher.cs' =
-        'd6aad71f65987f620ccf0d5a06394240aa199d3bb92ef38b81a9594f8e9ff94b'
+        'aa725b67ddfd48193a3e5cc3f39f529130e589e05fa14b1569123c8a8cf42866'
     'PrivateCrossProcessState.cs' =
         '651d8256822d41b9a7bceab1e6d6bb45740026cac00f487a564befe7777f272b'
     'Program.cs' =
-        '8eb6b8e04049d7dd06cb2998a0487a6b9ea4554e601f8ca63d047e83283fa0b2'
+        'dce15adfff1cd9079d442b6dc71f5fa2b79a85e2283852a98aa6f49177915666'
     'SurvivalMailboxDriver.csproj' =
         '4db436d69ea88ac3ff16f08c161b61cc0c048bad84cb7e529b2208fa569eafbe'
 }
@@ -211,6 +211,14 @@ try {
                 throw 'The software-held DEV-only Mr. X key pair is incomplete.'
             }
         }
+        $privacyRoutesRoot = Join-Path $root 'artifacts\survival-dev'
+        $androidPrivacyRoutes = Join-Path $privacyRoutesRoot 'privacy-routes.android.v1.json'
+        $windowsPrivacyRoutes = Join-Path $privacyRoutesRoot 'privacy-routes.windows.v1.json'
+        foreach ($privacyRoutes in @($androidPrivacyRoutes, $windowsPrivacyRoutes)) {
+            if (-not (Test-Path -LiteralPath $privacyRoutes -PathType Leaf)) {
+                throw 'The generated DEV privacy-route inventory is missing.'
+            }
+        }
         & dotnet $driver publish-runtime `
             --development-only `
             --runtime-authority-public ([IO.Path]::GetFullPath($RuntimeAuthorityPublic)) `
@@ -222,6 +230,8 @@ try {
             --windows-holder-public-key $WindowsHolderPublicKey `
             --mr-x-private-key $privateKey `
             --mr-x-public-key $publicKey `
+            --android-privacy-routes $androidPrivacyRoutes `
+            --windows-privacy-routes $windowsPrivacyRoutes `
             --revocation-ttl-seconds $RevocationTtlSeconds
         if ($LASTEXITCODE -ne 0) {
             throw 'DEV-LOCAL-ONLY Android/Windows mailbox runtime publication failed.'

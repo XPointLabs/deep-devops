@@ -124,7 +124,7 @@ Generate the node identity:
 
 ```bash
 node ./scripts/new-xnode-identity.mjs --as-env --out-dir ./secrets | tee ./identity.generated.env
-chmod 600 ./identity.generated.env ./secrets/key_ed25519 ./secrets/key_bls
+chmod 600 ./identity.generated.env ./secrets/key_ed25519 ./secrets/key_x25519 ./secrets/key_bls
 ```
 
 Copy the printed values from `identity.generated.env` into `.env.node.prod`:
@@ -132,12 +132,14 @@ Copy the printed values from `identity.generated.env` into `.env.node.prod`:
 ```text
 DEEP_NODE_ED25519_PUBLIC_KEY=...
 DEEP_NODE_ED25519_PRIVATE_KEY_FILE=./secrets/key_ed25519
+DEEP_NODE_X25519_PRIVATE_KEY_FILE=./secrets/key_x25519
 DEEP_NODE_BLS_PRIVATE_KEY_FILE=./secrets/key_bls
 DEEP_NODE_VLESS_CLIENT_ID=...
 ```
 
-Back up `secrets/key_ed25519`, `secrets/key_bls`, and `.env.node.prod` in the
-production secret store. Losing these files means losing the node identity.
+Back up `secrets/key_ed25519`, `secrets/key_x25519`, `secrets/key_bls`, and
+`.env.node.prod` in the production secret store. Losing these files means
+losing the node identity or the ability to open privacy traffic.
 
 ## Generate Xray Reality Keys
 
@@ -167,8 +169,13 @@ DEEP_NETWORK=mainnet
 
 DEEP_NODE_PUBLIC_PORT=443
 DEEP_NODE_PUBLIC_IP=<public origin IPv4 address>
-DEEP_NODE_PEER_RPC_PORT=443
-DEEP_NODE_PEER_RPC_ENDPOINT=https://<seed-host>/api/peer/onion
+DEEP_NODE_X25519_PRIVATE_KEY_FILE=./secrets/key_x25519
+
+# Repeat the four values for every next hop this node may call.
+DEEP_PRIVACY_PEER_1_ROUTER_ID=<64-hex-router-id>
+DEEP_PRIVACY_PEER_1_BASE_URL=https://<peer-host>/
+DEEP_PRIVACY_PEER_1_CURRENT_SPKI_SHA256=<64-hex-current-pin>
+DEEP_PRIVACY_PEER_1_NEXT_SPKI_SHA256=<different-64-hex-next-pin>
 
 DEEP_INGRESS_CERTIFICATE_PROFILE=deep-managed
 DEEP_INGRESS_HOST=<seed-host>
@@ -210,7 +217,7 @@ DEEP_NODE_REALITY_SPIDER_X=/
 ```
 
 Do not put private key material directly into `.env.node.prod`. The compose file
-mounts Ed25519 and BLS keys from files as Docker secrets.
+mounts Ed25519, independent X25519, and BLS keys from files as Docker secrets.
 
 ## Configure Seed-Specific Values
 
@@ -239,9 +246,11 @@ DEEP_NODE_PUBLIC_PORT=8443
 DEEP_INGRESS_HTTPS_BIND=8443
 ```
 
-The peer RPC endpoint is generated from the node's origin IP and peer port.
-Onion requests are encrypted and signed by a registered node. The BLS signer
-URL is derived automatically from this signed contact; `/api/staking/quorum/sign`
+The native privacy peer endpoint is
+`https://<seed-host>/api/peer/privacy/v1/frame`. Every configured outbound peer
+is selected by router id from local authority; an inbound layer cannot supply a
+URL. Peer requests are signed by a registered node. The BLS signer URL is
+derived automatically from this signed contact; `/api/staking/quorum/sign`
 is accepted only from the production staking control-plane network. There is no
 operator-configurable signer URL.
 
@@ -307,14 +316,16 @@ Every seed must appear in the registry with:
 
 - matching `nodeId` / `DEEP_NODE_ED25519_PUBLIC_KEY`;
 - `publicHost` equal to its seed hostname;
-- `onion-v1` capability;
+- canonical DPC1 contact with sole `privacy-routing-v1` capability;
+- independent X25519 public key and exact HTTPS privacy peer endpoint;
 - non-mocked VLESS transport;
 - populated BLS public key and signing endpoint;
 - recent heartbeat timestamp.
 
-`/api/relay-contacts` intentionally returns `401` to anonymous callers. XPoint
-nodes fetch the complete catalog with a signed Ed25519 request; clients obtain
-fresh routes through a Reality-connected seed and verify every contact locally.
+`/api/privacy-contacts` intentionally returns `401` to anonymous callers.
+XPoint nodes fetch the complete catalog with a signed Ed25519 request. Clients
+accept only a signed route artifact whose SHA-256 is bound into the activation
+and Mr-X policy authority, then verify every contact locally.
 
 ## Stake And Start Production Registration
 
@@ -347,12 +358,14 @@ seed3.xpoint.network:443
 ```
 
 If a seed uses a non-default public port, include that port in the bootstrap
-entry and verify the registry relay contact advertises the same
-`publicHost/publicPort`.
+entry and verify its registry privacy contact advertises the same HTTPS origin.
 
-Client releases contain only the initial Reality seed profiles. After entering
-the network, the client asks a seed for a fresh route and verifies the signed
-relay contacts. Clients do not download the complete catalog from the registry.
+Client releases contain initial Reality seed profiles plus signed, hash-bound
+privacy route authority. Each mailbox operation is wrapped for exactly three
+distinct routers. A fallback route must use six different router identities,
+keys, and origins across both routes and is allowed only after a classified
+definitely-before-forward failure; ambiguous dispatch is outcome-unknown and
+never falls back.
 
 ## Operations
 

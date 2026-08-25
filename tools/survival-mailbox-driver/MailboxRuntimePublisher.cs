@@ -115,6 +115,15 @@ internal static class MailboxRuntimePublisher
         });
         var revocationHash = Hash(revocationBytes);
 
+        var androidPrivacyRoutes = ReadExact(
+            SafeFile(Required("--android-privacy-routes")), 16 * 1024);
+        var windowsPrivacyRoutes = ReadExact(
+            SafeFile(Required("--windows-privacy-routes")), 16 * 1024);
+        ValidatePrivacyRoutes(androidPrivacyRoutes, "android");
+        ValidatePrivacyRoutes(windowsPrivacyRoutes, "windows");
+        var androidPrivacyRoutesHash = Hash(androidPrivacyRoutes);
+        var windowsPrivacyRoutesHash = Hash(windowsPrivacyRoutes);
+
         var privateKeyPath = SafeFile(Required("--mr-x-private-key"));
         var publicKeyPath = SafeFile(Required("--mr-x-public-key"));
         RequireProtectedDirectory(Path.GetDirectoryName(privateKeyPath)!);
@@ -131,12 +140,16 @@ internal static class MailboxRuntimePublisher
                 pointerBytes, manifestBytes, androidBundleBytes, windowsBundleBytes,
                 generation, authorityHash, issuer, androidHolder, windowsHolder,
                 SessionId(androidHolder), SessionId(windowsHolder), manifestHash,
-                revocationBytes, revocationHash, privateKey, publicKey);
+                revocationBytes, revocationHash,
+                androidPrivacyRoutes, androidPrivacyRoutesHash,
+                privateKey, publicKey);
             PublishPlatform("windows", Required("--windows-runtime-root"), authorityBytes,
                 pointerBytes, manifestBytes, androidBundleBytes, windowsBundleBytes,
                 generation, authorityHash, issuer, androidHolder, windowsHolder,
                 SessionId(androidHolder), SessionId(windowsHolder), manifestHash,
-                revocationBytes, revocationHash, privateKey, publicKey);
+                revocationBytes, revocationHash,
+                windowsPrivacyRoutes, windowsPrivacyRoutesHash,
+                privateKey, publicKey);
         }
         finally
         {
@@ -165,6 +178,7 @@ internal static class MailboxRuntimePublisher
         string generation, string authorityHash, string issuer,
         string androidHolder, string windowsHolder, string androidSession, string windowsSession,
         string manifestHash, byte[] revocations, string revocationHash,
+        byte[] privacyRoutes, string privacyRoutesHash,
         byte[] privateKey, byte[] publicKey)
     {
         var target = Path.GetFullPath(targetPath);
@@ -187,6 +201,7 @@ internal static class MailboxRuntimePublisher
         {
             File.WriteAllBytes(Path.Combine(stage, "authority.public.json"), authorityBytes);
             File.WriteAllBytes(Path.Combine(stage, "revocations.v1.json"), revocations);
+            File.WriteAllBytes(Path.Combine(stage, "privacy-routes.v1.json"), privacyRoutes);
             File.WriteAllBytes(Path.Combine(stage, "pair", "current-generation.json"), pointerBytes);
             var stagedGeneration = Path.Combine(stage, "pair", "generations", generation);
             File.WriteAllBytes(Path.Combine(stagedGeneration, "android.mailbox-credentials.v1.json"),
@@ -210,7 +225,8 @@ internal static class MailboxRuntimePublisher
                 windowsSessionId = windowsSession,
                 pairGeneration = generation,
                 pairManifestSha256 = manifestHash,
-                revocationSnapshotSha256 = revocationHash
+                revocationSnapshotSha256 = revocationHash,
+                privacyRoutesSha256 = privacyRoutesHash
             });
             var signature = PublicKeyAuth.SignDetached(payload, privateKey);
             Require(PublicKeyAuth.VerifyDetached(signature, payload, publicKey),
@@ -231,7 +247,8 @@ internal static class MailboxRuntimePublisher
                 pairManifestSha256 = manifestHash,
                 peerHolderPublicKey = peerHolder,
                 peerSessionId = peerSession,
-                revocationSnapshotSha256 = revocationHash
+                revocationSnapshotSha256 = revocationHash,
+                privacyRoutesSha256 = privacyRoutesHash
             }));
             ProtectTree(stage);
             if (Directory.Exists(target)) Directory.Move(target, backup);
@@ -257,6 +274,56 @@ internal static class MailboxRuntimePublisher
             if (published && Directory.Exists(target) && Directory.Exists(backup))
                 Directory.Delete(backup, true);
         }
+    }
+
+    private static void ValidatePrivacyRoutes(byte[] bytes, string expectedPlatform)
+    {
+        using var document = JsonDocument.Parse(bytes, new JsonDocumentOptions
+        {
+            AllowTrailingCommas = false,
+            CommentHandling = JsonCommentHandling.Disallow,
+            MaxDepth = 8
+        });
+        var root = document.RootElement;
+        Exact(root,
+            ["schemaVersion", "developmentOnly", "platform", "primary", "fallback"],
+            "privacy routes");
+        Require(root.GetProperty("schemaVersion").GetInt32() == 1 &&
+                root.GetProperty("developmentOnly").GetBoolean() &&
+                root.GetProperty("platform").GetString() == expectedPlatform,
+            "Privacy routes are not bound to the expected DEV platform.");
+
+        var routerIds = new HashSet<string>(StringComparer.Ordinal);
+        var agreementKeys = new HashSet<string>(StringComparer.Ordinal);
+        var origins = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var routeName in new[] { "primary", "fallback" })
+        {
+            var route = root.GetProperty(routeName);
+            Exact(route, ["entryOrigin", "hops"], $"{routeName} privacy route");
+            var originText = route.GetProperty("entryOrigin").GetString();
+            Require(Uri.TryCreate(originText, UriKind.Absolute, out var origin) &&
+                    origin.Scheme == Uri.UriSchemeHttps &&
+                    origin.AbsolutePath == "/" &&
+                    string.IsNullOrEmpty(origin.UserInfo) &&
+                    string.IsNullOrEmpty(origin.Query) &&
+                    string.IsNullOrEmpty(origin.Fragment) &&
+                    origins.Add(origin.AbsoluteUri),
+                "Privacy route entry origins must be distinct canonical HTTPS origins.");
+            var hops = route.GetProperty("hops");
+            Require(hops.ValueKind == JsonValueKind.Array && hops.GetArrayLength() == 3,
+                "A privacy route must contain exactly three hops.");
+            foreach (var hop in hops.EnumerateArray())
+            {
+                Exact(hop, ["routerId", "x25519PublicKey"], "privacy route hop");
+                var routerId = LowerHex(hop.GetProperty("routerId").GetString()!, 32);
+                var agreementKey = LowerHex(
+                    hop.GetProperty("x25519PublicKey").GetString()!, 32);
+                Require(routerIds.Add(routerId) && agreementKeys.Add(agreementKey),
+                    "Privacy routes must use six distinct router ids and X25519 keys.");
+            }
+        }
+        Require(routerIds.Count == 6 && agreementKeys.Count == 6,
+            "Privacy route inventory is incomplete.");
     }
 
     private static string SessionId(string ed25519Hex)

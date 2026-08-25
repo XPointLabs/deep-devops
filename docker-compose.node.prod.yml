@@ -149,15 +149,31 @@ services:
       Node__PublicHost: ${DEEP_NODE_PUBLIC_HOST:?set DEEP_NODE_PUBLIC_HOST}
       Node__PublicIp: ${DEEP_NODE_PUBLIC_IP:?set DEEP_NODE_PUBLIC_IP}
       Node__PublicPort: ${DEEP_NODE_PUBLIC_PORT:-443}
-      Node__PublicPeerRpcPort: ${DEEP_NODE_PEER_RPC_PORT:-443}
-      Node__PublicPeerRpcEndpoint: ${DEEP_NODE_PEER_RPC_ENDPOINT:?set DEEP_NODE_PEER_RPC_ENDPOINT}
       Node__QuorumCoordinatorNetworks: "172.31.241.2/32"
 
-      Runtime__BootstrapFromStorage: ${DEEP_NODE_BOOTSTRAP_FROM_STORAGE:-true}
-      Runtime__HeartbeatInterval: ${DEEP_NODE_RUNTIME_HEARTBEAT_INTERVAL:-00:00:30}
-      Runtime__RequireSignedRelayContacts: "true"
+      PrivacyRouting__Enabled: "true"
+      PrivacyRouting__X25519PrivateKeyPath: /run/secrets/node-x25519-private-key
+      PrivacyRouting__PublicPeerBaseUrl: https://${DEEP_NODE_PUBLIC_HOST:?set DEEP_NODE_PUBLIC_HOST}/
+      PrivacyRouting__MaximumConcurrentRequests: ${DEEP_PRIVACY_MAXIMUM_CONCURRENT_REQUESTS:-64}
+      PrivacyRouting__RequestsPerMinute: ${DEEP_PRIVACY_REQUESTS_PER_MINUTE:-600}
+      PrivacyRouting__RequestTimeoutSeconds: ${DEEP_PRIVACY_REQUEST_TIMEOUT_SECONDS:-30}
+      PrivacyRouting__ReplyPaddingBlockBytes: ${DEEP_PRIVACY_REPLY_PADDING_BLOCK_BYTES:-4096}
+      PrivacyRouting__ReplayCapacity: ${DEEP_PRIVACY_REPLAY_CAPACITY:-100000}
+      PrivacyRouting__ReplayTtlSeconds: ${DEEP_PRIVACY_REPLAY_TTL_SECONDS:-300}
+      PrivacyRouting__AllowInsecureHttpPeerTransport: "false"
+      PrivacyRouting__Peers__0__RouterId: ${DEEP_PRIVACY_PEER_1_ROUTER_ID:?set DEEP_PRIVACY_PEER_1_ROUTER_ID}
+      PrivacyRouting__Peers__0__BaseUrl: ${DEEP_PRIVACY_PEER_1_BASE_URL:?set DEEP_PRIVACY_PEER_1_BASE_URL}
+      PrivacyRouting__Peers__0__CurrentSpkiSha256: ${DEEP_PRIVACY_PEER_1_CURRENT_SPKI_SHA256:?set DEEP_PRIVACY_PEER_1_CURRENT_SPKI_SHA256}
+      PrivacyRouting__Peers__0__NextSpkiSha256: ${DEEP_PRIVACY_PEER_1_NEXT_SPKI_SHA256:?set DEEP_PRIVACY_PEER_1_NEXT_SPKI_SHA256}
+      PrivacyRouting__Peers__1__RouterId: ${DEEP_PRIVACY_PEER_2_ROUTER_ID:?set DEEP_PRIVACY_PEER_2_ROUTER_ID}
+      PrivacyRouting__Peers__1__BaseUrl: ${DEEP_PRIVACY_PEER_2_BASE_URL:?set DEEP_PRIVACY_PEER_2_BASE_URL}
+      PrivacyRouting__Peers__1__CurrentSpkiSha256: ${DEEP_PRIVACY_PEER_2_CURRENT_SPKI_SHA256:?set DEEP_PRIVACY_PEER_2_CURRENT_SPKI_SHA256}
+      PrivacyRouting__Peers__1__NextSpkiSha256: ${DEEP_PRIVACY_PEER_2_NEXT_SPKI_SHA256:?set DEEP_PRIVACY_PEER_2_NEXT_SPKI_SHA256}
+      PrivacyRouting__Peers__2__RouterId: ${DEEP_PRIVACY_PEER_3_ROUTER_ID:?set DEEP_PRIVACY_PEER_3_ROUTER_ID}
+      PrivacyRouting__Peers__2__BaseUrl: ${DEEP_PRIVACY_PEER_3_BASE_URL:?set DEEP_PRIVACY_PEER_3_BASE_URL}
+      PrivacyRouting__Peers__2__CurrentSpkiSha256: ${DEEP_PRIVACY_PEER_3_CURRENT_SPKI_SHA256:?set DEEP_PRIVACY_PEER_3_CURRENT_SPKI_SHA256}
+      PrivacyRouting__Peers__2__NextSpkiSha256: ${DEEP_PRIVACY_PEER_3_NEXT_SPKI_SHA256:?set DEEP_PRIVACY_PEER_3_NEXT_SPKI_SHA256}
 
-      RegistryBootstrap__BaseUrl: ${DEEP_REGISTRY_URL:?set DEEP_REGISTRY_URL}
       StorageRpc__BaseUrl: http://172.31.241.20:8080
 
       Vless__Enabled: "true"
@@ -211,6 +227,8 @@ services:
     secrets:
       - source: node-ed25519-private-key
         target: node-ed25519-private-key
+      - source: node-x25519-private-key
+        target: node-x25519-private-key
       - source: node-bls-private-key
         target: node-bls-private-key
     networks:
@@ -298,5 +316,7 @@ secrets:
     file: ${DEEP_INGRESS_NEXT_SPKI_FILE:?set DEEP_INGRESS_NEXT_SPKI_FILE}
   node-ed25519-private-key:
     file: ${DEEP_NODE_ED25519_PRIVATE_KEY_FILE:?set DEEP_NODE_ED25519_PRIVATE_KEY_FILE}
+  node-x25519-private-key:
+    file: ${DEEP_NODE_X25519_PRIVATE_KEY_FILE:?set DEEP_NODE_X25519_PRIVATE_KEY_FILE}
   node-bls-private-key:
     file: ${DEEP_NODE_BLS_PRIVATE_KEY_FILE:?set DEEP_NODE_BLS_PRIVATE_KEY_FILE}

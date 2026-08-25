@@ -37,9 +37,14 @@ function newEd25519Identity() {
 }
 
 const ed25519 = newEd25519Identity();
+let x25519PrivateKey;
+do {
+  x25519PrivateKey = randomBytes(32).toString('hex');
+} while (x25519PrivateKey === ed25519.privateKey || /^0+$/.test(x25519PrivateKey));
 const identity = {
   DEEP_NODE_ED25519_PRIVATE_KEY: ed25519.privateKey,
   DEEP_NODE_ED25519_PUBLIC_KEY: ed25519.publicKey,
+  DEEP_NODE_X25519_PRIVATE_KEY: x25519PrivateKey,
   DEEP_NODE_BLS_PRIVATE_KEY: newBlsScalarHex(),
   DEEP_NODE_VLESS_CLIENT_ID: randomUUID()
 };
@@ -69,12 +74,16 @@ if (outDir) {
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   const ed25519Path = resolve(directory, 'key_ed25519');
   const blsPath = resolve(directory, 'key_bls');
+  const x25519Path = resolve(directory, 'key_x25519');
   writeFileSync(ed25519Path, `0x${identity.DEEP_NODE_ED25519_PRIVATE_KEY}\n`, { mode: 0o600 });
   writeFileSync(blsPath, `0x${identity.DEEP_NODE_BLS_PRIVATE_KEY}\n`, { mode: 0o600 });
+  writeFileSync(x25519Path, `${identity.DEEP_NODE_X25519_PRIVATE_KEY}\n`, { mode: 0o600 });
   delete output.DEEP_NODE_ED25519_PRIVATE_KEY;
   delete output.DEEP_NODE_BLS_PRIVATE_KEY;
+  delete output.DEEP_NODE_X25519_PRIVATE_KEY;
   output.DEEP_NODE_ED25519_PRIVATE_KEY_FILE = ed25519Path;
   output.DEEP_NODE_BLS_PRIVATE_KEY_FILE = blsPath;
+  output.DEEP_NODE_X25519_PRIVATE_KEY_FILE = x25519Path;
 }
 
 if (args.has('--as-env') || args.has('-asenv')) {

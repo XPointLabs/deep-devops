@@ -37,8 +37,8 @@ supplied IPv4 interface and places the same address in both client artifacts. It
 never binds `0.0.0.0`.
 
 Raw `docker compose ... up` is not supported. The launcher creates filtered,
-fail-closed source contexts, exchanges signed relay contacts, restarts the
-XNodes, probes host HTTP endpoints, verifies all six contacts, and writes the
+fail-closed source contexts, reads the six signed native privacy contacts,
+probes host HTTP endpoints, verifies all six contacts, and writes the
 client handoff files; a raw Compose invocation does not perform those steps.
 
 All application root filesystems in this development stack are read-only. A
@@ -153,9 +153,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/survival-dev.ps1 -Ac
 ## P10E mailbox client and peer rehearsal
 
 The survival stack pins its filtered XNode context to accepted source
-`d817977c72699f58144892b7784250f21e62a892`; a dirty checkout, another revision,
+`828bb09246b58b73b23f24540d7edf863e2f43c2`; a dirty checkout, another revision,
 or a filtered-source manifest other than
-`cb74d02427de9d4bf18933cad8f254647c388eaec6969a1959f38ae0eecebbf6`
+`def5a44c57666f474980c8f12facbe7033e9a5944b797c6fb726865e7363ffad`
 fails closed before build. The source exporter writes a deterministic
 `.survival-source-manifest.json`, and the shared XNode image carries both the exact
 revision and manifest SHA-256 as OCI labels. The live rehearsal requires all six
@@ -326,11 +326,13 @@ Rollback is volume-preserving: run `ChaosEnd`, which removes the private interpo
 force-recreates only HAProxy with its ordinary xnode-1 backend. No XNode is restarted and no
 named volume is deleted.
 
-The launcher also exchanges the six fresh signed relay contacts through the
-local bootstrap sidecar and restarts the XNodes. Routed storage still requires
-exactly three signed, distinct hops. The other three pinned nodes provide one
-strictly disjoint fallback route for a classified pre-durable transport failure;
-this is a fixed development trust set, not dynamic discovery.
+The launcher verifies the six fresh DPC1 privacy contacts exposed by the
+XNodes. Every client request uses exactly three distinct native privacy hops:
+`xnode-3 -> xnode-4 -> xnode-1` first and the fully disjoint
+`xnode-5 -> xnode-6 -> xnode-2` route only after a definitely-before-forward
+failure. An ambiguous dispatch result is outcome-unknown and never triggers
+fallback. Storage replication remains behind the mailbox exit and can use a
+fourth storage node without exposing that node to the client route.
 
 Run the bounded chaos evidence lane after the shared transport tests have been
 built. It executes instrumented transport contract tests for: pre-dispatch

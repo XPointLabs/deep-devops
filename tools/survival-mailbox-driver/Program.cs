@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using Deep.Protocol.DeepExtension.MailboxCapabilities;
 using Deep.Protocol.DeepExtension.MembershipRoutes;
+using Sodium;
 using XNode.Core;
 using XNode.Core.Mailbox;
 using XNode.Core.Mailbox.Client;
@@ -79,6 +80,12 @@ switch (arguments.Command)
             arguments.OutputPublic!,
             arguments.CoordinatorUrl,
             arguments.OutputClientPublic);
+        WritePrivacyRouteArtifacts(
+            fixture.RouterIds,
+            arguments.SecretsDirectory,
+            arguments.OutputPrivacyRoutesAndroid!,
+            arguments.OutputPrivacyRoutesWindows!,
+            arguments.PrivacyEntryHost!);
         Result("authority", new
         {
             membershipProofs = 12,
@@ -141,6 +148,107 @@ switch (arguments.Command)
         break;
     default:
         throw new InvalidOperationException("Unknown mailbox rehearsal command.");
+}
+
+static void WritePrivacyRouteArtifacts(
+    IReadOnlyList<RouterId> routerIds,
+    string secretsDirectory,
+    string androidOutput,
+    string windowsOutput,
+    string entryHost)
+{
+    if (routerIds.Count != 6 ||
+        string.IsNullOrWhiteSpace(androidOutput) ||
+        string.IsNullOrWhiteSpace(windowsOutput) ||
+        !System.Net.IPAddress.TryParse(entryHost, out var address) ||
+        address.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork ||
+        address.Equals(System.Net.IPAddress.Any))
+    {
+        throw new InvalidOperationException(
+            "Privacy route publication requires six routers and an exact IPv4 entry host.");
+    }
+
+    var publicKeys = new byte[routerIds.Count][];
+    try
+    {
+        for (var index = 0; index < routerIds.Count; index++)
+        {
+            var path = Path.Combine(
+                secretsDirectory,
+                $"xnode-{index + 1}-x25519.private");
+            var value = File.ReadAllText(path).Trim();
+            if (value.Length != 64 ||
+                value.Any(character => character is not (
+                    >= '0' and <= '9' or >= 'a' and <= 'f')))
+            {
+                throw new InvalidDataException(
+                    "A privacy-routing fixture private key is not canonical lowercase hex.");
+            }
+
+            var privateKey = Convert.FromHexString(value);
+            try
+            {
+                publicKeys[index] = ScalarMult.Base(privateKey);
+                if (publicKeys[index].Length != 32 ||
+                    publicKeys[index].All(static item => item == 0))
+                {
+                    throw new InvalidDataException(
+                        "A privacy-routing fixture public key is invalid.");
+                }
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(privateKey);
+            }
+        }
+
+        for (var left = 0; left < publicKeys.Length; left++)
+        for (var right = left + 1; right < publicKeys.Length; right++)
+        {
+            if (CryptographicOperations.FixedTimeEquals(
+                    publicKeys[left], publicKeys[right]))
+            {
+                throw new InvalidDataException(
+                    "Privacy-routing fixture X25519 public keys must be distinct.");
+            }
+        }
+
+        object Route(int entryPort, int[] indices) => new
+        {
+            entryOrigin = $"https://{entryHost}:{entryPort}/",
+            hops = indices.Select(index => new
+            {
+                routerId = routerIds[index].Value,
+                x25519PublicKey = Convert.ToHexStringLower(publicKeys[index])
+            }).ToArray()
+        };
+
+        foreach (var (platform, output) in new[]
+                 {
+                     ("android", androidOutput),
+                     ("windows", windowsOutput)
+                 })
+        {
+            var bytes = JsonSerializer.SerializeToUtf8Bytes(new
+            {
+                schemaVersion = 1,
+                developmentOnly = true,
+                platform,
+                primary = Route(41803, [2, 3, 0]),
+                fallback = Route(41805, [4, 5, 1])
+            });
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(output))!);
+            File.WriteAllBytes(output, bytes);
+        }
+    }
+    finally
+    {
+        foreach (var publicKey in publicKeys)
+        {
+            if (publicKey is not null)
+                CryptographicOperations.ZeroMemory(publicKey);
+        }
+    }
 }
 
 static async Task RunNewAsync(
@@ -927,7 +1035,18 @@ sealed class Fixture
         var nextNotBefore = window.NextNotBeforeUnixSeconds;
         var currentExpiresAt = window.CurrentExpiresAtUnixSeconds;
         var nextExpiresAt = window.NextExpiresAtUnixSeconds;
-        var ids = seeds.Select(RelayContactSigner.DeriveRouterId).ToArray();
+        var ids = seeds.Select(static seed =>
+        {
+            var seedBytes = Convert.FromHexString(seed);
+            try
+            {
+                return RouterId.FromBytes(PublicKeyAuth.GenerateKeyPair(seedBytes).PublicKey);
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(seedBytes);
+            }
+        }).ToArray();
         var expectedIds = new[]
         {
             "4cb5abf6ad79fbf5abbccafcc269d85cd2651ed4b885b5869f241aedf0a5ba29",
@@ -2056,6 +2175,9 @@ sealed record Arguments(
     string? OutputClientEnvironment,
     string? OutputPublic,
     string? OutputClientPublic,
+    string? OutputPrivacyRoutesAndroid,
+    string? OutputPrivacyRoutesWindows,
+    string? PrivacyEntryHost,
     string? AndroidHolderPublicKey,
     string? WindowsHolderPublicKey,
     string? IssuerSeedPath,
@@ -2102,6 +2224,9 @@ sealed record Arguments(
             Optional("--output-client-env"),
             Optional("--output-public"),
             Optional("--output-client-public"),
+            Optional("--output-privacy-routes-android"),
+            Optional("--output-privacy-routes-windows"),
+            Optional("--privacy-entry-host"),
             Optional("--android-holder-public-key"),
             Optional("--windows-holder-public-key"),
             Optional("--issuer-seed-path"),

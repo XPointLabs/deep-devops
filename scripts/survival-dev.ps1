@@ -131,8 +131,8 @@ $baseArguments = @('compose') + $projectDirectoryArguments + @('-p', $Project, '
 $uatTlsArguments = @('compose') + $projectDirectoryArguments + @('-p', $Project, '-f', $ComposePath, '-f', $UatTlsComposePath)
 $chaosArguments = @('compose') + $projectDirectoryArguments + @('-p', $Project, '-f', $ComposePath, '-f', $UatTlsComposePath, '-f', $ChaosComposePath, '--profile', 'resend-chaos')
 $ContextRoot = Join-Path $Root 'artifacts\survival-dev\build-contexts'
-$SurvivalXNodeCommit = 'd817977c72699f58144892b7784250f21e62a892'
-$SurvivalXNodeContextManifestSha256 = 'cb74d02427de9d4bf18933cad8f254647c388eaec6969a1959f38ae0eecebbf6'
+$SurvivalXNodeCommit = '828bb09246b58b73b23f24540d7edf863e2f43c2'
+$SurvivalXNodeContextManifestSha256 = 'def5a44c57666f474980c8f12facbe7033e9a5944b797c6fb726865e7363ffad'
 $SurvivalMailboxBuildHelperSha256 = 'c5e0f08e0816296734195a27b2c8a47a207b0f1ade88f0186caffe02334f1456'
 $SurvivalMailboxDriverSha256 = @{
     'MailboxGrantProvisioner.cs' = 'f88f7ebb0c06f11fde52386341202090e8bd4205ad23bb40c31e7d79d2ac8184'
@@ -361,6 +361,8 @@ function Prepare-SurvivalMailboxPeerAuthority([string]$PinnedXNodeSource = '') {
     $clientAuthorityPath = Join-Path $outputDirectory 'mailbox-client-xnode-1.env'
     $publicPath = Join-Path $outputDirectory 'mailbox-peer-authority.public.json'
     $clientPublicPath = Join-Path $outputDirectory 'mailbox-client-authority.public.json'
+    $privacyAndroidPath = Join-Path $outputDirectory 'privacy-routes.android.v1.json'
+    $privacyWindowsPath = Join-Path $outputDirectory 'privacy-routes.windows.v1.json'
     $coordinatorHost = [Environment]::GetEnvironmentVariable('SURVIVAL_BIND_HOST')
     if ([string]::IsNullOrWhiteSpace($coordinatorHost)) { $coordinatorHost = '127.0.0.1' }
     $authorityStatePath = Get-SurvivalMailboxAuthorityState
@@ -372,7 +374,10 @@ function Prepare-SurvivalMailboxPeerAuthority([string]$PinnedXNodeSource = '') {
         '--output-client-env', $clientAuthorityPath,
         '--coordinator-url', "https://$coordinatorHost`:41801",
         '--output-public', $publicPath,
-        '--output-client-public', $clientPublicPath)
+        '--output-client-public', $clientPublicPath,
+        '--output-privacy-routes-android', $privacyAndroidPath,
+        '--output-privacy-routes-windows', $privacyWindowsPath,
+        '--privacy-entry-host', $coordinatorHost)
     Set-Item -Path 'Env:SURVIVAL_MAILBOX_AUTHORITY_ENV' -Value $authorityPath
     Set-Item -Path 'Env:SURVIVAL_MAILBOX_CLIENT_AUTHORITY_ENV' -Value $clientAuthorityPath
     Set-Item -Path 'Env:SURVIVAL_MAILBOX_PUBLIC_AUTHORITY' -Value $publicPath
@@ -474,6 +479,23 @@ function Prepare-SurvivalXNodeIdentitySecrets() {
             [IO.File]::WriteAllText($path, $seed + "`n", [Text.UTF8Encoding]::new($false))
         }
         Protect-SurvivalDevPrivateFile $path
+
+        # Privacy-routing agreement keys are deliberately independent from the
+        # Ed25519 router identity.  These deterministic values are DEV-LOCAL-ONLY
+        # fixture scalars and are never derived by Ed25519-to-X25519 conversion.
+        $privacyPath = Join-Path $directory "xnode-$index-x25519.private"
+        $privacyScalar = ('{0:x64}' -f (1000 + $index))
+        if (Test-Path -LiteralPath $privacyPath -PathType Leaf) {
+            if (([IO.File]::ReadAllText($privacyPath).Trim()) -cne $privacyScalar) {
+                throw 'Existing DEV-LOCAL-ONLY XNode privacy key does not match the pinned independent fixture key.'
+            }
+        } else {
+            [IO.File]::WriteAllText(
+                $privacyPath,
+                $privacyScalar + "`n",
+                [Text.UTF8Encoding]::new($false))
+        }
+        Protect-SurvivalDevPrivateFile $privacyPath
     }
     $issuerPath = Join-Path $directory 'mailbox-client-issuer.seed'
     $issuerSeed = ('{0:x64}' -f 1001)
@@ -485,6 +507,33 @@ function Prepare-SurvivalXNodeIdentitySecrets() {
         [IO.File]::WriteAllText($issuerPath, $issuerSeed + "`n", [Text.UTF8Encoding]::new($false))
     }
     Protect-SurvivalDevPrivateFile $issuerPath
+
+    $privacyOutput = Join-Path $Root 'artifacts\survival-dev'
+    [void][IO.Directory]::CreateDirectory($privacyOutput)
+    $routerIds = @(
+        '4cb5abf6ad79fbf5abbccafcc269d85cd2651ed4b885b5869f241aedf0a5ba29',
+        '7422b9887598068e32c4448a949adb290d0f4e35b9e01b0ee5f1a1e600fe2674',
+        'f381626e41e7027ea431bfe3009e94bdd25a746beec468948d6c3c7c5dc9a54b',
+        'fd50b8e3b144ea244fbf7737f550bc8dd0c2650bbc1aada833ca17ff8dbf329b',
+        'fde4fba030ad002f7c2f7d4c331f49d13fb0ec747eceebec634f1ff4cbca9def',
+        'b4c92afb3ba57f3ab959ffe6d319c98484a2155a0f4c65b2c37011ffd197b075'
+    )
+    foreach ($localIndex in 0..5) {
+        $peerIndex = 0
+        $lines = [Collections.Generic.List[string]]::new()
+        foreach ($candidateIndex in 0..5) {
+            if ($candidateIndex -eq $localIndex) { continue }
+            $nodeNumber = $candidateIndex + 1
+            $lines.Add("PrivacyRouting__Peers__$peerIndex`__RouterId=$($routerIds[$candidateIndex])")
+            $lines.Add("PrivacyRouting__Peers__$peerIndex`__BaseUrl=http://172.30.82.$(10 + $nodeNumber):8081/")
+            $peerIndex++
+        }
+        if ($peerIndex -ne 5) { throw 'Privacy-routing DEV peer fixture is incomplete.' }
+        [IO.File]::WriteAllText(
+            (Join-Path $privacyOutput "privacy-routing-xnode-$($localIndex + 1).env"),
+            (($lines -join "`n") + "`n"),
+            [Text.UTF8Encoding]::new($false))
+    }
 }
 
 function Reset-SurvivalMembershipFixture() {
@@ -561,12 +610,12 @@ function Reset-SurvivalChainLifecycle() {
 
 function Assert-SurvivalHostEndpoints([string]$HostName,[switch]$IncludeChain) {
     $targets = @(
-        "http://$HostName`:41801/api/network/contact",
-        "http://$HostName`:41802/api/network/contact",
-        "http://$HostName`:41803/api/network/contact",
-        "http://$HostName`:41804/api/network/contact",
-        "http://$HostName`:41805/api/network/contact",
-        "http://$HostName`:41806/api/network/contact",
+        "http://$HostName`:41801/api/network/privacy-contact",
+        "http://$HostName`:41802/api/network/privacy-contact",
+        "http://$HostName`:41803/api/network/privacy-contact",
+        "http://$HostName`:41804/api/network/privacy-contact",
+        "http://$HostName`:41805/api/network/privacy-contact",
+        "http://$HostName`:41806/api/network/privacy-contact",
         "http://$HostName`:41810/health/live",
         "http://$HostName`:41810/api/network/membership-route-catalog",
         "http://$HostName`:41801/api/network/membership-route-catalog",
@@ -710,14 +759,14 @@ function Get-SurvivalUatTlsSecretDirectory() {
 function Assert-SurvivalUatTlsEndpoint([string]$HostName) {
     try {
         $response = Invoke-WebRequest -UseBasicParsing `
-            -Uri "https://$HostName`:41801/api/network/contact" -TimeoutSec 5
+            -Uri "https://$HostName`:41801/api/network/privacy-contact" -TimeoutSec 5
         if ($response.StatusCode -ne 200) { throw 'unexpected HTTPS status' }
     } catch {
         throw "The CA-trusted HTTPS XNode ingress is not ready: $_"
     }
     $acceptedCleartext = $false
     try {
-        [void](Invoke-WebRequest -UseBasicParsing -Uri "http://$HostName`:41801/api/network/contact" -TimeoutSec 2)
+        [void](Invoke-WebRequest -UseBasicParsing -Uri "http://$HostName`:41801/api/network/privacy-contact" -TimeoutSec 2)
         $acceptedCleartext = $true
     } catch {}
     if ($acceptedCleartext) { throw 'The XNode application port accepted cleartext HTTP.' }
@@ -816,7 +865,7 @@ function Test-SurvivalChaosRunning() {
 function Wait-SurvivalXNodeOne([string]$HostName) {
     foreach ($attempt in 1..40) {
         try {
-            $response = Invoke-WebRequest -UseBasicParsing -Uri "https://$HostName`:41801/api/network/contact" -TimeoutSec 2
+            $response = Invoke-WebRequest -UseBasicParsing -Uri "https://$HostName`:41801/api/network/privacy-contact" -TimeoutSec 2
             if ($response.StatusCode -eq 200) { return }
         } catch {}
         Start-Sleep -Milliseconds 500
@@ -900,12 +949,8 @@ switch ($Action) {
             -TimeoutSeconds 300 `
             -Arguments ($upArguments + @('up', '-d', '--no-build', '--wait') + $Service)
         Assert-SurvivalHostEndpoints $advertisedHost -IncludeChain:$Chain
-        & node (Join-Path $PSScriptRoot 'survival-dev-seed.mjs') '--host' $advertisedHost
-        if ($LASTEXITCODE -ne 0) { throw 'Survival relay contact seed failed.' }
-        Invoke-SurvivalDocker ($baseArguments + @('restart', 'xnode-1', 'xnode-2', 'xnode-3', 'xnode-4', 'xnode-5', 'xnode-6'))
-        Assert-SurvivalHostEndpoints $advertisedHost -IncludeChain:$Chain
         & node (Join-Path $PSScriptRoot 'survival-dev-verify.mjs') '--host' $advertisedHost
-        if ($LASTEXITCODE -ne 0) { throw 'Survival relay contact verification failed.' }
+        if ($LASTEXITCODE -ne 0) { throw 'Survival native privacy-route verification failed.' }
         Assert-SurvivalMembershipFixtureVerified
         $verifiedMembershipPin = Get-SurvivalVerifiedMembershipPin
         $membershipUrl = "http://$advertisedHost`:41810/api/network/membership-route-catalog"

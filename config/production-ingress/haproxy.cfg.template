@@ -62,9 +62,9 @@ frontend deep_https
   http-request deny deny_status 400 if post_method !single_content_length
   http-request deny deny_status 413 if post_method content_length_too_large
   http-request deny deny_status 400 if get_method { req.body_size gt 0 }
-  acl public_get path /api/bootstrap/client /api/network/contact /api/network/membership-route-catalog
-  acl public_post path /api/session/rpc /api/client/mailbox/v2/store /api/client/mailbox/v2/retrieve /api/client/mailbox/v2/acknowledge
-  acl peer_post path /api/peer/onion /api/peer/mailbox/v2/store /api/peer/mailbox/v2/tombstone
+  acl public_get path /api/bootstrap/client /api/network/privacy-contact /api/network/membership-route-catalog
+  acl public_post path /api/ingress/v1/frame
+  acl peer_post path /api/peer/privacy/v1/frame /api/peer/mailbox/v2/store /api/peer/mailbox/v2/tombstone
   acl quorum_post path /api/staking/quorum/sign
   acl quorum_source src ${DEEP_QUORUM_COORDINATOR_CIDR}
   http-request deny deny_status 404 unless get_method public_get or post_method public_post or post_method peer_post or post_method quorum_post quorum_source
@@ -72,6 +72,9 @@ frontend deep_https
   use_backend xnode_api if post_method public_post
   use_backend xnode_peer if post_method peer_post
   use_backend xnode_peer if post_method quorum_post quorum_source
+  http-response del-header Date if public_post
+  http-response del-header Server if public_post
+  http-response set-header Cache-Control no-store if public_post
 
 backend xnode_api
   mode http

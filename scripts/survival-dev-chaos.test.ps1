@@ -19,14 +19,14 @@ if (-not $script.Contains("'stop', `$node") -or
     throw 'Chaos script does not restore each stopped XNode in a finally block.'
 }
 foreach ($required in @(
-    'RoutedStorage_StoreRouteAcquisitionFailureUsesFallbackBeforeSingleDispatch',
-    'RoutedStorage_RetrievePostDispatchTransportFailureRetriesOnceOnStrictlyDisjointRoute',
-    'RoutedStorage_StoreCommittedButResponseTransportFailsDoesNotRedispatch',
-    'RoutedStorage_StoreSignedPeerTransportFailureDoesNotRedispatch',
+    'RetryableBeforeForward_UsesFreshDisjointFallback',
+    'OutcomeUnknown_NeverUsesFallback',
+    'TerminalOutcomeUnknown_NeverUsesFallback',
+    'UnauthenticatedReply_IsOutcomeUnknownAndDoesNotFallback',
     'replicatedStorageClaimed = $false',
     'arbitraryIntermediateWriteContinuityClaimed = $false',
     'crossNodeDeduplicationClaimed = $false',
-    'source-contract-tested-privacy-degraded-development-only')) {
+    'postDispatchNoRedispatch = ''source-contract-tested-client-layer-only''')) {
     if (-not $script.Contains($required)) {
         throw "Chaos script is missing required bounded evidence declaration: $required"
     }

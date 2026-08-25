@@ -27,8 +27,8 @@ x-xnode-build: &xnode-build
   args:
     SDK_IMAGE: ${SURVIVAL_DOTNET_SDK_IMAGE:-mcr.microsoft.com/dotnet/sdk@sha256:7e964ea8bc6c1e18ea9fbc76ed403da41c9b19aeee2aab6bf9c845f25e891380}
     RUNTIME_IMAGE: ${SURVIVAL_DOTNET_RUNTIME_IMAGE:-mcr.microsoft.com/dotnet/aspnet@sha256:e3736b0d423db99c6988e1ddf5ea725c14b12579bb120024e5ff7ff204a14080}
-    XNODE_REVISION: d817977c72699f58144892b7784250f21e62a892
-    XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: cb74d02427de9d4bf18933cad8f254647c388eaec6969a1959f38ae0eecebbf6
+    XNODE_REVISION: 828bb09246b58b73b23f24540d7edf863e2f43c2
+    XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: def5a44c57666f474980c8f12facbe7033e9a5944b797c6fb726865e7363ffad
   dockerfile_inline: |
     ARG SDK_IMAGE
     ARG RUNTIME_IMAGE
@@ -77,44 +77,22 @@ x-xnode: &xnode
     Node__DataDirectory: /state
     Node__Network: local
     Node__PublicPort: "8080"
-    Node__PublicPeerRpcPort: "8081"
-    Runtime__BootstrapFromStorage: "true"
-    Runtime__EnablePrivatePeerEndpoints: "true"
-    Runtime__AllowPublicPeerEndpoints: "false"
-    Runtime__PrivatePeerNetworkIdentity: local
-    Runtime__PrivatePeerEndpointAllowlist__0__RouterId: 4cb5abf6ad79fbf5abbccafcc269d85cd2651ed4b885b5869f241aedf0a5ba29
-    Runtime__PrivatePeerEndpointAllowlist__0__IpAddress: 172.30.82.11
-    Runtime__PrivatePeerEndpointAllowlist__0__Port: "8081"
-    Runtime__PrivatePeerEndpointAllowlist__0__Path: /api/peer/onion
-    Runtime__PrivatePeerEndpointAllowlist__1__RouterId: 7422b9887598068e32c4448a949adb290d0f4e35b9e01b0ee5f1a1e600fe2674
-    Runtime__PrivatePeerEndpointAllowlist__1__IpAddress: 172.30.82.12
-    Runtime__PrivatePeerEndpointAllowlist__1__Port: "8081"
-    Runtime__PrivatePeerEndpointAllowlist__1__Path: /api/peer/onion
-    Runtime__PrivatePeerEndpointAllowlist__2__RouterId: f381626e41e7027ea431bfe3009e94bdd25a746beec468948d6c3c7c5dc9a54b
-    Runtime__PrivatePeerEndpointAllowlist__2__IpAddress: 172.30.82.13
-    Runtime__PrivatePeerEndpointAllowlist__2__Port: "8081"
-    Runtime__PrivatePeerEndpointAllowlist__2__Path: /api/peer/onion
-    Runtime__PrivatePeerEndpointAllowlist__3__RouterId: fd50b8e3b144ea244fbf7737f550bc8dd0c2650bbc1aada833ca17ff8dbf329b
-    Runtime__PrivatePeerEndpointAllowlist__3__IpAddress: 172.30.82.14
-    Runtime__PrivatePeerEndpointAllowlist__3__Port: "8081"
-    Runtime__PrivatePeerEndpointAllowlist__3__Path: /api/peer/onion
-    Runtime__PrivatePeerEndpointAllowlist__4__RouterId: fde4fba030ad002f7c2f7d4c331f49d13fb0ec747eceebec634f1ff4cbca9def
-    Runtime__PrivatePeerEndpointAllowlist__4__IpAddress: 172.30.82.15
-    Runtime__PrivatePeerEndpointAllowlist__4__Port: "8081"
-    Runtime__PrivatePeerEndpointAllowlist__4__Path: /api/peer/onion
-    Runtime__PrivatePeerEndpointAllowlist__5__RouterId: b4c92afb3ba57f3ab959ffe6d319c98484a2155a0f4c65b2c37011ffd197b075
-    Runtime__PrivatePeerEndpointAllowlist__5__IpAddress: 172.30.82.16
-    Runtime__PrivatePeerEndpointAllowlist__5__Port: "8081"
-    Runtime__PrivatePeerEndpointAllowlist__5__Path: /api/peer/onion
-    RegistryBootstrap__BaseUrl: http://relay-bootstrap:8080
+    PrivacyRouting__Enabled: "true"
+    PrivacyRouting__X25519PrivateKeyPath: /run/secrets/xnode-x25519.private
+    PrivacyRouting__AllowInsecureHttpPeerTransport: "true"
+    PrivacyRouting__MaximumConcurrentRequests: "64"
+    PrivacyRouting__RequestsPerMinute: "600"
+    PrivacyRouting__RequestTimeoutSeconds: "30"
+    PrivacyRouting__ReplyPaddingBlockBytes: "4096"
+    PrivacyRouting__ReplayCapacity: "100000"
+    PrivacyRouting__ReplayTtlSeconds: "300"
     StorageRpc__BaseUrl: http://storage:8080
     RegistryHeartbeat__Enabled: "false"
     Vless__Enabled: "false"
     MembershipArtifact__ArtifactPath: /run/deep-membership/membership-route-catalog.json
     MembershipArtifact__MaximumBytes: "2097152"
-    # The peer listener remains Docker-network-only on 8081. The generated common
-    # authority env keeps client ingress dormant except on xnode-1, whose second
-    # env file enables the bounded DEV-LOCAL-ONLY P10E client fixture.
+    # The privacy peer listener remains Docker-network-only on 8081. Generated route
+    # authority selects the two mailbox-capable exits without public MAU2 access.
     Mailbox__Enabled: "true"
     Mailbox__DirectoryName: mailbox-p10c
     Mailbox__PeerReplayDirectoryName: mailbox-peer-replay-p10c
@@ -135,8 +113,8 @@ x-mailbox-driver-build: &mailbox-driver-build
   args:
     SDK_IMAGE: ${SURVIVAL_DOTNET_SDK_IMAGE:-mcr.microsoft.com/dotnet/sdk@sha256:7e964ea8bc6c1e18ea9fbc76ed403da41c9b19aeee2aab6bf9c845f25e891380}
     RUNTIME_IMAGE: ${SURVIVAL_DOTNET_RUNTIME_IMAGE:-mcr.microsoft.com/dotnet/aspnet@sha256:e3736b0d423db99c6988e1ddf5ea725c14b12579bb120024e5ff7ff204a14080}
-    XNODE_REVISION: d817977c72699f58144892b7784250f21e62a892
-    XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: cb74d02427de9d4bf18933cad8f254647c388eaec6969a1959f38ae0eecebbf6
+    XNODE_REVISION: 828bb09246b58b73b23f24540d7edf863e2f43c2
+    XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: def5a44c57666f474980c8f12facbe7033e9a5944b797c6fb726865e7363ffad
   dockerfile_inline: |
     ARG SDK_IMAGE
     ARG RUNTIME_IMAGE
@@ -193,7 +171,6 @@ x-compat-build: &compat-build
     COPY --chown=node:node tools/file-service ./tools/file-service
     COPY --chown=node:node tools/push-service ./tools/push-service
     COPY --chown=node:node tools/calls-service ./tools/calls-service
-    COPY --chown=node:node tools/relay-bootstrap ./tools/relay-bootstrap
     RUN mkdir /state && chown node:node /state
     USER node
 
@@ -390,111 +367,134 @@ services:
     env_file:
       - ${SURVIVAL_MAILBOX_AUTHORITY_ENV:-./artifacts/survival-dev/mailbox-peer-authority.env}
       - ${SURVIVAL_MAILBOX_CLIENT_AUTHORITY_ENV:-./artifacts/survival-dev/mailbox-client-xnode-1.env}
+      - ./artifacts/survival-dev/privacy-routing-xnode-1.env
     environment:
       <<: *xnode-environment
       Node__PublicHost: ${SURVIVAL_BIND_HOST:-127.0.0.1}
       Node__PublicPort: "41801"
-      Node__PublicPeerRpcEndpoint: http://172.30.82.11:8081/api/peer/onion
       Node__RouterId: 4cb5abf6ad79fbf5abbccafcc269d85cd2651ed4b885b5869f241aedf0a5ba29
       Node__Ed25519PrivateKeyPath: /run/secrets/xnode-ed25519.seed
+      PrivacyRouting__PublicPeerBaseUrl: http://172.30.82.11:8081/
     ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41801:8080"]
     networks: { runtime: { ipv4_address: 172.30.82.11 } }
     volumes: [xnode-1-state:/state, membership-route-artifact:/run/deep-membership:ro]
     secrets:
       - source: xnode-1-ed25519
         target: xnode-ed25519.seed
+      - source: xnode-1-x25519
+        target: xnode-x25519.private
     depends_on:
-      relay-bootstrap: { condition: service_healthy }
       membership-fixture: { condition: service_completed_successfully }
 
   xnode-2:
     <<: *xnode
+    env_file:
+      - ${SURVIVAL_MAILBOX_AUTHORITY_ENV:-./artifacts/survival-dev/mailbox-peer-authority.env}
+      - ${SURVIVAL_MAILBOX_CLIENT_AUTHORITY_ENV:-./artifacts/survival-dev/mailbox-client-xnode-1.env}
+      - ./artifacts/survival-dev/privacy-routing-xnode-2.env
     environment:
       <<: *xnode-environment
       Node__PublicHost: xnode-2
-      Node__PublicPeerRpcEndpoint: http://172.30.82.12:8081/api/peer/onion
       Node__RouterId: 7422b9887598068e32c4448a949adb290d0f4e35b9e01b0ee5f1a1e600fe2674
       Node__Ed25519PrivateKeyPath: /run/secrets/xnode-ed25519.seed
+      PrivacyRouting__PublicPeerBaseUrl: http://172.30.82.12:8081/
     ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41802:8080"]
     networks: { runtime: { ipv4_address: 172.30.82.12 } }
     volumes: [xnode-2-state:/state, membership-route-artifact:/run/deep-membership:ro]
     secrets:
       - source: xnode-2-ed25519
         target: xnode-ed25519.seed
+      - source: xnode-2-x25519
+        target: xnode-x25519.private
     depends_on:
-      relay-bootstrap: { condition: service_healthy }
       membership-fixture: { condition: service_completed_successfully }
 
   xnode-3:
     <<: *xnode
+    env_file:
+      - ${SURVIVAL_MAILBOX_AUTHORITY_ENV:-./artifacts/survival-dev/mailbox-peer-authority.env}
+      - ./artifacts/survival-dev/privacy-routing-xnode-3.env
     environment:
       <<: *xnode-environment
       Node__PublicHost: xnode-3
-      Node__PublicPeerRpcEndpoint: http://172.30.82.13:8081/api/peer/onion
       Node__RouterId: f381626e41e7027ea431bfe3009e94bdd25a746beec468948d6c3c7c5dc9a54b
       Node__Ed25519PrivateKeyPath: /run/secrets/xnode-ed25519.seed
+      PrivacyRouting__PublicPeerBaseUrl: http://172.30.82.13:8081/
     ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41803:8080"]
     networks: { runtime: { ipv4_address: 172.30.82.13 } }
     volumes: [xnode-3-state:/state, membership-route-artifact:/run/deep-membership:ro]
     secrets:
       - source: xnode-3-ed25519
         target: xnode-ed25519.seed
+      - source: xnode-3-x25519
+        target: xnode-x25519.private
     depends_on:
-      relay-bootstrap: { condition: service_healthy }
       membership-fixture: { condition: service_completed_successfully }
 
   xnode-4:
     <<: *xnode
+    env_file:
+      - ${SURVIVAL_MAILBOX_AUTHORITY_ENV:-./artifacts/survival-dev/mailbox-peer-authority.env}
+      - ./artifacts/survival-dev/privacy-routing-xnode-4.env
     environment:
       <<: *xnode-environment
       Node__PublicHost: xnode-4
-      Node__PublicPeerRpcEndpoint: http://172.30.82.14:8081/api/peer/onion
       Node__RouterId: fd50b8e3b144ea244fbf7737f550bc8dd0c2650bbc1aada833ca17ff8dbf329b
       Node__Ed25519PrivateKeyPath: /run/secrets/xnode-ed25519.seed
+      PrivacyRouting__PublicPeerBaseUrl: http://172.30.82.14:8081/
     ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41804:8080"]
     networks: { runtime: { ipv4_address: 172.30.82.14 } }
     volumes: [xnode-4-state:/state, membership-route-artifact:/run/deep-membership:ro]
     secrets:
       - source: xnode-4-ed25519
         target: xnode-ed25519.seed
+      - source: xnode-4-x25519
+        target: xnode-x25519.private
     depends_on:
-      relay-bootstrap: { condition: service_healthy }
       membership-fixture: { condition: service_completed_successfully }
 
   xnode-5:
     <<: *xnode
+    env_file:
+      - ${SURVIVAL_MAILBOX_AUTHORITY_ENV:-./artifacts/survival-dev/mailbox-peer-authority.env}
+      - ./artifacts/survival-dev/privacy-routing-xnode-5.env
     environment:
       <<: *xnode-environment
       Node__PublicHost: xnode-5
-      Node__PublicPeerRpcEndpoint: http://172.30.82.15:8081/api/peer/onion
       Node__RouterId: fde4fba030ad002f7c2f7d4c331f49d13fb0ec747eceebec634f1ff4cbca9def
       Node__Ed25519PrivateKeyPath: /run/secrets/xnode-ed25519.seed
+      PrivacyRouting__PublicPeerBaseUrl: http://172.30.82.15:8081/
     ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41805:8080"]
     networks: { runtime: { ipv4_address: 172.30.82.15 } }
     volumes: [xnode-5-state:/state, membership-route-artifact:/run/deep-membership:ro]
     secrets:
       - source: xnode-5-ed25519
         target: xnode-ed25519.seed
+      - source: xnode-5-x25519
+        target: xnode-x25519.private
     depends_on:
-      relay-bootstrap: { condition: service_healthy }
       membership-fixture: { condition: service_completed_successfully }
 
   xnode-6:
     <<: *xnode
+    env_file:
+      - ${SURVIVAL_MAILBOX_AUTHORITY_ENV:-./artifacts/survival-dev/mailbox-peer-authority.env}
+      - ./artifacts/survival-dev/privacy-routing-xnode-6.env
     environment:
       <<: *xnode-environment
       Node__PublicHost: xnode-6
-      Node__PublicPeerRpcEndpoint: http://172.30.82.16:8081/api/peer/onion
       Node__RouterId: b4c92afb3ba57f3ab959ffe6d319c98484a2155a0f4c65b2c37011ffd197b075
       Node__Ed25519PrivateKeyPath: /run/secrets/xnode-ed25519.seed
+      PrivacyRouting__PublicPeerBaseUrl: http://172.30.82.16:8081/
     ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41806:8080"]
     networks: { runtime: { ipv4_address: 172.30.82.16 } }
     volumes: [xnode-6-state:/state, membership-route-artifact:/run/deep-membership:ro]
     secrets:
       - source: xnode-6-ed25519
         target: xnode-ed25519.seed
+      - source: xnode-6-x25519
+        target: xnode-x25519.private
     depends_on:
-      relay-bootstrap: { condition: service_healthy }
       membership-fixture: { condition: service_completed_successfully }
 
   registry:
@@ -615,15 +615,6 @@ services:
     volumes: [calls-state:/state]
     healthcheck: { <<: *health, test: [CMD, node, --eval, "fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"] }
 
-  relay-bootstrap:
-    <<: *service
-    image: deep-survival/compat:dev
-    command: [node, tools/relay-bootstrap/relay-bootstrap.mjs]
-    environment: { PORT: "8080", RELAY_BOOTSTRAP_STATE_DIR: /state }
-    ports: ["127.0.0.1:41999:8080"]
-    volumes: [relay-bootstrap-state:/state]
-    healthcheck: { <<: *health, test: [CMD, node, --eval, "fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"] }
-
 networks:
   runtime:
     driver: bridge
@@ -645,7 +636,6 @@ volumes:
   file-state:
   push-state:
   calls-state:
-  relay-bootstrap-state:
   mailbox-rehearsal-state:
 
 secrets:
@@ -655,4 +645,10 @@ secrets:
   xnode-4-ed25519: { file: ./.secrets/survival-dev/xnode-4-ed25519.seed }
   xnode-5-ed25519: { file: ./.secrets/survival-dev/xnode-5-ed25519.seed }
   xnode-6-ed25519: { file: ./.secrets/survival-dev/xnode-6-ed25519.seed }
+  xnode-1-x25519: { file: ./.secrets/survival-dev/xnode-1-x25519.private }
+  xnode-2-x25519: { file: ./.secrets/survival-dev/xnode-2-x25519.private }
+  xnode-3-x25519: { file: ./.secrets/survival-dev/xnode-3-x25519.private }
+  xnode-4-x25519: { file: ./.secrets/survival-dev/xnode-4-x25519.private }
+  xnode-5-x25519: { file: ./.secrets/survival-dev/xnode-5-x25519.private }
+  xnode-6-x25519: { file: ./.secrets/survival-dev/xnode-6-x25519.private }
   mailbox-client-issuer: { file: ./.secrets/survival-dev/mailbox-client-issuer.seed }

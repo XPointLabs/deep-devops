@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
+import http2 from 'node:http2';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -56,7 +57,7 @@ test('one-shot chaos drops only one completed durable response and restart/TTL d
   const items = new Set();
   let duplicateStores = 0;
   let upstreamRequests = 0;
-  const upstream = http.createServer((request, response) => {
+  const upstream = http2.createServer((request, response) => {
     const chunks = [];
     request.on('data', (chunk) => chunks.push(chunk));
     request.on('end', () => {
@@ -79,19 +80,19 @@ test('one-shot chaos drops only one completed durable response and restart/TTL d
       dataPort: 0,
     });
     let proxyPort = proxy.address.port;
-    const sendStore = (body) => send(proxyPort, '/api/client/mailbox/v2/store', body);
+    const sendIngress = (body) => send(proxyPort, '/api/ingress/v1/frame', body);
 
-    const passthrough = await sendStore(Buffer.from('first-mau2'));
+    const passthrough = await sendIngress(Buffer.from('first-opaque-frame'));
     assert.equal(passthrough.status, 200);
     assert.equal(passthrough.body, 'durable-response');
     assert.equal(items.size, 1);
 
     const armed = await control(controlSocket, token, 'arm', 5, 'post-durable-response-drop');
     assert.equal(armed.armed, true);
-    await assert.rejects(sendStore(Buffer.from('uncertain-mau2')));
+    await assert.rejects(sendIngress(Buffer.from('uncertain-opaque-frame')));
     assert.equal(items.size, 2, 'upstream durable state must exist before the downstream drop');
 
-    const retry = await sendStore(Buffer.from('uncertain-mau2'));
+    const retry = await sendIngress(Buffer.from('uncertain-opaque-frame'));
     assert.equal(retry.status, 200);
     assert.equal(retry.body, 'durable-response');
     assert.equal(items.size, 2, 'exact retry must not create another server item');
@@ -127,7 +128,7 @@ test('one-shot chaos drops only one completed durable response and restart/TTL d
     });
 
     await control(controlSocket, token, 'arm', 5, 'pre-dispatch-outage');
-    const outage = await sendStore(Buffer.from('not-dispatched'));
+    const outage = await sendIngress(Buffer.from('not-dispatched'));
     assert.equal(outage.status, 503);
     assert.equal(upstreamRequests, 3, 'pre-dispatch fault must not reach the durable store');
     const afterOutage = await control(controlSocket, token, 'status');
@@ -138,25 +139,23 @@ test('one-shot chaos drops only one completed durable response and restart/TTL d
     assert.equal(afterOutage.preDispatchOutageCount, 1);
     assert.equal(afterOutage.postDurableResponseDropCount, 0);
 
-    const outageRetry = await sendStore(Buffer.from('not-dispatched'));
+    const outageRetry = await sendIngress(Buffer.from('not-dispatched'));
     assert.equal(outageRetry.status, 200);
     assert.equal(items.size, 3);
     assert.equal(upstreamRequests, 4);
 
     await control(controlSocket, token, 'arm', 5, 'post-durable-ack-response-drop');
-    const wrongRoute = await sendStore(Buffer.from('store-cannot-consume-ack-fault'));
-    assert.equal(wrongRoute.status, 200);
-    const wrongMethod = await send(proxyPort, '/api/client/mailbox/v2/acknowledge', Buffer.alloc(0), 'GET');
+    const wrongMethod = await send(proxyPort, '/api/ingress/v1/frame', Buffer.alloc(0), 'GET');
     assert.equal(wrongMethod.status, 404);
     const stillArmedForAck = await control(controlSocket, token, 'status');
     assert.equal(stillArmedForAck.armed, true);
     assert.equal(stillArmedForAck.operationAttemptCount, 0);
     assert.equal(stillArmedForAck.injectedFaultCount, 0);
-    await assert.rejects(send(proxyPort, '/api/client/mailbox/v2/acknowledge', Buffer.from('ack-once')));
-    assert.equal(upstreamRequests, 6, 'ACK must reach upstream before its response is dropped');
-    const ackRetry = await send(proxyPort, '/api/client/mailbox/v2/acknowledge', Buffer.from('ack-once'));
+    await assert.rejects(sendIngress(Buffer.from('opaque-ack-once')));
+    assert.equal(upstreamRequests, 5, 'ACK must reach upstream before its response is dropped');
+    const ackRetry = await sendIngress(Buffer.from('opaque-ack-once'));
     assert.equal(ackRetry.status, 200);
-    assert.equal(upstreamRequests, 7);
+    assert.equal(upstreamRequests, 6);
     const afterAck = await control(controlSocket, token, 'status');
     assert.equal(afterAck.operation, 'mailbox-ack');
     assert.equal(afterAck.operationAttemptCount, 2);
@@ -190,7 +189,7 @@ test('one-shot chaos drops only one completed durable response and restart/TTL d
 
     const denied = await send(proxyPort, '/status');
     assert.equal(denied.status, 404, 'control state must never be exposed on the data listener');
-    assert.equal(upstreamRequests, 7);
+    assert.equal(upstreamRequests, 6);
   } finally {
     if (proxy) await proxy.close();
     await new Promise((resolve) => upstream.close(resolve));

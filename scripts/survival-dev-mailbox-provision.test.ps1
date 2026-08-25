@@ -161,9 +161,9 @@ try {
         throw 'Pinned exported XNode source snapshot is missing.'
     }
     $source = Get-Content -Raw -LiteralPath $sourceManifest | ConvertFrom-Json
-    if ($source.sourceCommit -ne 'd817977c72699f58144892b7784250f21e62a892' -or
+    if ($source.sourceCommit -ne '828bb09246b58b73b23f24540d7edf863e2f43c2' -or
         (Get-FileHash -LiteralPath $sourceManifest -Algorithm SHA256).Hash -ne
-            'CB74D02427DE9D4BF18933CAD8F254647C388EAEC6969A1959F38AE0EECEBBF6') {
+            'DEF5A44C57666F474980C8F12FACBE7033E9A5944B797C6FB726865E7363FFAD') {
         throw 'Tests require the exact clean exported XNode source snapshot.'
     }
     foreach ($file in $source.files) {
@@ -193,9 +193,9 @@ try {
             -XNodeSource $Source `
             -DriverSource $Driver `
             -Destination $Destination `
-            -ExpectedCommit 'd817977c72699f58144892b7784250f21e62a892' `
+            -ExpectedCommit '828bb09246b58b73b23f24540d7edf863e2f43c2' `
             -ExpectedManifestSha256 `
-                'cb74d02427de9d4bf18933cad8f254647c388eaec6969a1959f38ae0eecebbf6' `
+                'def5a44c57666f474980c8f12facbe7033e9a5944b797c6fb726865e7363ffad' `
             -ExpectedDriverSha256 $driverHashes
     }
 
@@ -254,6 +254,9 @@ try {
         $seedPath = Join-Path $secrets "xnode-$index-ed25519.seed"
         [IO.File]::WriteAllText($seedPath, ('{0:x64}' -f $index) + "`n")
         Protect-TestSecret $seedPath
+        $privacyPath = Join-Path $secrets "xnode-$index-x25519.private"
+        [IO.File]::WriteAllText($privacyPath, ('{0:x64}' -f (1000 + $index)) + "`n")
+        Protect-TestSecret $privacyPath
     }
     $issuer = Join-Path $secrets 'mailbox-client-issuer.seed'
     [IO.File]::WriteAllText($issuer, ('{0:x64}' -f 1001) + "`n")
@@ -266,6 +269,9 @@ try {
         '--output-client-env', (Join-Path $temporary 'client.env'),
         '--output-public', $authority,
         '--output-client-public', $runtimeAuthority,
+        '--output-privacy-routes-android', (Join-Path $temporary 'privacy-routes.android.v1.json'),
+        '--output-privacy-routes-windows', (Join-Path $temporary 'privacy-routes.windows.v1.json'),
+        '--privacy-entry-host', '192.168.1.44',
         '--coordinator-url', 'http://192.168.1.44:41801')
     $authorityHash = Get-LowerSha256 $authority
     $runtimeAuthorityHash = Get-LowerSha256 $runtimeAuthority
@@ -451,6 +457,34 @@ try {
     [IO.File]::WriteAllBytes($testPublicKey, (Convert-HexToBytes $testPublic))
     Protect-TestSecret $testPrivateKey
     Protect-TestSecret $testPublicKey
+    $privacyRoutes = @{}
+    foreach ($platform in @('android', 'windows')) {
+        $privacyPath = Join-Path $temporary "privacy-routes.$platform.v1.json"
+        $hops = 1..6 | ForEach-Object {
+            [pscustomobject][ordered]@{
+                routerId = $_.ToString('x64')
+                x25519PublicKey = (100 + $_).ToString('x64')
+            }
+        }
+        $privacyDocument = [pscustomobject][ordered]@{
+            schemaVersion = 1
+            developmentOnly = $true
+            platform = $platform
+            primary = [pscustomobject][ordered]@{
+                entryOrigin = 'https://192.0.2.10:41803/'
+                hops = @($hops[2], $hops[3], $hops[0])
+            }
+            fallback = [pscustomobject][ordered]@{
+                entryOrigin = 'https://192.0.2.10:41805/'
+                hops = @($hops[4], $hops[5], $hops[1])
+            }
+        }
+        [IO.File]::WriteAllText(
+            $privacyPath,
+            (($privacyDocument | ConvertTo-Json -Depth 8 -Compress) + "`n"),
+            [Text.UTF8Encoding]::new($false))
+        $privacyRoutes[$platform] = $privacyPath
+    }
     $publishRuntime = @(
         'publish-runtime', '--development-only',
         '--runtime-authority-public', $runtimeAuthority,
@@ -462,6 +496,8 @@ try {
         '--windows-holder-public-key', $windows,
         '--mr-x-private-key', $testPrivateKey,
         '--mr-x-public-key', $testPublicKey,
+        '--android-privacy-routes', $privacyRoutes.android,
+        '--windows-privacy-routes', $privacyRoutes.windows,
         '--revocation-ttl-seconds', '3600')
     Invoke-Driver $publishRuntime
     Invoke-Driver $publishRuntime
@@ -471,7 +507,9 @@ try {
         $revocations = Get-Content -Raw (Join-Path $published 'revocations.v1.json') | ConvertFrom-Json
         if ([string]$activation.platform -cne $platform -or
             [string]$activation.authoritySha256 -cne $runtimeAuthorityHash -or
+            [string]::IsNullOrWhiteSpace([string]$activation.privacyRoutesSha256) -or
             @($revocations.revoked).Count -ne 0 -or
+            -not (Test-Path -LiteralPath (Join-Path $published 'privacy-routes.v1.json')) -or
             (Get-Item (Join-Path $published 'mr-x-mailbox-policy.signature')).Length -ne 64) {
             throw "Published $platform runtime is not the exact bounded signed schema."
         }

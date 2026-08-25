@@ -88,12 +88,13 @@ Use the public installer README for the complete operator flow and CLI options.
 4. If you are not using the public installer end to end, copy
    `docker-compose.node.prod.yml` and create `.env.node.prod` from
    `.env.node.prod.example`.
-5. Generate node identity files. This follows the upstream Session/Oxen model:
-   service-node keys are local node files (`key_ed25519` and `key_bls`) loaded
+5. Generate node identity files. Service-node keys are local node files
+   (`key_ed25519`, independent `key_x25519`, and `key_bls`) loaded
    from the node data/config folder, not private seeds passed as environment
    variables. `DEEP_NODE_ED25519_PUBLIC_KEY` is derived from
-   `key_ed25519` and is the node/router id used by signed relay contact
-   manifests and staking registration.
+   `key_ed25519` and is the node/router id used by signed DPC1 privacy contacts
+   and staking registration. `key_x25519` is used only to open this node's
+   native privacy layer and must never be derived from the Ed25519 seed.
 
 ```powershell
 New-Item -ItemType Directory -Force .\secrets | Out-Null
@@ -102,6 +103,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\new-xnode-identity.ps1 -AsEnv
 
 Copy the printed `DEEP_NODE_ED25519_PUBLIC_KEY`,
 `DEEP_NODE_ED25519_PRIVATE_KEY_FILE`,
+`DEEP_NODE_X25519_PRIVATE_KEY_FILE`,
 `DEEP_NODE_BLS_PRIVATE_KEY_FILE`, and
 `DEEP_NODE_VLESS_CLIENT_ID` values into `.env.node.prod`. Keep the
 `secrets` directory local to the node host and back it up as node identity
@@ -127,11 +129,12 @@ Put the generated private/public key pair into `DEEP_NODE_REALITY_PRIVATE_KEY` a
   Keep it equal to `DEEP_INGRESS_HTTPS_BIND` unless an approved NAT rule
   translates the port.
 - `DEEP_NODE_PUBLIC_IP`: public origin IPv4 address advertised to other nodes.
-- `DEEP_NODE_PEER_RPC_PORT` and `DEEP_NODE_PEER_RPC_ENDPOINT`: advertised
-  peer endpoint, now `https://<ingress-host>/api/peer/onion` on the shared TLS
-  ingress. Requests are encrypted by the
-  onion protocol and authenticated with the sending node's Ed25519 identity,
-  timestamp, and one-time nonce. The endpoint does not expose the admin API.
+- `DEEP_NODE_X25519_PRIVATE_KEY_FILE`: independent X25519 private scalar used
+  to open exactly one native privacy layer.
+- `DEEP_PRIVACY_PEER_<N>_*`: each authorized next-hop router id, HTTPS base
+  URL, and distinct current/next SPKI pins. Peer frames use
+  `/api/peer/privacy/v1/frame`, Ed25519 request authentication, bounded replay
+  protection, and never trust an endpoint supplied by an inbound frame.
 - The BLS signing URL is derived from the signed peer RPC contact and is not an
   operator setting. Production images accept that route only from the staking
   control-plane network.
@@ -148,7 +151,9 @@ Put the generated private/public key pair into `DEEP_NODE_REALITY_PRIVATE_KEY` a
   production fallback is `https://arb1.arbitrum.io/rpc`.
 - `DEEP_SERVICE_NODE_REWARDS_ADDRESS`: production `ServiceNodeRewards` contract.
 - `DEEP_NODE_ED25519_PUBLIC_KEY`: public node/router id derived from `key_ed25519`.
-- `DEEP_NODE_ED25519_PRIVATE_KEY_FILE` and `DEEP_NODE_BLS_PRIVATE_KEY_FILE`: local files mounted as Docker secrets; do not put private key material directly in `.env`.
+- `DEEP_NODE_ED25519_PRIVATE_KEY_FILE`, `DEEP_NODE_X25519_PRIVATE_KEY_FILE`, and
+  `DEEP_NODE_BLS_PRIVATE_KEY_FILE`: local files mounted as Docker secrets; do
+  not put private key material directly in `.env`.
 - `DEEP_NODE_VLESS_CLIENT_ID` and Reality fields: unique per node.
 - `DEEP_DOCKER_LOG_MAX_SIZE` and `DEEP_DOCKER_LOG_MAX_FILE`: optional compose
   overrides for Docker `json-file` log rotation; defaults are `50m` and `5`.
@@ -175,10 +180,13 @@ docker compose --env-file .\.env.node.prod -f .\docker-compose.node.prod.yml exe
 curl --fail --cacert <trusted-ca.pem> --pinnedpubkey "sha256//<approved-spki-base64>" https://<ingress-host>/api/bootstrap/client
 ```
 
-The relay contact published by heartbeat must include `x25519PublicKey`,
-`rpcEndpoint`, and `onion-v1` capability. Clients use these fields to build
-Session-style three-hop onion envelopes; entry and middle nodes only see the
-next hop, while the exit node calls storage.
+The privacy contact published by heartbeat must be a canonical signed DPC1
+contact with the sole `privacy-routing-v1` capability, the independent X25519
+public key, and `https://<host>/api/peer/privacy/v1/frame`. A signed client
+route contains exactly three distinct routers. Each router opens one layer and
+learns only its predecessor plus the next router id; only the exit receives the
+inner MAU2 mailbox frame. Storage replication happens after that exit and is
+not counted as a privacy hop.
 
 Control-plane checks:
 
@@ -188,7 +196,7 @@ curl https://staking.deep.example/obligations
 curl https://staking.deep.example/exit_liquidation_list
 ```
 
-After the stake transaction is submitted on the staking portal, the router heartbeat publishes the BLS public key, proof of possession, transport bundle, signed relay contact, and signing endpoint. The staking backend builds the BLS quorum signer set from chain-active service nodes and service-node obligation status, then uses registry-published endpoints only as an address cache. There is no UAT reward signer endpoint in the production path.
+After the stake transaction is submitted on the staking portal, the router heartbeat publishes the BLS public key, proof of possession, transport bundle, signed privacy contact, and signing endpoint. The staking backend builds the BLS quorum signer set from chain-active service nodes and service-node obligation status, then uses registry-published endpoints only as an address cache. There is no UAT reward signer endpoint in the production path.
 
 ## Contracts Readiness
 
@@ -244,4 +252,10 @@ keys or mnemonics in git.
 - Container registry, observability, alerting, CI release evidence, and incident/rollback automation are centralized operations systems.
 - Contract ownership/governance remains centralized until ownership is transferred to the final multisig/governance process.
 
-The decentralized pieces in the current architecture are the Arbitrum contracts, signed relay contacts, authenticated onion relay transport, and BLS quorum signatures produced by active, obligation-eligible service nodes. Clients enter through a built-in Reality seed, request a fresh signed route from that node, and verify every relay contact. The next decentralization frontier is replacing the authenticated registry cache with node-network gossip while keeping FCM/APNs/Huawei push delivery centralized by platform necessity.
+The decentralized pieces in the current architecture are the Arbitrum contracts,
+signed DPC1 privacy contacts, authenticated native layered relay transport, and
+BLS quorum signatures produced by active, obligation-eligible service nodes.
+Clients use an activation-authorized, hash-bound route artifact and verify every
+contact. The next decentralization frontier is replacing the authenticated
+registry cache with node-network gossip while keeping FCM/APNs/Huawei push
+delivery centralized by platform necessity.
