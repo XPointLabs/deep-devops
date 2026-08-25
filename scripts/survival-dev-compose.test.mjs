@@ -663,6 +663,8 @@ test('P10E uses real current/next MIP1/RIP1 authority, bounded client ingress, a
   assert.match(launcher, /\$SurvivalXNodeCommit = '4d05fe7dd2dadd3f094c172a382ad675d2ff545a'/);
   assert.match(launcher, /Prepare-SurvivalXNodeIdentitySecrets/);
   assert.match(launcher, /Prepare-SurvivalMailboxPeerAuthority/);
+  assert.match(launcher, /'--coordinator-url', "https:\/\/\$coordinatorHost`:41801"/);
+  assert.doesNotMatch(launcher, /'--coordinator-url', "http:\/\/\$coordinatorHost`:41801"/);
   assert.match(launcher, /mailbox-client-xnode-1\.env/);
   assert.match(launcher, /'Prepare' \{/);
   assert.match(launcher, /function Invoke-SurvivalMailboxDriverImmutable/);

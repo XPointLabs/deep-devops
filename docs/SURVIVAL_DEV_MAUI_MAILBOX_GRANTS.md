@@ -107,7 +107,7 @@ runtime pair with:
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass `
   -File .\scripts\survival-dev-mailbox-issue.ps1 `
-  -CoordinatorUrl http://<exact-lan-ipv4>:41801
+  -CoordinatorUrl https://<exact-lan-ipv4>:41801
 ```
 
 The issuer reads only the exact protected holder records

@@ -359,7 +359,7 @@ function Prepare-SurvivalMailboxPeerAuthority([string]$PinnedXNodeSource = '') {
         '--authority-state', $authorityStatePath,
         '--output-env', $authorityPath,
         '--output-client-env', $clientAuthorityPath,
-        '--coordinator-url', "http://$coordinatorHost`:41801",
+        '--coordinator-url', "https://$coordinatorHost`:41801",
         '--output-public', $publicPath,
         '--output-client-public', $clientPublicPath)
     Set-Item -Path 'Env:SURVIVAL_MAILBOX_AUTHORITY_ENV' -Value $authorityPath
