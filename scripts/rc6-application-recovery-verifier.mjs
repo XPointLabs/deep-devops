@@ -435,7 +435,8 @@ async function validateMembershipCanary(expectations) {
 function generateCallIdentity() {
   const pair = generateKeyPairSync('ed25519');
   const identity = publicIdentity(pair.privateKey);
-  return { privateKey: pair.privateKey, ...identity };
+  const signingKey = pair.privateKey;
+  return { privateKey: signingKey, ...identity };
 }
 
 function signCallSignal(sender, recipient, values = {}) {

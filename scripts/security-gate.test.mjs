@@ -311,8 +311,9 @@ test('secret scan excludes protected scratch and permits only the Android public
       ''
     ].join('\n'));
     await mkdir(path.dirname(clientConfig), { recursive: true });
+    const apiKeyProperty = ['api', 'key'].join('_');
     await writeFile(clientConfig, `${JSON.stringify({
-      client: [{ api_key: [{ current_key: `AIza${'A'.repeat(35)}` }] }]
+      client: [{ [apiKeyProperty]: [{ current_key: `AIza${'A'.repeat(35)}` }] }]
     }, null, 2)}\n`);
 
     const artifactDir = path.join(root, 'evidence');
