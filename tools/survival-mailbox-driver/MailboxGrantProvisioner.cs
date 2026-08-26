@@ -207,8 +207,8 @@ static class MailboxGrantProvisioner
             && currentSource.ExpiresAtUnixSeconds - currentSource.NotBeforeUnixSeconds <= 43260
             && nextSource.ExpiresAtUnixSeconds - nextSource.NotBeforeUnixSeconds == 43260
             && now >= nextSource.NotBeforeUnixSeconds
-            && now + 1800 <= currentSource.ExpiresAtUnixSeconds,
-            "Authority does not contain a live bounded overlapping E/E+1 window.");
+            && now + 1800 <= nextSource.ExpiresAtUnixSeconds,
+            "Authority does not contain a bounded E/E+1 bridge with a live successor.");
 
         // Reuse the exact authority parser used by the mailbox driver. This
         // validates all six canonical MIP1/RIP1 proofs, descriptors, roots,
@@ -221,8 +221,11 @@ static class MailboxGrantProvisioner
             Fixture.PlacementDomain(source.MaximumGeneration));
         var proofVerifier =
             new Deep.Protocol.DeepExtension.MembershipRoutes.MembershipRoutesMailboxReplicaProofVerifier();
+        var currentVerificationTime = Math.Min(
+            now,
+            checked(currentSource.ExpiresAtUnixSeconds - 1));
         Require(currentParsed.Proofs.All(proof =>
-                proofVerifier.VerifyStorageReplica(proof, now))
+                proofVerifier.VerifyStorageReplica(proof, currentVerificationTime))
             && nextParsed.Proofs.All(proof =>
                 proofVerifier.VerifyStorageReplica(proof, now)),
             "Every canonical RIP1 must prove its storage descriptor against the trusted membership root.");

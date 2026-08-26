@@ -69,18 +69,18 @@ if ([string]::IsNullOrWhiteSpace($OutputDirectory)) { $OutputDirectory = Join-Pa
 if ([string]::IsNullOrWhiteSpace($MailboxSecretDirectory)) { $MailboxSecretDirectory = Join-Path $root '.secrets\survival-dev\maui-mailbox-grants' }
 
 # This wrapper intentionally does not call Docker or export the issuer seed.
-$expectedXNodeCommit = 'c8b38e2b5221fa6c047717202a50a80ebd4f2dd6'
+$expectedXNodeCommit = 'e9e82f50d7cf3ded2c888c9298d29148549953b6'
 $expectedXNodeManifestSha256 =
-    '0d9ad51d967681816e816f7177c565a770143dfc9983cd9746fdf2cf20096ce6'
+    '084876ea676180d7efa89c691b7a9e18e8cd345733b8cb31c77b56d1c8204a29'
 $expectedDriverSha256 = @{
     'MailboxGrantProvisioner.cs' =
-        'f88f7ebb0c06f11fde52386341202090e8bd4205ad23bb40c31e7d79d2ac8184'
+        '884a6670230d36333adbdad37358d082ca84740fef2d5c6e13776500a37b8d53'
     'MailboxRuntimePublisher.cs' =
         'aa725b67ddfd48193a3e5cc3f39f529130e589e05fa14b1569123c8a8cf42866'
     'PrivateCrossProcessState.cs' =
         '651d8256822d41b9a7bceab1e6d6bb45740026cac00f487a564befe7777f272b'
     'Program.cs' =
-        '9f18d7cfbfbb12de01a2787cf98f526131907140a789516e9a2cffb0e3ef073c'
+        '9ef8de42cc66a3bfba30362868f78af74d87503c50871877f07c9b09f90adcf0'
     'SurvivalMailboxDriver.csproj' =
         '4db436d69ea88ac3ff16f08c161b61cc0c048bad84cb7e529b2208fa569eafbe'
 }

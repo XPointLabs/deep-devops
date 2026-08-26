@@ -1344,10 +1344,10 @@ sealed class Fixture
             || nextAuthority.ExpiresAtUnixSeconds
                 - nextAuthority.NotBeforeUnixSeconds != 43260
             || now < nextAuthority.NotBeforeUnixSeconds
-            || now + 1800 > currentAuthority.ExpiresAtUnixSeconds)
+            || now + 1800 > nextAuthority.ExpiresAtUnixSeconds)
         {
             throw new InvalidDataException(
-                "The public mailbox authority does not contain a live bounded E/E+1 window.");
+                "The public mailbox authority does not contain a bounded E/E+1 bridge with a live successor.");
         }
 
         var current = ParsePublicEpoch(

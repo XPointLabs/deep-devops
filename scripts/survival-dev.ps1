@@ -132,14 +132,14 @@ $baseArguments = @('compose') + $projectDirectoryArguments + @('-p', $Project, '
 $uatTlsArguments = @('compose') + $projectDirectoryArguments + @('-p', $Project, '-f', $ComposePath, '-f', $UatTlsComposePath)
 $chaosArguments = @('compose') + $projectDirectoryArguments + @('-p', $Project, '-f', $ComposePath, '-f', $UatTlsComposePath, '-f', $ChaosComposePath, '--profile', 'resend-chaos')
 $ContextRoot = Join-Path $Root 'artifacts\survival-dev\build-contexts'
-$SurvivalXNodeCommit = 'c8b38e2b5221fa6c047717202a50a80ebd4f2dd6'
-$SurvivalXNodeContextManifestSha256 = '0d9ad51d967681816e816f7177c565a770143dfc9983cd9746fdf2cf20096ce6'
+$SurvivalXNodeCommit = 'e9e82f50d7cf3ded2c888c9298d29148549953b6'
+$SurvivalXNodeContextManifestSha256 = '084876ea676180d7efa89c691b7a9e18e8cd345733b8cb31c77b56d1c8204a29'
 $SurvivalMailboxBuildHelperSha256 = 'c5e0f08e0816296734195a27b2c8a47a207b0f1ade88f0186caffe02334f1456'
 $SurvivalMailboxDriverSha256 = @{
-    'MailboxGrantProvisioner.cs' = 'f88f7ebb0c06f11fde52386341202090e8bd4205ad23bb40c31e7d79d2ac8184'
+    'MailboxGrantProvisioner.cs' = '884a6670230d36333adbdad37358d082ca84740fef2d5c6e13776500a37b8d53'
     'MailboxRuntimePublisher.cs' = 'aa725b67ddfd48193a3e5cc3f39f529130e589e05fa14b1569123c8a8cf42866'
     'PrivateCrossProcessState.cs' = '651d8256822d41b9a7bceab1e6d6bb45740026cac00f487a564befe7777f272b'
-    'Program.cs' = '9f18d7cfbfbb12de01a2787cf98f526131907140a789516e9a2cffb0e3ef073c'
+    'Program.cs' = '9ef8de42cc66a3bfba30362868f78af74d87503c50871877f07c9b09f90adcf0'
     'SurvivalMailboxDriver.csproj' = '4db436d69ea88ac3ff16f08c161b61cc0c048bad84cb7e529b2208fa569eafbe'
 }
 $ChainLifecycleServices = @(
@@ -436,8 +436,12 @@ function Get-SurvivalMailboxAuthorityState() {
             if (-not $RecoverExpiredMailboxAuthority) {
                 throw 'DEV mailbox authority overlap was allowed to expire; use the explicit DEV-only recovery switch or restore a still-live authority checkpoint.'
             }
-            if ($nextEpoch -gt ([uint64]::MaxValue - 2)) {
+            if ($nextEpoch -eq [uint64]::MaxValue) {
                 throw 'DEV mailbox authority epoch cannot be advanced safely.'
+            }
+            if ($nextExpires -gt ([uint64]::MaxValue - 43260) -or
+                $nextExpires + 43260 -lt $now + 1800) {
+                throw 'DEV mailbox authority expired too long ago to form an exact live recovery bridge; restore a newer protected checkpoint or explicitly reset the local clients.'
             }
             $retired = $path + '.retired-through-' + $nextEpoch + '-' +
                 [DateTimeOffset]::UtcNow.ToString('yyyyMMddTHHmmssZ') + '.json'
@@ -446,17 +450,18 @@ function Get-SurvivalMailboxAuthorityState() {
             }
             [IO.File]::Copy($path, $retired, $false)
             Protect-SurvivalDevPrivateFile $retired
+            $bridgeSuccessorNotBefore = $nextExpires
             $state = [pscustomobject][ordered]@{
                 schemaVersion = 1
-                currentEpoch = $nextEpoch + 1
-                currentNotBeforeUnixSeconds = $anchor - 300
-                currentExpiresAtUnixSeconds = $anchor + 28800
-                nextEpoch = $nextEpoch + 2
-                nextNotBeforeUnixSeconds = $anchor - 60
-                nextExpiresAtUnixSeconds = $anchor + 43200
+                currentEpoch = $nextEpoch
+                currentNotBeforeUnixSeconds = $nextNotBefore
+                currentExpiresAtUnixSeconds = $nextExpires
+                nextEpoch = $nextEpoch + 1
+                nextNotBeforeUnixSeconds = $bridgeSuccessorNotBefore
+                nextExpiresAtUnixSeconds = $bridgeSuccessorNotBefore + 43260
             }
             $changed = $true
-            Write-Warning 'Recovered an expired DEV-only mailbox authority by advancing beyond every previously issued epoch; old credentials remain intentionally unusable.'
+            Write-Warning 'Recovered an expired DEV-only mailbox authority with the retired E+1 preserved as an exact bridge and one fresh live successor; older credentials remain intentionally unusable.'
         } else {
             $newNextNotBefore = $anchor - 60
             $newNextExpires = $anchor + 43200

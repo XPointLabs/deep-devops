@@ -30,6 +30,7 @@ const resendChaosIntegration = readFileSync(new URL('./survival-dev-resend-chaos
 const resendChaosProxy = readFileSync(new URL('../tools/survival-resend-chaos/resend-chaos-proxy.mjs', import.meta.url), 'utf8');
 const haproxy = readFileSync(new URL('../config/survival-uat-tls/haproxy.cfg', import.meta.url), 'utf8');
 const mailboxDriver = readFileSync(new URL('../tools/survival-mailbox-driver/Program.cs', import.meta.url), 'utf8');
+const mailboxProvisionDriver = readFileSync(new URL('../tools/survival-mailbox-driver/MailboxGrantProvisioner.cs', import.meta.url), 'utf8');
 const privateCrossProcessState = readFileSync(new URL('../tools/survival-mailbox-driver/PrivateCrossProcessState.cs', import.meta.url), 'utf8');
 const chaosStateTest = readFileSync(new URL('./survival-dev-chaos-state.test.ps1', import.meta.url), 'utf8');
 const mailboxBuildInputs = readFileSync(new URL('./survival-dev-mailbox-build-inputs.ps1', import.meta.url), 'utf8');
@@ -695,7 +696,7 @@ test('P10E uses real current/next MIP1/RIP1 authority, bounded client ingress, a
     assert.match(compose, new RegExp(`xnode-${index}-ed25519: \\{ file: \\.\\/.secrets\\/survival-dev\\/xnode-${index}-ed25519\\.seed \\}`));
     assert.match(compose, new RegExp(`xnode-${index}-x25519: \\{ file: \\.\\/.secrets\\/survival-dev\\/xnode-${index}-x25519\\.private \\}`));
   }
-  assert.match(launcher, /\$SurvivalXNodeCommit = 'c8b38e2b5221fa6c047717202a50a80ebd4f2dd6'/);
+  assert.match(launcher, /\$SurvivalXNodeCommit = 'e9e82f50d7cf3ded2c888c9298d29148549953b6'/);
   assert.match(launcher, /Prepare-SurvivalXNodeIdentitySecrets/);
   assert.match(launcher, /Prepare-SurvivalMailboxPeerAuthority/);
   assert.match(launcher, /'--coordinator-url', "https:\/\/\$coordinatorHost`:41801"/);
@@ -728,7 +729,7 @@ test('P10E uses real current/next MIP1/RIP1 authority, bounded client ingress, a
     mailboxDriverStateInit,
     /chown 65532:65532 \/state \/state\/driver/);
   assert.doesNotMatch(mailboxDriverStateInit, /chmod|777|DAC_OVERRIDE/);
-  assert.match(compose, /XNODE_REVISION: c8b38e2b5221fa6c047717202a50a80ebd4f2dd6/);
+  assert.match(compose, /XNODE_REVISION: e9e82f50d7cf3ded2c888c9298d29148549953b6/);
   assert.match(compose, /XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: [0-9a-f]{64}/);
   assert.match(compose, /org\.opencontainers\.image\.revision/);
   assert.match(compose, /com\.xpoint\.source-context\.manifest-sha256/);
@@ -801,7 +802,9 @@ test('P10E uses real current/next MIP1/RIP1 authority, bounded client ingress, a
   assert.match(mailboxDriver, /MailboxClientCodec\.DecodeRetrievePage/);
   assert.match(mailboxDriver, /MailboxAggregateAckCodec\.DecodeMqr3/);
   assert.match(mailboxDriver, /requireNonLoopbackCoordinator/);
-  assert.match(mailboxDriver, /now \+ 1800 > currentAuthority\.ExpiresAtUnixSeconds/);
+  assert.match(mailboxDriver, /now \+ 1800 > nextAuthority\.ExpiresAtUnixSeconds/);
+  assert.match(mailboxDriver, /bounded E\/E\+1 bridge with a live successor/);
+  assert.match(mailboxProvisionDriver, /currentVerificationTime = Math\.Min/);
   assert.match(mailboxDriver, /boundedEpochWindows = true/);
   assert.match(mailboxDriver, /MailboxAuthenticatedCapabilityRuntime/);
   assert.match(mailboxDriver, /runtime\.CollectExpired\(retainUntil \+ 1, 1\)/);
@@ -853,10 +856,14 @@ test('development identities remain exact strings and Up proves host HTTP reacha
 test('expired DEV mailbox authority recovery is explicit, monotonic, and recoverable', () => {
   assert.match(launcher, /\[switch\]\$RecoverExpiredMailboxAuthority/);
   assert.match(launcher, /if \(-not \$RecoverExpiredMailboxAuthority\)/);
-  assert.match(launcher, /currentEpoch = \$nextEpoch \+ 1/);
-  assert.match(launcher, /nextEpoch = \$nextEpoch \+ 2/);
+  assert.match(launcher, /currentEpoch = \$nextEpoch\r?\n\s+currentNotBeforeUnixSeconds = \$nextNotBefore\r?\n\s+currentExpiresAtUnixSeconds = \$nextExpires/);
+  assert.match(launcher, /nextEpoch = \$nextEpoch \+ 1/);
+  assert.match(launcher, /\$bridgeSuccessorNotBefore = \$nextExpires/);
+  assert.match(launcher, /nextExpiresAtUnixSeconds = \$bridgeSuccessorNotBefore \+ 43260/);
+  assert.match(launcher, /expired too long ago to form an exact live recovery bridge/);
   assert.match(launcher, /\.retired-through-/);
   assert.match(launcher, /\[IO\.File\]::Copy\(\$path, \$retired, \$false\)/);
+  assert.match(launcher, /retired E\+1 preserved as an exact bridge/);
   assert.match(launcher, /accepted only by Prepare or Up/);
 });
 

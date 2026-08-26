@@ -153,9 +153,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/survival-dev.ps1 -Ac
 ## P10E mailbox client and peer rehearsal
 
 The survival stack pins its filtered XNode context to accepted source
-`c8b38e2b5221fa6c047717202a50a80ebd4f2dd6`; a dirty checkout, another revision,
+`e9e82f50d7cf3ded2c888c9298d29148549953b6`; a dirty checkout, another revision,
 or a filtered-source manifest other than
-`0d9ad51d967681816e816f7177c565a770143dfc9983cd9746fdf2cf20096ce6`
+`084876ea676180d7efa89c691b7a9e18e8cd345733b8cb31c77b56d1c8204a29`
 fails closed before build. The source exporter writes a deterministic
 `.survival-source-manifest.json`, and the shared XNode image carries both the exact
 revision and manifest SHA-256 as OCI labels. The live rehearsal requires all six
@@ -191,9 +191,14 @@ year-2038 sentinel.
 If both persisted DEV windows were allowed to expire, ordinary preparation fails closed.
 Recovery is an explicit local-only discontinuity: preserve the existing protected state,
 then run `Prepare` or `Up` with `-RecoverExpiredMailboxAuthority`. The launcher copies the
-retired checkpoint and advances beyond every previously issued epoch; it never resets to
-epoch 1 or silently reuses the expired E+1. Previously issued DEV credentials intentionally
-remain unusable and the Android/Windows runtime pair must be reissued.
+retired checkpoint, carries its E+1 forward byte-for-byte as an expired bridge current epoch,
+and creates one fresh live successor whose window begins at the retired epoch boundary. It
+never resets to epoch 1 or reissues different bytes
+for an existing epoch. XNode may start on that bridge because only the fresh successor is
+live; the expired epoch remains unusable. Reissue the Android/Windows runtime pair before the
+next ordinary `Up`, which then promotes the live successor while preserving the same overlap.
+Recovery fails closed when the retained boundary is too old to leave at least 30 minutes in
+the bounded successor; that case requires a newer checkpoint or an explicit local client reset.
 
 The deterministic issuer seed is an ignored Docker secret mounted only into the rehearsal
 driver; XNode receives only its public key. XNode reports ready only after durable
