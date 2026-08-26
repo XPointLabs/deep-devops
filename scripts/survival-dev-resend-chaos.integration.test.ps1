@@ -20,7 +20,7 @@ $ExpectedDriverSha256 = @{
     'MailboxGrantProvisioner.cs' = 'f88f7ebb0c06f11fde52386341202090e8bd4205ad23bb40c31e7d79d2ac8184'
     'MailboxRuntimePublisher.cs' = 'aa725b67ddfd48193a3e5cc3f39f529130e589e05fa14b1569123c8a8cf42866'
     'PrivateCrossProcessState.cs' = '651d8256822d41b9a7bceab1e6d6bb45740026cac00f487a564befe7777f272b'
-    'Program.cs' = '5162fbeb990dd045664f5c2ef873e012dd9ac9ad6a5d02903d9ec097a3f7927d'
+    'Program.cs' = 'a328c1523444f04efa5a53b1ac27da7092ce634d9bb856ab78e4c64eeacbc0b7'
     'SurvivalMailboxDriver.csproj' = '4db436d69ea88ac3ff16f08c161b61cc0c048bad84cb7e529b2208fa569eafbe'
 }
 . (Join-Path $PSScriptRoot 'survival-dev-private-secrets.ps1')

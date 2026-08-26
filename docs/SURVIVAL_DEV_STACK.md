@@ -172,11 +172,12 @@ implementation to write a public, DEV-LOCAL-ONLY authority environment file cont
 real current/next six-leaf MIP1 Merkle commitments, canonical MIP1/RIP1 proofs, and all
 30 epoch/pair selections across the six fixed router/signing identities and
 exact literal `http://172.30.82.11:8081` through `http://172.30.82.16:8081`
-endpoints on the isolated DEV bridge. A second generated environment enables the bounded
-DEV-LOCAL-ONLY client fixture only on `xnode-1`: MAU2 issuer trust, E/E+1 placement and
-membership authority, and native MAU2 ingress with canonical MEO1/MBR2/MBA2
-bindings. `xnode-2` through `xnode-6`
-remain peer-only and report `dormant-unmapped`.
+endpoints on the isolated DEV bridge. Two separately node-bound generated environments enable
+the bounded DEV-LOCAL-ONLY client fixture on `xnode-1` and `xnode-2`: MAU2 issuer trust,
+E/E+1 placement and membership authority, and native MAU2 ingress with canonical
+MEO1/MBR2/MBA2 bindings. The primary privacy route exits through `xnode-1`; the fully
+disjoint fallback exits through `xnode-2`. `xnode-3` through `xnode-6` remain peer-only and
+report `dormant-unmapped`.
 
 The generator rounds its anchor down to the current minute and creates a genuinely
 rotating overlap: current E is valid from anchor minus five minutes through anchor plus
@@ -232,8 +233,8 @@ coordinator, durable journals, Sodium signatures, and exact P10E codecs. It requ
 - a stopped selected peer to produce only one durable replica, `PartialFailure`, and no MQR3;
 - retry of that exact PRQ2 after peer restart to produce native 2-of-2 MQR3;
 - canonical Tombstone plus exact replay to produce native MRR2/MQR3;
-- all six `/health/ready` checks, ready client ingress only on xnode-1,
-  dormant-unmapped ingress on xnode-2 through xnode-6, and the exact shared image
+- all six `/health/ready` checks, ready client ingress on xnode-1 and xnode-2,
+  dormant-unmapped ingress on xnode-3 through xnode-6, and the exact shared image
   provenance binding.
 
 Run:

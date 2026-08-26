@@ -393,10 +393,12 @@ services:
     <<: *xnode
     env_file:
       - ${SURVIVAL_MAILBOX_AUTHORITY_ENV:-./artifacts/survival-dev/mailbox-peer-authority.env}
+      - ${SURVIVAL_MAILBOX_FALLBACK_CLIENT_AUTHORITY_ENV:-./artifacts/survival-dev/mailbox-client-xnode-2.env}
       - ./artifacts/survival-dev/privacy-routing-xnode-2.env
     environment:
       <<: *xnode-environment
-      Node__PublicHost: xnode-2
+      Node__PublicHost: ${SURVIVAL_BIND_HOST:-127.0.0.1}
+      Node__PublicPort: "41802"
       Node__RouterId: 7422b9887598068e32c4448a949adb290d0f4e35b9e01b0ee5f1a1e600fe2674
       Node__Ed25519PrivateKeyPath: /run/secrets/xnode-ed25519.seed
       PrivacyRouting__PublicPeerBaseUrl: http://172.30.82.12:8083/

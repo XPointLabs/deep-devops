@@ -16,6 +16,7 @@ $work = Join-Path ([IO.Path]::GetTempPath()) ('deep-mailbox-retention-' + [Guid]
 try {
     $authorityEnv = Join-Path $work 'authority.env'
     $clientEnv = Join-Path $work 'client.env'
+    $fallbackClientEnv = Join-Path $work 'fallback-client.env'
     $authorityPublic = Join-Path $work 'authority.public.json'
     $privacyRoutesAndroid = Join-Path $work 'privacy-routes.android.v1.json'
     $privacyRoutesWindows = Join-Path $work 'privacy-routes.windows.v1.json'
@@ -28,12 +29,36 @@ try {
         '--secrets-dir' $secrets `
         '--output-env' $authorityEnv `
         '--output-client-env' $clientEnv `
+        '--output-fallback-client-env' $fallbackClientEnv `
         '--output-public' $authorityPublic `
         '--output-privacy-routes-android' $privacyRoutesAndroid `
         '--output-privacy-routes-windows' $privacyRoutesWindows `
         '--privacy-entry-host' '127.0.0.1' `
-        '--coordinator-url' 'http://127.0.0.1:41801')
+        '--coordinator-url' 'http://127.0.0.1:41801' `
+        '--fallback-coordinator-url' 'http://127.0.0.1:41802')
     if ($LASTEXITCODE -ne 0) { throw 'Host-only authority generation failed.' }
+    $primary = @{}
+    $fallback = @{}
+    foreach ($line in [IO.File]::ReadAllLines($clientEnv)) {
+        $pair = $line.Split('=', 2)
+        $primary[$pair[0]] = $pair[1]
+    }
+    foreach ($line in [IO.File]::ReadAllLines($fallbackClientEnv)) {
+        $pair = $line.Split('=', 2)
+        $fallback[$pair[0]] = $pair[1]
+    }
+    if ($primary['MailboxClient__DevelopmentFixture__CoordinatorUrl'] -cne 'http://127.0.0.1:41801' -or
+        $fallback['MailboxClient__DevelopmentFixture__CoordinatorUrl'] -cne 'http://127.0.0.1:41802' -or
+        $primary['MailboxClient__DevelopmentFixture__CurrentLocalMembershipProof'] -cne
+            $fallback['MailboxClient__DevelopmentFixture__CurrentRemoteMembershipProof'] -or
+        $primary['MailboxClient__DevelopmentFixture__CurrentRemoteMembershipProof'] -cne
+            $fallback['MailboxClient__DevelopmentFixture__CurrentLocalMembershipProof'] -or
+        $primary['MailboxClient__DevelopmentFixture__NextLocalMembershipProof'] -cne
+            $fallback['MailboxClient__DevelopmentFixture__NextRemoteMembershipProof'] -or
+        $primary['MailboxClient__DevelopmentFixture__NextRemoteMembershipProof'] -cne
+            $fallback['MailboxClient__DevelopmentFixture__NextLocalMembershipProof']) {
+        throw 'Host-only authority generation did not bind two exact coordinator exits and reciprocal local proofs.'
+    }
     $resultLines = @(& dotnet @common retention-gc `
         '--secrets-dir' $secrets `
         '--authority-public' $authorityPublic `

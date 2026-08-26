@@ -138,12 +138,12 @@ function Assert-Runtime() {
         if ($ready.ready -ne $true -or $ready.mailboxPeer -ne 'ready' -or $status.mailbox.peerRuntime -ne 'ready') {
             throw "xnode-$index did not report peer-runtime readiness."
         }
-        if ($index -eq 1) {
+        if ($index -in 1, 2) {
             if ($ready.mailboxClient.reason -ne 'ready' -or
                 $status.mailboxClient.enabled -ne $true -or
                 $status.mailboxClient.clientRoutesMapped -ne $true -or
                 $status.mailboxClient.clientIngress -ne 'native-mau2-meo1-mbr2-mba2') {
-                throw 'xnode-1 does not truthfully report ready canonical client ingress.'
+                throw "xnode-$index does not truthfully report ready canonical client ingress."
             }
             $clientIngress = 'native-mau2-meo1-mbr2-mba2'
         } else {

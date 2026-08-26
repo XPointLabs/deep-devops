@@ -81,8 +81,10 @@ switch (arguments.Command)
         fixture.WriteAuthority(
             arguments.OutputEnvironment!,
             arguments.OutputClientEnvironment!,
+            arguments.OutputFallbackClientEnvironment,
             arguments.OutputPublic!,
             arguments.CoordinatorUrl,
+            arguments.FallbackCoordinatorUrl,
             arguments.OutputClientPublic);
         WritePrivacyRouteArtifacts(
             fixture.RouterIds,
@@ -1337,8 +1339,10 @@ sealed class Fixture
     public void WriteAuthority(
         string environmentPath,
         string clientEnvironmentPath,
+        string? fallbackClientEnvironmentPath,
         string publicPath,
         string coordinatorUrl,
+        string? fallbackCoordinatorUrl,
         string? clientPublicPath)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(environmentPath))!);
@@ -1396,40 +1400,58 @@ sealed class Fixture
             .Select(MailboxPeerReplicationCodec.EncodeMembershipProof)
             .Select(Convert.ToBase64String)
             .ToArray();
-        var clientLines = new[]
+        string[] ClientLines(string exactCoordinatorUrl, int localReplicaIndex)
         {
-            "MailboxClient__Enabled=true",
-            "MailboxClient__DevelopmentFixture__Enabled=true",
-            $"MailboxClient__DevelopmentFixture__NetworkId={Lower(networkId)}",
-            $"MailboxClient__DevelopmentFixture__IssuerPublicKey={Lower(issuerPublicKey)}",
-            $"MailboxClient__DevelopmentFixture__MinimumGeneration={CurrentEpoch}",
-            $"MailboxClient__DevelopmentFixture__MaximumGeneration={NextEpoch}",
-            $"MailboxClient__DevelopmentFixture__IssuerValidFromUnixSeconds={CurrentNotBefore}",
-            $"MailboxClient__DevelopmentFixture__IssuerValidUntilUnixSeconds={NextExpiresAt}",
-            $"MailboxClient__DevelopmentFixture__CoordinatorUrl={coordinatorUrl}",
-            $"MailboxClient__DevelopmentFixture__CurrentPlacementId={Lower(currentPlacement.Bytes.Span)}",
-            $"MailboxClient__DevelopmentFixture__CurrentPlacementCommitment={Lower(MailboxPlacementCommitment.Compute(currentPlacement))}",
-            $"MailboxClient__DevelopmentFixture__NextPlacementId={Lower(nextPlacement.Bytes.Span)}",
-            $"MailboxClient__DevelopmentFixture__NextPlacementCommitment={Lower(MailboxPlacementCommitment.Compute(nextPlacement))}",
-            $"MailboxClient__DevelopmentFixture__ReplicaIds__0={RouterIds[0].Value}",
-            $"MailboxClient__DevelopmentFixture__ReplicaIds__1={RouterIds[1].Value}",
-            $"MailboxClient__DevelopmentFixture__ReplicaSigningPublicKeys__0={Lower(Descriptors[0].Ed25519PublicKey.Span)}",
-            $"MailboxClient__DevelopmentFixture__ReplicaSigningPublicKeys__1={Lower(Descriptors[1].Ed25519PublicKey.Span)}",
-            $"MailboxClient__DevelopmentFixture__CurrentLocalMembershipProof={currentMip[0]}",
-            $"MailboxClient__DevelopmentFixture__CurrentRemoteMembershipProof={currentMip[1]}",
-            $"MailboxClient__DevelopmentFixture__NextLocalMembershipProof={nextMip[0]}",
-            $"MailboxClient__DevelopmentFixture__NextRemoteMembershipProof={nextMip[1]}",
-            "MailboxClientAdapter__Enabled=true",
-            $"MailboxClientAdapter__CurrentMembershipCommitment={Lower(Root)}",
-            $"MailboxClientAdapter__NextMembershipCommitment={Lower(NextRoot)}",
-            $"MailboxClientAdapter__CurrentEpoch={CurrentEpoch}",
-            $"MailboxClientAdapter__NextEpoch={NextEpoch}",
-            $"MailboxClientAdapter__CurrentNotBeforeUnixSeconds={CurrentNotBefore}",
-            $"MailboxClientAdapter__NextNotBeforeUnixSeconds={NextNotBefore}",
-            $"MailboxClientAdapter__CurrentExpiresAtUnixSeconds={CurrentExpiresAt}",
-            $"MailboxClientAdapter__NextExpiresAtUnixSeconds={NextExpiresAt}"
-        };
-        File.WriteAllText(clientEnvironmentPath, string.Join('\n', clientLines) + "\n");
+            var remoteReplicaIndex = localReplicaIndex == 0 ? 1 : 0;
+            return
+            [
+                "MailboxClient__Enabled=true",
+                "MailboxClient__DevelopmentFixture__Enabled=true",
+                $"MailboxClient__DevelopmentFixture__NetworkId={Lower(networkId)}",
+                $"MailboxClient__DevelopmentFixture__IssuerPublicKey={Lower(issuerPublicKey)}",
+                $"MailboxClient__DevelopmentFixture__MinimumGeneration={CurrentEpoch}",
+                $"MailboxClient__DevelopmentFixture__MaximumGeneration={NextEpoch}",
+                $"MailboxClient__DevelopmentFixture__IssuerValidFromUnixSeconds={CurrentNotBefore}",
+                $"MailboxClient__DevelopmentFixture__IssuerValidUntilUnixSeconds={NextExpiresAt}",
+                $"MailboxClient__DevelopmentFixture__CoordinatorUrl={exactCoordinatorUrl}",
+                $"MailboxClient__DevelopmentFixture__CurrentPlacementId={Lower(currentPlacement.Bytes.Span)}",
+                $"MailboxClient__DevelopmentFixture__CurrentPlacementCommitment={Lower(MailboxPlacementCommitment.Compute(currentPlacement))}",
+                $"MailboxClient__DevelopmentFixture__NextPlacementId={Lower(nextPlacement.Bytes.Span)}",
+                $"MailboxClient__DevelopmentFixture__NextPlacementCommitment={Lower(MailboxPlacementCommitment.Compute(nextPlacement))}",
+                $"MailboxClient__DevelopmentFixture__ReplicaIds__0={RouterIds[0].Value}",
+                $"MailboxClient__DevelopmentFixture__ReplicaIds__1={RouterIds[1].Value}",
+                $"MailboxClient__DevelopmentFixture__ReplicaSigningPublicKeys__0={Lower(Descriptors[0].Ed25519PublicKey.Span)}",
+                $"MailboxClient__DevelopmentFixture__ReplicaSigningPublicKeys__1={Lower(Descriptors[1].Ed25519PublicKey.Span)}",
+                $"MailboxClient__DevelopmentFixture__CurrentLocalMembershipProof={currentMip[localReplicaIndex]}",
+                $"MailboxClient__DevelopmentFixture__CurrentRemoteMembershipProof={currentMip[remoteReplicaIndex]}",
+                $"MailboxClient__DevelopmentFixture__NextLocalMembershipProof={nextMip[localReplicaIndex]}",
+                $"MailboxClient__DevelopmentFixture__NextRemoteMembershipProof={nextMip[remoteReplicaIndex]}",
+                "MailboxClientAdapter__Enabled=true",
+                $"MailboxClientAdapter__CurrentMembershipCommitment={Lower(Root)}",
+                $"MailboxClientAdapter__NextMembershipCommitment={Lower(NextRoot)}",
+                $"MailboxClientAdapter__CurrentEpoch={CurrentEpoch}",
+                $"MailboxClientAdapter__NextEpoch={NextEpoch}",
+                $"MailboxClientAdapter__CurrentNotBeforeUnixSeconds={CurrentNotBefore}",
+                $"MailboxClientAdapter__NextNotBeforeUnixSeconds={NextNotBefore}",
+                $"MailboxClientAdapter__CurrentExpiresAtUnixSeconds={CurrentExpiresAt}",
+                $"MailboxClientAdapter__NextExpiresAtUnixSeconds={NextExpiresAt}"
+            ];
+        }
+
+        File.WriteAllText(
+            clientEnvironmentPath,
+            string.Join('\n', ClientLines(coordinatorUrl, localReplicaIndex: 0)) + "\n");
+        if (fallbackClientEnvironmentPath is not null)
+        {
+            if (string.IsNullOrWhiteSpace(fallbackCoordinatorUrl))
+            {
+                throw new InvalidOperationException(
+                    "A fallback mailbox client environment requires its exact coordinator URL.");
+            }
+            File.WriteAllText(
+                fallbackClientEnvironmentPath,
+                string.Join('\n', ClientLines(fallbackCoordinatorUrl, localReplicaIndex: 1)) + "\n");
+        }
         File.WriteAllText(publicPath, JsonSerializer.Serialize(new
         {
             schemaVersion = 2,
@@ -2824,6 +2846,7 @@ sealed record Arguments(
     string? RunId,
     string? OutputEnvironment,
     string? OutputClientEnvironment,
+    string? OutputFallbackClientEnvironment,
     string? OutputPublic,
     string? OutputClientPublic,
     string? OutputPrivacyRoutesAndroid,
@@ -2845,7 +2868,8 @@ sealed record Arguments(
     string? AuthorityStatePath,
     bool FailAfterStage,
     bool FailAfterPromotion,
-    string? FailAfterDurabilityBarrier)
+    string? FailAfterDurabilityBarrier,
+    string? FallbackCoordinatorUrl)
 {
     public static Arguments Parse(string[] values)
     {
@@ -2874,6 +2898,7 @@ sealed record Arguments(
             Optional("--run-id"),
             Optional("--output-env"),
             Optional("--output-client-env"),
+            Optional("--output-fallback-client-env"),
             Optional("--output-public"),
             Optional("--output-client-public"),
             Optional("--output-privacy-routes-android"),
@@ -2895,6 +2920,7 @@ sealed record Arguments(
             Optional("--authority-state"),
             values.Contains("--fail-after-stage", StringComparer.Ordinal),
             values.Contains("--fail-after-promotion", StringComparer.Ordinal),
-            Optional("--fail-after-durability-barrier"));
+            Optional("--fail-after-durability-barrier"),
+            Optional("--fallback-coordinator-url"));
     }
 }

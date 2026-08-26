@@ -138,7 +138,7 @@ $SurvivalMailboxDriverSha256 = @{
     'MailboxGrantProvisioner.cs' = 'f88f7ebb0c06f11fde52386341202090e8bd4205ad23bb40c31e7d79d2ac8184'
     'MailboxRuntimePublisher.cs' = 'aa725b67ddfd48193a3e5cc3f39f529130e589e05fa14b1569123c8a8cf42866'
     'PrivateCrossProcessState.cs' = '651d8256822d41b9a7bceab1e6d6bb45740026cac00f487a564befe7777f272b'
-    'Program.cs' = '5162fbeb990dd045664f5c2ef873e012dd9ac9ad6a5d02903d9ec097a3f7927d'
+    'Program.cs' = 'a328c1523444f04efa5a53b1ac27da7092ce634d9bb856ab78e4c64eeacbc0b7'
     'SurvivalMailboxDriver.csproj' = '4db436d69ea88ac3ff16f08c161b61cc0c048bad84cb7e529b2208fa569eafbe'
 }
 $ChainLifecycleServices = @(
@@ -359,6 +359,7 @@ function Prepare-SurvivalMailboxPeerAuthority([string]$PinnedXNodeSource = '') {
     } else { [IO.Path]::GetFullPath($PinnedXNodeSource) }
     $authorityPath = Join-Path $outputDirectory 'mailbox-peer-authority.env'
     $clientAuthorityPath = Join-Path $outputDirectory 'mailbox-client-xnode-1.env'
+    $fallbackClientAuthorityPath = Join-Path $outputDirectory 'mailbox-client-xnode-2.env'
     $publicPath = Join-Path $outputDirectory 'mailbox-peer-authority.public.json'
     $clientPublicPath = Join-Path $outputDirectory 'mailbox-client-authority.public.json'
     $privacyAndroidPath = Join-Path $outputDirectory 'privacy-routes.android.v1.json'
@@ -372,7 +373,9 @@ function Prepare-SurvivalMailboxPeerAuthority([string]$PinnedXNodeSource = '') {
         '--authority-state', $authorityStatePath,
         '--output-env', $authorityPath,
         '--output-client-env', $clientAuthorityPath,
+        '--output-fallback-client-env', $fallbackClientAuthorityPath,
         '--coordinator-url', "https://$coordinatorHost`:41801",
+        '--fallback-coordinator-url', "https://$coordinatorHost`:41802",
         '--output-public', $publicPath,
         '--output-client-public', $clientPublicPath,
         '--output-privacy-routes-android', $privacyAndroidPath,
@@ -380,6 +383,7 @@ function Prepare-SurvivalMailboxPeerAuthority([string]$PinnedXNodeSource = '') {
         '--privacy-entry-host', $coordinatorHost)
     Set-Item -Path 'Env:SURVIVAL_MAILBOX_AUTHORITY_ENV' -Value $authorityPath
     Set-Item -Path 'Env:SURVIVAL_MAILBOX_CLIENT_AUTHORITY_ENV' -Value $clientAuthorityPath
+    Set-Item -Path 'Env:SURVIVAL_MAILBOX_FALLBACK_CLIENT_AUTHORITY_ENV' -Value $fallbackClientAuthorityPath
     Set-Item -Path 'Env:SURVIVAL_MAILBOX_PUBLIC_AUTHORITY' -Value $publicPath
     Set-Item -Path 'Env:SURVIVAL_MAILBOX_CLIENT_PUBLIC_AUTHORITY' -Value $clientPublicPath
 }
