@@ -850,6 +850,16 @@ test('development identities remain exact strings and Up proves host HTTP reacha
   }
 });
 
+test('expired DEV mailbox authority recovery is explicit, monotonic, and recoverable', () => {
+  assert.match(launcher, /\[switch\]\$RecoverExpiredMailboxAuthority/);
+  assert.match(launcher, /if \(-not \$RecoverExpiredMailboxAuthority\)/);
+  assert.match(launcher, /currentEpoch = \$nextEpoch \+ 1/);
+  assert.match(launcher, /nextEpoch = \$nextEpoch \+ 2/);
+  assert.match(launcher, /\.retired-through-/);
+  assert.match(launcher, /\[IO\.File\]::Copy\(\$path, \$retired, \$false\)/);
+  assert.match(launcher, /accepted only by Prepare or Up/);
+});
+
 test('chaos rehearsal follows the exported LAN host and invalidates stale evidence', () => {
   assert.match(chaos, /\$env:XNODE_URLS/);
   assert.match(chaos, /\$RuntimeHost = \$runtimeHosts\[0\]/);

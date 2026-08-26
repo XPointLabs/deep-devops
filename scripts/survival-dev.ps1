@@ -7,6 +7,7 @@ param(
     [string]$LanHost,
     [switch]$Chain,
     [switch]$Reset,
+    [switch]$RecoverExpiredMailboxAuthority,
     [ValidateRange(5, 300)]
     [int]$ChaosTtlSeconds = 60,
     [ValidateSet('post-durable-response-drop','pre-dispatch-outage','primary-ingress-rejected-before-forward','post-durable-ack-response-drop')]
@@ -432,24 +433,48 @@ function Get-SurvivalMailboxAuthorityState() {
 
     if ($now + 1800 -gt $currentExpires) {
         if ($now + 1800 -gt $nextExpires) {
-            throw 'DEV mailbox authority overlap was allowed to expire; forward rotation cannot be reconstructed safely.'
+            if (-not $RecoverExpiredMailboxAuthority) {
+                throw 'DEV mailbox authority overlap was allowed to expire; use the explicit DEV-only recovery switch or restore a still-live authority checkpoint.'
+            }
+            if ($nextEpoch -gt ([uint64]::MaxValue - 2)) {
+                throw 'DEV mailbox authority epoch cannot be advanced safely.'
+            }
+            $retired = $path + '.retired-through-' + $nextEpoch + '-' +
+                [DateTimeOffset]::UtcNow.ToString('yyyyMMddTHHmmssZ') + '.json'
+            if (Test-Path -LiteralPath $retired) {
+                throw 'DEV mailbox authority recovery backup already exists.'
+            }
+            [IO.File]::Copy($path, $retired, $false)
+            Protect-SurvivalDevPrivateFile $retired
+            $state = [pscustomobject][ordered]@{
+                schemaVersion = 1
+                currentEpoch = $nextEpoch + 1
+                currentNotBeforeUnixSeconds = $anchor - 300
+                currentExpiresAtUnixSeconds = $anchor + 28800
+                nextEpoch = $nextEpoch + 2
+                nextNotBeforeUnixSeconds = $anchor - 60
+                nextExpiresAtUnixSeconds = $anchor + 43200
+            }
+            $changed = $true
+            Write-Warning 'Recovered an expired DEV-only mailbox authority by advancing beyond every previously issued epoch; old credentials remain intentionally unusable.'
+        } else {
+            $newNextNotBefore = $anchor - 60
+            $newNextExpires = $anchor + 43200
+            if ($newNextNotBefore -le $nextNotBefore -or $newNextNotBefore -gt $nextExpires `
+                -or $newNextExpires -le $nextExpires) {
+                throw 'DEV mailbox authority cannot form the next bounded overlap window.'
+            }
+            $state = [pscustomobject][ordered]@{
+                schemaVersion = 1
+                currentEpoch = $nextEpoch
+                currentNotBeforeUnixSeconds = $nextNotBefore
+                currentExpiresAtUnixSeconds = $nextExpires
+                nextEpoch = $nextEpoch + 1
+                nextNotBeforeUnixSeconds = $newNextNotBefore
+                nextExpiresAtUnixSeconds = $newNextExpires
+            }
+            $changed = $true
         }
-        $newNextNotBefore = $anchor - 60
-        $newNextExpires = $anchor + 43200
-        if ($newNextNotBefore -le $nextNotBefore -or $newNextNotBefore -gt $nextExpires `
-            -or $newNextExpires -le $nextExpires) {
-            throw 'DEV mailbox authority cannot form the next bounded overlap window.'
-        }
-        $state = [pscustomobject][ordered]@{
-            schemaVersion = 1
-            currentEpoch = $nextEpoch
-            currentNotBeforeUnixSeconds = $nextNotBefore
-            currentExpiresAtUnixSeconds = $nextExpires
-            nextEpoch = $nextEpoch + 1
-            nextNotBeforeUnixSeconds = $newNextNotBefore
-            nextExpiresAtUnixSeconds = $newNextExpires
-        }
-        $changed = $true
     }
 
     if ($changed) {
@@ -942,6 +967,10 @@ function Stop-SurvivalChaos([switch]$BestEffort) {
 }
 
 Initialize-PhysicalDockerAuthority
+
+if ($RecoverExpiredMailboxAuthority -and $Action -cnotin @('Prepare', 'Up')) {
+    throw '-RecoverExpiredMailboxAuthority is accepted only by Prepare or Up.'
+}
 
 switch ($Action) {
     'Prepare' {

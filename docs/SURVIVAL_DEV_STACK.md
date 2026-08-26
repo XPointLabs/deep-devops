@@ -183,10 +183,17 @@ peer-only and report `dormant-unmapped`.
 
 The generator rounds its anchor down to the current minute and creates a genuinely
 rotating overlap: current E is valid from anchor minus five minutes through anchor plus
-one hour; E+1 is valid from anchor minus one minute through anchor plus two hours. The
+eight hours; E+1 is valid from anchor minus one minute through anchor plus twelve hours. The
 runtime loader rejects an old fixture unless at least 30 minutes remain in E. This keeps
 replay retention tied to bounded epoch validity rather than an issuer-lifetime or
 year-2038 sentinel.
+
+If both persisted DEV windows were allowed to expire, ordinary preparation fails closed.
+Recovery is an explicit local-only discontinuity: preserve the existing protected state,
+then run `Prepare` or `Up` with `-RecoverExpiredMailboxAuthority`. The launcher copies the
+retired checkpoint and advances beyond every previously issued epoch; it never resets to
+epoch 1 or silently reuses the expired E+1. Previously issued DEV credentials intentionally
+remain unusable and the Android/Windows runtime pair must be reissued.
 
 The deterministic issuer seed is an ignored Docker secret mounted only into the rehearsal
 driver; XNode receives only its public key. XNode reports ready only after durable
