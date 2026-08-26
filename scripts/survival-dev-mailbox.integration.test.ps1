@@ -30,8 +30,8 @@ $ComposePath = Join-Path $Root 'docker-compose.survival.dev.yml'
 $UatTlsComposePath = Join-Path $Root 'docker-compose.survival-uat-tls.dev.yml'
 $Launcher = Join-Path $PSScriptRoot 'survival-dev.ps1'
 $Project = 'deep-survival-dev'
-$expectedCommit = '19517d176793a37e258766be39ca9adba30369fa'
-$expectedManifest = 'f759eeeffcf19b9ec97bef8d34bc740b38a0bdb22f0d554c4094c303f7f219e2'
+$expectedCommit = 'c8b38e2b5221fa6c047717202a50a80ebd4f2dd6'
+$expectedManifest = '0d9ad51d967681816e816f7177c565a770143dfc9983cd9746fdf2cf20096ce6'
 $base = @('compose', '-p', $Project, '-f', $ComposePath, '-f', $UatTlsComposePath)
 $nodes = 1..6 | ForEach-Object { "xnode-$_" }
 $TlsSecretDirectory = [Environment]::GetEnvironmentVariable('SURVIVAL_UAT_TLS_SECRET_DIR')
@@ -97,7 +97,7 @@ function Invoke-Driver([string]$Phase, [string]$RunId = '') {
     $jsonLines = @($output | Where-Object { $_ -match '^\{"schemaVersion":1,' })
     if ($jsonLines.Count -ne 1) { throw "Live mailbox driver phase '$Phase' emitted no unique sanitized result." }
     $result = $jsonLines[0] | ConvertFrom-Json
-    if ($result.passed -ne $true -or $result.phase -notmatch '^(reset|retention-gc|store|replay|selected-peer-loss|selected-peer-retry|tombstone|client-lifecycle|client-selected-peer-loss|client-selected-peer-retry)$') {
+    if ($result.passed -ne $true -or $result.phase -notmatch '^(reset|retention-gc|store|replay|selected-peer-loss|selected-peer-retry|tombstone|client-lifecycle|client-fallback-continuity|client-selected-peer-loss|client-selected-peer-retry)$') {
         throw "Live mailbox driver phase '$Phase' did not pass."
     }
     return $result
@@ -138,17 +138,26 @@ function Assert-Runtime() {
         if ($ready.ready -ne $true -or $ready.mailboxPeer -ne 'ready' -or $status.mailbox.peerRuntime -ne 'ready') {
             throw "xnode-$index did not report peer-runtime readiness."
         }
-        if ($index -in 1, 2) {
+        if ($index -eq 1) {
             if ($ready.mailboxClient.reason -ne 'ready' -or
                 $status.mailboxClient.enabled -ne $true -or
                 $status.mailboxClient.clientRoutesMapped -ne $true -or
-                $status.mailboxClient.clientIngress -ne 'native-mau2-meo1-mbr2-mba2') {
-                throw "xnode-$index does not truthfully report ready canonical client ingress."
+                $status.mailboxClient.clientIngress -ne 'native-mau2-meo1-mbr2-mba2' -or
+                $status.mailboxAuthorityForwarding -ne 'authority') {
+                throw 'xnode-1 does not truthfully report the sole canonical client authority.'
             }
             $clientIngress = 'native-mau2-meo1-mbr2-mba2'
+        } elseif ($index -eq 2) {
+            if ($status.mailboxClient.enabled -ne $false -or
+                $status.mailboxClient.clientIngress -ne 'dormant-unmapped' -or
+                $status.mailboxAuthorityForwarding -ne 'forwarding-exit') {
+                throw 'xnode-2 does not truthfully report forwarding-only mailbox authority state.'
+            }
+            $clientIngress = 'forwarding-only'
         } else {
             if ($status.mailboxClient.enabled -ne $false -or
-                $status.mailboxClient.clientIngress -ne 'dormant-unmapped') {
+                $status.mailboxClient.clientIngress -ne 'dormant-unmapped' -or
+                $status.mailboxAuthorityForwarding -ne 'disabled') {
                 throw "xnode-$index does not truthfully report dormant-unmapped client ingress."
             }
             $clientIngress = 'dormant-unmapped'
@@ -161,6 +170,17 @@ function Assert-Runtime() {
         }
     }
     return $runtime
+}
+
+function Assert-NoCoordinatorStateOnForwardingExit() {
+    $container = (& docker @base ps -q xnode-2).Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($container)) {
+        throw 'The forwarding-only xnode-2 container is unavailable.'
+    }
+    & docker exec $container sh -ec 'for path in /state/mailbox-client-native-mau2-v1 /state/mailbox-capability-replay-v3 /state/mailbox-client-canonical-outcomes-v1; do test ! -e "$path" || exit 1; done'
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Forwarding-only xnode-2 created or retained forbidden coordinator state.'
+    }
 }
 
 function Get-ImageBinding() {
@@ -262,6 +282,7 @@ try {
     Invoke-Docker @('--profile', 'mailbox-rehearsal', 'run', '--rm', '--no-deps', 'mailbox-driver-state-init')
     $phases += Invoke-Driver 'reset'
     $phases += Invoke-Driver 'retention-gc'
+    $phases += Invoke-Driver 'client-fallback-continuity' $runId
     $phases += Invoke-Driver 'client-lifecycle' $runId
     $phases += Invoke-Driver 'store' $runId
 
@@ -287,6 +308,7 @@ try {
     $phases += Invoke-Driver 'tombstone'
 
     [void](Assert-Runtime)
+    Assert-NoCoordinatorStateOnForwardingExit
     [void](Get-ImageBinding)
     Invoke-TlsTopologyVerify
 }
@@ -299,6 +321,7 @@ finally {
 # Evidence is published only after checked restoration and a second live
 # validation. A failed finally block therefore cannot leave a new green file.
 $runtime = Assert-Runtime
+Assert-NoCoordinatorStateOnForwardingExit
 $binding = Get-ImageBinding
 $volumeBindingsAfter = Get-StateVolumeBindings
 if (($volumeBindingsBefore | ConvertTo-Json -Compress) -cne
@@ -322,6 +345,8 @@ $evidence = [pscustomobject]@{
         publicStoreRetrieveAck = $true
         publicStoreExactReplay = $true
         publicClientPrivacyRouted = $true
+        fallbackStorePrimaryRetrieveExactlyOnce = $true
+        fallbackCoordinatorIsXnode1 = $true
         directCleartextClientIngress = $false
         publicSelectedPeerLossNeverQuorum = $true
         publicSelectedPeerRestartExactRetryQuorum = $true

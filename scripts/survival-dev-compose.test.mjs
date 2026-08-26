@@ -674,9 +674,13 @@ test('P10E uses real current/next MIP1/RIP1 authority, bounded client ingress, a
   assert.match(serviceBlock('xnode-1'), /SURVIVAL_MAILBOX_CLIENT_AUTHORITY_ENV/);
   assert.match(serviceBlock('xnode-1'), /Node__PublicHost: \$\{SURVIVAL_BIND_HOST:-127\.0\.0\.1\}/);
   assert.match(serviceBlock('xnode-1'), /Node__PublicPort: "41801"/);
-  assert.match(serviceBlock('xnode-2'), /SURVIVAL_MAILBOX_FALLBACK_CLIENT_AUTHORITY_ENV/);
-  assert.match(serviceBlock('xnode-2'), /Node__PublicHost: \$\{SURVIVAL_BIND_HOST:-127\.0\.0\.1\}/);
+  assert.match(serviceBlock('xnode-1'), /MailboxAuthorityForwarding__AllowedExitRouterIds__0: 7422b988/);
+  assert.doesNotMatch(serviceBlock('xnode-2'), /MAILBOX_CLIENT_AUTHORITY_ENV/);
+  assert.match(serviceBlock('xnode-2'), /Node__PublicHost: xnode-2/);
   assert.match(serviceBlock('xnode-2'), /Node__PublicPort: "41802"/);
+  assert.match(serviceBlock('xnode-2'), /MailboxAuthorityForwarding__Enabled: "true"/);
+  assert.match(serviceBlock('xnode-2'), /MailboxAuthorityForwarding__AuthorityRouterId: 4cb5abf6/);
+  assert.doesNotMatch(compose, /SURVIVAL_MAILBOX_FALLBACK_CLIENT_AUTHORITY_ENV/);
   for (const index of [3, 4, 5, 6]) {
     assert.doesNotMatch(serviceBlock(`xnode-${index}`), /SURVIVAL_MAILBOX_CLIENT_AUTHORITY_ENV/);
   }
@@ -691,14 +695,14 @@ test('P10E uses real current/next MIP1/RIP1 authority, bounded client ingress, a
     assert.match(compose, new RegExp(`xnode-${index}-ed25519: \\{ file: \\.\\/.secrets\\/survival-dev\\/xnode-${index}-ed25519\\.seed \\}`));
     assert.match(compose, new RegExp(`xnode-${index}-x25519: \\{ file: \\.\\/.secrets\\/survival-dev\\/xnode-${index}-x25519\\.private \\}`));
   }
-  assert.match(launcher, /\$SurvivalXNodeCommit = '19517d176793a37e258766be39ca9adba30369fa'/);
+  assert.match(launcher, /\$SurvivalXNodeCommit = 'c8b38e2b5221fa6c047717202a50a80ebd4f2dd6'/);
   assert.match(launcher, /Prepare-SurvivalXNodeIdentitySecrets/);
   assert.match(launcher, /Prepare-SurvivalMailboxPeerAuthority/);
   assert.match(launcher, /'--coordinator-url', "https:\/\/\$coordinatorHost`:41801"/);
-  assert.match(launcher, /'--fallback-coordinator-url', "https:\/\/\$coordinatorHost`:41802"/);
+  assert.doesNotMatch(launcher, /fallback-coordinator-url/);
   assert.doesNotMatch(launcher, /'--coordinator-url', "http:\/\/\$coordinatorHost`:41801"/);
   assert.match(launcher, /mailbox-client-xnode-1\.env/);
-  assert.match(launcher, /mailbox-client-xnode-2\.env/);
+  assert.doesNotMatch(launcher, /mailbox-client-xnode-2\.env/);
   assert.match(launcher, /'Prepare' \{/);
   assert.match(launcher, /function Invoke-SurvivalMailboxDriverImmutable/);
   assert.match(launcher, /function Get-PinnedSurvivalXNodeContext/);
@@ -724,7 +728,7 @@ test('P10E uses real current/next MIP1/RIP1 authority, bounded client ingress, a
     mailboxDriverStateInit,
     /chown 65532:65532 \/state \/state\/driver/);
   assert.doesNotMatch(mailboxDriverStateInit, /chmod|777|DAC_OVERRIDE/);
-  assert.match(compose, /XNODE_REVISION: 19517d176793a37e258766be39ca9adba30369fa/);
+  assert.match(compose, /XNODE_REVISION: c8b38e2b5221fa6c047717202a50a80ebd4f2dd6/);
   assert.match(compose, /XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: [0-9a-f]{64}/);
   assert.match(compose, /org\.opencontainers\.image\.revision/);
   assert.match(compose, /com\.xpoint\.source-context\.manifest-sha256/);

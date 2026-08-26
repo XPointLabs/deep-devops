@@ -131,14 +131,14 @@ $baseArguments = @('compose') + $projectDirectoryArguments + @('-p', $Project, '
 $uatTlsArguments = @('compose') + $projectDirectoryArguments + @('-p', $Project, '-f', $ComposePath, '-f', $UatTlsComposePath)
 $chaosArguments = @('compose') + $projectDirectoryArguments + @('-p', $Project, '-f', $ComposePath, '-f', $UatTlsComposePath, '-f', $ChaosComposePath, '--profile', 'resend-chaos')
 $ContextRoot = Join-Path $Root 'artifacts\survival-dev\build-contexts'
-$SurvivalXNodeCommit = '19517d176793a37e258766be39ca9adba30369fa'
-$SurvivalXNodeContextManifestSha256 = 'f759eeeffcf19b9ec97bef8d34bc740b38a0bdb22f0d554c4094c303f7f219e2'
+$SurvivalXNodeCommit = 'c8b38e2b5221fa6c047717202a50a80ebd4f2dd6'
+$SurvivalXNodeContextManifestSha256 = '0d9ad51d967681816e816f7177c565a770143dfc9983cd9746fdf2cf20096ce6'
 $SurvivalMailboxBuildHelperSha256 = 'c5e0f08e0816296734195a27b2c8a47a207b0f1ade88f0186caffe02334f1456'
 $SurvivalMailboxDriverSha256 = @{
     'MailboxGrantProvisioner.cs' = 'f88f7ebb0c06f11fde52386341202090e8bd4205ad23bb40c31e7d79d2ac8184'
     'MailboxRuntimePublisher.cs' = 'aa725b67ddfd48193a3e5cc3f39f529130e589e05fa14b1569123c8a8cf42866'
     'PrivateCrossProcessState.cs' = '651d8256822d41b9a7bceab1e6d6bb45740026cac00f487a564befe7777f272b'
-    'Program.cs' = 'a328c1523444f04efa5a53b1ac27da7092ce634d9bb856ab78e4c64eeacbc0b7'
+    'Program.cs' = '9f18d7cfbfbb12de01a2787cf98f526131907140a789516e9a2cffb0e3ef073c'
     'SurvivalMailboxDriver.csproj' = '4db436d69ea88ac3ff16f08c161b61cc0c048bad84cb7e529b2208fa569eafbe'
 }
 $ChainLifecycleServices = @(
@@ -359,7 +359,6 @@ function Prepare-SurvivalMailboxPeerAuthority([string]$PinnedXNodeSource = '') {
     } else { [IO.Path]::GetFullPath($PinnedXNodeSource) }
     $authorityPath = Join-Path $outputDirectory 'mailbox-peer-authority.env'
     $clientAuthorityPath = Join-Path $outputDirectory 'mailbox-client-xnode-1.env'
-    $fallbackClientAuthorityPath = Join-Path $outputDirectory 'mailbox-client-xnode-2.env'
     $publicPath = Join-Path $outputDirectory 'mailbox-peer-authority.public.json'
     $clientPublicPath = Join-Path $outputDirectory 'mailbox-client-authority.public.json'
     $privacyAndroidPath = Join-Path $outputDirectory 'privacy-routes.android.v1.json'
@@ -373,9 +372,7 @@ function Prepare-SurvivalMailboxPeerAuthority([string]$PinnedXNodeSource = '') {
         '--authority-state', $authorityStatePath,
         '--output-env', $authorityPath,
         '--output-client-env', $clientAuthorityPath,
-        '--output-fallback-client-env', $fallbackClientAuthorityPath,
         '--coordinator-url', "https://$coordinatorHost`:41801",
-        '--fallback-coordinator-url', "https://$coordinatorHost`:41802",
         '--output-public', $publicPath,
         '--output-client-public', $clientPublicPath,
         '--output-privacy-routes-android', $privacyAndroidPath,
@@ -383,7 +380,6 @@ function Prepare-SurvivalMailboxPeerAuthority([string]$PinnedXNodeSource = '') {
         '--privacy-entry-host', $coordinatorHost)
     Set-Item -Path 'Env:SURVIVAL_MAILBOX_AUTHORITY_ENV' -Value $authorityPath
     Set-Item -Path 'Env:SURVIVAL_MAILBOX_CLIENT_AUTHORITY_ENV' -Value $clientAuthorityPath
-    Set-Item -Path 'Env:SURVIVAL_MAILBOX_FALLBACK_CLIENT_AUTHORITY_ENV' -Value $fallbackClientAuthorityPath
     Set-Item -Path 'Env:SURVIVAL_MAILBOX_PUBLIC_AUTHORITY' -Value $publicPath
     Set-Item -Path 'Env:SURVIVAL_MAILBOX_CLIENT_PUBLIC_AUTHORITY' -Value $clientPublicPath
 }

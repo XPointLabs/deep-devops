@@ -41,6 +41,10 @@ docker compose -p deep-survival-dev `
 Always pass `-LanHost` to `Prepare`; the xnode-1 client authority binds its
 coordinator URL to that exact host.
 
+HAProxy terminates the physical UAT TLS boundary only. The forwarding-only xnode-2 exit reaches
+the single xnode-1 coordinator directly on the Docker-only authenticated peer listener; this
+internal bridge is not published through HAProxy and introduces no second coordinator URL.
+
 ## Trust gates
 
 Android does not require a user-CA tap. A `DeepPhysicalE2E` build contains the

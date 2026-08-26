@@ -27,8 +27,8 @@ x-xnode-build: &xnode-build
   args:
     SDK_IMAGE: ${SURVIVAL_DOTNET_SDK_IMAGE:-mcr.microsoft.com/dotnet/sdk@sha256:7e964ea8bc6c1e18ea9fbc76ed403da41c9b19aeee2aab6bf9c845f25e891380}
     RUNTIME_IMAGE: ${SURVIVAL_DOTNET_RUNTIME_IMAGE:-mcr.microsoft.com/dotnet/aspnet@sha256:e3736b0d423db99c6988e1ddf5ea725c14b12579bb120024e5ff7ff204a14080}
-    XNODE_REVISION: 19517d176793a37e258766be39ca9adba30369fa
-    XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: f759eeeffcf19b9ec97bef8d34bc740b38a0bdb22f0d554c4094c303f7f219e2
+    XNODE_REVISION: c8b38e2b5221fa6c047717202a50a80ebd4f2dd6
+    XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: 0d9ad51d967681816e816f7177c565a770143dfc9983cd9746fdf2cf20096ce6
   dockerfile_inline: |
     ARG SDK_IMAGE
     ARG RUNTIME_IMAGE
@@ -117,8 +117,8 @@ x-mailbox-driver-build: &mailbox-driver-build
   args:
     SDK_IMAGE: ${SURVIVAL_DOTNET_SDK_IMAGE:-mcr.microsoft.com/dotnet/sdk@sha256:7e964ea8bc6c1e18ea9fbc76ed403da41c9b19aeee2aab6bf9c845f25e891380}
     RUNTIME_IMAGE: ${SURVIVAL_DOTNET_RUNTIME_IMAGE:-mcr.microsoft.com/dotnet/aspnet@sha256:e3736b0d423db99c6988e1ddf5ea725c14b12579bb120024e5ff7ff204a14080}
-    XNODE_REVISION: 19517d176793a37e258766be39ca9adba30369fa
-    XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: f759eeeffcf19b9ec97bef8d34bc740b38a0bdb22f0d554c4094c303f7f219e2
+    XNODE_REVISION: c8b38e2b5221fa6c047717202a50a80ebd4f2dd6
+    XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: 0d9ad51d967681816e816f7177c565a770143dfc9983cd9746fdf2cf20096ce6
   dockerfile_inline: |
     ARG SDK_IMAGE
     ARG RUNTIME_IMAGE
@@ -378,6 +378,7 @@ services:
       Node__RouterId: 4cb5abf6ad79fbf5abbccafcc269d85cd2651ed4b885b5869f241aedf0a5ba29
       Node__Ed25519PrivateKeyPath: /run/secrets/xnode-ed25519.seed
       PrivacyRouting__PublicPeerBaseUrl: http://172.30.82.11:8083/
+      MailboxAuthorityForwarding__AllowedExitRouterIds__0: 7422b9887598068e32c4448a949adb290d0f4e35b9e01b0ee5f1a1e600fe2674
     ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41801:8080"]
     networks: { runtime: { ipv4_address: 172.30.82.11 } }
     volumes: [xnode-1-state:/state, membership-route-artifact:/run/deep-membership:ro]
@@ -393,15 +394,16 @@ services:
     <<: *xnode
     env_file:
       - ${SURVIVAL_MAILBOX_AUTHORITY_ENV:-./artifacts/survival-dev/mailbox-peer-authority.env}
-      - ${SURVIVAL_MAILBOX_FALLBACK_CLIENT_AUTHORITY_ENV:-./artifacts/survival-dev/mailbox-client-xnode-2.env}
       - ./artifacts/survival-dev/privacy-routing-xnode-2.env
     environment:
       <<: *xnode-environment
-      Node__PublicHost: ${SURVIVAL_BIND_HOST:-127.0.0.1}
+      Node__PublicHost: xnode-2
       Node__PublicPort: "41802"
       Node__RouterId: 7422b9887598068e32c4448a949adb290d0f4e35b9e01b0ee5f1a1e600fe2674
       Node__Ed25519PrivateKeyPath: /run/secrets/xnode-ed25519.seed
       PrivacyRouting__PublicPeerBaseUrl: http://172.30.82.12:8083/
+      MailboxAuthorityForwarding__Enabled: "true"
+      MailboxAuthorityForwarding__AuthorityRouterId: 4cb5abf6ad79fbf5abbccafcc269d85cd2651ed4b885b5869f241aedf0a5ba29
     ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41802:8080"]
     networks: { runtime: { ipv4_address: 172.30.82.12 } }
     volumes: [xnode-2-state:/state, membership-route-artifact:/run/deep-membership:ro]

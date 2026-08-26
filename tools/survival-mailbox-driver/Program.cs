@@ -81,10 +81,8 @@ switch (arguments.Command)
         fixture.WriteAuthority(
             arguments.OutputEnvironment!,
             arguments.OutputClientEnvironment!,
-            arguments.OutputFallbackClientEnvironment,
             arguments.OutputPublic!,
             arguments.CoordinatorUrl,
-            arguments.FallbackCoordinatorUrl,
             arguments.OutputClientPublic);
         WritePrivacyRouteArtifacts(
             fixture.RouterIds,
@@ -130,6 +128,9 @@ switch (arguments.Command)
         break;
     case "client-lifecycle":
         await RunClientLifecycleAsync(fixture, arguments);
+        break;
+    case "client-fallback-continuity":
+        await RunClientFallbackContinuityAsync(fixture, arguments);
         break;
     case "client-loss":
         await RunClientLossAsync(fixture, arguments);
@@ -542,6 +543,112 @@ static async Task RunClientLifecycleAsync(Fixture fixture, Arguments arguments)
         mrp1Bytes = pageBytes.Length,
         mau2AckBytes = ack.Length,
         mar1Bytes = ackBytes.Length
+    });
+}
+
+static async Task RunClientFallbackContinuityAsync(Fixture fixture, Arguments arguments)
+{
+    if (string.IsNullOrWhiteSpace(arguments.RunId)
+        || string.IsNullOrWhiteSpace(arguments.PrivacyRoutesPath))
+    {
+        throw new InvalidOperationException(
+            "Fallback continuity requires a run id and exact privacy routes.");
+    }
+
+    var now = checked((ulong)DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+    var store = fixture.NewClientStore(arguments.RunId, "fallback-continuity", now);
+    var fallback = new ExactHttpClient(
+        arguments.ClientUrl,
+        arguments.PrivacyRoutesPath,
+        ExactPrivacyRouteSelection.FallbackOnly);
+    var primary = new ExactHttpClient(
+        arguments.ClientUrl,
+        arguments.PrivacyRoutesPath,
+        ExactPrivacyRouteSelection.PrimaryOnly);
+    var storeReceiptBytes = await fallback.SendSuccessAsync(
+        MailboxWireHttpContract.Store,
+        store.CanonicalRequest);
+    var storeReplayBytes = await fallback.SendSuccessAsync(
+        MailboxWireHttpContract.Store,
+        store.CanonicalRequest);
+    var storeReceipt = MailboxReceiptV3Codec.DecodeDurableQuorum(storeReceiptBytes);
+    if (!CryptographicOperations.FixedTimeEquals(storeReceiptBytes, storeReplayBytes)
+        || !CryptographicOperations.FixedTimeEquals(
+            storeReceipt.CoordinatorId.Span,
+            fixture.RouterIds[0].ToBytes()))
+    {
+        throw new InvalidOperationException(
+            "Fallback Store did not return the exact xnode-1 authoritative MQR3.");
+    }
+
+    var retrieve = fixture.NewClientRetrieve(
+        arguments.RunId,
+        "fallback-continuity-retrieve",
+        store.Envelope,
+        now,
+        replayCounter: 12);
+    var pageBytes = await primary.SendSuccessAsync(
+        MailboxWireHttpContract.Retrieve,
+        retrieve);
+    var page = MailboxClientCodec.DecodeRetrievePage(
+        pageBytes,
+        fixture.ClientDecodePolicy(now));
+    var item = page.Items.Count == 1
+        ? page.Items[0]
+        : throw new InvalidOperationException(
+            "Primary Retrieve did not discover exactly one fallback-stored envelope.");
+    if (!item.Envelope.OperationId.Span.SequenceEqual(store.Envelope.OperationId.Span))
+    {
+        throw new InvalidOperationException(
+            "Primary Retrieve returned the wrong fallback-stored envelope.");
+    }
+
+    var ack = fixture.NewClientAck(
+        arguments.RunId,
+        "fallback-continuity-ack",
+        store.Envelope,
+        [item.ToAcknowledgement()],
+        now,
+        replayCounter: 13);
+    var ackBytes = await primary.SendSuccessAsync(
+        MailboxWireHttpContract.Acknowledge,
+        ack);
+    var ackReplayBytes = await primary.SendSuccessAsync(
+        MailboxWireHttpContract.Acknowledge,
+        ack);
+    if (!CryptographicOperations.FixedTimeEquals(ackBytes, ackReplayBytes)
+        || MailboxAggregateAckCodec.DecodeMqr3(ackBytes).TombstoneQuorums.Count != 1)
+    {
+        throw new InvalidOperationException(
+            "Authoritative ACK replay after fallback Store was not byte-identical.");
+    }
+
+    var emptyRetrieve = fixture.NewClientRetrieve(
+        arguments.RunId,
+        "fallback-continuity-empty",
+        store.Envelope,
+        now,
+        replayCounter: 14);
+    var emptyBytes = await primary.SendSuccessAsync(
+        MailboxWireHttpContract.Retrieve,
+        emptyRetrieve);
+    var empty = MailboxClientCodec.DecodeRetrievePage(
+        emptyBytes,
+        fixture.ClientDecodePolicy(now));
+    if (empty.Items.Count != 0)
+    {
+        throw new InvalidOperationException(
+            "Primary Retrieve remained non-empty after authoritative ACK.");
+    }
+
+    Result("client-fallback-continuity", new
+    {
+        fallbackStore = "durable",
+        coordinator = "xnode-1",
+        primaryRetrieveItems = page.Items.Count,
+        exactStoreReplay = true,
+        exactAckReplay = true,
+        retrieveAfterAckItems = empty.Items.Count
     });
 }
 
@@ -1339,10 +1446,8 @@ sealed class Fixture
     public void WriteAuthority(
         string environmentPath,
         string clientEnvironmentPath,
-        string? fallbackClientEnvironmentPath,
         string publicPath,
         string coordinatorUrl,
-        string? fallbackCoordinatorUrl,
         string? clientPublicPath)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(environmentPath))!);
@@ -1441,17 +1546,6 @@ sealed class Fixture
         File.WriteAllText(
             clientEnvironmentPath,
             string.Join('\n', ClientLines(coordinatorUrl, localReplicaIndex: 0)) + "\n");
-        if (fallbackClientEnvironmentPath is not null)
-        {
-            if (string.IsNullOrWhiteSpace(fallbackCoordinatorUrl))
-            {
-                throw new InvalidOperationException(
-                    "A fallback mailbox client environment requires its exact coordinator URL.");
-            }
-            File.WriteAllText(
-                fallbackClientEnvironmentPath,
-                string.Join('\n', ClientLines(fallbackCoordinatorUrl, localReplicaIndex: 1)) + "\n");
-        }
         File.WriteAllText(publicPath, JsonSerializer.Serialize(new
         {
             schemaVersion = 2,
@@ -2096,11 +2190,21 @@ sealed class ExactHttpClient
     private readonly HttpClient? directClient;
     private readonly HttpClient? privacyClient;
     private readonly ExactPrivacyRoutes? privacyRoutes;
+    private readonly ExactPrivacyRouteSelection routeSelection;
 
-    public ExactHttpClient(string baseUrl, string? privacyRoutesPath)
+    public ExactHttpClient(
+        string baseUrl,
+        string? privacyRoutesPath,
+        ExactPrivacyRouteSelection routeSelection = ExactPrivacyRouteSelection.Automatic)
     {
+        this.routeSelection = routeSelection;
         if (privacyRoutesPath is null)
         {
+            if (routeSelection != ExactPrivacyRouteSelection.Automatic)
+            {
+                throw new InvalidOperationException(
+                    "A forced privacy route requires an exact privacy route artifact.");
+            }
             directClient = new HttpClient
             {
                 BaseAddress = new Uri(baseUrl.TrimEnd('/') + "/"),
@@ -2221,6 +2325,25 @@ sealed class ExactHttpClient
             _ => throw new InvalidOperationException(
                 "Privacy-routed ExactHttpClient accepts only authenticated Store, Retrieve, and ACK MAU2.")
         };
+
+        if (routeSelection != ExactPrivacyRouteSelection.Automatic)
+        {
+            var route = routeSelection == ExactPrivacyRouteSelection.PrimaryOnly
+                ? privacyRoutes.Primary
+                : privacyRoutes.Fallback;
+            try
+            {
+                return await DispatchPrivacyAsync(
+                    route,
+                    operation,
+                    contract,
+                    canonicalRequest);
+            }
+            catch (ExactPrivacyBeforeForwardException)
+            {
+                return MailboxFailure(MailboxHttpFailure.DependencyUnavailable);
+            }
+        }
 
         try
         {
@@ -2633,6 +2756,13 @@ sealed class ExactHttpClient
         Exception? innerException = null) => new(message, innerException);
 }
 
+enum ExactPrivacyRouteSelection
+{
+    Automatic = 0,
+    PrimaryOnly = 1,
+    FallbackOnly = 2
+}
+
 sealed class ExactPrivacyBeforeForwardException : IOException
 {
     public ExactPrivacyBeforeForwardException(
@@ -2846,7 +2976,6 @@ sealed record Arguments(
     string? RunId,
     string? OutputEnvironment,
     string? OutputClientEnvironment,
-    string? OutputFallbackClientEnvironment,
     string? OutputPublic,
     string? OutputClientPublic,
     string? OutputPrivacyRoutesAndroid,
@@ -2868,8 +2997,7 @@ sealed record Arguments(
     string? AuthorityStatePath,
     bool FailAfterStage,
     bool FailAfterPromotion,
-    string? FailAfterDurabilityBarrier,
-    string? FallbackCoordinatorUrl)
+    string? FailAfterDurabilityBarrier)
 {
     public static Arguments Parse(string[] values)
     {
@@ -2898,7 +3026,6 @@ sealed record Arguments(
             Optional("--run-id"),
             Optional("--output-env"),
             Optional("--output-client-env"),
-            Optional("--output-fallback-client-env"),
             Optional("--output-public"),
             Optional("--output-client-public"),
             Optional("--output-privacy-routes-android"),
@@ -2920,7 +3047,6 @@ sealed record Arguments(
             Optional("--authority-state"),
             values.Contains("--fail-after-stage", StringComparer.Ordinal),
             values.Contains("--fail-after-promotion", StringComparer.Ordinal),
-            Optional("--fail-after-durability-barrier"),
-            Optional("--fallback-coordinator-url"));
+            Optional("--fail-after-durability-barrier"));
     }
 }

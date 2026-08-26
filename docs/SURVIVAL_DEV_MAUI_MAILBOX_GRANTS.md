@@ -21,8 +21,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\survival-dev-mailbox-provisio
 ```
 
 The wrapper uses only the exported XNode snapshot at pinned commit
-`19517d176793a37e258766be39ca9adba30369fa` with manifest SHA-256
-`f759eeeffcf19b9ec97bef8d34bc740b38a0bdb22f0d554c4094c303f7f219e2`.
+`c8b38e2b5221fa6c047717202a50a80ebd4f2dd6` with manifest SHA-256
+`0d9ad51d967681816e816f7177c565a770143dfc9983cd9746fdf2cf20096ce6`.
 It rejects every file not present in that manifest, including extra `.cs`,
 `.props`, `.targets`, and `Directory.Build.*` inputs. The four driver inputs
 are separately hash-pinned. XNode and driver bytes are copied with source
@@ -39,7 +39,9 @@ authority hash and issuer public key.
 
 The provisioner strictly revalidates every MIP1/RIP1 proof, all six descriptors
 and endpoints, both membership roots, the exact 30 placement selections, the
-E/E+1 windows, and the exact xnode-1/xnode-2 client replicas before signing.
+E/E+1 windows, the single xnode-1 coordinator URL, and the exact xnode-1/xnode-2
+storage replicas before signing. xnode-2 may terminate the disjoint privacy fallback route but
+does not receive a client authority environment or own coordinator state.
 Each device bundle contains E/E+1 retrieve/ACK grants for its own mailbox,
 E/E+1 deposit grants for the peer mailbox, and separate E/E+1 deposit grants
 for its own mailbox so the existing sender/self E2EE copy can be stored without

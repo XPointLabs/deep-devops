@@ -14,13 +14,13 @@ $PinnedXNode = Join-Path $Root 'artifacts\survival-dev\build-contexts\xnode'
 $DriverSource = Join-Path $Root 'tools\survival-mailbox-driver'
 $BuildHelper = Join-Path $PSScriptRoot 'survival-dev-mailbox-build-inputs.ps1'
 $ExpectedBuildHelperSha256 = 'c5e0f08e0816296734195a27b2c8a47a207b0f1ade88f0186caffe02334f1456'
-$ExpectedXNodeCommit = '19517d176793a37e258766be39ca9adba30369fa'
-$ExpectedXNodeManifestSha256 = 'f759eeeffcf19b9ec97bef8d34bc740b38a0bdb22f0d554c4094c303f7f219e2'
+$ExpectedXNodeCommit = 'c8b38e2b5221fa6c047717202a50a80ebd4f2dd6'
+$ExpectedXNodeManifestSha256 = '0d9ad51d967681816e816f7177c565a770143dfc9983cd9746fdf2cf20096ce6'
 $ExpectedDriverSha256 = @{
     'MailboxGrantProvisioner.cs' = 'f88f7ebb0c06f11fde52386341202090e8bd4205ad23bb40c31e7d79d2ac8184'
     'MailboxRuntimePublisher.cs' = 'aa725b67ddfd48193a3e5cc3f39f529130e589e05fa14b1569123c8a8cf42866'
     'PrivateCrossProcessState.cs' = '651d8256822d41b9a7bceab1e6d6bb45740026cac00f487a564befe7777f272b'
-    'Program.cs' = 'a328c1523444f04efa5a53b1ac27da7092ce634d9bb856ab78e4c64eeacbc0b7'
+    'Program.cs' = '9f18d7cfbfbb12de01a2787cf98f526131907140a789516e9a2cffb0e3ef073c'
     'SurvivalMailboxDriver.csproj' = '4db436d69ea88ac3ff16f08c161b61cc0c048bad84cb7e529b2208fa569eafbe'
 }
 . (Join-Path $PSScriptRoot 'survival-dev-private-secrets.ps1')

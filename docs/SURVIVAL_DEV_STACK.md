@@ -153,9 +153,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/survival-dev.ps1 -Ac
 ## P10E mailbox client and peer rehearsal
 
 The survival stack pins its filtered XNode context to accepted source
-`19517d176793a37e258766be39ca9adba30369fa`; a dirty checkout, another revision,
+`c8b38e2b5221fa6c047717202a50a80ebd4f2dd6`; a dirty checkout, another revision,
 or a filtered-source manifest other than
-`f759eeeffcf19b9ec97bef8d34bc740b38a0bdb22f0d554c4094c303f7f219e2`
+`0d9ad51d967681816e816f7177c565a770143dfc9983cd9746fdf2cf20096ce6`
 fails closed before build. The source exporter writes a deterministic
 `.survival-source-manifest.json`, and the shared XNode image carries both the exact
 revision and manifest SHA-256 as OCI labels. The live rehearsal requires all six
@@ -172,12 +172,14 @@ implementation to write a public, DEV-LOCAL-ONLY authority environment file cont
 real current/next six-leaf MIP1 Merkle commitments, canonical MIP1/RIP1 proofs, and all
 30 epoch/pair selections across the six fixed router/signing identities and
 exact literal `http://172.30.82.11:8081` through `http://172.30.82.16:8081`
-endpoints on the isolated DEV bridge. Two separately node-bound generated environments enable
-the bounded DEV-LOCAL-ONLY client fixture on `xnode-1` and `xnode-2`: MAU2 issuer trust,
-E/E+1 placement and membership authority, and native MAU2 ingress with canonical
-MEO1/MBR2/MBA2 bindings. The primary privacy route exits through `xnode-1`; the fully
-disjoint fallback exits through `xnode-2`. `xnode-3` through `xnode-6` remain peer-only and
-report `dormant-unmapped`.
+endpoints on the isolated DEV bridge. One node-bound generated environment enables the bounded
+DEV-LOCAL-ONLY client fixture only on `xnode-1`: MAU2 issuer trust, E/E+1 placement and membership
+authority, the sole durable operation ledger, and native MAU2 ingress with canonical
+MEO1/MBR2/MBA2 bindings. The primary privacy route exits locally through `xnode-1`; the fully
+disjoint fallback exits through `xnode-2`, which forwards unchanged MAU2 over the authenticated
+Docker-only HTTP/2 peer bridge to xnode-1. xnode-2 has no client adapter, replay/outcome journal,
+operation ledger, cursor authority, or MQR3 authority. `xnode-3` through `xnode-6` remain
+peer-only and report `dormant-unmapped`.
 
 The generator rounds its anchor down to the current minute and creates a genuinely
 rotating overlap: current E is valid from anchor minus five minutes through anchor plus
@@ -233,8 +235,9 @@ coordinator, durable journals, Sodium signatures, and exact P10E codecs. It requ
 - a stopped selected peer to produce only one durable replica, `PartialFailure`, and no MQR3;
 - retry of that exact PRQ2 after peer restart to produce native 2-of-2 MQR3;
 - canonical Tombstone plus exact replay to produce native MRR2/MQR3;
-- all six `/health/ready` checks, ready client ingress on xnode-1 and xnode-2,
-  dormant-unmapped ingress on xnode-3 through xnode-6, and the exact shared image
+- all six `/health/ready` checks, ready authoritative client ingress on xnode-1,
+  forwarding-only authority role on xnode-2, dormant-unmapped ingress on xnode-3 through xnode-6,
+  absence of xnode-2 coordinator-state files, and the exact shared image
   provenance binding.
 
 Run:
@@ -340,7 +343,8 @@ XNodes. Every client request uses exactly three distinct native privacy hops:
 `xnode-3 -> xnode-4 -> xnode-1` first and the fully disjoint
 `xnode-5 -> xnode-6 -> xnode-2` route only after a definitely-before-forward
 failure. An ambiguous dispatch result is outcome-unknown and never triggers
-fallback. Storage replication remains behind the mailbox exit and can use a
+fallback. The second terminal exit forwards to the same xnode-1 coordinator, so both paths share
+one cursor/continuation/ACK domain while route hops remain disjoint. Storage replication remains behind the mailbox exit and can use a
 fourth storage node without exposing that node to the client route.
 
 Run the bounded chaos evidence lane after the shared transport tests have been
