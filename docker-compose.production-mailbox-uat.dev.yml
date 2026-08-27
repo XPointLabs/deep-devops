@@ -1,0 +1,147 @@
+x-uat-production-mailbox-xnode-environment: &uat-production-mailbox-xnode-environment
+  ASPNETCORE_ENVIRONMENT: Production
+  SSL_CERT_FILE: /run/deep-uat-ca/ca.crt
+  Mailbox__AllowInsecureHttpPeerTransport: "false"
+  PrivacyRouting__AllowInsecureHttpPeerTransport: "false"
+  MailboxAuthorityForwarding__Enabled: "false"
+  MailboxAuthorityForwarding__AuthorityRouterId: ""
+
+x-uat-production-mailbox-xnode: &uat-production-mailbox-xnode
+  env_file:
+    - ${SURVIVAL_UAT_MAILBOX_ARTIFACT_DIR:?set SURVIVAL_UAT_MAILBOX_ARTIFACT_DIR}/xnode.env
+  environment: *uat-production-mailbox-xnode-environment
+  volumes:
+    - ${SURVIVAL_UAT_TLS_SECRET_DIR:?set SURVIVAL_UAT_TLS_SECRET_DIR}/ca.crt:/run/deep-uat-ca/ca.crt:ro
+  depends_on:
+    survival-uat-production-mailbox-state-init: { condition: service_completed_successfully }
+
+services:
+  survival-uat-production-mailbox-state-init:
+    image: ${SURVIVAL_DOTNET_RUNTIME_IMAGE:-mcr.microsoft.com/dotnet/aspnet@sha256:e3736b0d423db99c6988e1ddf5ea725c14b12579bb120024e5ff7ff204a14080}
+    platform: linux/arm64
+    user: "65532:65532"
+    restart: "no"
+    read_only: true
+    network_mode: none
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    volumes:
+      - xnode-1-state:/state/xnode-1
+      - xnode-2-state:/state/xnode-2
+      - xnode-3-state:/state/xnode-3
+      - xnode-4-state:/state/xnode-4
+      - xnode-5-state:/state/xnode-5
+      - xnode-6-state:/state/xnode-6
+      - ${SURVIVAL_UAT_MAILBOX_ARTIFACT_DIR:?set SURVIVAL_UAT_MAILBOX_ARTIFACT_DIR}:/bootstrap/artifacts:ro
+    secrets:
+      - source: production-mailbox-route-state-hmac
+        target: production-mailbox-route-state-hmac
+    command:
+      - sh
+      - -ec
+      - |
+        for node in 1 2 3 4 5 6; do
+          root="/state/xnode-$${node}/production-mailbox"
+          artifacts="/state/xnode-$${node}/production-mailbox-artifacts"
+          mkdir -p "$${root}/closures"
+          mkdir -p "$${artifacts}/selections"
+          if [ ! -e "$${root}/authority-lkg.pml3" ]; then
+            cp /bootstrap/artifacts/baseline.pml3 "$${root}/authority-lkg.pml3"
+          fi
+          if [ ! -e "$${root}/closure-state-hmac.key" ]; then
+            cp /run/secrets/production-mailbox-route-state-hmac "$${root}/closure-state-hmac.key"
+          fi
+          chmod 0700 "$${root}" "$${root}/closures"
+          chmod 0600 "$${root}/authority-lkg.pml3" "$${root}/closure-state-hmac.key"
+          for name in authority.pma1 revocations.pmr1 topology.pmt1; do
+            cp "/bootstrap/artifacts/$${name}" "$${artifacts}/$${name}.new"
+            chmod 0400 "$${artifacts}/$${name}.new"
+            mv -f "$${artifacts}/$${name}.new" "$${artifacts}/$${name}"
+          done
+          find "$${artifacts}/selections" -maxdepth 1 -type f -name '*.pms1' -delete
+          for source in /bootstrap/artifacts/selections/*.pms1; do
+            cp "$${source}" "$${artifacts}/selections/"
+          done
+          chmod 0700 "$${artifacts}" "$${artifacts}/selections"
+          chmod 0400 "$${artifacts}/selections/"*.pms1
+        done
+
+  xnode-1:
+    <<: *uat-production-mailbox-xnode
+    env_file:
+      - ${SURVIVAL_UAT_MAILBOX_ARTIFACT_DIR:?set SURVIVAL_UAT_MAILBOX_ARTIFACT_DIR}/xnode.env
+      - ${SURVIVAL_UAT_MAILBOX_ARTIFACT_DIR:?set SURVIVAL_UAT_MAILBOX_ARTIFACT_DIR}/privacy-routing-xnode-1.env
+    environment:
+      <<: *uat-production-mailbox-xnode-environment
+      PrivacyRouting__PublicPeerBaseUrl: https://${SURVIVAL_UAT_PUBLIC_HOST:?set SURVIVAL_UAT_PUBLIC_HOST}:41801/
+  xnode-2:
+    <<: *uat-production-mailbox-xnode
+    env_file:
+      - ${SURVIVAL_UAT_MAILBOX_ARTIFACT_DIR:?set SURVIVAL_UAT_MAILBOX_ARTIFACT_DIR}/xnode.env
+      - ${SURVIVAL_UAT_MAILBOX_ARTIFACT_DIR:?set SURVIVAL_UAT_MAILBOX_ARTIFACT_DIR}/privacy-routing-xnode-2.env
+    environment:
+      <<: *uat-production-mailbox-xnode-environment
+      PrivacyRouting__PublicPeerBaseUrl: https://${SURVIVAL_UAT_PUBLIC_HOST:?set SURVIVAL_UAT_PUBLIC_HOST}:41802/
+  xnode-3:
+    <<: *uat-production-mailbox-xnode
+    env_file:
+      - ${SURVIVAL_UAT_MAILBOX_ARTIFACT_DIR:?set SURVIVAL_UAT_MAILBOX_ARTIFACT_DIR}/xnode.env
+      - ${SURVIVAL_UAT_MAILBOX_ARTIFACT_DIR:?set SURVIVAL_UAT_MAILBOX_ARTIFACT_DIR}/privacy-routing-xnode-3.env
+    environment:
+      <<: *uat-production-mailbox-xnode-environment
+      PrivacyRouting__PublicPeerBaseUrl: https://${SURVIVAL_UAT_PUBLIC_HOST:?set SURVIVAL_UAT_PUBLIC_HOST}:41803/
+  xnode-4:
+    <<: *uat-production-mailbox-xnode
+    env_file:
+      - ${SURVIVAL_UAT_MAILBOX_ARTIFACT_DIR:?set SURVIVAL_UAT_MAILBOX_ARTIFACT_DIR}/xnode.env
+      - ${SURVIVAL_UAT_MAILBOX_ARTIFACT_DIR:?set SURVIVAL_UAT_MAILBOX_ARTIFACT_DIR}/privacy-routing-xnode-4.env
+    environment:
+      <<: *uat-production-mailbox-xnode-environment
+      PrivacyRouting__PublicPeerBaseUrl: https://${SURVIVAL_UAT_PUBLIC_HOST:?set SURVIVAL_UAT_PUBLIC_HOST}:41804/
+  xnode-5:
+    <<: *uat-production-mailbox-xnode
+    env_file:
+      - ${SURVIVAL_UAT_MAILBOX_ARTIFACT_DIR:?set SURVIVAL_UAT_MAILBOX_ARTIFACT_DIR}/xnode.env
+      - ${SURVIVAL_UAT_MAILBOX_ARTIFACT_DIR:?set SURVIVAL_UAT_MAILBOX_ARTIFACT_DIR}/privacy-routing-xnode-5.env
+    environment:
+      <<: *uat-production-mailbox-xnode-environment
+      PrivacyRouting__PublicPeerBaseUrl: https://${SURVIVAL_UAT_PUBLIC_HOST:?set SURVIVAL_UAT_PUBLIC_HOST}:41805/
+  xnode-6:
+    <<: *uat-production-mailbox-xnode
+    env_file:
+      - ${SURVIVAL_UAT_MAILBOX_ARTIFACT_DIR:?set SURVIVAL_UAT_MAILBOX_ARTIFACT_DIR}/xnode.env
+      - ${SURVIVAL_UAT_MAILBOX_ARTIFACT_DIR:?set SURVIVAL_UAT_MAILBOX_ARTIFACT_DIR}/privacy-routing-xnode-6.env
+    environment:
+      <<: *uat-production-mailbox-xnode-environment
+      PrivacyRouting__PublicPeerBaseUrl: https://${SURVIVAL_UAT_PUBLIC_HOST:?set SURVIVAL_UAT_PUBLIC_HOST}:41806/
+
+  registry:
+    env_file:
+      - ${SURVIVAL_UAT_MAILBOX_ARTIFACT_DIR:?set SURVIVAL_UAT_MAILBOX_ARTIFACT_DIR}/registry.env
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      SSL_CERT_FILE: /run/deep-uat-ca/ca.crt
+    volumes:
+      - ${SURVIVAL_UAT_MAILBOX_ARTIFACT_DIR:?set SURVIVAL_UAT_MAILBOX_ARTIFACT_DIR}:/run/deep-production-mailbox:ro
+      - ${SURVIVAL_UAT_TLS_SECRET_DIR:?set SURVIVAL_UAT_TLS_SECRET_DIR}/ca.crt:/run/deep-uat-ca/ca.crt:ro
+    secrets:
+      - source: production-mailbox-issuer
+        target: production-mailbox-issuer
+      - source: production-mailbox-closure-publisher
+        target: production-mailbox-closure-publisher
+      - source: production-mailbox-owner-control
+        target: production-mailbox-owner-control
+      - source: production-mailbox-route-state-hmac
+        target: production-mailbox-route-state-hmac
+    depends_on:
+      survival-uat-production-mailbox-state-init: { condition: service_completed_successfully }
+
+secrets:
+  production-mailbox-issuer:
+    file: ${SURVIVAL_UAT_MAILBOX_SECRET_DIR:?set SURVIVAL_UAT_MAILBOX_SECRET_DIR}/issuer.seed
+  production-mailbox-closure-publisher:
+    file: ${SURVIVAL_UAT_MAILBOX_SECRET_DIR:?set SURVIVAL_UAT_MAILBOX_SECRET_DIR}/closure-publisher.seed
+  production-mailbox-owner-control:
+    file: ${SURVIVAL_UAT_MAILBOX_SECRET_DIR:?set SURVIVAL_UAT_MAILBOX_SECRET_DIR}/owner-control.seed
+  production-mailbox-route-state-hmac:
+    file: ${SURVIVAL_UAT_MAILBOX_SECRET_DIR:?set SURVIVAL_UAT_MAILBOX_SECRET_DIR}/route-state-hmac.key

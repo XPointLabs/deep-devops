@@ -5,6 +5,8 @@ param(
     [string]$LanHost,
     [Parameter(Mandatory)]
     [string]$SecretRoot,
+    [ValidatePattern('^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$')]
+    [string]$DnsHost,
     [switch]$RotateLeaf
 )
 
@@ -83,7 +85,9 @@ foreach ($state in @(@('index.txt',''), @('serial','1000'), @('crlnumber','1000'
     }
 }
 
-$leafFiles = @('server.key','server.csr','server.crt','server.pem','server.ext') |
+$leafFiles = @(
+    'server.key','server.csr','server.crt','server.pem','server.ext',
+    'next-server.key','next-server.csr','next-server.crt','next-server.pem','next-server.ext') |
     ForEach-Object { Join-Path $root $_ }
 if ($RotateLeaf) {
     foreach ($path in $leafFiles) { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue }
@@ -93,7 +97,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $root 'server.pem'))) {
 basicConstraints=critical,CA:FALSE
 keyUsage=critical,digitalSignature,keyEncipherment
 extendedKeyUsage=serverAuth
-subjectAltName=IP:$LanHost
+subjectAltName=IP:$LanHost$(if (-not [string]::IsNullOrWhiteSpace($DnsHost)) { ",DNS:$DnsHost" } else { '' })
 crlDistributionPoints=URI:http://${LanHost}:41824/deep-physical-uat-ca.crl
 subjectKeyIdentifier=hash
 authorityKeyIdentifier=keyid,issuer
@@ -110,6 +114,38 @@ authorityKeyIdentifier=keyid,issuer
         [IO.File]::WriteAllBytes((Join-Path $root 'server.pem'), $certificate + $privateKey)
     } finally {
         [Array]::Clear($privateKey, 0, $privateKey.Length)
+    }
+}
+
+if (-not (Test-Path -LiteralPath (Join-Path $root 'next-server.pem'))) {
+    $nextExtensions = @"
+basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature,keyEncipherment
+extendedKeyUsage=serverAuth
+subjectAltName=IP:$LanHost$(if (-not [string]::IsNullOrWhiteSpace($DnsHost)) { ",DNS:$DnsHost" } else { '' })
+crlDistributionPoints=URI:http://${LanHost}:41824/deep-physical-uat-ca.crl
+subjectKeyIdentifier=hash
+authorityKeyIdentifier=keyid,issuer
+"@
+    [IO.File]::WriteAllText(
+        (Join-Path $root 'next-server.ext'),
+        $nextExtensions,
+        [Text.UTF8Encoding]::new($false))
+    Invoke-OpenSsl @('req','-new','-newkey','rsa:3072','-sha256','-nodes',
+        '-subj',"/CN=$LanHost",'-keyout','/certs/next-server.key',
+        '-out','/certs/next-server.csr')
+    Invoke-OpenSsl @('x509','-req','-sha256','-days','60',
+        '-in','/certs/next-server.csr','-CA','/certs/ca.crt',
+        '-CAkey','/certs/ca.key','-CAcreateserial',
+        '-extfile','/certs/next-server.ext','-out','/certs/next-server.crt')
+    $nextCertificate = [IO.File]::ReadAllBytes((Join-Path $root 'next-server.crt'))
+    $nextPrivateKey = [IO.File]::ReadAllBytes((Join-Path $root 'next-server.key'))
+    try {
+        [IO.File]::WriteAllBytes(
+            (Join-Path $root 'next-server.pem'),
+            $nextCertificate + $nextPrivateKey)
+    } finally {
+        [Array]::Clear($nextPrivateKey, 0, $nextPrivateKey.Length)
     }
 }
 
@@ -132,10 +168,21 @@ if (-not (Test-Path -LiteralPath $turnSecretPath -PathType Leaf)) {
 Invoke-OpenSsl @('ca','-gencrl','-config','/certs/openssl-ca.cnf',
     '-out','/certs/public/deep-physical-uat-ca.crl')
 Invoke-OpenSsl @('verify','-CAfile','/certs/ca.crt','-verify_ip',$LanHost,'/certs/server.crt')
+Invoke-OpenSsl @('verify','-CAfile','/certs/ca.crt','-verify_ip',$LanHost,
+    '/certs/next-server.crt')
+if (-not [string]::IsNullOrWhiteSpace($DnsHost)) {
+    Invoke-OpenSsl @('verify','-CAfile','/certs/ca.crt','-verify_hostname',$DnsHost,
+        '/certs/server.crt')
+    Invoke-OpenSsl @('verify','-CAfile','/certs/ca.crt','-verify_hostname',$DnsHost,
+        '/certs/next-server.crt')
+}
 Invoke-OpenSsl @('verify','-CAfile','/certs/ca.crt','-CRLfile',
     '/certs/public/deep-physical-uat-ca.crl','-crl_check','/certs/server.crt')
+Invoke-OpenSsl @('verify','-CAfile','/certs/ca.crt','-CRLfile',
+    '/certs/public/deep-physical-uat-ca.crl','-crl_check','/certs/next-server.crt')
 Invoke-OpenSsl @('x509','-in','/certs/ca.crt','-noout','-checkend','2592000')
 Invoke-OpenSsl @('x509','-in','/certs/server.crt','-noout','-checkend','604800')
+Invoke-OpenSsl @('x509','-in','/certs/next-server.crt','-noout','-checkend','604800')
 
 $ca = [Security.Cryptography.X509Certificates.X509Certificate2]::new($caCert)
 try {
@@ -149,6 +196,7 @@ try {
         caCertificate = $caCert
         caCertificateSha256 = $caHash
         leafCertificate = (Join-Path $root 'server.crt')
+        nextLeafCertificate = (Join-Path $root 'next-server.crt')
         crl = (Join-Path $publicRoot 'deep-physical-uat-ca.crl')
         leafRotatedIndependently = $true
         windowsTrustRequiresInteractiveApproval = $true

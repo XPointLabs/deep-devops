@@ -4,8 +4,10 @@ using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Deep.Protocol.DeepExtension.MailboxCapabilities;
+using Deep.Protocol.DeepExtension.MailboxAuthority;
 using Deep.Protocol.DeepExtension.ManagedIngress;
 using Deep.Protocol.DeepExtension.MembershipRoutes;
+using Deep.Protocol.DeepExtension.MailboxTopology;
 using Deep.Protocol.DeepExtension.PrivacyRouting;
 using Sodium;
 using XNode.Core;
@@ -15,6 +17,11 @@ using XNode.Core.Mailbox.Client;
 if (args.Length > 0 && args[0] == "publish-runtime")
 {
     MailboxRuntimePublisher.Publish(args);
+    return;
+}
+if (args.Length > 0 && args[0] == "publish-production-uat")
+{
+    ProductionMailboxUatPublisher.Publish(args);
     return;
 }
 

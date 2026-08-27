@@ -134,12 +134,13 @@ $chaosArguments = @('compose') + $projectDirectoryArguments + @('-p', $Project, 
 $ContextRoot = Join-Path $Root 'artifacts\survival-dev\build-contexts'
 $SurvivalXNodeCommit = 'e9e82f50d7cf3ded2c888c9298d29148549953b6'
 $SurvivalXNodeContextManifestSha256 = '084876ea676180d7efa89c691b7a9e18e8cd345733b8cb31c77b56d1c8204a29'
-$SurvivalMailboxBuildHelperSha256 = 'c5e0f08e0816296734195a27b2c8a47a207b0f1ade88f0186caffe02334f1456'
+$SurvivalMailboxBuildHelperSha256 = 'db657dc0a596a197bc0258c00f1a81f4fe84978efe3d2535c8fc44dd31f22bc3'
 $SurvivalMailboxDriverSha256 = @{
     'MailboxGrantProvisioner.cs' = '884a6670230d36333adbdad37358d082ca84740fef2d5c6e13776500a37b8d53'
     'MailboxRuntimePublisher.cs' = 'aa725b67ddfd48193a3e5cc3f39f529130e589e05fa14b1569123c8a8cf42866'
     'PrivateCrossProcessState.cs' = '651d8256822d41b9a7bceab1e6d6bb45740026cac00f487a564befe7777f272b'
-    'Program.cs' = '9ef8de42cc66a3bfba30362868f78af74d87503c50871877f07c9b09f90adcf0'
+    'Program.cs' = '67cccb576b14ca81db6d705e49bac17d08d2a7c1a62f8ffe4354c9899caaeb5b'
+    'ProductionMailboxUatPublisher.cs' = '2fd3213836e94f70ec6b07d95e964abffaf1d018402d86da0a9475c4c2654168'
     'SurvivalMailboxDriver.csproj' = '4db436d69ea88ac3ff16f08c161b61cc0c048bad84cb7e529b2208fa569eafbe'
 }
 $ChainLifecycleServices = @(

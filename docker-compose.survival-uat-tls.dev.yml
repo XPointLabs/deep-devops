@@ -42,7 +42,8 @@ services:
     volumes:
       - ./config/coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
       - ./scripts/coturn-entrypoint.sh:/usr/local/bin/deep-coturn-entrypoint:ro
-      - ${SURVIVAL_UAT_TLS_SECRET_DIR:?set SURVIVAL_UAT_TLS_SECRET_DIR}:/run/deep-uat-tls:ro
+      - ${SURVIVAL_UAT_TLS_SECRET_DIR:?set SURVIVAL_UAT_TLS_SECRET_DIR}/server.crt:/run/deep-uat-tls/server.crt:ro
+      - ${SURVIVAL_UAT_TLS_SECRET_DIR:?set SURVIVAL_UAT_TLS_SECRET_DIR}/server.key:/run/deep-uat-tls/server.key:ro
     secrets:
       - source: turn-shared-secret
         target: turn-shared-secret
@@ -84,7 +85,7 @@ services:
         source: ${DEEP_PHYSICAL_E2E_HAPROXY_CONFIG_PATH:-./config/survival-uat-tls/haproxy.cfg}
         target: /usr/local/etc/haproxy/haproxy.cfg
         read_only: true
-      - ${SURVIVAL_UAT_TLS_SECRET_DIR:?set SURVIVAL_UAT_TLS_SECRET_DIR}:/run/deep-uat-tls:ro
+      - ${SURVIVAL_UAT_TLS_SECRET_DIR:?set SURVIVAL_UAT_TLS_SECRET_DIR}/server.pem:/run/deep-uat-tls/server.pem:ro
     networks: { runtime: { ipv4_address: 172.30.82.7 } }
     depends_on:
       xnode-1: { condition: service_healthy }

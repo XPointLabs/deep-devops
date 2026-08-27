@@ -154,6 +154,7 @@ function New-SurvivalMailboxIsolatedSource {
         'MailboxRuntimePublisher.cs',
         'PrivateCrossProcessState.cs',
         'Program.cs',
+        'ProductionMailboxUatPublisher.cs',
         'SurvivalMailboxDriver.csproj'
     )
     $driverBuildInputs = @(
