@@ -63,6 +63,7 @@ assert.match(bootstrap, /publish-production-uat-successor/);
 assert.match(bootstrap, /PreviousTrustFloorBundle/);
 assert.match(bootstrap, /PreviousAuthorityArtifact/);
 assert.match(bootstrap, /UAT Windows approval rotation requires both exact signing and build hashes/);
+assert.match(bootstrap, /\$windowsInputs = @\(\s*@\(\$WindowsSigningCertificateSha256, \$WindowsBuildArtifactSha256\)/);
 assert.match(bootstrap, /privateMaterialIncluded = \$false/);
 assert.match(bootstrap, /caPrivateKeyMounted = \$false/);
 assert.doesNotMatch(bootstrap, /Get-Content[^\n]+(?:seed|key)/i);

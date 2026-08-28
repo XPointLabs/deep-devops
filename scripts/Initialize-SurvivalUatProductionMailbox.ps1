@@ -146,8 +146,9 @@ $successorArguments = if ($successorInputs.Count -eq 2) {
         '--previous-trust-floor', ([IO.Path]::GetFullPath($PreviousTrustFloorBundle)),
         '--previous-authority', ([IO.Path]::GetFullPath($PreviousAuthorityArtifact)))
 } else { @() }
-$windowsInputs = @($WindowsSigningCertificateSha256, $WindowsBuildArtifactSha256) |
-    Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+$windowsInputs = @(
+    @($WindowsSigningCertificateSha256, $WindowsBuildArtifactSha256) |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 if ($successorInputs.Count -eq 0 -and $windowsInputs.Count -ne 2) {
     throw 'Initial UAT bootstrap requires exact Windows signing and build hashes.'
 }
