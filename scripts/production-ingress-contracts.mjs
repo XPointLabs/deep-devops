@@ -12,7 +12,7 @@ const ingressBlock = compose.match(/^  ingress:[\s\S]*?(?=^  xnode:)/m)?.[0] ?? 
 const checks = [
   ['only ingress publishes ports', /^ {4}ports:/m.test(ingressBlock) && !/^ {4}ports:/m.test(compose.replace(ingressBlock, ''))],
   ['ingress publishes 443', /DEEP_INGRESS_HTTPS_BIND:-443}:443/.test(compose)],
-  ['ingress image is digest pinned', /haproxy:3\.2\.4-alpine3\.22@sha256:[0-9a-f]{64}/.test(compose)],
+  ['ingress image is digest pinned', /haproxy:3\.2\.22-alpine3\.24@sha256:[0-9a-f]{64}/.test(compose)],
   ['upstream network is internal', /ingress-upstream:\s*\n {4}internal: true/.test(compose)],
   ['plaintext listeners bind only loopback and internal IPs', !/ASPNETCORE_URLS:.*0\.0\.0\.0/.test(compose) && /LISTEN_HOST: 172\.31\.241\.20/.test(compose) && /server\.listen\(port, listenHost/.test(storage)],
   ['storage RPC is pinned to internal address', /StorageRpc__BaseUrl: http:\/\/172\.31\.241\.20:8080/.test(compose)],
@@ -20,6 +20,7 @@ const checks = [
   ['privacy peer route is isolated to peer listener', /acl peer_post path \/api\/peer\/privacy\/v1\/frame/.test(config) && /use_backend xnode_peer if post_method peer_post/.test(config)],
   ['independent privacy key is mounted as a secret', /PrivacyRouting__X25519PrivateKeyPath: \/run\/secrets\/node-x25519-private-key/.test(compose) && /source: node-x25519-private-key/.test(compose)],
   ['privacy peers require router authority and dual SPKI pins', /PrivacyRouting__Peers__0__RouterId:/.test(compose) && /PrivacyRouting__Peers__0__BaseUrl:/.test(compose) && /PrivacyRouting__Peers__0__CurrentSpkiSha256:/.test(compose) && /PrivacyRouting__Peers__0__NextSpkiSha256:/.test(compose) && /PrivacyRouting__AllowInsecureHttpPeerTransport: "false"/.test(compose)],
+  ['development UAT private peer addresses are absent', !/DevelopmentUatPrivatePeerAddresses/.test(compose)],
   ['TLS 1.2 minimum', /ssl-min-ver TLSv1\.2/.test(config)],
   ['strict SNI', /strict-sni/.test(config)],
   ['host and SNI are exact allowlists', /ssl_fc_sni -i \$\{DEEP_INGRESS_HOST}/.test(config) && /hdr\(host\).* -i \$\{DEEP_INGRESS_HOST}/.test(config)],

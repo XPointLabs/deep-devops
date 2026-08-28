@@ -11,13 +11,20 @@ const proxy = read('config', 'survival-uat-tls', 'haproxy.cfg');
 const bootstrap = read('scripts', 'Initialize-SurvivalUatProductionMailbox.ps1');
 const tlsBootstrap = read('scripts', 'Initialize-SurvivalUatTls.ps1');
 const publisher = read('tools', 'survival-mailbox-driver', 'ProductionMailboxUatPublisher.cs');
+const xnodeEnvironment = bootstrap.match(
+  /Write-PublicEnvironment \(Join-Path \$output 'xnode\.env'\) @\([\s\S]*?(?=\r?\n\r?\n\[pscustomobject\])/,
+)?.[0] ?? '';
 
 assert.match(compose, /ASPNETCORE_ENVIRONMENT: Production/);
+assert.match(compose, /PrivacyRouting__AllowInsecureHttpPeerTransport: "false"/);
+assert.doesNotMatch(compose, /DevelopmentUatOnlyAllowPrivateResolvedPeerAddresses/);
 assert.match(compose, /MailboxAuthorityForwarding__Enabled: "false"/);
 assert.match(compose, /MailboxAuthorityForwarding__AuthorityRouterId: ""/);
 assert.equal((compose.match(/^  xnode-[1-6]:$/gm) ?? []).length, 6);
 assert.match(bootstrap, /ProductionMailbox__Enabled=true/);
 assert.match(bootstrap, /ProductionMailbox__UseDevelopmentInMemoryState=true/);
+assert.match(xnodeEnvironment, /'DevelopmentUatPrivatePeerAddresses__Scope=DEVELOPMENT-UAT-ONLY'/);
+assert.match(xnodeEnvironment, /"DevelopmentUatPrivatePeerAddresses__Addresses__0=\$LanHost"/);
 assert.match(bootstrap, /DevelopmentSoftwareSignerSeedPath=\/run\/secrets\/production-mailbox-issuer/);
 assert.match(compose, /production-mailbox-route-state-hmac/);
 assert.match(compose, /survival-uat-production-mailbox-state-init:[\s\S]*?user: "65532:65532"/);

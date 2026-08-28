@@ -153,9 +153,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/survival-dev.ps1 -Ac
 ## P10E mailbox client and peer rehearsal
 
 The survival stack pins its filtered XNode context to accepted source
-`e9e82f50d7cf3ded2c888c9298d29148549953b6`; a dirty checkout, another revision,
+`539f2229a44b8b6362dda9b88d08d36264eeee65`; a dirty checkout, another revision,
 or a filtered-source manifest other than
-`084876ea676180d7efa89c691b7a9e18e8cd345733b8cb31c77b56d1c8204a29`
+`eba7312147c3abbba0068b49b5f2e718cfeb6fd78a723e5a36d46d5cb99f3d2e`
 fails closed before build. The source exporter writes a deterministic
 `.survival-source-manifest.json`, and the shared XNode image carries both the exact
 revision and manifest SHA-256 as OCI labels. The live rehearsal requires all six

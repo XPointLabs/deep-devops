@@ -161,9 +161,9 @@ try {
         throw 'Pinned exported XNode source snapshot is missing.'
     }
     $source = Get-Content -Raw -LiteralPath $sourceManifest | ConvertFrom-Json
-    if ($source.sourceCommit -ne 'e9e82f50d7cf3ded2c888c9298d29148549953b6' -or
+    if ($source.sourceCommit -ne '539f2229a44b8b6362dda9b88d08d36264eeee65' -or
         (Get-FileHash -LiteralPath $sourceManifest -Algorithm SHA256).Hash -ne
-            '084876EA676180D7EFA89C691B7A9E18E8CD345733B8CB31C77B56D1C8204A29') {
+            'EBA7312147C3ABBBA0068B49B5F2E718CFEB6FD78A723E5A36D46D5CB99F3D2E') {
         throw 'Tests require the exact clean exported XNode source snapshot.'
     }
     foreach ($file in $source.files) {
@@ -183,6 +183,7 @@ try {
         'MailboxRuntimePublisher.cs',
         'PrivateCrossProcessState.cs',
         'Program.cs',
+        'ProductionMailboxUatPublisher.cs',
         'SurvivalMailboxDriver.csproj')) {
         $driverHashes[$name] = (Get-FileHash -LiteralPath (
             Join-Path $driverSource $name) -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -193,9 +194,9 @@ try {
             -XNodeSource $Source `
             -DriverSource $Driver `
             -Destination $Destination `
-            -ExpectedCommit 'e9e82f50d7cf3ded2c888c9298d29148549953b6' `
+            -ExpectedCommit '539f2229a44b8b6362dda9b88d08d36264eeee65' `
             -ExpectedManifestSha256 `
-                '084876ea676180d7efa89c691b7a9e18e8cd345733b8cb31c77b56d1c8204a29' `
+                'eba7312147c3abbba0068b49b5f2e718cfeb6fd78a723e5a36d46d5cb99f3d2e' `
             -ExpectedDriverSha256 $driverHashes
     }
 

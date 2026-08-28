@@ -232,6 +232,8 @@ Write-PublicEnvironment (Join-Path $output 'registry.env') @(
     'ProductionMailbox__ArtifactCatalogDirectory=/state/production-mailbox-artifact-catalog')
 
 Write-PublicEnvironment (Join-Path $output 'xnode.env') @(
+    'DevelopmentUatPrivatePeerAddresses__Scope=DEVELOPMENT-UAT-ONLY',
+    "DevelopmentUatPrivatePeerAddresses__Addresses__0=$LanHost",
     'MailboxClient__Enabled=true',
     'MailboxClient__DevelopmentFixture__Enabled=false',
     'MailboxClientAdapter__Enabled=true',

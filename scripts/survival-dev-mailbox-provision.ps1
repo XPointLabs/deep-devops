@@ -22,7 +22,7 @@ Set-StrictMode -Version Latest
 $root = [IO.Path]::GetFullPath((Split-Path $PSScriptRoot -Parent))
 $buildHelper = Join-Path $PSScriptRoot 'survival-dev-mailbox-build-inputs.ps1'
 $expectedBuildHelperSha256 =
-    'c5e0f08e0816296734195a27b2c8a47a207b0f1ade88f0186caffe02334f1456'
+    'db657dc0a596a197bc0258c00f1a81f4fe84978efe3d2535c8fc44dd31f22bc3'
 if (((Get-Item -Force -LiteralPath $buildHelper).Attributes -band
     [IO.FileAttributes]::ReparsePoint)) {
     throw 'The mailbox immutable-build helper cannot be a reparse point.'
@@ -69,9 +69,9 @@ if ([string]::IsNullOrWhiteSpace($OutputDirectory)) { $OutputDirectory = Join-Pa
 if ([string]::IsNullOrWhiteSpace($MailboxSecretDirectory)) { $MailboxSecretDirectory = Join-Path $root '.secrets\survival-dev\maui-mailbox-grants' }
 
 # This wrapper intentionally does not call Docker or export the issuer seed.
-$expectedXNodeCommit = 'e9e82f50d7cf3ded2c888c9298d29148549953b6'
+$expectedXNodeCommit = '539f2229a44b8b6362dda9b88d08d36264eeee65'
 $expectedXNodeManifestSha256 =
-    '084876ea676180d7efa89c691b7a9e18e8cd345733b8cb31c77b56d1c8204a29'
+    'eba7312147c3abbba0068b49b5f2e718cfeb6fd78a723e5a36d46d5cb99f3d2e'
 $expectedDriverSha256 = @{
     'MailboxGrantProvisioner.cs' =
         '884a6670230d36333adbdad37358d082ca84740fef2d5c6e13776500a37b8d53'
@@ -80,7 +80,9 @@ $expectedDriverSha256 = @{
     'PrivateCrossProcessState.cs' =
         '651d8256822d41b9a7bceab1e6d6bb45740026cac00f487a564befe7777f272b'
     'Program.cs' =
-        '9ef8de42cc66a3bfba30362868f78af74d87503c50871877f07c9b09f90adcf0'
+        '5763c4556c96dbe2bd798dc79cfa1c97129adfd82691f1283734c06ee49a6562'
+    'ProductionMailboxUatPublisher.cs' =
+        '966c6be6cfe71317c10e66265bbad30ab61736e722a120304b8ce035fb056bc7'
     'SurvivalMailboxDriver.csproj' =
         '4db436d69ea88ac3ff16f08c161b61cc0c048bad84cb7e529b2208fa569eafbe'
 }
