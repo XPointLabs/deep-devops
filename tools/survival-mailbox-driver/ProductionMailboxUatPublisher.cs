@@ -231,13 +231,17 @@ internal static class ProductionMailboxUatPublisher
                     "Deep/survival-uat/production-mailbox/approval-placeholder/v1",
                     networkId),
                 AllowedAndroidSigningCertificateSha256 = [input.AndroidSigningCertificateSha256],
-                AllowedWindowsSigningCertificateSha256 = predecessor?.WindowsSigningCertificateSha256 ??
-                    [(ReadOnlyMemory<byte>)(input.WindowsSigningCertificateSha256 ??
-                        throw new InvalidOperationException())],
+                AllowedWindowsSigningCertificateSha256 =
+                    input.WindowsSigningCertificateSha256 is { } windowsSigner
+                        ? [(ReadOnlyMemory<byte>)windowsSigner]
+                        : predecessor?.WindowsSigningCertificateSha256 ??
+                            throw new InvalidOperationException(),
                 AndroidReleaseBuildArtifactSha256 = [input.AndroidBuildArtifactSha256],
-                WindowsReleaseBuildArtifactSha256 = predecessor?.WindowsBuildArtifactSha256 ??
-                    [(ReadOnlyMemory<byte>)(input.WindowsBuildArtifactSha256 ??
-                        throw new InvalidOperationException())],
+                WindowsReleaseBuildArtifactSha256 =
+                    input.WindowsBuildArtifactSha256 is { } windowsArtifact
+                        ? [(ReadOnlyMemory<byte>)windowsArtifact]
+                        : predecessor?.WindowsBuildArtifactSha256 ??
+                            throw new InvalidOperationException(),
                 RolloutNotBeforeUnixSeconds = now,
                 RolloutNotAfterUnixSeconds = rolloutUntil
             },
@@ -852,13 +856,18 @@ internal static class ProductionMailboxUatPublisher
             {
                 allowed.Add("--previous-trust-floor");
                 allowed.Add("--previous-authority");
+                allowed.Add("--windows-signing-certificate-sha256");
+                allowed.Add("--windows-build-artifact-sha256");
             }
             else
             {
                 allowed.Add("--windows-signing-certificate-sha256");
                 allowed.Add("--windows-build-artifact-sha256");
             }
-            if (args.Length != 1 + allowed.Count * 2
+            var exactArgumentCount = 1 + allowed.Count * 2;
+            var successorWithoutWindowsCount = exactArgumentCount - 4;
+            if (args.Length != exactArgumentCount &&
+                (!successor || args.Length != successorWithoutWindowsCount)
                 || args[0] is not ("publish-production-uat" or
                     "publish-production-uat-successor"))
                 throw new InvalidOperationException(
@@ -880,6 +889,7 @@ internal static class ProductionMailboxUatPublisher
                     throw new InvalidOperationException($"{name} is required.");
                 return args[index + 1];
             }
+            bool Supplied(string name) => Array.IndexOf(args, name) >= 0;
             byte[] Hash(string name)
             {
                 var value = Required(name);
@@ -950,8 +960,10 @@ internal static class ProductionMailboxUatPublisher
                 ApplicationId("--android-application-id"),
                 Version("--android-version-code"),
                 Lineage("--android-signer-lineage-sha256"),
-                successor ? null : Hash("--windows-signing-certificate-sha256"),
-                successor ? null : Hash("--windows-build-artifact-sha256"),
+                Supplied("--windows-signing-certificate-sha256")
+                    ? Hash("--windows-signing-certificate-sha256") : null,
+                Supplied("--windows-build-artifact-sha256")
+                    ? Hash("--windows-build-artifact-sha256") : null,
                 successor ? Path.GetFullPath(Required("--previous-trust-floor")) : null,
                 successor ? Path.GetFullPath(Required("--previous-authority")) : null);
         }

@@ -62,6 +62,7 @@ assert.match(bootstrap, /AndroidSignerLineageSha256/);
 assert.match(bootstrap, /publish-production-uat-successor/);
 assert.match(bootstrap, /PreviousTrustFloorBundle/);
 assert.match(bootstrap, /PreviousAuthorityArtifact/);
+assert.match(bootstrap, /UAT Windows approval rotation requires both exact signing and build hashes/);
 assert.match(bootstrap, /privateMaterialIncluded = \$false/);
 assert.match(bootstrap, /caPrivateKeyMounted = \$false/);
 assert.doesNotMatch(bootstrap, /Get-Content[^\n]+(?:seed|key)/i);
@@ -85,6 +86,8 @@ assert.match(publisher, /buildIdSha256 = Lower\(input\.AndroidBuildArtifactSha25
 assert.match(publisher, /applicationId = input\.AndroidApplicationId/);
 assert.match(publisher, /playAppSigningLineageSha256/);
 assert.match(publisher, /AndroidReleaseBuildArtifactSha256 = \[input\.AndroidBuildArtifactSha256\]/);
+assert.match(publisher, /input\.WindowsSigningCertificateSha256 is \{ \} windowsSigner/);
+assert.match(publisher, /input\.WindowsBuildArtifactSha256 is \{ \} windowsArtifact/);
 assert.match(publisher, /publish-production-uat-routes/);
 assert.match(publisher, /production-mailbox-privacy-routes\.v1\.sig/);
 assert.match(publisher, /PublicKeyAuth\.SignDetached\(json, mrX\.PrivateKey\)/);

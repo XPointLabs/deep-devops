@@ -146,12 +146,18 @@ $successorArguments = if ($successorInputs.Count -eq 2) {
         '--previous-trust-floor', ([IO.Path]::GetFullPath($PreviousTrustFloorBundle)),
         '--previous-authority', ([IO.Path]::GetFullPath($PreviousAuthorityArtifact)))
 } else { @() }
-if ($successorInputs.Count -eq 0 -and
-    ($WindowsSigningCertificateSha256 -cnotmatch '^[0-9a-f]{64}$' -or
-     $WindowsBuildArtifactSha256 -cnotmatch '^[0-9a-f]{64}$')) {
+$windowsInputs = @($WindowsSigningCertificateSha256, $WindowsBuildArtifactSha256) |
+    Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+if ($successorInputs.Count -eq 0 -and $windowsInputs.Count -ne 2) {
     throw 'Initial UAT bootstrap requires exact Windows signing and build hashes.'
 }
-$windowsArguments = if ($successorInputs.Count -eq 0) {
+if ($windowsInputs.Count -notin @(0, 2) -or
+    ($windowsInputs.Count -eq 2 -and
+     ($WindowsSigningCertificateSha256 -cnotmatch '^[0-9a-f]{64}$' -or
+      $WindowsBuildArtifactSha256 -cnotmatch '^[0-9a-f]{64}$'))) {
+    throw 'UAT Windows approval rotation requires both exact signing and build hashes.'
+}
+$windowsArguments = if ($windowsInputs.Count -eq 2) {
     @(
         '--windows-signing-certificate-sha256', $WindowsSigningCertificateSha256,
         '--windows-build-artifact-sha256', $WindowsBuildArtifactSha256)
