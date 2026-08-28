@@ -139,8 +139,8 @@ $SurvivalMailboxDriverSha256 = @{
     'MailboxGrantProvisioner.cs' = '884a6670230d36333adbdad37358d082ca84740fef2d5c6e13776500a37b8d53'
     'MailboxRuntimePublisher.cs' = 'aa725b67ddfd48193a3e5cc3f39f529130e589e05fa14b1569123c8a8cf42866'
     'PrivateCrossProcessState.cs' = '651d8256822d41b9a7bceab1e6d6bb45740026cac00f487a564befe7777f272b'
-    'Program.cs' = '67cccb576b14ca81db6d705e49bac17d08d2a7c1a62f8ffe4354c9899caaeb5b'
-    'ProductionMailboxUatPublisher.cs' = '2fd3213836e94f70ec6b07d95e964abffaf1d018402d86da0a9475c4c2654168'
+    'Program.cs' = '5763c4556c96dbe2bd798dc79cfa1c97129adfd82691f1283734c06ee49a6562'
+    'ProductionMailboxUatPublisher.cs' = 'eb46f925e102ef4b43c69013f73b72720b219c67a7d38653b40cd7863c72f191'
     'SurvivalMailboxDriver.csproj' = '4db436d69ea88ac3ff16f08c161b61cc0c048bad84cb7e529b2208fa569eafbe'
 }
 $ChainLifecycleServices = @(

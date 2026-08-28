@@ -17,11 +17,18 @@ param(
     [ValidatePattern('^[0-9a-f]{64}$')]
     [string]$AndroidBuildArtifactSha256,
     [Parameter(Mandatory)]
-    [ValidatePattern('^[0-9a-f]{64}$')]
-    [string]$WindowsSigningCertificateSha256,
+    [ValidateSet('network.xpoint.deep.e2e')]
+    [string]$AndroidApplicationId,
     [Parameter(Mandatory)]
-    [ValidatePattern('^[0-9a-f]{64}$')]
+    [ValidatePattern('^[1-9][0-9]*$')]
+    [string]$AndroidVersionCode,
+    [Parameter(Mandatory)]
+    [ValidatePattern('^[0-9a-f]{64}(\|[0-9a-f]{64}){0,31}$')]
+    [string]$AndroidSignerLineageSha256,
+    [string]$WindowsSigningCertificateSha256,
     [string]$WindowsBuildArtifactSha256,
+    [string]$PreviousTrustFloorBundle,
+    [string]$PreviousAuthorityArtifact,
     [string]$XNodeRepository,
     [string]$OutputDirectory
 )
@@ -124,11 +131,37 @@ foreach ($index in 1..6) {
     }
 }
 
+$successorInputs = @($PreviousTrustFloorBundle, $PreviousAuthorityArtifact) |
+    Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+if ($successorInputs.Count -notin @(0, 2)) {
+    throw 'UAT successor bootstrap requires both previous trust floor and authority artifact.'
+}
+$publisherCommand = if ($successorInputs.Count -eq 2) {
+    'publish-production-uat-successor'
+} else {
+    'publish-production-uat'
+}
+$successorArguments = if ($successorInputs.Count -eq 2) {
+    @(
+        '--previous-trust-floor', ([IO.Path]::GetFullPath($PreviousTrustFloorBundle)),
+        '--previous-authority', ([IO.Path]::GetFullPath($PreviousAuthorityArtifact)))
+} else { @() }
+if ($successorInputs.Count -eq 0 -and
+    ($WindowsSigningCertificateSha256 -cnotmatch '^[0-9a-f]{64}$' -or
+     $WindowsBuildArtifactSha256 -cnotmatch '^[0-9a-f]{64}$')) {
+    throw 'Initial UAT bootstrap requires exact Windows signing and build hashes.'
+}
+$windowsArguments = if ($successorInputs.Count -eq 0) {
+    @(
+        '--windows-signing-certificate-sha256', $WindowsSigningCertificateSha256,
+        '--windows-build-artifact-sha256', $WindowsBuildArtifactSha256)
+} else { @() }
+
 $project = Join-Path $root 'tools\survival-mailbox-driver\SurvivalMailboxDriver.csproj'
-Invoke-Checked dotnet @(
+$publisherArguments = @(
     'run', '--project', $project, '--configuration', 'Release',
     "-p:XNodeSource=$xnode", '--',
-    'publish-production-uat',
+    $publisherCommand,
     '--secrets-dir', $xnodeSecrets,
     '--private-dir', $private,
     '--output-dir', $output,
@@ -139,8 +172,11 @@ Invoke-Checked dotnet @(
     '--next-certificate', $nextCertificate,
     '--android-signing-certificate-sha256', $AndroidSigningCertificateSha256,
     '--android-build-artifact-sha256', $AndroidBuildArtifactSha256,
-    '--windows-signing-certificate-sha256', $WindowsSigningCertificateSha256,
-    '--windows-build-artifact-sha256', $WindowsBuildArtifactSha256)
+    '--android-application-id', $AndroidApplicationId,
+    '--android-version-code', $AndroidVersionCode,
+    '--android-signer-lineage-sha256', $AndroidSignerLineageSha256) +
+    $windowsArguments + $successorArguments
+Invoke-Checked dotnet $publisherArguments
 
 $runtimePath = Join-Path $output 'runtime-public.json'
 $runtime = Get-Content -Raw -LiteralPath $runtimePath | ConvertFrom-Json

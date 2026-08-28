@@ -19,9 +19,15 @@ if (args.Length > 0 && args[0] == "publish-runtime")
     MailboxRuntimePublisher.Publish(args);
     return;
 }
-if (args.Length > 0 && args[0] == "publish-production-uat")
+if (args.Length > 0 && args[0] is "publish-production-uat" or
+    "publish-production-uat-successor")
 {
     ProductionMailboxUatPublisher.Publish(args);
+    return;
+}
+if (args.Length > 0 && args[0] == "publish-production-uat-routes")
+{
+    ProductionMailboxUatPublisher.PublishRoutes(args);
     return;
 }
 

@@ -56,6 +56,94 @@ internal static class ProductionMailboxUatPublisher
         }
     }
 
+    public static void PublishRoutes(string[] args)
+    {
+        var input = RouteInput.Parse(args);
+        RequireDirectory(input.SecretDirectory, "secret directory");
+        RequireDirectory(input.PrivateDirectory, "private directory");
+        Directory.CreateDirectory(input.OutputDirectory);
+        if (Directory.EnumerateFileSystemEntries(input.OutputDirectory).Any())
+            throw new InvalidOperationException(
+                "UAT privacy-route output directory must be empty.");
+
+        var mrXSeed = ReadSecret(Path.Combine(input.PrivateDirectory, "mrx.seed"));
+        var xnodeSeeds = Enumerable.Range(1, 6)
+            .Select(index => ReadHexSecret(Path.Combine(
+                input.SecretDirectory, $"xnode-{index}-ed25519.seed")))
+            .ToArray();
+        var x25519PublicKeys = new byte[6][];
+        KeyPair? mrX = null;
+        try
+        {
+            var fixture = Fixture.CreateAuthority(xnodeSeeds,
+                Convert.ToHexString(mrXSeed), AuthorityWindow.Load(input.AuthorityStatePath));
+            mrX = PublicKeyAuth.GenerateKeyPair(mrXSeed);
+            var networkId = DomainHash(
+                "Deep/survival-uat/production-mailbox/network/v1", mrX.PublicKey)[..16];
+            for (var index = 0; index < x25519PublicKeys.Length; index++)
+            {
+                var privateKey = ReadHexSecret(Path.Combine(
+                    input.SecretDirectory, $"xnode-{index + 1}-x25519.private"));
+                var privateKeyBytes = Convert.FromHexString(privateKey);
+                try { x25519PublicKeys[index] = ScalarMult.Base(privateKeyBytes); }
+                finally { CryptographicOperations.ZeroMemory(privateKeyBytes); }
+            }
+            if (x25519PublicKeys.Any(key => key.Length != 32 ||
+                    key.AsSpan().IndexOfAnyExcept((byte)0) < 0) ||
+                x25519PublicKeys.Select(static key => Convert.ToHexStringLower(key))
+                    .Distinct(StringComparer.Ordinal).Count() != 6)
+                throw new InvalidDataException("UAT privacy X25519 public keys are invalid.");
+
+            object Route(int port, int[] indices) => new
+            {
+                entryOrigin = $"https://{input.PublicHost}:{port}/",
+                hops = indices.Select(index => new
+                {
+                    routerId = Lower(fixture.Descriptors[index].RouterId.Span),
+                    x25519PublicKey = Lower(x25519PublicKeys[index])
+                }).ToArray()
+            };
+            var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            var expires = checked((long)Math.Min(
+                fixture.CurrentExpiresAt, fixture.NextExpiresAt));
+            if (expires <= now + 1800)
+                throw new InvalidDataException("UAT privacy-route window is not live.");
+            var json = JsonSerializer.SerializeToUtf8Bytes(new
+            {
+                schemaVersion = 1,
+                developmentOnly = false,
+                networkId = Lower(networkId),
+                notBeforeUnixSeconds = Math.Max(0, now - 60),
+                expiresUnixSeconds = expires,
+                primary = Route(41803, [2, 3, 0]),
+                fallback = Route(41805, [4, 5, 1])
+            });
+            var signature = PublicKeyAuth.SignDetached(json, mrX.PrivateKey);
+            if (!PublicKeyAuth.VerifyDetached(signature, json, mrX.PublicKey))
+                throw new CryptographicException("UAT privacy-route signature failed verification.");
+            WriteAtomic(Path.Combine(input.OutputDirectory,
+                "production-mailbox-privacy-routes.v1.json"), json);
+            WriteAtomic(Path.Combine(input.OutputDirectory,
+                "production-mailbox-privacy-routes.v1.sig"), signature);
+            WriteAtomic(Path.Combine(input.OutputDirectory,
+                "production-mailbox-privacy-routes.v1.pub"), mrX.PublicKey);
+            CryptographicOperations.ZeroMemory(json);
+            CryptographicOperations.ZeroMemory(signature);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(mrXSeed);
+            foreach (var key in x25519PublicKeys)
+                if (key is not null) CryptographicOperations.ZeroMemory(key);
+            if (mrX is not null)
+            {
+                CryptographicOperations.ZeroMemory(mrX.PrivateKey);
+                CryptographicOperations.ZeroMemory(mrX.PublicKey);
+            }
+        }
+        Console.WriteLine("UAT privacy-route public artifacts published.");
+    }
+
     private static void Write(
         Input input,
         Fixture fixture,
@@ -75,24 +163,38 @@ internal static class ProductionMailboxUatPublisher
         if (CryptographicOperations.FixedTimeEquals(currentSpki, nextSpki))
             throw new InvalidDataException("Current and next UAT TLS SPKI pins must differ.");
 
-        var previousAuthorityHash = DomainHash(
+        var predecessor = input.PreviousTrustFloorPath is null
+            ? null
+            : LoadPredecessor(input, mrX.PublicKey, networkId);
+        var previousAuthorityHash = predecessor?.AuthorityHash ?? DomainHash(
             "Deep/survival-uat/production-mailbox/previous-authority/v1", networkId);
-        var previousRevocationHead = DomainHash(
+        var previousRevocationHead = predecessor?.RevocationHeadHash ?? DomainHash(
             "Deep/survival-uat/production-mailbox/previous-revocation-head/v1", networkId);
-        var previousRevocationSnapshot = DomainHash(
+        var previousRevocationSnapshot = predecessor?.RevocationSnapshotHash ?? DomainHash(
             "Deep/survival-uat/production-mailbox/previous-revocation-snapshot/v1", networkId);
-        var previousTopologyHash = DomainHash(
+        var previousTopologyHash = predecessor?.TopologyHash ?? DomainHash(
             "Deep/survival-uat/production-mailbox/previous-topology/v1", networkId);
-        var revocationHead = DomainHash(
-            "Deep/survival-uat/production-mailbox/revocation-head/v1", networkId);
         var currentPlacement = DomainHash(
             "Deep/survival-uat/production-mailbox/current-placement/v1", networkId);
         var nextPlacement = DomainHash(
             "Deep/survival-uat/production-mailbox/next-placement/v1", networkId);
-        var authorityGeneration = checked(fixture.CurrentEpoch + 1);
-        var revocationGeneration = authorityGeneration;
-        var topologyGeneration = authorityGeneration;
+        var authorityGeneration = predecessor is null
+            ? checked(fixture.CurrentEpoch + 1)
+            : checked(predecessor.AuthorityGeneration + 1);
+        var revocationGeneration = predecessor is null
+            ? authorityGeneration
+            : checked(predecessor.RevocationGeneration + 1);
+        var topologyGeneration = predecessor is null
+            ? authorityGeneration
+            : checked(predecessor.TopologyGeneration + 1);
+        var revocationGenerationBytes = new byte[sizeof(ulong)];
+        BinaryPrimitives.WriteUInt64BigEndian(revocationGenerationBytes, revocationGeneration);
+        var revocationHead = DomainHash(
+            "Deep/survival-uat/production-mailbox/revocation-head/v2",
+            networkId, previousRevocationHead, revocationGenerationBytes);
         var rolloutUntil = Math.Min(fixture.CurrentExpiresAt, fixture.NextExpiresAt);
+        var revocationUntil = Math.Min(rolloutUntil, checked(now +
+            ProductionMailboxAuthorityConstants.MaximumRevocationSnapshotLifetimeSeconds));
 
         var draft = new ProductionMailboxAuthority
         {
@@ -121,7 +223,7 @@ internal static class ProductionMailboxUatPublisher
                 PreviousHeadHash = previousRevocationHead,
                 Generation = revocationGeneration,
                 IssuedAtUnixSeconds = now,
-                ExpiresAtUnixSeconds = rolloutUntil
+                ExpiresAtUnixSeconds = revocationUntil
             },
             MrXApproval = new ProductionMailboxAuthorityApproval
             {
@@ -129,9 +231,13 @@ internal static class ProductionMailboxUatPublisher
                     "Deep/survival-uat/production-mailbox/approval-placeholder/v1",
                     networkId),
                 AllowedAndroidSigningCertificateSha256 = [input.AndroidSigningCertificateSha256],
-                AllowedWindowsSigningCertificateSha256 = [input.WindowsSigningCertificateSha256],
+                AllowedWindowsSigningCertificateSha256 = predecessor?.WindowsSigningCertificateSha256 ??
+                    [(ReadOnlyMemory<byte>)(input.WindowsSigningCertificateSha256 ??
+                        throw new InvalidOperationException())],
                 AndroidReleaseBuildArtifactSha256 = [input.AndroidBuildArtifactSha256],
-                WindowsReleaseBuildArtifactSha256 = [input.WindowsBuildArtifactSha256],
+                WindowsReleaseBuildArtifactSha256 = predecessor?.WindowsBuildArtifactSha256 ??
+                    [(ReadOnlyMemory<byte>)(input.WindowsBuildArtifactSha256 ??
+                        throw new InvalidOperationException())],
                 RolloutNotBeforeUnixSeconds = now,
                 RolloutNotAfterUnixSeconds = rolloutUntil
             },
@@ -147,7 +253,7 @@ internal static class ProductionMailboxUatPublisher
             RevocationHeadHash = revocationHead,
             PreviousRevocationHeadHash = previousRevocationHead,
             IssuedAtUnixSeconds = now,
-            ExpiresAtUnixSeconds = rolloutUntil,
+            ExpiresAtUnixSeconds = revocationUntil,
             RevokedGrantSerials = [],
             IssuerSignature = new byte[64]
         };
@@ -236,8 +342,8 @@ internal static class ProductionMailboxUatPublisher
         WriteAtomic(Path.Combine(input.OutputDirectory, "revocations.pmr1"), revocationBytes);
         WriteAtomic(Path.Combine(input.OutputDirectory, "topology.pmt1"), topologyBytes);
         WriteAtomic(Path.Combine(input.OutputDirectory, "baseline.pml3"), EncodeLkg(
-            authorityGeneration - 1, previousAuthorityHash,
-            revocationGeneration - 1, previousRevocationHead,
+            predecessor?.AuthorityGeneration ?? authorityGeneration - 1, previousAuthorityHash,
+            predecessor?.RevocationGeneration ?? revocationGeneration - 1, previousRevocationHead,
             previousRevocationSnapshot, topologyGeneration - 1,
             previousTopologyHash));
 
@@ -256,7 +362,14 @@ internal static class ProductionMailboxUatPublisher
                 topologyGeneration = topologyGeneration.ToString(),
                 topologyHash = Lower(topologyHash)
             },
-            android = (object?)null
+            android = new
+            {
+                buildIdSha256 = Lower(input.AndroidBuildArtifactSha256),
+                applicationId = input.AndroidApplicationId,
+                versionCode = input.AndroidVersionCode.ToString(),
+                playAppSigningLineageSha256 = input.AndroidSignerLineageSha256
+                    .Select(hash => Lower(hash)).ToArray()
+            }
         };
         WriteJson(Path.Combine(input.OutputDirectory, "trust-floor.json"), trustFloor);
         WriteJson(Path.Combine(input.OutputDirectory, "runtime-public.json"), new
@@ -574,6 +687,136 @@ internal static class ProductionMailboxUatPublisher
         }
     }
 
+    private static Predecessor LoadPredecessor(
+        Input input,
+        byte[] expectedMrXPublicKey,
+        byte[] expectedNetworkId)
+    {
+        var trustPath = input.PreviousTrustFloorPath ?? throw new InvalidOperationException();
+        var authorityPath = input.PreviousAuthorityPath ?? throw new InvalidOperationException();
+        using var trust = JsonDocument.Parse(File.ReadAllBytes(trustPath), new JsonDocumentOptions
+        {
+            AllowTrailingCommas = false,
+            CommentHandling = JsonCommentHandling.Disallow,
+            MaxDepth = 4
+        });
+        var root = trust.RootElement;
+        var floor = root.GetProperty("trustFloor");
+        static byte[] Hash(JsonElement value, string name, int bytes)
+        {
+            var text = value.GetProperty(name).GetString();
+            if (text is null || text.Length != bytes * 2 || text.Any(character => character is not
+                    (>= '0' and <= '9') and not (>= 'a' and <= 'f')))
+                throw new InvalidDataException($"Previous UAT trust floor {name} is invalid.");
+            var decoded = Convert.FromHexString(text);
+            if (decoded.AsSpan().IndexOfAnyExcept((byte)0) < 0)
+                throw new InvalidDataException($"Previous UAT trust floor {name} is invalid.");
+            return decoded;
+        }
+        static ulong Generation(JsonElement value, string name)
+        {
+            var text = value.GetProperty(name).GetString();
+            if (text is null || text.Length == 0 || text[0] == '0' ||
+                !ulong.TryParse(text, out var parsed) || parsed == 0)
+                throw new InvalidDataException($"Previous UAT trust floor {name} is invalid.");
+            return parsed;
+        }
+        var mrXHash = Hash(floor, "mrXPublicKeySha256", 32);
+        var network = Hash(floor, "networkId", 16);
+        var authorityHash = Hash(floor, "authorityHash", 32);
+        var authorityBytes = File.ReadAllBytes(authorityPath);
+        try
+        {
+            var authority = ProductionMailboxAuthorityCodec.Decode(authorityBytes);
+            if (!CryptographicOperations.FixedTimeEquals(
+                    SHA256.HashData(expectedMrXPublicKey), mrXHash) ||
+                !CryptographicOperations.FixedTimeEquals(expectedNetworkId, network) ||
+                !CryptographicOperations.FixedTimeEquals(SHA256.HashData(authorityBytes), authorityHash) ||
+                !CryptographicOperations.FixedTimeEquals(authority.NetworkId.Span, network) ||
+                !CryptographicOperations.FixedTimeEquals(
+                    authority.MrXApprovalEd25519PublicKey.Span, expectedMrXPublicKey) ||
+                !PublicKeyAuth.VerifyDetached(authority.Signature.ToArray(),
+                    ProductionMailboxAuthorityCodec.GetSigningBytes(authority),
+                    expectedMrXPublicKey))
+                throw new InvalidDataException(
+                    "Previous UAT authority does not match its trust floor or Mr. X root.");
+            var authorityGeneration = Generation(floor, "authorityGeneration");
+            var revocationGeneration = Generation(floor, "revocationGeneration");
+            var topologyGeneration = Generation(floor, "topologyGeneration");
+            if (authority.AuthorityGeneration != authorityGeneration ||
+                authority.Revocation.Generation != revocationGeneration)
+                throw new InvalidDataException(
+                    "Previous UAT authority generations do not match its trust floor.");
+            return new Predecessor(
+                authorityGeneration,
+                authorityHash,
+                revocationGeneration,
+                Hash(floor, "revocationHeadHash", 32),
+                Hash(floor, "revocationSnapshotHash", 32),
+                topologyGeneration,
+                Hash(floor, "topologyHash", 32),
+                authority.MrXApproval.AllowedWindowsSigningCertificateSha256
+                    .Select(static hash => (ReadOnlyMemory<byte>)hash.ToArray()).ToArray(),
+                authority.MrXApproval.WindowsReleaseBuildArtifactSha256
+                    .Select(static hash => (ReadOnlyMemory<byte>)hash.ToArray()).ToArray());
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(mrXHash);
+            CryptographicOperations.ZeroMemory(network);
+            CryptographicOperations.ZeroMemory(authorityBytes);
+        }
+    }
+
+    private sealed record Predecessor(
+        ulong AuthorityGeneration,
+        byte[] AuthorityHash,
+        ulong RevocationGeneration,
+        byte[] RevocationHeadHash,
+        byte[] RevocationSnapshotHash,
+        ulong TopologyGeneration,
+        byte[] TopologyHash,
+        ReadOnlyMemory<byte>[] WindowsSigningCertificateSha256,
+        ReadOnlyMemory<byte>[] WindowsBuildArtifactSha256);
+
+    private sealed record RouteInput(
+        string SecretDirectory,
+        string PrivateDirectory,
+        string OutputDirectory,
+        string AuthorityStatePath,
+        string PublicHost)
+    {
+        public static RouteInput Parse(string[] args)
+        {
+            var names = new[]
+            {
+                "--secrets-dir", "--private-dir", "--output-dir",
+                "--authority-state", "--public-host"
+            };
+            if (args.Length != 1 + names.Length * 2 ||
+                args[0] != "publish-production-uat-routes")
+                throw new InvalidOperationException(
+                    "publish-production-uat-routes requires the exact documented argument set.");
+            var values = new Dictionary<string, string>(StringComparer.Ordinal);
+            for (var index = 1; index < args.Length; index += 2)
+                if (!names.Contains(args[index], StringComparer.Ordinal) ||
+                    string.IsNullOrWhiteSpace(args[index + 1]) ||
+                    !values.TryAdd(args[index], args[index + 1]))
+                    throw new InvalidOperationException(
+                        "publish-production-uat-routes contains an unknown, duplicate, or empty argument.");
+            var host = values["--public-host"];
+            if (Uri.CheckHostName(host) != UriHostNameType.Dns)
+                throw new InvalidOperationException(
+                    "--public-host must be a DNS name accepted by PublicHttpsOnly.");
+            return new(
+                Path.GetFullPath(values["--secrets-dir"]),
+                Path.GetFullPath(values["--private-dir"]),
+                Path.GetFullPath(values["--output-dir"]),
+                Path.GetFullPath(values["--authority-state"]),
+                host);
+        }
+    }
+
     private sealed record Input(
         string SecretDirectory,
         string PrivateDirectory,
@@ -585,21 +828,39 @@ internal static class ProductionMailboxUatPublisher
         string NextCertificatePath,
         byte[] AndroidSigningCertificateSha256,
         byte[] AndroidBuildArtifactSha256,
-        byte[] WindowsSigningCertificateSha256,
-        byte[] WindowsBuildArtifactSha256)
+        string AndroidApplicationId,
+        ulong AndroidVersionCode,
+        byte[][] AndroidSignerLineageSha256,
+        byte[]? WindowsSigningCertificateSha256,
+        byte[]? WindowsBuildArtifactSha256,
+        string? PreviousTrustFloorPath,
+        string? PreviousAuthorityPath)
     {
         public static Input Parse(string[] args)
         {
+            var successor = string.Equals(args.FirstOrDefault(),
+                "publish-production-uat-successor", StringComparison.Ordinal);
             var allowed = new HashSet<string>(StringComparer.Ordinal)
             {
                 "--secrets-dir", "--private-dir", "--output-dir", "--authority-state",
                 "--lan-host", "--public-host", "--current-certificate",
                 "--next-certificate", "--android-signing-certificate-sha256",
-                "--android-build-artifact-sha256", "--windows-signing-certificate-sha256",
-                "--windows-build-artifact-sha256"
+                "--android-build-artifact-sha256", "--android-application-id",
+                "--android-version-code", "--android-signer-lineage-sha256"
             };
+            if (successor)
+            {
+                allowed.Add("--previous-trust-floor");
+                allowed.Add("--previous-authority");
+            }
+            else
+            {
+                allowed.Add("--windows-signing-certificate-sha256");
+                allowed.Add("--windows-build-artifact-sha256");
+            }
             if (args.Length != 1 + allowed.Count * 2
-                || !string.Equals(args[0], "publish-production-uat", StringComparison.Ordinal))
+                || args[0] is not ("publish-production-uat" or
+                    "publish-production-uat-successor"))
                 throw new InvalidOperationException(
                     "publish-production-uat requires the exact documented argument set.");
             var seen = new HashSet<string>(StringComparer.Ordinal);
@@ -630,6 +891,42 @@ internal static class ProductionMailboxUatPublisher
                     throw new InvalidOperationException($"{name} cannot be all-zero.");
                 return bytes;
             }
+            ulong Version(string name)
+            {
+                var value = Required(name);
+                if (value.Length == 0 || value[0] == '0' ||
+                    !ulong.TryParse(value, out var parsed) || parsed == 0)
+                    throw new InvalidOperationException($"{name} must be a positive integer.");
+                return parsed;
+            }
+            byte[][] Lineage(string name)
+            {
+                var values = Required(name).Split('|', StringSplitOptions.None);
+                if (values.Length is < 1 or > 32)
+                    throw new InvalidOperationException($"{name} count is invalid.");
+                var hashes = values.Select(value =>
+                {
+                    if (value.Length != 64 || value.Any(static item => item is not
+                            (>= '0' and <= '9') and not (>= 'a' and <= 'f')))
+                        throw new InvalidOperationException($"{name} must contain lowercase SHA-256 values.");
+                    var hash = Convert.FromHexString(value);
+                    if (hash.AsSpan().IndexOfAnyExcept((byte)0) < 0)
+                        throw new InvalidOperationException($"{name} cannot contain all-zero values.");
+                    return hash;
+                }).ToArray();
+                if (hashes.Select(static hash => Convert.ToHexStringLower(hash))
+                        .Distinct(StringComparer.Ordinal).Count() != hashes.Length)
+                    throw new InvalidOperationException($"{name} contains duplicates.");
+                return hashes;
+            }
+            string ApplicationId(string name)
+            {
+                var value = Required(name);
+                if (!string.Equals(value, "network.xpoint.deep.e2e", StringComparison.Ordinal))
+                    throw new InvalidOperationException(
+                        $"{name} must be the isolated physical E2E package.");
+                return value;
+            }
             var host = Required("--lan-host");
             if (!System.Net.IPAddress.TryParse(host, out var address)
                 || address.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork
@@ -650,8 +947,13 @@ internal static class ProductionMailboxUatPublisher
                 Path.GetFullPath(Required("--next-certificate")),
                 Hash("--android-signing-certificate-sha256"),
                 Hash("--android-build-artifact-sha256"),
-                Hash("--windows-signing-certificate-sha256"),
-                Hash("--windows-build-artifact-sha256"));
+                ApplicationId("--android-application-id"),
+                Version("--android-version-code"),
+                Lineage("--android-signer-lineage-sha256"),
+                successor ? null : Hash("--windows-signing-certificate-sha256"),
+                successor ? null : Hash("--windows-build-artifact-sha256"),
+                successor ? Path.GetFullPath(Required("--previous-trust-floor")) : null,
+                successor ? Path.GetFullPath(Required("--previous-authority")) : null);
         }
     }
 }
