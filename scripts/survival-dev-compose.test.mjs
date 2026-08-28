@@ -696,7 +696,7 @@ test('P10E uses real current/next MIP1/RIP1 authority, bounded client ingress, a
     assert.match(compose, new RegExp(`xnode-${index}-ed25519: \\{ file: \\.\\/.secrets\\/survival-dev\\/xnode-${index}-ed25519\\.seed \\}`));
     assert.match(compose, new RegExp(`xnode-${index}-x25519: \\{ file: \\.\\/.secrets\\/survival-dev\\/xnode-${index}-x25519\\.private \\}`));
   }
-  assert.match(launcher, /\$SurvivalXNodeCommit = '9fc47598622820430c233bcb8499824540979536'/);
+  assert.match(launcher, /\$SurvivalXNodeCommit = '00280a643cfdc1e0780147eceb1da5c7b6fd2799'/);
   assert.match(launcher, /Prepare-SurvivalXNodeIdentitySecrets/);
   assert.match(launcher, /Prepare-SurvivalMailboxPeerAuthority/);
   assert.match(launcher, /'--coordinator-url', "https:\/\/\$coordinatorHost`:41801"/);
@@ -729,12 +729,12 @@ test('P10E uses real current/next MIP1/RIP1 authority, bounded client ingress, a
     mailboxDriverStateInit,
     /chown 65532:65532 \/state \/state\/driver/);
   assert.doesNotMatch(mailboxDriverStateInit, /chmod|777|DAC_OVERRIDE/);
-  assert.match(compose, /XNODE_REVISION: 9fc47598622820430c233bcb8499824540979536/);
-  assert.match(compose, /XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: 98e9685bf8c45f2b2507efe5f2ed597dda052b9af0c90571bb0f8a003791a290/);
+  assert.match(compose, /XNODE_REVISION: 00280a643cfdc1e0780147eceb1da5c7b6fd2799/);
+  assert.match(compose, /XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: bd8cb5a16fb1d396716adc14d0adf95b005c0cccdf476cffd1cd65e5938aa102/);
   assert.match(compose, /org\.opencontainers\.image\.revision/);
   assert.match(compose, /com\.xpoint\.source-context\.manifest-sha256/);
   assert.match(compose, /sha256sum -c -/);
-  assert.match(launcher, /\$SurvivalXNodeContextManifestSha256 = '98e9685bf8c45f2b2507efe5f2ed597dda052b9af0c90571bb0f8a003791a290'/);
+  assert.match(launcher, /\$SurvivalXNodeContextManifestSha256 = 'bd8cb5a16fb1d396716adc14d0adf95b005c0cccdf476cffd1cd65e5938aa102'/);
   const revisions = [
     ...compose.matchAll(/XNODE_REVISION: ([0-9a-f]{40})/g),
     ...launcher.matchAll(/\$SurvivalXNodeCommit = '([0-9a-f]{40})'/g),
