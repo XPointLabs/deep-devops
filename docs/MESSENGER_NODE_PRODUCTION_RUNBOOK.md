@@ -12,6 +12,12 @@ Launch-critical scope:
 - push subscribe/resubscribe/unsubscribe and provider delivery canary;
 - restart persistence, load smoke, no-mock router validation, security artifacts, and rollback evidence.
 
+Pre-release messenger blocker (reviewed 2026-08-30): no-mock Xray readiness is
+currently server-side evidence only. The MAUI mailbox client must be bound to
+the VLESS/Reality ingress, and a physical run must succeed while direct HTTPS
+managed ingress is blocked. Until then this runbook cannot produce an
+anti-blocking messenger GO decision.
+
 Deferred scope:
 
 - VPN/TUN/TAP, exit routing, generic TCP/UDP forwarding, Session/Oxen federation, and non-messenger platform extras.
