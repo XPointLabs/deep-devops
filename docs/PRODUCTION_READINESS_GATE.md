@@ -182,8 +182,9 @@ GA evidence by itself.
 
 ## Client Device Acceptance
 
-`client-device-acceptance.json` must prove Android, iOS, and Windows acceptance
-against the Deep-owned stack, not build-only or synthetic coverage.
+`client-device-acceptance.json` must prove Android and Windows acceptance against
+the Deep-owned stack, not build-only or synthetic coverage. iOS is
+unverified/non-blocking and not release-supported in this scope generation.
 Validate it with `scripts/client-device-acceptance-gate.mjs`; see
 `docs/CLIENT_DEVICE_ACCEPTANCE.md` for the full schema and template.
 

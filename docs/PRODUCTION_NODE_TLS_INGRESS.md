@@ -1,5 +1,9 @@
 # Production Node TLS Ingress
 
+Status: **pre-cutover operational evidence**. PMA1/PMT1 commands below match the
+current stack; DR-0004 requires PMA2/PMT2 and signed XCB1 bindings before public
+release. Do not carry these authority bytes forward as compatibility fallback.
+
 `docker-compose.node.prod.yml` has one public listener: the hardened `ingress`
 container publishes TCP `443`. XNode API ports `8080`/`8081`, Xray `443`, and
 storage `8080` are container-only. Cleartext HTTP upstreams exist only on the

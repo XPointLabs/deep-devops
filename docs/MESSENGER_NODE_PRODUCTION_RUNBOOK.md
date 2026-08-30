@@ -293,7 +293,7 @@ Release sign-off requires all of these:
 - `artifacts/security/security-gate-summary.json` with status `ok`;
 - `artifacts/observability/observability-gate-summary.json` with status `ok`, zero failed SLO checks, dashboard coverage from `observability/deep-messenger-dashboard.json`, and alert routing coverage from `observability/deep-alert-routes.json`;
 - `artifacts/release/release-evidence-summary.json` with status `ok`;
-- `artifacts/release/client-device-acceptance.json` and `artifacts/release/client-device-acceptance-summary.json` with Android/iOS/Windows device-lab evidence for launch-critical client scenarios;
+- `artifacts/release/client-device-acceptance.json` and `artifacts/release/client-device-acceptance-summary.json` with Android/Windows device-lab evidence; iOS is unverified/non-blocking and not release-supported;
 - `artifacts/release/ops-deployment-evidence.json` and `artifacts/release/ops-deployment-evidence-summary.json` with deployed dashboard, tested alert-route, post-deploy verification, backup, and rollback evidence;
 - `artifacts/release/security-audit-signoff.json` and `artifacts/release/security-audit-signoff-summary.json` with external audit closure, zero critical/high findings or approved exception, security-gate evidence, and SBOM attestation;
 - `artifacts/release/ga-decision.json` and `artifacts/release/ga-decision-summary.json` with go decision, blocker closure, engineering/security/ops approvals, 30/60/90 stabilization owners, and post-GA backlog;

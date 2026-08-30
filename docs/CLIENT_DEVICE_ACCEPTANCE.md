@@ -13,14 +13,15 @@ Run it before `production-readiness-gate.mjs`:
 node .\deep-devops\scripts\client-device-acceptance-gate.mjs
 ```
 
-The manifest must prove Android, iOS, and Windows acceptance against the
-Deep-owned stack. Build-only, synthetic, unit-only, and local-only
+The first public release manifest must prove Android and Windows acceptance
+against the Deep-owned stack. iOS/iPadOS/macOS remain a separate, explicitly
+unsupported lane until signing authority and physical evidence are available.
+Build-only, synthetic, unit-only, and local-only
 evidence types are rejected.
 
 Required platforms:
 
 - `android`
-- `ios`
 - `windows`
 
 Required scenarios:
@@ -32,11 +33,12 @@ Required scenarios:
 - `attachments`
 - `avatars-profile-image`
 - `push-lifecycle`
+- `calls-relay-privacy-and-restricted-network`
 - `release-no-stub-no-mock-guards`
 
 Each platform and scenario must be `passed`, `success`, `ok`, or `approved`,
 must link retained evidence through `url`, `path`, `id`, `artifacts`, or
-`evidence`, and must cover all three required platforms.
+`evidence`, and must cover both required platforms.
 
 The generated `client-device-acceptance-summary.json` records the manifest
 `releaseCandidate`. The final production-readiness gate rejects summaries that

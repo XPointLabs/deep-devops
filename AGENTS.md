@@ -16,7 +16,11 @@ fixtures are reference/test inputs only and must not enter UAT or release topolo
 
 - UAT must exercise the production architecture: authenticated HTTPS, real services, durable
   state, bounded retry and fail-closed readiness. No mock can satisfy release evidence.
-- Call signaling/ICE routes to `deep-registry-api`; do not restore a standalone legacy calls path.
+- Target call signaling uses ratcheted message transport and allocation goes to
+  CallRelay through XPoint. Registry `/api/calls/*` is pre-cutover removal input.
+- A direct internal developer lane may omit HAProxy. Production-representative
+  UAT/release must exercise shared 443 ingress, TLS/SNI, restart re-resolution and
+  the exact signed carrier profile.
 - HAProxy backends must tolerate container restart through bounded Docker DNS re-resolution.
 - Every service defines health/readiness, host/container URLs, secrets, state and cleanup behavior.
 - Gates fail when evidence, provider delivery, trust inputs or rollback proof is missing.

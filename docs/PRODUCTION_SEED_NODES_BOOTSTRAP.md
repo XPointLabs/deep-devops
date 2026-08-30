@@ -1,5 +1,10 @@
 # Production Seed Nodes Bootstrap
 
+Status: **pre-cutover bootstrap evidence plus target topology guidance**.
+PMT1/PRA instructions are replaced at clean-break by DR-0004
+PMA2/PMT2/PMS2/XRA1/XRC1/XRR1/XSS1; embedded hosts remain public seeds, never
+the complete bridge pool.
+
 This runbook prepares the first three production XPoint nodes on Linux hosts.
 Use it on every seed server with a unique node identity, BLS key, VLESS client
 id, and Xray Reality key pair.
@@ -360,12 +365,15 @@ seed3.xpoint.network:443
 If a seed uses a non-default public port, include that port in the bootstrap
 entry and verify its registry privacy contact advertises the same HTTPS origin.
 
-Client releases contain initial Reality seed profiles plus signed, hash-bound
-privacy route authority. Each mailbox operation is wrapped for exactly three
-distinct routers. A fallback route must use six different router identities,
-keys, and origins across both routes and is allowed only after a classified
-definitely-before-forward failure; ambiguous dispatch is outcome-unknown and
-never falls back.
+Client releases contain only initial access seeds plus a signed, rotating
+bridge/topology trust root. Embedded seeds are not the complete usable bridge
+pool. Each mailbox operation is wrapped for exactly three distinct routers.
+With the initial three-node topology a fallback may reorder/reuse those nodes
+and is only a best-effort liveness attempt after a classified
+definitely-before-forward failure; it is not an independent failure domain.
+Ambiguous dispatch is outcome-unknown and never falls back. A six-router
+failure-domain-disjoint capability is activated later by an explicit signed
+policy and separate evidence gate.
 
 ## Operations
 

@@ -1,5 +1,9 @@
 # Production Calls
 
+This document describes the currently implemented call components. The public
+release target additionally requires transport-neutral E2EE signaling and the
+signed media-carrier policy from `../../docs/architecture/THREAT-MODEL.md`.
+
 Deep call setup is split into three production components:
 
 - `deep-registry-api` stores short-lived, end-to-end encrypted signaling envelopes and authenticates every sender and inbox request with the account Ed25519 key.
@@ -50,7 +54,7 @@ the config path in argv.
 
 Nginx must route `/api/calls` on `registry.xpoint.network` to the registry API (`http://127.0.0.1:28180`), not to port `19103`.
 
-`registry.xpoint.network` is currently proxied by Cloudflare, which does not forward standard TURN ports. The production default therefore publishes the origin IP through `DEEP_TURN_PUBLIC_HOST`. To enable censorship-resistant TURN over TLS, create a DNS-only `turn.xpoint.network` record to the same origin, issue a certificate for it, set `DEEP_TURN_PUBLIC_HOST=turn.xpoint.network`, and add `turns:turn.xpoint.network:5349?transport=tcp` to `Calls__IceUrls`. ICE configuration is fetched at runtime, so this change does not require a new client build.
+`registry.xpoint.network` is currently proxied by Cloudflare, which does not forward standard TURN ports. A DNS-only `turn.xpoint.network` record and TURN/TLS improve compatibility with restricted networks but do **not** constitute censorship resistance: the domain and origin IP remain enumerable and blockable. Production v1 obtains short-lived relay descriptors from the signed rotating media bridge catalog and provides at least one independently hosted TLS/HTTPS-compatible fallback. ICE configuration is fetched at runtime, so endpoint rotation does not require a new client build.
 
 ## Verify
 
@@ -60,7 +64,12 @@ An unsigned credential request must be rejected:
 curl -i https://registry.xpoint.network/api/calls/ice-servers/05aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 ```
 
-Expected status: `401 Unauthorized`. Verify TURN from another host with coturn utilities and a credential issued by the signed client endpoint. Also verify both direct ICE and forced relay calls before a client release.
+Expected status: `401 Unauthorized`. This verifies only the legacy pre-clean-break
+call stack. The first public clean-break release does not enable direct ICE and
+does not use this Registry inbox as steady-state signaling. Its acceptance gate
+uses E2EE message-plane signaling, relay-only ICE, rotating masked relay
+descriptors and UDP-blocked TCP fallback as specified in
+`../../docs/architecture/V1-RELEASE-SCOPE.md`.
 
 After Certbot renews the certificate, restart coturn so it opens the renewed key material:
 

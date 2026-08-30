@@ -218,7 +218,7 @@ Staking portal:        http://192.168.1.44:28083
 Storage service:       http://192.168.1.44:28100
 File service:          http://192.168.1.44:28101
 Push service:          http://192.168.1.44:28102
-Registry call API:     http://192.168.1.44:28103
+Legacy pre-cutover Registry call API (absent after clean-break): http://192.168.1.44:28103
 STUN/TURN:             192.168.1.44:3478, 192.168.1.44:5349
 Router node 1 API:     http://192.168.1.44:29281
 Router node 2 API:     http://192.168.1.44:29282
