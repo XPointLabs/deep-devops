@@ -8,7 +8,7 @@ on:
 
 jobs:
   unit:
-    runs-on: [self-hosted, Linux, X64, ubuntu-latest]
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout devops
         uses: actions/checkout@v4
@@ -127,7 +127,7 @@ jobs:
           --receipt "${{ runner.temp }}/deep-upload/unit-roundtrip-receipt.json"
 
   security-gate:
-    runs-on: [self-hosted, Linux, X64, ubuntu-latest]
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout devops
         uses: actions/checkout@v4
@@ -258,7 +258,7 @@ jobs:
           --receipt "${{ runner.temp }}/deep-upload/security-roundtrip-receipt.json"
 
   release-gate-contracts:
-    runs-on: [self-hosted, Linux, X64, ubuntu-latest]
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout devops
         uses: actions/checkout@v4

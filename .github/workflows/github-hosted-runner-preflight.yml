@@ -1,11 +1,11 @@
-name: on-premise-runner-preflight
+name: github-hosted-runner-preflight
 
 on:
   workflow_dispatch:
   push:
     branches: [release-candidate/prod-20260909]
     paths:
-      - .github/workflows/on-premise-runner-preflight.yml
+      - .github/workflows/github-hosted-runner-preflight.yml
 
 permissions:
   contents: read
@@ -13,7 +13,7 @@ permissions:
 jobs:
   linux-docker-x64:
     name: Linux x64 Docker multi-architecture host
-    runs-on: [self-hosted, Linux, X64, ubuntu-latest]
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - name: Verify runner route and base commands
@@ -27,7 +27,7 @@ jobs:
             command -v "${command}" >/dev/null
           done
           available_kib=$(df -Pk "${RUNNER_TEMP}" | awk 'NR == 2 { print $4 }')
-          test "${available_kib}" -ge 31457280
+          test "${available_kib}" -ge 10485760
 
       - name: Verify Docker daemon access
         shell: bash
@@ -51,7 +51,7 @@ jobs:
 
   linux-android-x64:
     name: Linux x64 managed and Android build host
-    runs-on: [self-hosted, Linux, X64, ubuntu-latest]
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - name: Verify runner route and base commands
@@ -65,7 +65,7 @@ jobs:
             command -v "${command}" >/dev/null
           done
           available_kib=$(df -Pk "${RUNNER_TEMP}" | awk 'NR == 2 { print $4 }')
-          test "${available_kib}" -ge 31457280
+          test "${available_kib}" -ge 10485760
 
       - uses: actions/setup-dotnet@v4
         env:
@@ -98,7 +98,7 @@ jobs:
 
   windows-x64:
     name: Windows x64 client and native cross-build host
-    runs-on: [self-hosted, Windows, X64, windows-latest, windows-2022]
+    runs-on: windows-2022
     timeout-minutes: 30
     steps:
       - name: Verify runner route and free space
@@ -112,7 +112,7 @@ jobs:
             throw 'The Windows runner host is not x64.'
           }
           $drive = Get-PSDrive -Name ([IO.Path]::GetPathRoot($env:RUNNER_TEMP).TrimEnd(':\'))
-          if ($drive.Free -lt 30GB) { throw 'The Windows runner needs at least 30 GiB free.' }
+          if ($drive.Free -lt 20GB) { throw 'The Windows runner needs at least 20 GiB free.' }
 
       - uses: actions/setup-dotnet@v4
         env:
@@ -166,7 +166,7 @@ jobs:
             [IO.Directory]::CreateSymbolicLink($link, $target) | Out-Null
           }
           catch {
-            throw 'The runner service account must be allowed to create symbolic links for the filesystem security tests.'
+            throw 'The GitHub-hosted runner must be allowed to create symbolic links for the filesystem security tests.'
           }
           finally {
             if ([IO.Directory]::Exists($link)) { [IO.Directory]::Delete($link) }

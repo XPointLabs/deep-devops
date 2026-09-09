@@ -43,7 +43,7 @@ permissions:
 
 jobs:
   supporting-release-evidence:
-    runs-on: [self-hosted, Linux, X64, ubuntu-latest]
+    runs-on: ubuntu-latest
     environment: ${{ inputs.release_lane }}
     timeout-minutes: 120
     steps:

@@ -27,7 +27,7 @@ permissions:
 
 jobs:
   p6-release-evidence:
-    runs-on: [self-hosted, Linux, X64, ubuntu-latest]
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout devops
         uses: actions/checkout@v4
