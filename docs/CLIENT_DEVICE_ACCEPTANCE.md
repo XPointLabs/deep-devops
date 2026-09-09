@@ -19,6 +19,12 @@ unsupported lane until signing authority and physical evidence are available.
 Build-only, synthetic, unit-only, and local-only
 evidence types are rejected.
 
+GitHub Actions never controls the physical Android device or the interactive
+Windows desktop. Mr. X runs the physical matrix on the local operator
+workstation, then retains its sanitized, signed, commit-bound evidence for the
+release manifest. "Local-only" above means an unretained assertion without
+that evidence; it does not exclude a properly retained local physical run.
+
 Required platforms:
 
 - `android`
