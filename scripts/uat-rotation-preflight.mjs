@@ -46,16 +46,14 @@ function assertExactWindowsAcl(targetPath, isDirectory) {
   const script = [
     "$ErrorActionPreference = 'Stop'",
     '$target = $env:DEEP_ACL_TARGET',
-    '$acl = Get-Acl -LiteralPath $target',
-    '$owner = $acl.Owner',
-    'try { $owner = ([System.Security.Principal.NTAccount]$owner).Translate([System.Security.Principal.SecurityIdentifier]).Value } catch { }',
+    `$acl = [System.IO.${isDirectory ? 'Directory' : 'File'}]::GetAccessControl($target)`,
+    '$owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value',
     '$current = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value',
-    '$entries = @($acl.Access | ForEach-Object {',
+    '$entries = @($acl.GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier]) | ForEach-Object {',
     '  $identity = $_.IdentityReference.Value',
-    '  try { $identity = $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value } catch { }',
     '  [pscustomobject]@{ identity = $identity; type = [string]$_.AccessControlType; rights = [int]$_.FileSystemRights; inherited = $_.IsInherited; inheritance = [int]$_.InheritanceFlags; propagation = [int]$_.PropagationFlags }',
     '})',
-    '$attributes = (Get-Item -LiteralPath $target -Force).Attributes',
+    '$attributes = [System.IO.File]::GetAttributes($target)',
     '[pscustomobject]@{ owner = $owner; current = $current; protected = $acl.AreAccessRulesProtected; reparsePoint = (($attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0); entries = $entries } | ConvertTo-Json -Compress -Depth 5'
   ].join('\n');
   const result = spawnSync('powershell.exe', [
@@ -65,7 +63,12 @@ function assertExactWindowsAcl(targetPath, isDirectory) {
     windowsHide: true,
     env: { ...process.env, DEEP_ACL_TARGET: targetPath }
   });
-  if (result.status !== 0) throw new Error('unable to validate exact Windows secret ACL');
+  if (result.status !== 0) {
+    const reason = result.error?.code
+      ?? result.stderr.trim().split(/\r?\n/u).filter(Boolean).at(-1)
+      ?? `exit ${result.status}`;
+    throw new Error(`unable to validate exact Windows secret ACL (${reason})`);
+  }
   let acl;
   try {
     acl = JSON.parse(result.stdout.trim());
