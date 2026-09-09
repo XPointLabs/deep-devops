@@ -1,0 +1,128 @@
+name: on-premise-runner-preflight
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [release-candidate/prod-20260909]
+    paths:
+      - .github/workflows/on-premise-runner-preflight.yml
+
+permissions:
+  contents: read
+
+jobs:
+  linux-x64:
+    name: Linux x64 container and Android build host
+    runs-on: [self-hosted, Linux, X64, ubuntu-latest]
+    timeout-minutes: 30
+    steps:
+      - name: Verify runner route and base commands
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${RUNNER_OS}" = Linux
+          test "${RUNNER_ARCH}" = X64
+          test "$(uname -m)" = x86_64
+          for command in bash git jq base64 curl tar unzip; do
+            command -v "${command}" >/dev/null
+          done
+          available_kib=$(df -Pk "${RUNNER_TEMP}" | awk 'NR == 2 { print $4 }')
+          test "${available_kib}" -ge 31457280
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.301
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Verify managed and Android build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(dotnet --version)" = 10.0.301
+          node --version
+          java -version
+          sdkmanager --version
+
+      - name: Verify Docker daemon access
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker version
+          docker info
+
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Verify Buildx and Linux ARM64 execution
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker buildx inspect --bootstrap
+          test "$(docker run --rm --platform linux/arm64 alpine:3.22 uname -m)" = aarch64
+
+  windows-x64:
+    name: Windows x64 client and native cross-build host
+    runs-on: [self-hosted, Windows, X64, windows-latest, windows-2022]
+    timeout-minutes: 30
+    steps:
+      - name: Verify runner route and free space
+        shell: pwsh
+        run: |
+          if ($env:RUNNER_OS -cne 'Windows' -or $env:RUNNER_ARCH -cne 'X64') {
+            throw "Unexpected runner route: $env:RUNNER_OS/$env:RUNNER_ARCH"
+          }
+          if ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture -ne
+              [Runtime.InteropServices.Architecture]::X64) {
+            throw 'The Windows runner host is not x64.'
+          }
+          $drive = Get-PSDrive -Name ([IO.Path]::GetPathRoot($env:RUNNER_TEMP).TrimEnd(':\'))
+          if ($drive.Free -lt 30GB) { throw 'The Windows runner needs at least 30 GiB free.' }
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.301
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Verify pinned Visual Studio cross-build components
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          if (-not (Test-Path -LiteralPath $vswhere -PathType Leaf)) {
+            throw 'Visual Studio Installer/vswhere is missing.'
+          }
+          $components = @(
+            'Microsoft.VisualStudio.Component.VC.Tools.x86.x64',
+            'Microsoft.VisualStudio.Component.VC.Tools.ARM64',
+            'Microsoft.VisualStudio.Component.VC.CMake.Project'
+          )
+          foreach ($component in $components) {
+            $installation = (& $vswhere -latest -products '*' -requires $component -property installationPath | Out-String).Trim()
+            if ([string]::IsNullOrWhiteSpace($installation)) {
+              throw "Missing Visual Studio component: $component"
+            }
+          }
+          $sdk = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\Include\10.0.26100.0'
+          if (-not (Test-Path -LiteralPath $sdk -PathType Container)) {
+            throw 'Pinned Windows SDK 10.0.26100.0 is missing.'
+          }
+          if ((dotnet --version) -cne '10.0.301') {
+            throw 'Pinned .NET SDK 10.0.301 is unavailable.'
+          }
+          git --version
+          node --version
