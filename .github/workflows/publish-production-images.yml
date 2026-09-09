@@ -54,6 +54,14 @@ jobs:
           token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
           path: xnode
 
+      - name: Checkout protocol
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/deep-protocol
+          ref: ${{ inputs.xnode_ref || env.DEFAULT_XNODE_REF }}
+          token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
+          path: deep-protocol
+
       - name: Resolve image tags
         id: versions
         shell: bash
@@ -113,13 +121,16 @@ jobs:
       - name: Build and push xnode
         uses: docker/build-push-action@v6
         with:
-          context: xnode
+          context: .
           file: deep-devops/docker/xnode-xray.Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
           build-args: |
-            PROJECT=src/XNode/XNode.csproj
+            SDK_IMAGE=mcr.microsoft.com/dotnet/sdk@sha256:7e964ea8bc6c1e18ea9fbc76ed403da41c9b19aeee2aab6bf9c845f25e891380
+            RUNTIME_IMAGE=mcr.microsoft.com/dotnet/aspnet@sha256:e3736b0d423db99c6988e1ddf5ea725c14b12579bb120024e5ff7ff204a14080
+            PROJECT=xnode/src/XNode/XNode.csproj
             APP_DLL=XNode.dll
+            DEEP_PROTOCOL_SOURCE_CUTOVER=true
             XRAY_VERSION=${{ inputs.xray_version || env.DEFAULT_XRAY_VERSION }}
             XRAY_SHA256_AMD64=23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae
             XRAY_SHA256_ARM64=4d30283ae614e3057f730f67cd088a42be6fdf91f8639d82cb69e48cde80413c

@@ -6,11 +6,12 @@ ARG RUNTIME_IMAGE
 FROM --platform=$BUILDPLATFORM ${SDK_IMAGE} AS build
 ARG PROJECT
 ARG TARGETARCH
+ARG DEEP_PROTOCOL_SOURCE_CUTOVER=false
 WORKDIR /src
 COPY . .
 RUN set -eu; \
     for attempt in 1 2 3; do \
-      if dotnet restore "$PROJECT" --locked-mode > /tmp/dotnet-restore.log 2>&1; then \
+      if dotnet restore "$PROJECT" -p:DeepProtocolSourceCutover="$DEEP_PROTOCOL_SOURCE_CUTOVER" > /tmp/dotnet-restore.log 2>&1; then \
         cat /tmp/dotnet-restore.log; rm -f /tmp/dotnet-restore.log; break; \
       fi; \
       cat /tmp/dotnet-restore.log >&2; \
@@ -25,7 +26,7 @@ RUN case "$TARGETARCH" in \
       arm64) DOTNET_ARCH=arm64 ;; \
       *) echo "Unsupported target architecture: $TARGETARCH" >&2; exit 1 ;; \
     esac \
-    && dotnet publish "$PROJECT" --configuration Release --runtime "linux-$DOTNET_ARCH" --output /app --no-restore
+    && dotnet publish "$PROJECT" --configuration Release --runtime "linux-$DOTNET_ARCH" --output /app --no-restore -p:DeepProtocolSourceCutover="$DEEP_PROTOCOL_SOURCE_CUTOVER"
 
 FROM ${RUNTIME_IMAGE} AS runtime
 ARG APP_DLL
