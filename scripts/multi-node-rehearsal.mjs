@@ -137,17 +137,6 @@ function toRegisterRequest(node, index) {
   };
 }
 
-async function rpc(routerUrl, method, payload) {
-  return await fetchJson(`${routerUrl}/api/session/rpc`, {
-    method: 'POST',
-    body: JSON.stringify({
-      id: `${method}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-      method,
-      payload
-    })
-  });
-}
-
 async function collectRouter(url, index) {
   const ready = await waitForJson(`${url}/health/ready`);
   const status = await fetchJson(`${url}/status`);
@@ -156,14 +145,12 @@ async function collectRouter(url, index) {
   const xray = property(status, 'xray', 'Xray');
   const routerId = property(registryPayload, 'routerId', 'RouterId') ?? property(router, 'routerId', 'RouterId');
   assert.ok(routerId, `router ${url} did not expose routerId`);
-  const relayContact = await fetchJson(`${url}/api/network/contact`);
-  assert.equal(property(relayContact, 'routerId', 'RouterId'), routerId, `router ${url} contact routerId mismatch`);
-  assert.equal(
-    property(relayContact, 'signatureAlgorithm', 'SignatureAlgorithm'),
-    'ed25519',
-    `router ${url} did not publish an Ed25519 signed contact`
-  );
-  assert.ok(property(relayContact, 'signature', 'Signature'), `router ${url} contact did not include a signature`);
+  const privacyContactResponse = await fetch(`${url}/api/network/privacy-contact`);
+  const privacyContactProblem = await privacyContactResponse.json();
+  assert.equal(privacyContactResponse.status, 503,
+    `router ${url} must fail closed without a verified Contact authority`);
+  assert.match(property(privacyContactProblem, 'detail', 'Detail') ?? '', /privacy routing is disabled/i,
+    `router ${url} did not explain its unavailable privacy contact boundary`);
 
   const transportMocked = Boolean(property(property(registryPayload, 'transport', 'Transport'), 'mocked', 'Mocked'))
     || String(property(ready, 'transportMode', 'TransportMode') ?? '').toLowerCase() === 'mocked';
@@ -178,7 +165,7 @@ async function collectRouter(url, index) {
     ready,
     status,
     registryPayload,
-    relayContact,
+    privacyContactStatus: privacyContactResponse.status,
     xray,
     transportMode: property(ready, 'transportMode', 'TransportMode'),
     transportMocked
@@ -195,8 +182,6 @@ async function main() {
   }
 
   assert.equal(new Set(routers.map(router => router.routerId)).size, 3, 'router IDs must be unique');
-
-  const contacts = routers.map(router => router.relayContact);
   for (const [index, router] of routers.entries()) {
     const request = toRegisterRequest(router, index);
     request.stakeAtomic = Number(request.stakeAtomic);
@@ -211,13 +196,6 @@ async function main() {
     });
   }
 
-  for (const router of routers) {
-    for (const contact of contacts) {
-      const stored = await rpc(router.url, 'store_rc', contact);
-      assert.equal(stored.success, true, `store_rc failed on ${router.url}`);
-    }
-  }
-
   const registryRuntime = await fetchJson(`${registryUrl}/api/nodes/runtime`);
   const registryNodes = await fetchJson(`${registryUrl}/api/nodes`);
   const reconciliation = await fetchJson(`${registryUrl}/api/nodes/reconciliation`);
@@ -227,24 +205,6 @@ async function main() {
   const issues = property(reconciliation, 'issues', 'Issues') ?? [];
   const rehearsalIssues = issues.filter(issue => routers.some(router => router.routerId === property(issue, 'nodeId', 'NodeId')));
   assert.deepEqual(rehearsalIssues, [], `registry reconciliation reported multi-node rehearsal issues: ${JSON.stringify(rehearsalIssues)}`);
-
-  const selected = await rpc(routers[0].url, 'select_path', {
-    pivot: routers[2].routerId,
-    edges: [routers[1].routerId]
-  });
-  assert.equal(selected.success, true, 'select_path failed after seeding relay contacts');
-
-  const selectedResult = property(selected, 'result', 'Result') ?? {};
-  const selectedHops = property(selectedResult, 'hops', 'Hops') ?? [];
-  assert.equal(selectedHops.length, 3, 'selected path must include three hops');
-  assert.equal(new Set(selectedHops).size, 3, 'selected path must use three distinct router IDs');
-  assert.ok(selectedHops.includes(routers[1].routerId), 'selected path should use the requested edge router');
-  assert.equal(selectedHops.at(-1), routers[2].routerId, 'selected path must end at the pivot router');
-
-  const fetchRcs = await rpc(routers[0].url, 'fetch_rcs', {});
-  assert.equal(fetchRcs.success, true, 'fetch_rcs failed after seeding relay contacts');
-  const relayContacts = property(fetchRcs, 'result', 'Result') ?? [];
-  assert.ok(relayContacts.length >= 3, 'router did not retain at least three relay contacts');
 
   const artifact = {
     status: 'ok',
@@ -258,20 +218,14 @@ async function main() {
       publicPort: property(router.registryPayload, 'publicPort', 'PublicPort'),
       transportMode: router.transportMode,
       transportMocked: router.transportMocked,
+      privacyContactStatus: router.privacyContactStatus,
       xrayRunning: Boolean(property(router.xray, 'running', 'Running')),
       xrayDegraded: Boolean(property(router.xray, 'degraded', 'Degraded'))
     })),
     registryRuntime,
     registryNodeCount: registryNodes.length,
     reconciliationIssues: rehearsalIssues,
-    selectedPath: {
-      sourceRouterId: routers[0].routerId,
-      edgeRouterId: routers[1].routerId,
-      pivotRouterId: routers[2].routerId,
-      hops: selectedHops,
-      distinctHops: new Set(selectedHops).size
-    },
-    relayContactCount: relayContacts.length
+    privacyAuthorityBoundary: 'fail-closed-without-verified-authority'
   };
 
   mkdirSync(artifactDir, { recursive: true });

@@ -357,7 +357,7 @@ export async function bootstrapPrivateUat(options) {
   for (const router of routers) {
     const contact = await fetchJson(
       fetchImpl,
-      `${router.api}/api/network/contact`,
+      `${router.api}/api/network/privacy-contact`,
       { method: 'GET' },
       200,
       `${router.name} contact`

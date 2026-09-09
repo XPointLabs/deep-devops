@@ -167,7 +167,7 @@ function createSyntheticWorld(options = {}) {
       if (check === 0) return response(options.initiallyReady ? 200 : 503, { ready: false });
       return response(registered[index].size === 3 ? 200 : 503, { ready: registered[index].size === 3 });
     }
-    if (suffix === '/api/network/contact') return response(200, contacts[index]);
+    if (suffix === '/api/network/privacy-contact') return response(200, contacts[index]);
     if (suffix === '/status') {
       const count = options.incompleteStatus === index ? 2 : registered[index].size;
       return response(200, {
@@ -248,7 +248,7 @@ test('performs exactly 3 contact fetches, 9 stores, 3 membership checks, and 3 r
     contacts: 3, stores: 9, registered: 3, hops: 3,
     before: 503, after: 200, production: false, restart: false
   });
-  assert.equal(world.requests.filter(item => item.suffix === '/api/network/contact').length, 3);
+  assert.equal(world.requests.filter(item => item.suffix === '/api/network/privacy-contact').length, 3);
   assert.equal(world.requests.filter(item => item.suffix === '/api/session/rpc').length, 15);
   assert.equal(world.requests.filter(item => item.suffix === '/health/ready').length, 6);
 });
