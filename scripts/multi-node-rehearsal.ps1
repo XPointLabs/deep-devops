@@ -123,13 +123,17 @@ function Invoke-DockerBounded {
     $process = $null
     try {
         Write-Host "Starting bounded docker command (timeout ${TimeoutSeconds}s): docker $($Arguments -join ' ')"
-        $process = Start-Process `
-            -FilePath "docker" `
-            -ArgumentList $Arguments `
-            -PassThru `
-            -WindowStyle Hidden `
-            -RedirectStandardOutput $stdoutPath `
-            -RedirectStandardError $stderrPath
+        $startProcessParameters = @{
+            FilePath = "docker"
+            ArgumentList = $Arguments
+            PassThru = $true
+            RedirectStandardOutput = $stdoutPath
+            RedirectStandardError = $stderrPath
+        }
+        if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+            $startProcessParameters.WindowStyle = 'Hidden'
+        }
+        $process = Start-Process @startProcessParameters
         # Windows PowerShell can lose ExitCode for a quickly-exiting child if
         # the native handle was never materialized before WaitForExit.
         [void]$process.Handle

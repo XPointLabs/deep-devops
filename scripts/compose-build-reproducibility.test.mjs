@@ -141,6 +141,8 @@ test('multi-node compose startup is isolated, bounded, observable, and always cl
   assert.match(source, /artifacts["']?\)?[\s\S]*rehearsals\\multi-node/);
   assert.match(source, /\$env:DEEP_REHEARSAL_RUN_DIR = \$ArtifactDir/);
   assert.match(source, /ComposeProjectName \$ComposeProjectName/);
+  assert.match(source, /\$startProcessParameters\.WindowStyle = 'Hidden'/);
+  assert.match(source, /\[Environment\]::OSVersion\.Platform -eq \[PlatformID\]::Win32NT/);
   assert.match(source, /\[void\]\$process\.Handle/);
   assert.match(source, /completed without an observable integer exit code/);
   assert.match(source, /function Invoke-DockerCleanupBounded/);
