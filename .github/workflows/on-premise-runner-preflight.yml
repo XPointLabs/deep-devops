@@ -23,7 +23,7 @@ jobs:
           test "${RUNNER_OS}" = Linux
           test "${RUNNER_ARCH}" = X64
           test "$(uname -m)" = x86_64
-          for command in bash git jq base64 curl tar unzip; do
+          for command in bash git jq base64 curl tar unzip pwsh; do
             command -v "${command}" >/dev/null
           done
           available_kib=$(df -Pk "${RUNNER_TEMP}" | awk 'NR == 2 { print $4 }')
@@ -61,7 +61,7 @@ jobs:
           test "${RUNNER_OS}" = Linux
           test "${RUNNER_ARCH}" = X64
           test "$(uname -m)" = x86_64
-          for command in bash git jq base64 curl tar unzip; do
+          for command in bash git jq base64 curl tar unzip pwsh; do
             command -v "${command}" >/dev/null
           done
           available_kib=$(df -Pk "${RUNNER_TEMP}" | awk 'NR == 2 { print $4 }')

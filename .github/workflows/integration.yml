@@ -46,6 +46,11 @@ jobs:
           token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
           path: xpoint-staking-contracts
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
       - name: Run e2e smoke
         shell: pwsh
         run: ./deep-devops/scripts/test-env.ps1 -Suite smoke
