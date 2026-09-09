@@ -29,30 +29,6 @@ jobs:
           available_kib=$(df -Pk "${RUNNER_TEMP}" | awk 'NR == 2 { print $4 }')
           test "${available_kib}" -ge 31457280
 
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 10.0.301
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 17
-
-      - uses: android-actions/setup-android@v3
-
-      - name: Verify managed and Android build tools
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(dotnet --version)" = 10.0.301
-          node --version
-          java -version
-          sdkmanager --version
-
       - name: Verify Docker daemon access
         shell: bash
         run: |
@@ -73,13 +49,42 @@ jobs:
           docker buildx inspect --bootstrap
           test "$(docker run --rm --platform linux/arm64 alpine:3.22 uname -m)" = aarch64
 
+      - uses: actions/setup-dotnet@v4
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/dotnet
+        with:
+          dotnet-version: 10.0.301
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+        env:
+          ANDROID_HOME: ${{ runner.temp }}/android-sdk
+          ANDROID_SDK_ROOT: ${{ runner.temp }}/android-sdk
+
+      - name: Verify managed and Android build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(dotnet --version)" = 10.0.301
+          node --version
+          java -version
+          sdkmanager --version
+
   windows-x64:
     name: Windows x64 client and native cross-build host
     runs-on: [self-hosted, Windows, X64, windows-latest, windows-2022]
     timeout-minutes: 30
     steps:
       - name: Verify runner route and free space
-        shell: pwsh
+        shell: powershell
         run: |
           if ($env:RUNNER_OS -cne 'Windows' -or $env:RUNNER_ARCH -cne 'X64') {
             throw "Unexpected runner route: $env:RUNNER_OS/$env:RUNNER_ARCH"
@@ -100,7 +105,7 @@ jobs:
           node-version: 24
 
       - name: Verify pinned Visual Studio cross-build components
-        shell: pwsh
+        shell: powershell
         run: |
           $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
           if (-not (Test-Path -LiteralPath $vswhere -PathType Leaf)) {
@@ -126,3 +131,6 @@ jobs:
           }
           git --version
           node --version
+          if (-not (Get-Command pwsh.exe -ErrorAction SilentlyContinue)) {
+            throw 'PowerShell 7 (pwsh.exe) is required by the repository workflows.'
+          }
