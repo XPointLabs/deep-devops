@@ -43,6 +43,7 @@ jobs:
         with:
           repository: ${{ github.repository_owner }}/deep-protocol
           ref: ${{ env.RELEASE_SOURCE_REF }}
+          fetch-depth: 0
           token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
           path: deep-protocol
 
