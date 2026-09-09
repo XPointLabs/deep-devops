@@ -5,6 +5,9 @@ on:
     - cron: "23 2 * * *"
   workflow_dispatch:
 
+env:
+  RELEASE_SOURCE_REF: ${{ github.event_name == 'pull_request' && github.base_ref || github.ref_name }}
+
 jobs:
   full-e2e:
     runs-on: ubuntu-latest
@@ -24,12 +27,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: ${{ github.repository_owner }}/xnode
+          ref: ${{ env.RELEASE_SOURCE_REF }}
           token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
           path: xnode
 
       - uses: actions/checkout@v4
         with:
           repository: ${{ github.repository_owner }}/deep-registry-api
+          ref: ${{ env.RELEASE_SOURCE_REF }}
           token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
           path: deep-registry-api
 

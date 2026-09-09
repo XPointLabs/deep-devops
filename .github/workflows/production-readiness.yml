@@ -21,6 +21,9 @@ on:
         required: false
         type: string
 
+env:
+  RELEASE_SOURCE_REF: ${{ github.ref_name }}
+
 jobs:
   production-readiness:
     runs-on: ubuntu-latest
@@ -34,24 +37,30 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: ${{ github.repository_owner }}/xnode
+          ref: ${{ env.RELEASE_SOURCE_REF }}
+          fetch-depth: 0
           token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
           path: xnode
 
       - uses: actions/checkout@v4
         with:
           repository: ${{ github.repository_owner }}/deep-registry-api
+          ref: ${{ env.RELEASE_SOURCE_REF }}
           token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
           path: deep-registry-api
 
       - uses: actions/checkout@v4
         with:
           repository: ${{ github.repository_owner }}/deep-client-shared
+          ref: ${{ env.RELEASE_SOURCE_REF }}
+          fetch-depth: 0
           token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
           path: deep-client-shared
 
       - uses: actions/checkout@v4
         with:
           repository: ${{ github.repository_owner }}/deep-client-maui
+          ref: ${{ env.RELEASE_SOURCE_REF }}
           token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
           path: deep-client-maui
 
