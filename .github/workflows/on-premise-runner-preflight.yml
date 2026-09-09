@@ -11,8 +11,8 @@ permissions:
   contents: read
 
 jobs:
-  linux-x64:
-    name: Linux x64 container and Android build host
+  linux-docker-x64:
+    name: Linux x64 Docker multi-architecture host
     runs-on: [self-hosted, Linux, X64, ubuntu-latest]
     timeout-minutes: 30
     steps:
@@ -48,6 +48,24 @@ jobs:
           set -euo pipefail
           docker buildx inspect --bootstrap
           test "$(docker run --rm --platform linux/arm64 alpine:3.22 uname -m)" = aarch64
+
+  linux-android-x64:
+    name: Linux x64 managed and Android build host
+    runs-on: [self-hosted, Linux, X64, ubuntu-latest]
+    timeout-minutes: 30
+    steps:
+      - name: Verify runner route and base commands
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${RUNNER_OS}" = Linux
+          test "${RUNNER_ARCH}" = X64
+          test "$(uname -m)" = x86_64
+          for command in bash git jq base64 curl tar unzip; do
+            command -v "${command}" >/dev/null
+          done
+          available_kib=$(df -Pk "${RUNNER_TEMP}" | awk 'NR == 2 { print $4 }')
+          test "${available_kib}" -ge 31457280
 
       - uses: actions/setup-dotnet@v4
         env:
@@ -97,6 +115,8 @@ jobs:
           if ($drive.Free -lt 30GB) { throw 'The Windows runner needs at least 30 GiB free.' }
 
       - uses: actions/setup-dotnet@v4
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}\dotnet
         with:
           dotnet-version: 10.0.301
 
