@@ -97,7 +97,7 @@ jobs:
           sdkmanager --version
 
   windows-x64:
-    name: Windows x64 client and native cross-build host
+    name: Windows x64 managed client build host
     runs-on: windows-2022
     timeout-minutes: 30
     steps:
@@ -124,7 +124,7 @@ jobs:
         with:
           node-version: 24
 
-      - name: Verify pinned Visual Studio cross-build components
+      - name: Verify managed Windows client build tools
         shell: powershell
         run: |
           $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
@@ -132,9 +132,7 @@ jobs:
             throw 'Visual Studio Installer/vswhere is missing.'
           }
           $components = @(
-            'Microsoft.VisualStudio.Component.VC.Tools.x86.x64',
-            'Microsoft.VisualStudio.Component.VC.Tools.ARM64',
-            'Microsoft.VisualStudio.Component.VC.CMake.Project'
+            'Microsoft.VisualStudio.Component.VC.Tools.x86.x64'
           )
           foreach ($component in $components) {
             $installation = (& $vswhere -latest -products '*' -requires $component -property installationPath | Out-String).Trim()
@@ -153,23 +151,4 @@ jobs:
           node --version
           if (-not (Get-Command pwsh.exe -ErrorAction SilentlyContinue)) {
             throw 'PowerShell 7 (pwsh.exe) is required by the repository workflows.'
-          }
-          if (-not (Get-Command rustup.exe -ErrorAction SilentlyContinue) -or
-              -not (Get-Command cargo.exe -ErrorAction SilentlyContinue)) {
-            throw 'rustup.exe and cargo.exe must be available to the runner service account.'
-          }
-          $probeRoot = Join-Path $env:RUNNER_TEMP "deep-symlink-probe-$([Guid]::NewGuid().ToString('N'))"
-          $target = Join-Path $probeRoot 'target'
-          $link = Join-Path $probeRoot 'link'
-          [IO.Directory]::CreateDirectory($target) | Out-Null
-          try {
-            [IO.Directory]::CreateSymbolicLink($link, $target) | Out-Null
-          }
-          catch {
-            throw 'The GitHub-hosted runner must be allowed to create symbolic links for the filesystem security tests.'
-          }
-          finally {
-            if ([IO.Directory]::Exists($link)) { [IO.Directory]::Delete($link) }
-            if ([IO.Directory]::Exists($target)) { [IO.Directory]::Delete($target) }
-            if ([IO.Directory]::Exists($probeRoot)) { [IO.Directory]::Delete($probeRoot) }
           }
