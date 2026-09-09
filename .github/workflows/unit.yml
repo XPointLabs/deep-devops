@@ -7,7 +7,7 @@ on:
 
 jobs:
   unit:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, ubuntu-latest]
     steps:
       - name: Checkout devops
         uses: actions/checkout@v4
@@ -53,6 +53,8 @@ jobs:
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.tool_cache }}/dotnet
         with:
           dotnet-version: |
             10.0.x
@@ -124,7 +126,7 @@ jobs:
           --receipt "${{ runner.temp }}/deep-upload/unit-roundtrip-receipt.json"
 
   security-gate:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, ubuntu-latest]
     steps:
       - name: Checkout devops
         uses: actions/checkout@v4
@@ -181,6 +183,8 @@ jobs:
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.tool_cache }}/dotnet
         with:
           dotnet-version: |
             10.0.x
@@ -253,7 +257,7 @@ jobs:
           --receipt "${{ runner.temp }}/deep-upload/security-roundtrip-receipt.json"
 
   release-gate-contracts:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, ubuntu-latest]
     steps:
       - name: Checkout devops
         uses: actions/checkout@v4

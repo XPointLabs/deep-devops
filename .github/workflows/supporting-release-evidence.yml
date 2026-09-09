@@ -43,7 +43,7 @@ permissions:
 
 jobs:
   supporting-release-evidence:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, ubuntu-latest]
     environment: ${{ inputs.release_lane }}
     timeout-minutes: 120
     steps:
@@ -84,6 +84,8 @@ jobs:
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.tool_cache }}/dotnet
         with:
           dotnet-version: |
             10.0.x

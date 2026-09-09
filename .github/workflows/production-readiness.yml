@@ -23,7 +23,7 @@ on:
 
 jobs:
   production-readiness:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, ubuntu-latest]
     environment: ${{ inputs.release_lane }}
     steps:
       - name: Checkout devops

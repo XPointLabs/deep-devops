@@ -69,7 +69,7 @@ jobs:
 
       - uses: actions/setup-dotnet@v4
         env:
-          DOTNET_INSTALL_DIR: ${{ runner.temp }}/dotnet
+          DOTNET_INSTALL_DIR: ${{ runner.tool_cache }}/dotnet
         with:
           dotnet-version: 10.0.301
 
@@ -116,7 +116,7 @@ jobs:
 
       - uses: actions/setup-dotnet@v4
         env:
-          DOTNET_INSTALL_DIR: ${{ runner.temp }}\dotnet
+          DOTNET_INSTALL_DIR: ${{ runner.tool_cache }}\dotnet
         with:
           dotnet-version: 10.0.301
 
@@ -153,4 +153,8 @@ jobs:
           node --version
           if (-not (Get-Command pwsh.exe -ErrorAction SilentlyContinue)) {
             throw 'PowerShell 7 (pwsh.exe) is required by the repository workflows.'
+          }
+          if (-not (Get-Command rustup.exe -ErrorAction SilentlyContinue) -or
+              -not (Get-Command cargo.exe -ErrorAction SilentlyContinue)) {
+            throw 'rustup.exe and cargo.exe must be available to the runner service account.'
           }
