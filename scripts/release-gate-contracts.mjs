@@ -198,11 +198,7 @@ if (commandResults.every(result => result.passed)) {
 
 if (commandResults.every(result => result.passed)) {
   runNode(
-    [
-      'scripts/update-ceremony-contracts.mjs',
-      '--artifact-dir',
-      path.join(artifactRoot, 'generated', 'P02C')
-    ],
+    ['scripts/update-ceremony-contracts.mjs'],
     'update-ceremony:test-only-dry-run-evidence'
   );
 }

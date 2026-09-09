@@ -4,10 +4,33 @@ function Initialize-DeepEphemeralComposeSecrets {
     )
 
     $generatedNames = [System.Collections.Generic.List[string]]::new()
+    $devopsRoot = [IO.Path]::GetFullPath((Join-Path $ScriptDirectory '..'))
+    $secretDirectory = Join-Path $devopsRoot '.secrets\test-env'
+    [IO.Directory]::CreateDirectory($secretDirectory) | Out-Null
+
+    function Write-EphemeralSecretFile {
+        param(
+            [string] $Path,
+            [string] $Value
+        )
+
+        [IO.File]::WriteAllText(
+            $Path,
+            $Value + [Environment]::NewLine,
+            [Text.UTF8Encoding]::new($false))
+        if (-not $IsWindows) {
+            [IO.File]::SetUnixFileMode(
+                $Path,
+                [IO.UnixFileMode]::UserRead -bor [IO.UnixFileMode]::UserWrite)
+        }
+    }
+
     foreach ($index in 1..4) {
         $privateName = "XNODE_${index}_ED25519_PRIVATE_KEY"
         $publicName = "XNODE_${index}_ROUTER_ID"
         $realityName = "XNODE_${index}_REALITY_PRIVATE_KEY"
+        $clientIdFileName = "XNODE_${index}_VLESS_CLIENT_ID_FILE"
+        $realityFileName = "XNODE_${index}_REALITY_PRIVATE_KEY_FILE"
         $privateValue = [Environment]::GetEnvironmentVariable($privateName, "Process")
         $publicValue = [Environment]::GetEnvironmentVariable($publicName, "Process")
 
@@ -40,13 +63,27 @@ function Initialize-DeepEphemeralComposeSecrets {
             [Environment]::SetEnvironmentVariable($realityName, $value, "Process")
             $generatedNames.Add($realityName)
         }
+
+        if ([string]::IsNullOrWhiteSpace(
+            [Environment]::GetEnvironmentVariable($clientIdFileName, "Process"))) {
+            $clientIdPath = Join-Path $secretDirectory "xnode-$index-vless-client-id"
+            Write-EphemeralSecretFile -Path $clientIdPath -Value ([Guid]::NewGuid().ToString('D'))
+            [Environment]::SetEnvironmentVariable($clientIdFileName, $clientIdPath, "Process")
+            $generatedNames.Add($clientIdFileName)
+        }
+
+        if ([string]::IsNullOrWhiteSpace(
+            [Environment]::GetEnvironmentVariable($realityFileName, "Process"))) {
+            $realityPath = Join-Path $secretDirectory "xnode-$index-reality-private-key"
+            $realityValue = [Environment]::GetEnvironmentVariable($realityName, "Process")
+            Write-EphemeralSecretFile -Path $realityPath -Value $realityValue
+            [Environment]::SetEnvironmentVariable($realityFileName, $realityPath, "Process")
+            $generatedNames.Add($realityFileName)
+        }
     }
 
     if ([string]::IsNullOrWhiteSpace(
         [Environment]::GetEnvironmentVariable('DEEP_TEST_TURN_SHARED_SECRET_FILE', 'Process'))) {
-        $devopsRoot = [IO.Path]::GetFullPath((Join-Path $ScriptDirectory '..'))
-        $secretDirectory = Join-Path $devopsRoot '.secrets\test-env'
-        [IO.Directory]::CreateDirectory($secretDirectory) | Out-Null
         $secretPath = Join-Path $secretDirectory 'turn-shared-secret'
         if (-not (Test-Path -LiteralPath $secretPath -PathType Leaf)) {
             $random = [byte[]]::new(48)

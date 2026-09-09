@@ -107,7 +107,10 @@ if ($script:LastDockerExitCode -ne 0) {
 
 if ($RequireRouterNoMock) {
     Set-DefaultProcessEnvironmentVariable -Name "XNODE_DOCKERFILE" -Value (Join-Path $DevopsDir "docker/xnode-xray.Dockerfile")
-    Set-DefaultProcessEnvironmentVariable -Name "XNODE_ASPNETCORE_ENVIRONMENT" -Value "Production"
+    # This integration lane proves that the real Xray process and transport are
+    # healthy. Production readiness is a separate fail-closed authority gate;
+    # enabling that profile here would intentionally keep privacy routing down.
+    Set-DefaultProcessEnvironmentVariable -Name "XNODE_ASPNETCORE_ENVIRONMENT" -Value "Development"
     Set-DefaultProcessEnvironmentVariable -Name "XNODE_VLESS_MOCK_PROCESS" -Value "false"
     Set-DefaultProcessEnvironmentVariable -Name "XNODE_XRAY_EXECUTABLE_PATH" -Value "/usr/local/bin/xray"
     Set-DefaultProcessEnvironmentVariable -Name "XNODE_TRANSPORT_MODE" -Value "Tcp"

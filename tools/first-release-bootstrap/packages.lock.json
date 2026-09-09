@@ -4,18 +4,18 @@
     "net10.0": {
       "Deep.Protocol": {
         "type": "Transitive",
-        "resolved": "0.6.0-local.2ee5f72df11c",
-        "contentHash": "lsuUa2tv1C05/bh6M48AQVVIpoZ8Vix1WBFKJVPK63wgmKx2VCrhc3gdEDGOLpgVsPHTfTWCtoCcRvcsyRS9uA==",
+        "resolved": "0.5.0-production.e75bfed",
+        "contentHash": "d554G0Upd8xsuRWoUGBh9bR33cu/9fpcDMEZ5ciTZ9OhLQahiuCgqkoukcMRUuJr2Sn6Nz/DaAk/m3buDq197A==",
         "dependencies": {
-          "Sodium.Core": "[1.4.1]"
+          "Sodium.Core": "1.4.1"
         }
       },
       "Deep.Protocol.MembershipRoutes": {
         "type": "Transitive",
-        "resolved": "0.6.0-local.2ee5f72df11c",
-        "contentHash": "nq7lyTu4BO227lZ0fQibw32SCDs8K6/VmsL7s7GFgAEiJkm/3v99kRlBMK/o96DMRbejSVo8QWlvUiKch5OWbA==",
+        "resolved": "0.5.0-production.e75bfed",
+        "contentHash": "6+TuQpHGiX+ekv0Cu5G+f1yEio/ZUP/hIdIX7X37hbrgIsIvwLItPLOEKXxRIRrXeEiyF1zun8QEnQiFLVS3Ug==",
         "dependencies": {
-          "Deep.Protocol": "0.6.0-local.2ee5f72df11c"
+          "Deep.Protocol": "0.5.0-production.e75bfed"
         }
       },
       "Keccak256": {
@@ -113,8 +113,8 @@
       "xnode.core": {
         "type": "Project",
         "dependencies": {
-          "Deep.Protocol": "[0.6.0-local.2ee5f72df11c, 0.6.0-local.2ee5f72df11c]",
-          "Deep.Protocol.MembershipRoutes": "[0.6.0-local.2ee5f72df11c, 0.6.0-local.2ee5f72df11c]",
+          "Deep.Protocol": "[0.5.0-production.e75bfed, 0.5.0-production.e75bfed]",
+          "Deep.Protocol.MembershipRoutes": "[0.5.0-production.e75bfed, 0.5.0-production.e75bfed]",
           "Microsoft.Extensions.Logging.Abstractions": "[8.0.0, )",
           "Rebex.Elliptic.Ed25519": "[1.2.2, )",
           "Sodium.Core": "[1.4.1, )"

@@ -182,6 +182,21 @@ test('no-mock compose pins both supported Xray platform assets and Dockerfile se
   assert.match(dockerfile, /--retry 5 --retry-all-errors/);
   assert.doesNotMatch(dockerfile, /dotnet restore[^\r\n]*--(?:arch|runtime|-r)\b/);
   assert.match(dockerfile, /dotnet publish[^\r\n]*--runtime "linux-\$DOTNET_ARCH"[^\r\n]*--no-restore/);
+
+  for (const [service, index] of [['xnode', 1], ['xnode-1', 2], ['xnode-2', 3], ['xnode-3', 4]]) {
+    const block = compose.match(new RegExp(`^  ${service}:\\r?\\n([\\s\\S]*?)(?=^  [a-zA-Z0-9-]+:|(?![\\s\\S]))`, 'm'))?.[1] ?? '';
+    assert.match(block, new RegExp(`Vless__ClientIdFile: /run/secrets/xnode-${index}-vless-client-id`));
+    assert.match(block, new RegExp(`Vless__Reality__PrivateKeyFile: /run/secrets/xnode-${index}-reality-private-key`));
+    assert.doesNotMatch(block, /Vless__ClientId:/);
+    assert.doesNotMatch(block, /Vless__Reality__PrivateKey:/);
+  }
+});
+
+test('no-mock integration uses real Xray without impersonating production authority readiness', async () => {
+  const source = await readFile(path.join(repositoryRoot, 'scripts', 'test-env.ps1'), 'utf8');
+  assert.match(source, /XNODE_ASPNETCORE_ENVIRONMENT" -Value "Development"/);
+  assert.match(source, /XNODE_VLESS_MOCK_PROCESS" -Value "false"/);
+  assert.match(source, /XNODE_XRAY_EXECUTABLE_PATH" -Value "\/usr\/local\/bin\/xray"/);
 });
 
 test('mandatory whole-image ARGs stay explicit and checks are scoped to InvalidDefaultArgInFrom', async () => {

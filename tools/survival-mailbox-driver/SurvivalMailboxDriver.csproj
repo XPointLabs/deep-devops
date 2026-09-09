@@ -5,9 +5,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <RestoreConfigFile>$(XNodeSource)\eng\survival-beta.NuGet.Config</RestoreConfigFile>
+    <XNodeSource Condition="'$(XNodeSource)' == ''">$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../../../xnode'))</XNodeSource>
+    <RestoreConfigFile>$(XNodeSource)/eng/survival-beta.NuGet.Config</RestoreConfigFile>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="$(XNodeSource)\src\XNode.Core\XNode.Core.csproj" />
+    <ProjectReference Include="$(XNodeSource)/src/XNode.Core/XNode.Core.csproj" />
   </ItemGroup>
 </Project>

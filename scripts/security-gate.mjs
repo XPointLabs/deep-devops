@@ -664,13 +664,16 @@ function buildSbom() {
 function runCommand(command, args, cwd) {
   const isWindowsCommandShim = process.platform === 'win32' && ['corepack', 'npm', 'pnpm'].includes(command);
   const executable = isWindowsCommandShim ? 'cmd.exe' : command;
+  const invokedCommand = isWindowsCommandShim ? resolveWindowsCommandShim(command) : command;
+  const windowsCommandLine = [invokedCommand, ...args].map(quoteWindowsCommandArg).join(' ');
   const commandArgs = isWindowsCommandShim
-    ? ['/d', '/s', '/c', [command, ...args].map(quoteWindowsCommandArg).join(' ')]
+    ? ['/d', '/s', '/c', `"${windowsCommandLine}"`]
     : args;
   const result = spawnSync(executable, commandArgs, {
     cwd,
     encoding: 'utf8',
-    maxBuffer: 20 * 1024 * 1024
+    maxBuffer: 20 * 1024 * 1024,
+    windowsVerbatimArguments: isWindowsCommandShim
   });
 
   return {
@@ -681,6 +684,18 @@ function runCommand(command, args, cwd) {
     stderr: result.stderr ?? '',
     error: result.error ? String(result.error.message ?? result.error) : null
   };
+}
+
+function resolveWindowsCommandShim(command) {
+  const directories = [
+    resolve(process.execPath, '..'),
+    ...(process.env.PATH ?? '').split(';').filter(Boolean)
+  ];
+  for (const directory of directories) {
+    const candidate = join(directory, `${command}.cmd`);
+    if (existsSync(candidate)) return candidate;
+  }
+  return `${command}.cmd`;
 }
 
 function quoteWindowsCommandArg(value) {
@@ -810,15 +825,15 @@ function npmAuditForRepo(repo, root) {
       ecosystem: 'npm',
       repo,
       manifest: relative(workspaceRoot, packageJsonPath).replace(/\\/g, '/'),
-      status: 'skipped',
+      status: 'ok',
       reason: 'package.json has no dependencies'
     }];
   }
 
   if (existsSync(join(root, 'pnpm-lock.yaml'))) {
-    let result = runCommand('pnpm', ['audit', '--audit-level', 'high', '--json'], root);
+    let result = runCommand('corepack', ['pnpm', 'audit', '--audit-level', 'high', '--json'], root);
     if (result.exitCode !== 0 && /not recognized|command not found|not found/i.test(`${result.stderr}\n${result.error ?? ''}`)) {
-      result = runCommand('corepack', ['pnpm', 'audit', '--audit-level', 'high', '--json'], root);
+      result = runCommand('pnpm', ['audit', '--audit-level', 'high', '--json'], root);
     }
     const auditStatus = packageAuditStatus(result);
 

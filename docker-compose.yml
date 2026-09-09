@@ -43,12 +43,16 @@ services:
       Vless__WorkingDirectory: /tmp/deep/xray
       Vless__PublicHost: xnode
       Vless__PublicPort: 443
+      Vless__ClientIdFile: /run/secrets/xnode-1-vless-client-id
       Vless__TransportMode: ${XNODE_TRANSPORT_MODE:-Reality}
       Vless__Reality__ServerName: www.microsoft.com
       Vless__Reality__PublicKey: devnet-reality-public-key
-      Vless__Reality__PrivateKey: ${XNODE_1_REALITY_PRIVATE_KEY:?set XNODE_1_REALITY_PRIVATE_KEY in .env}
+      Vless__Reality__PrivateKeyFile: /run/secrets/xnode-1-reality-private-key
       Vless__Reality__ShortId: 0123456789abcdef
       RegistryHeartbeat__Enabled: "false"
+    secrets:
+      - xnode-1-vless-client-id
+      - xnode-1-reality-private-key
     ports:
       - "18081:8080"
     healthcheck:
@@ -104,12 +108,16 @@ services:
       Vless__WorkingDirectory: /tmp/deep/xray
       Vless__PublicHost: xnode-1
       Vless__PublicPort: 443
+      Vless__ClientIdFile: /run/secrets/xnode-2-vless-client-id
       Vless__TransportMode: ${XNODE_TRANSPORT_MODE:-Reality}
       Vless__Reality__ServerName: www.microsoft.com
       Vless__Reality__PublicKey: devnet-reality-public-key
-      Vless__Reality__PrivateKey: ${XNODE_2_REALITY_PRIVATE_KEY:?set XNODE_2_REALITY_PRIVATE_KEY in .env}
+      Vless__Reality__PrivateKeyFile: /run/secrets/xnode-2-reality-private-key
       Vless__Reality__ShortId: 0123456789abc101
       RegistryHeartbeat__Enabled: "false"
+    secrets:
+      - xnode-2-vless-client-id
+      - xnode-2-reality-private-key
     ports:
       - "19281:8080"
     healthcheck:
@@ -145,12 +153,16 @@ services:
       Vless__WorkingDirectory: /tmp/deep/xray
       Vless__PublicHost: xnode-2
       Vless__PublicPort: 443
+      Vless__ClientIdFile: /run/secrets/xnode-3-vless-client-id
       Vless__TransportMode: ${XNODE_TRANSPORT_MODE:-Reality}
       Vless__Reality__ServerName: www.microsoft.com
       Vless__Reality__PublicKey: devnet-reality-public-key
-      Vless__Reality__PrivateKey: ${XNODE_3_REALITY_PRIVATE_KEY:?set XNODE_3_REALITY_PRIVATE_KEY in .env}
+      Vless__Reality__PrivateKeyFile: /run/secrets/xnode-3-reality-private-key
       Vless__Reality__ShortId: 0123456789abc102
       RegistryHeartbeat__Enabled: "false"
+    secrets:
+      - xnode-3-vless-client-id
+      - xnode-3-reality-private-key
     ports:
       - "19282:8080"
     healthcheck:
@@ -186,12 +198,16 @@ services:
       Vless__WorkingDirectory: /tmp/deep/xray
       Vless__PublicHost: xnode-3
       Vless__PublicPort: 443
+      Vless__ClientIdFile: /run/secrets/xnode-4-vless-client-id
       Vless__TransportMode: ${XNODE_TRANSPORT_MODE:-Reality}
       Vless__Reality__ServerName: www.microsoft.com
       Vless__Reality__PublicKey: devnet-reality-public-key
-      Vless__Reality__PrivateKey: ${XNODE_4_REALITY_PRIVATE_KEY:?set XNODE_4_REALITY_PRIVATE_KEY in .env}
+      Vless__Reality__PrivateKeyFile: /run/secrets/xnode-4-reality-private-key
       Vless__Reality__ShortId: 0123456789abc103
       RegistryHeartbeat__Enabled: "false"
+    secrets:
+      - xnode-4-vless-client-id
+      - xnode-4-reality-private-key
     ports:
       - "19283:8080"
     healthcheck:
@@ -509,3 +525,19 @@ volumes:
 secrets:
   turn-shared-secret:
     file: ${DEEP_TEST_TURN_SHARED_SECRET_FILE:-./.secrets/test-env/turn-shared-secret}
+  xnode-1-vless-client-id:
+    file: ${XNODE_1_VLESS_CLIENT_ID_FILE:-./.secrets/test-env/xnode-1-vless-client-id}
+  xnode-1-reality-private-key:
+    file: ${XNODE_1_REALITY_PRIVATE_KEY_FILE:-./.secrets/test-env/xnode-1-reality-private-key}
+  xnode-2-vless-client-id:
+    file: ${XNODE_2_VLESS_CLIENT_ID_FILE:-./.secrets/test-env/xnode-2-vless-client-id}
+  xnode-2-reality-private-key:
+    file: ${XNODE_2_REALITY_PRIVATE_KEY_FILE:-./.secrets/test-env/xnode-2-reality-private-key}
+  xnode-3-vless-client-id:
+    file: ${XNODE_3_VLESS_CLIENT_ID_FILE:-./.secrets/test-env/xnode-3-vless-client-id}
+  xnode-3-reality-private-key:
+    file: ${XNODE_3_REALITY_PRIVATE_KEY_FILE:-./.secrets/test-env/xnode-3-reality-private-key}
+  xnode-4-vless-client-id:
+    file: ${XNODE_4_VLESS_CLIENT_ID_FILE:-./.secrets/test-env/xnode-4-vless-client-id}
+  xnode-4-reality-private-key:
+    file: ${XNODE_4_REALITY_PRIVATE_KEY_FILE:-./.secrets/test-env/xnode-4-reality-private-key}

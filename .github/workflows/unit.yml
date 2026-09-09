@@ -142,7 +142,7 @@ jobs:
           --receipt "${{ runner.temp }}/deep-upload/unit-roundtrip-receipt.json"
 
   security-gate:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
       - name: Checkout release superproject
         uses: actions/checkout@v4
