@@ -5,10 +5,17 @@ ARG RUNTIME_IMAGE
 
 FROM ${SDK_IMAGE} AS build
 ARG PROJECT
+ARG DEEP_PROTOCOL_SOURCE_CUTOVER=false
+ARG DEEP_PROTOCOL_LOCAL_CUTOVER=false
 WORKDIR /src
 COPY . .
-RUN dotnet restore "$PROJECT"
-RUN dotnet publish "$PROJECT" --configuration Release --output /app --no-restore
+COPY --from=deep_protocol . /deep-protocol
+RUN dotnet restore "$PROJECT" \
+      -p:DeepProtocolSourceCutover="$DEEP_PROTOCOL_SOURCE_CUTOVER" \
+      -p:DeepProtocolLocalCutover="$DEEP_PROTOCOL_LOCAL_CUTOVER"
+RUN dotnet publish "$PROJECT" --configuration Release --output /app --no-restore \
+      -p:DeepProtocolSourceCutover="$DEEP_PROTOCOL_SOURCE_CUTOVER" \
+      -p:DeepProtocolLocalCutover="$DEEP_PROTOCOL_LOCAL_CUTOVER"
 
 FROM ${RUNTIME_IMAGE} AS runtime
 ARG APP_DLL

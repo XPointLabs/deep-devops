@@ -8,11 +8,14 @@ services:
     build:
       context: ${DEEP_ROOT:-..}/xnode
       dockerfile: ${XNODE_DOCKERFILE:-../deep-devops/docker/dotnet-service.Dockerfile}
+      additional_contexts:
+        deep_protocol: ${DEEP_ROOT:-..}/deep-protocol
       args:
         SDK_IMAGE: mcr.microsoft.com/dotnet/sdk:10.0.301
         RUNTIME_IMAGE: mcr.microsoft.com/dotnet/aspnet:10.0
         PROJECT: src/XNode/XNode.csproj
         APP_DLL: XNode.dll
+        DEEP_PROTOCOL_SOURCE_CUTOVER: "true"
         XRAY_VERSION: ${XNODE_XRAY_VERSION:-v26.3.27}
         XRAY_DOWNLOAD_URL: ${XNODE_XRAY_DOWNLOAD_URL:-}
         XRAY_SHA256: ${XNODE_XRAY_SHA256:-}
@@ -61,11 +64,14 @@ services:
     build:
       context: ${DEEP_ROOT:-..}/xnode
       dockerfile: ${XNODE_DOCKERFILE:-../deep-devops/docker/dotnet-service.Dockerfile}
+      additional_contexts:
+        deep_protocol: ${DEEP_ROOT:-..}/deep-protocol
       args:
         SDK_IMAGE: mcr.microsoft.com/dotnet/sdk:10.0.301
         RUNTIME_IMAGE: mcr.microsoft.com/dotnet/aspnet:10.0
         PROJECT: src/XNode/XNode.csproj
         APP_DLL: XNode.dll
+        DEEP_PROTOCOL_SOURCE_CUTOVER: "true"
         XRAY_VERSION: ${XNODE_XRAY_VERSION:-v26.3.27}
         XRAY_DOWNLOAD_URL: ${XNODE_XRAY_DOWNLOAD_URL:-}
         XRAY_SHA256: ${XNODE_XRAY_SHA256:-}
@@ -199,11 +205,14 @@ services:
     build:
       context: ${DEEP_ROOT:-..}/deep-registry-api
       dockerfile: ${DEEP_DEVOPS_DIR:-../deep-devops}/docker/dotnet-service.Dockerfile
+      additional_contexts:
+        deep_protocol: ${DEEP_ROOT:-..}/deep-protocol
       args:
         SDK_IMAGE: mcr.microsoft.com/dotnet/sdk:10.0.301
         RUNTIME_IMAGE: mcr.microsoft.com/dotnet/aspnet:10.0
         PROJECT: src/Deep.Registry.Api/Deep.Registry.Api.csproj
         APP_DLL: Deep.Registry.Api.dll
+        DEEP_PROTOCOL_LOCAL_CUTOVER: "true"
     environment:
       ASPNETCORE_URLS: http://0.0.0.0:8080
       Registry__StakingRequirementAtomic: "25000000000000"
@@ -232,6 +241,8 @@ services:
     build:
       context: ${DEEP_ROOT:-..}/xpoint-staking-backend
       dockerfile: ${DEEP_DEVOPS_DIR:-../deep-devops}/docker/dotnet-service.Dockerfile
+      additional_contexts:
+        deep_protocol: ${DEEP_ROOT:-..}/deep-protocol
       args:
         SDK_IMAGE: mcr.microsoft.com/dotnet/sdk:10.0.301
         RUNTIME_IMAGE: mcr.microsoft.com/dotnet/aspnet:10.0

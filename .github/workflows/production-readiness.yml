@@ -29,6 +29,14 @@ jobs:
     runs-on: ubuntu-latest
     environment: ${{ inputs.release_lane }}
     steps:
+      - name: Checkout release superproject
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/deep-platform
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
       - name: Checkout devops
         uses: actions/checkout@v4
         with:

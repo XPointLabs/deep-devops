@@ -50,6 +50,14 @@ jobs:
     environment: ${{ inputs.release_lane }}
     timeout-minutes: 120
     steps:
+      - name: Checkout release superproject
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/deep-platform
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
       - name: Checkout devops
         uses: actions/checkout@v4
         with:
@@ -93,8 +101,7 @@ jobs:
         env:
           DOTNET_INSTALL_DIR: ${{ runner.tool_cache }}/dotnet
         with:
-          dotnet-version: |
-            10.0.x
+          dotnet-version: 10.0.301
 
       - name: Setup Node
         uses: actions/setup-node@v4

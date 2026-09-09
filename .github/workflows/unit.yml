@@ -13,6 +13,14 @@ jobs:
   unit:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout release superproject
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/deep-platform
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
       - name: Checkout devops
         uses: actions/checkout@v4
         with:
@@ -64,8 +72,7 @@ jobs:
         env:
           DOTNET_INSTALL_DIR: ${{ runner.tool_cache }}/dotnet
         with:
-          dotnet-version: |
-            10.0.x
+          dotnet-version: 10.0.301
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -75,8 +82,8 @@ jobs:
       - name: Unit tests
         shell: pwsh
         run: |
-          dotnet test xnode/XNode.slnx --configuration Release --logger "trx;LogFileName=xnode.trx"
-          dotnet test deep-registry-api/Deep.Registry.Api.slnx --configuration Release --logger "trx;LogFileName=registry.trx"
+          dotnet test xnode/XNode.slnx --configuration Release --logger "trx;LogFileName=xnode.trx" -p:DeepProtocolSourceCutover=true
+          dotnet test deep-registry-api/Deep.Registry.Api.slnx --configuration Release --logger "trx;LogFileName=registry.trx" -p:DeepProtocolLocalCutover=true -p:DeepProtocolSourceCutover=true
           dotnet test xpoint-staking-backend/XPoint.Staking.Backend.slnx --configuration Release --logger "trx;LogFileName=staking-backend.trx"
           dotnet test deep-protocol/Deep.Protocol.slnx --configuration Release --logger "trx;LogFileName=protocol.trx"
           cd deep-tests-e2e
@@ -136,6 +143,14 @@ jobs:
   security-gate:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout release superproject
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/deep-platform
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
       - name: Checkout devops
         uses: actions/checkout@v4
         with:
@@ -201,8 +216,7 @@ jobs:
         env:
           DOTNET_INSTALL_DIR: ${{ runner.tool_cache }}/dotnet
         with:
-          dotnet-version: |
-            10.0.x
+          dotnet-version: 10.0.301
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -274,6 +288,14 @@ jobs:
   release-gate-contracts:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout release superproject
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/deep-platform
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
       - name: Checkout devops
         uses: actions/checkout@v4
         with:

@@ -9,9 +9,15 @@ ARG TARGETARCH
 ARG DEEP_PROTOCOL_SOURCE_CUTOVER=false
 WORKDIR /src
 COPY . .
+COPY --from=deep_protocol . /deep-protocol
 RUN set -eu; \
     for attempt in 1 2 3; do \
-      if dotnet restore "$PROJECT" --locked-mode -p:DeepProtocolSourceCutover="$DEEP_PROTOCOL_SOURCE_CUTOVER" > /tmp/dotnet-restore.log 2>&1; then \
+      if [ "$DEEP_PROTOCOL_SOURCE_CUTOVER" = "true" ]; then \
+        if dotnet restore "$PROJECT" -p:DeepProtocolSourceCutover=true > /tmp/dotnet-restore.log 2>&1; then restore_ok=true; else restore_ok=false; fi; \
+      else \
+        if dotnet restore "$PROJECT" --locked-mode -p:DeepProtocolSourceCutover=false > /tmp/dotnet-restore.log 2>&1; then restore_ok=true; else restore_ok=false; fi; \
+      fi; \
+      if [ "$restore_ok" = "true" ]; then \
         cat /tmp/dotnet-restore.log; rm -f /tmp/dotnet-restore.log; break; \
       fi; \
       cat /tmp/dotnet-restore.log >&2; \
