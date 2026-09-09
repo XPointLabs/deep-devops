@@ -158,3 +158,18 @@ jobs:
               -not (Get-Command cargo.exe -ErrorAction SilentlyContinue)) {
             throw 'rustup.exe and cargo.exe must be available to the runner service account.'
           }
+          $probeRoot = Join-Path $env:RUNNER_TEMP "deep-symlink-probe-$([Guid]::NewGuid().ToString('N'))"
+          $target = Join-Path $probeRoot 'target'
+          $link = Join-Path $probeRoot 'link'
+          [IO.Directory]::CreateDirectory($target) | Out-Null
+          try {
+            [IO.Directory]::CreateSymbolicLink($link, $target) | Out-Null
+          }
+          catch {
+            throw 'The runner service account must be allowed to create symbolic links for the filesystem security tests.'
+          }
+          finally {
+            if ([IO.Directory]::Exists($link)) { [IO.Directory]::Delete($link) }
+            if ([IO.Directory]::Exists($target)) { [IO.Directory]::Delete($target) }
+            if ([IO.Directory]::Exists($probeRoot)) { [IO.Directory]::Delete($probeRoot) }
+          }
