@@ -13,13 +13,14 @@ for (let index = 2; index < process.argv.length; index += 1) {
 }
 const required = ['--profile', '--host', '--current-cert', '--current-key', '--current-pin', '--next-cert', '--next-key', '--next-pin', '--client-timeout-seconds', '--server-timeout-seconds', '--quorum-cidr'];
 for (const name of required) if (!values.has(name)) throw new Error(`Missing ${name}.`);
-if (!['deep-managed', 'operator-managed'].includes(values.get('--profile'))) {
+if (!['pinned-self-issued', 'deep-managed', 'operator-managed'].includes(values.get('--profile'))) {
   throw new Error('Invalid ingress certificate profile.');
 }
 
 const host = values.get('--host');
-if (!/^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/.test(host)) {
-  throw new Error('Ingress host must be one exact DNS name.');
+const hostIsIp = isIP(host) === 4;
+if (!hostIsIp && !/^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/.test(host)) {
+  throw new Error('Ingress host must be one exact DNS name or public IPv4 address.');
 }
 for (const option of ['--client-timeout-seconds', '--server-timeout-seconds']) {
   const text = values.get(option);
@@ -65,8 +66,11 @@ function inspect(label) {
   if (certificateSpki.length !== privateSpki.length || !crypto.timingSafeEqual(certificateSpki, privateSpki)) {
     throw new Error(`${label} certificate does not match its private key.`);
   }
-  const exactDnsSan = String(certificate.subjectAltName ?? '').split(', ').includes(`DNS:${host}`);
-  if (!exactDnsSan || certificate.checkHost(host, { wildcards: false, partialWildcards: false, multiLabelWildcards: false, singleLabelSubdomains: false }) !== host) {
+  const sanItems = String(certificate.subjectAltName ?? '').split(', ');
+  const exactSan = hostIsIp
+    ? sanItems.includes(`IP Address:${host}`) && certificate.checkIP(host) === host
+    : sanItems.includes(`DNS:${host}`) && certificate.checkHost(host, { wildcards: false, partialWildcards: false, multiLabelWildcards: false, singleLabelSubdomains: false }) === host;
+  if (!exactSan) {
     throw new Error(`${label} certificate SAN does not contain the exact ingress host.`);
   }
   const now = Date.now();

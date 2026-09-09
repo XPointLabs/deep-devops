@@ -30,7 +30,7 @@ function Assert-ProtectedHolderFile([string]$Path) {
     if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
         $current = [Security.Principal.WindowsIdentity]::GetCurrent().User
         $allowed = @($current.Value, 'S-1-5-18', 'S-1-5-32-544') | Sort-Object
-        $security = ([IO.FileInfo]$item).GetAccessControl()
+        $security = Get-Acl -LiteralPath $Path
         $rules = @($security.GetAccessRules($true, $true,
             [Security.Principal.SecurityIdentifier]) | ForEach-Object {
                 if ($_.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow -or

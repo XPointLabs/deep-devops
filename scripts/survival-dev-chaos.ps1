@@ -133,9 +133,9 @@ Remove-Item -LiteralPath $EvidencePath -Force -ErrorAction SilentlyContinue
 # one storage service and therefore cannot prove per-node durability or dedupe.
 Invoke-ContractEvidence `
     'pre-dispatch-ingress-fallback' `
-    'Deep.Client.Shared.Tests.Services.PrivacyRoutedMailboxBinaryIngressTests.RetryableBeforeForward_UsesFreshDisjointFallback' `
-    'A canonical before-forward failure uses the pinned, strictly disjoint three-hop fallback before any mailbox mutation.' `
-    'The injected failure is a transport contract test; it does not prove that an arbitrary stopped node was selected in a live message flow.'
+    'Deep.Client.Shared.Tests.Services.PrivacyRoutedMailboxBinaryIngressTests.InitialThreeNodeProfile_AllowsBestEffortFallbackNodeReuse' `
+    'The initial three-node profile permits best-effort fallback node reuse; retry remains admissible only after a definitive before-forward rejection, before any mailbox mutation.' `
+    'The injected failure is a transport contract test; it does not prove that an arbitrary stopped node was selected in a live message flow or permit fallback after an unknown outcome.'
 Invoke-ContractEvidence `
     'postdispatch-outcome-unknown' `
     'Deep.Client.Shared.Tests.Services.PrivacyRoutedMailboxBinaryIngressTests.OutcomeUnknown_NeverUsesFallback' `

@@ -105,7 +105,7 @@ Copy the printed `DEEP_NODE_ED25519_PUBLIC_KEY`,
 `DEEP_NODE_ED25519_PRIVATE_KEY_FILE`,
 `DEEP_NODE_X25519_PRIVATE_KEY_FILE`,
 `DEEP_NODE_BLS_PRIVATE_KEY_FILE`, and
-`DEEP_NODE_VLESS_CLIENT_ID` values into `.env.node.prod`. Keep the
+`DEEP_NODE_VLESS_CLIENT_ID_FILE` values into `.env.node.prod`. Keep the
 `secrets` directory local to the node host and back it up as node identity
 state.
 
@@ -115,7 +115,10 @@ state.
 docker run --rm --entrypoint xray ghcr.io/xpointlabs/xnode:latest x25519
 ```
 
-Put the generated private/public key pair into `DEEP_NODE_REALITY_PRIVATE_KEY` and `DEEP_NODE_REALITY_PUBLIC_KEY`. Generate a unique 8-byte hex `DEEP_NODE_REALITY_SHORT_ID` per host.
+Write the generated private key as one line to a protected local file and set
+`DEEP_NODE_REALITY_PRIVATE_KEY_FILE` to that path. Put only the public key in
+`DEEP_NODE_REALITY_PUBLIC_KEY`. Generate a unique 8-byte hex
+`DEEP_NODE_REALITY_SHORT_ID` per host.
 
 ## Required Env Values
 
@@ -131,7 +134,8 @@ Put the generated private/public key pair into `DEEP_NODE_REALITY_PRIVATE_KEY` a
 - `DEEP_NODE_PUBLIC_IP`: public origin IPv4 address advertised to other nodes.
 - `DEEP_NODE_X25519_PRIVATE_KEY_FILE`: independent X25519 private scalar used
   to open exactly one native privacy layer.
-- `DEEP_PRIVACY_PEER_<N>_*`: each authorized next-hop router id, HTTPS base
+- `DEEP_PRIVACY_PEER_<N>_*`: the two other routers in the three-router seed
+  topology, each with its authorized next-hop router id, HTTPS base
   URL, and distinct current/next SPKI pins. Peer frames use
   `/api/peer/privacy/v1/frame`, Ed25519 request authentication, bounded replay
   protection, and never trust an endpoint supplied by an inbound frame.
@@ -154,7 +158,14 @@ Put the generated private/public key pair into `DEEP_NODE_REALITY_PRIVATE_KEY` a
 - `DEEP_NODE_ED25519_PRIVATE_KEY_FILE`, `DEEP_NODE_X25519_PRIVATE_KEY_FILE`, and
   `DEEP_NODE_BLS_PRIVATE_KEY_FILE`: local files mounted as Docker secrets; do
   not put private key material directly in `.env`.
-- `DEEP_NODE_VLESS_CLIENT_ID` and Reality fields: unique per node.
+- `DEEP_NODE_ONION_STATE_PROTECTION_FILE` is an independent raw nonzero 32-byte
+  secret protecting durable replay/entropy/key-vault state.
+- `DEEP_NODE_ONION_RECEIVE_POSITION` is the exact authority-assigned
+  `Ingress`, `Core`, or `Exit` role; the first three seed nodes use those roles
+  respectively and never infer them from startup order.
+- `DEEP_NODE_VLESS_CLIENT_ID_FILE` and `DEEP_NODE_REALITY_PRIVATE_KEY_FILE`:
+  protected local files mounted read-only as Docker secrets; their values must
+  not be placed in `.env`. Public Reality fields remain unique per node.
 - `DEEP_DOCKER_LOG_MAX_SIZE` and `DEEP_DOCKER_LOG_MAX_FILE`: optional compose
   overrides for Docker `json-file` log rotation; defaults are `50m` and `5`.
 

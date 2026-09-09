@@ -35,7 +35,7 @@ if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
             [Security.AccessControl.AccessControlType]::Allow)
         $security.AddAccessRule($rule)
     }
-    [IO.DirectoryInfo]::new($root).SetAccessControl($security)
+    Set-Acl -LiteralPath $root -AclObject $security
 }
 
 function Invoke-OpenSsl([string[]]$Arguments) {

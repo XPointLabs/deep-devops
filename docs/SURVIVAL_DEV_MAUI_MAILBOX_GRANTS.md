@@ -22,7 +22,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\survival-dev-mailbox-provisio
 
 The wrapper uses only the exported XNode snapshot at pinned commit
 `00280a643cfdc1e0780147eceb1da5c7b6fd2799` with manifest SHA-256
-`bd8cb5a16fb1d396716adc14d0adf95b005c0cccdf476cffd1cd65e5938aa102`.
+`bbb317f49bf774f0223cf0763466c01bfe1c3c896d18075da5d9873751354dbc`.
 It rejects every file not present in that manifest, including extra `.cs`,
 `.props`, `.targets`, and `Directory.Build.*` inputs. The four driver inputs
 are separately hash-pinned. XNode and driver bytes are copied with source

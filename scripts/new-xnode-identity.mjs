@@ -1,6 +1,6 @@
 ﻿#!/usr/bin/env node
 import { generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const scalarOrder = BigInt('0x73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001');
@@ -72,18 +72,28 @@ const output = { ...identity };
 if (outDir) {
   const directory = resolve(outDir);
   mkdirSync(directory, { recursive: true, mode: 0o700 });
+  if (process.platform !== 'win32') chmodSync(directory, 0o700);
   const ed25519Path = resolve(directory, 'key_ed25519');
   const blsPath = resolve(directory, 'key_bls');
   const x25519Path = resolve(directory, 'key_x25519');
+  const vlessClientIdPath = resolve(directory, 'vless-client-id');
   writeFileSync(ed25519Path, `0x${identity.DEEP_NODE_ED25519_PRIVATE_KEY}\n`, { mode: 0o600 });
   writeFileSync(blsPath, `0x${identity.DEEP_NODE_BLS_PRIVATE_KEY}\n`, { mode: 0o600 });
   writeFileSync(x25519Path, `${identity.DEEP_NODE_X25519_PRIVATE_KEY}\n`, { mode: 0o600 });
+  writeFileSync(vlessClientIdPath, `${identity.DEEP_NODE_VLESS_CLIENT_ID}\n`, { mode: 0o600 });
+  if (process.platform !== 'win32') {
+    for (const secretPath of [ed25519Path, blsPath, x25519Path, vlessClientIdPath]) {
+      chmodSync(secretPath, 0o600);
+    }
+  }
   delete output.DEEP_NODE_ED25519_PRIVATE_KEY;
   delete output.DEEP_NODE_BLS_PRIVATE_KEY;
   delete output.DEEP_NODE_X25519_PRIVATE_KEY;
+  delete output.DEEP_NODE_VLESS_CLIENT_ID;
   output.DEEP_NODE_ED25519_PRIVATE_KEY_FILE = ed25519Path;
   output.DEEP_NODE_BLS_PRIVATE_KEY_FILE = blsPath;
   output.DEEP_NODE_X25519_PRIVATE_KEY_FILE = x25519Path;
+  output.DEEP_NODE_VLESS_CLIENT_ID_FILE = vlessClientIdPath;
 }
 
 if (args.has('--as-env') || args.has('-asenv')) {

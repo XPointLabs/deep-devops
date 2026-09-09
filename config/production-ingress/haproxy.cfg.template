@@ -22,9 +22,11 @@ frontend public_tls
   tcp-request content accept if { req.ssl_hello_type 1 }
   acl deep_https_sni req.ssl_sni -i ${DEEP_INGRESS_HOST}
   acl deep_reality_sni req.ssl_sni -i ${DEEP_NODE_REALITY_SERVER_NAME}
-  tcp-request content reject unless deep_https_sni or deep_reality_sni
+  acl has_sni req.ssl_sni -m found
+  tcp-request content reject if has_sni !deep_https_sni !deep_reality_sni
   use_backend local_https_terminator if deep_https_sni
   use_backend xray_reality if deep_reality_sni
+  default_backend local_https_terminator
 
 backend local_https_terminator
   mode tcp
@@ -35,11 +37,13 @@ backend xray_reality
   server xray 172.31.241.10:443 check
 
 frontend deep_https
-  bind 127.0.0.1:8443 ssl strict-sni crt /var/lib/haproxy/ingress-current.pem alpn h2,http/1.1
+  bind 127.0.0.1:8443 ssl crt /var/lib/haproxy/ingress-current.pem alpn h2,http/1.1
   mode http
   log-format "deep_ingress status=%ST bytes=%B termination=%ts"
   option http-buffer-request
-  http-request deny deny_status 421 unless { ssl_fc_sni -i ${DEEP_INGRESS_HOST} }
+  acl deep_inner_sni ssl_fc_sni -i ${DEEP_INGRESS_HOST}
+  acl inner_has_sni ssl_fc_sni -m found
+  http-request deny deny_status 421 if inner_has_sni !deep_inner_sni
   http-request deny deny_status 421 unless { hdr(host),field(1,:) -i ${DEEP_INGRESS_HOST} }
   http-request del-header Forwarded
   http-request del-header X-Forwarded-For
@@ -67,14 +71,15 @@ frontend deep_https
   acl peer_post path /api/peer/privacy/v1/frame /api/peer/mailbox/v2/store /api/peer/mailbox/v2/tombstone
   acl quorum_post path /api/staking/quorum/sign
   acl quorum_source src ${DEEP_QUORUM_COORDINATOR_CIDR}
+  http-request set-var(txn.is_public_post) bool(true) if post_method public_post
   http-request deny deny_status 404 unless get_method public_get or post_method public_post or post_method peer_post or post_method quorum_post quorum_source
   use_backend xnode_api if get_method public_get
   use_backend xnode_api if post_method public_post
   use_backend xnode_peer if post_method peer_post
   use_backend xnode_peer if post_method quorum_post quorum_source
-  http-response del-header Date if public_post
-  http-response del-header Server if public_post
-  http-response set-header Cache-Control no-store if public_post
+  http-response del-header Date if { var(txn.is_public_post) -m bool }
+  http-response del-header Server if { var(txn.is_public_post) -m bool }
+  http-response set-header Cache-Control no-store if { var(txn.is_public_post) -m bool }
 
 backend xnode_api
   mode http

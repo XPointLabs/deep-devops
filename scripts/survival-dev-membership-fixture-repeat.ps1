@@ -51,14 +51,15 @@ foreach ($iteration in 1..2) {
     if ($LASTEXITCODE -ne 0) {
         throw "Unable to read membership fixture logs on iteration $iteration."
     }
-    $matches = [regex]::Matches(
-        ($logs -join "`n"),
+    $logText = $logs -join "`n"
+    $hashMatches = [regex]::Matches(
+        $logText,
         '(?m)^PublishedArtifactSha256=([0-9a-f]{64})\r?$'
     )
-    if ($matches.Count -ne 1 -or ($logs -join "`n") -notmatch 'Generated and Sodium-verified one DEV-LOCAL-ONLY') {
+    if ($hashMatches.Count -ne 1 -or $logText -notmatch 'Generated and Sodium-verified one DEV-LOCAL-ONLY') {
         throw "Iteration $iteration lacks one Sodium-verified artifact result."
     }
-    $hash = $matches[0].Groups[1].Value
+    $hash = $hashMatches[0].Groups[1].Value
     Invoke-Docker ($baseArguments + @(
         'run', '--rm', '--no-deps',
         'membership-artifact-init',

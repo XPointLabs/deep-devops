@@ -1,5 +1,7 @@
-ARG SDK_IMAGE=mcr.microsoft.com/dotnet/sdk:10.0
-ARG RUNTIME_IMAGE=mcr.microsoft.com/dotnet/aspnet:10.0
+# check=skip=InvalidDefaultArgInFrom
+# Keep full-image references mandatory and provided via pinned compose/runtime inputs.
+ARG SDK_IMAGE
+ARG RUNTIME_IMAGE
 
 FROM ${SDK_IMAGE} AS build
 ARG PROJECT

@@ -82,8 +82,10 @@ exact SHA-256 gate and an exact local-only NuGet source mapping. It creates an a
 the isolated `membership-route-artifact` volume, then exits. The public artifact
 is a full sorted six-leaf MRL1 catalog for the exact development XNode IDs and
 their `ingress|core|storage` roles, with proofs, a 3-of-5 offline-root delegation,
-and a 2-of-3 online MSM1 membership statement. Its sorted halves provide two
-disjoint three-hop development routes. Each descriptor signs the exact selected
+and a 2-of-3 online MSM1 membership statement. It provides six independently
+described routers; privacy-route artifacts select exactly three unique
+owner/key records per route and distinct entry origins, while primary and
+fallback may overlap. Each descriptor signs the exact selected
 client IPv4 address with host ports `41801` through `41806`; Docker-only
 hostnames and container port `8080` are never signed. The host must be canonical
 loopback, RFC1918, or IPv4 link-local; hostname, wildcard, and public IPv4 input
@@ -155,7 +157,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/survival-dev.ps1 -Ac
 The survival stack pins its filtered XNode context to accepted source
 `00280a643cfdc1e0780147eceb1da5c7b6fd2799`; a dirty checkout, another revision,
 or a filtered-source manifest other than
-`bd8cb5a16fb1d396716adc14d0adf95b005c0cccdf476cffd1cd65e5938aa102`
+`bbb317f49bf774f0223cf0763466c01bfe1c3c896d18075da5d9873751354dbc`
 fails closed before build. The source exporter writes a deterministic
 `.survival-source-manifest.json`, and the shared XNode image carries both the exact
 revision and manifest SHA-256 as OCI labels. The live rehearsal requires all six
@@ -175,11 +177,20 @@ exact literal `http://172.30.82.11:8081` through `http://172.30.82.16:8081`
 endpoints on the isolated DEV bridge. One node-bound generated environment enables the bounded
 DEV-LOCAL-ONLY client fixture only on `xnode-1`: MAU2 issuer trust, E/E+1 placement and membership
 authority, the sole durable operation ledger, and native MAU2 ingress with canonical
-MEO1/MBR2/MBA2 bindings. The primary privacy route exits locally through `xnode-1`; the fully
-disjoint fallback exits through `xnode-2`, which forwards unchanged MAU2 over the authenticated
+MEO1/MBR2/MBA2 bindings. The primary privacy route exits locally through `xnode-1`; the fallback
+uses a distinct entry origin and may reuse selected router/key records, while forwarding unchanged
+MAU2 over the authenticated
 Docker-only HTTP/2 peer bridge to xnode-1. xnode-2 has no client adapter, replay/outcome journal,
 operation ledger, cursor authority, or MQR3 authority. `xnode-3` through `xnode-6` remain
 peer-only and report `dormant-unmapped`.
+
+The launcher emits only `privacy-routes.android.v2.json` and
+`privacy-routes.windows.v2.json`; runtime publication mounts them as
+`privacy-routes.v2.json`. Each hop is exactly `routerOwnerId`, 32-byte `keyId`,
+positive `epoch`, and `x25519PublicKey`. The DEV fixture issues a separate
+key id alongside each independent X25519 scalar; the publisher binds that id
+to the selected owner and current authenticated topology epoch before writing
+the artifact. No v1 reader, filename, or hash-derived key identifier exists.
 
 The generator rounds its anchor down to the current minute and creates a genuinely
 rotating overlap: current E is valid from anchor minus five minutes through anchor plus
@@ -352,11 +363,14 @@ named volume is deleted.
 
 The launcher verifies the six fresh DPC1 privacy contacts exposed by the
 XNodes. Every client request uses exactly three distinct native privacy hops:
-`xnode-3 -> xnode-4 -> xnode-1` first and the fully disjoint
-`xnode-5 -> xnode-6 -> xnode-2` route only after a definitely-before-forward
+`xnode-3 -> xnode-4 -> xnode-1` first. This six-node lab happens to use the
+non-overlapping `xnode-5 -> xnode-6 -> xnode-2` route only after a
+definitely-before-forward
 failure. An ambiguous dispatch result is outcome-unknown and never triggers
-fallback. The second terminal exit forwards to the same xnode-1 coordinator, so both paths share
-one cursor/continuation/ACK domain while route hops remain disjoint. Storage replication remains behind the mailbox exit and can use a
+fallback. Non-overlap is fixture evidence, not a production capability or
+failure-domain claim; the three-node release profile may reuse nodes across
+routes. The second terminal exit forwards to the same xnode-1 coordinator, so both paths share
+one cursor/continuation/ACK domain. Storage replication remains behind the mailbox exit and can use a
 fourth storage node without exposing that node to the client route.
 
 Run the bounded chaos evidence lane after the shared transport tests have been
@@ -442,7 +456,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/survival-dev.ps1 -Ac
 
 Default messenger host ports are XNodes `41801-41806`, registry `41810`,
 storage `41820`, file `41821`, and push `41822`. Registry also owns the authenticated
-call signal/inbox/ICE listener on `41823`; there is no standalone calls service or
+call signal/inbox/ICE listener on `41823` (container listener `8081`, while the
+same Registry process serves its main API on container listener `8080`); there is no standalone calls service or
 calls state volume. The local-only
 chain profile additionally uses Hardhat `41545` and staking `41811`. All traffic
 is Debug HTTP intended only for loopback or the exact trusted developer IPv4

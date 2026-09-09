@@ -189,6 +189,32 @@ function gitVisibleFiles(source) {
   }
 }
 
+function selectedFileBytes(source, entry, expectedCommit) {
+  if (expectedCommit === undefined) {
+    return readFileSync(join(source, ...entry.split('/')));
+  }
+
+  try {
+    // A pinned context must be byte-identical on every host. Reading the exact
+    // committed blob avoids core.autocrlf and other checkout transformations
+    // while the clean-source preflight still rejects local substitutions.
+    return execFileSync('git', [
+      '-c',
+      `safe.directory=${source}`,
+      '-C',
+      source,
+      'show',
+      `${expectedCommit}:${entry}`
+    ], {
+      encoding: null,
+      maxBuffer: 64 * 1024 * 1024,
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+  } catch {
+    fail('pinned source blob is unavailable');
+  }
+}
+
 function assertExactCleanGitSource(source, expectedCommit) {
   if (!/^[0-9a-f]{40}$/.test(expectedCommit ?? '')) {
     fail('expected source commit must be exact lowercase SHA-1');
@@ -251,10 +277,11 @@ export function exportDevelopmentContext({ kind, source, destination, ownedRoot,
     const files = [];
     for (const entry of [...selected].sort()) {
       const sourcePath = join(fullSource, ...entry.split('/'));
-      const bytes = readFileSync(sourcePath);
+      const bytes = selectedFileBytes(fullSource, entry, expectedCommit);
       const target = join(stage, ...entry.split('/'));
       mkdirSync(dirname(target), { recursive: true });
-      copyFileSync(sourcePath, target);
+      if (expectedCommit === undefined) copyFileSync(sourcePath, target);
+      else writeFileSync(target, bytes);
       files.push({
         path: entry,
         bytes: bytes.length,

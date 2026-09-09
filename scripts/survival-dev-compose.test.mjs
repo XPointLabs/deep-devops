@@ -31,6 +31,7 @@ const resendChaosProxy = readFileSync(new URL('../tools/survival-resend-chaos/re
 const haproxy = readFileSync(new URL('../config/survival-uat-tls/haproxy.cfg', import.meta.url), 'utf8');
 const mailboxDriver = readFileSync(new URL('../tools/survival-mailbox-driver/Program.cs', import.meta.url), 'utf8');
 const mailboxProvisionDriver = readFileSync(new URL('../tools/survival-mailbox-driver/MailboxGrantProvisioner.cs', import.meta.url), 'utf8');
+const mailboxRuntimePublisher = readFileSync(new URL('../tools/survival-mailbox-driver/MailboxRuntimePublisher.cs', import.meta.url), 'utf8');
 const privateCrossProcessState = readFileSync(new URL('../tools/survival-mailbox-driver/PrivateCrossProcessState.cs', import.meta.url), 'utf8');
 const chaosStateTest = readFileSync(new URL('./survival-dev-chaos-state.test.ps1', import.meta.url), 'utf8');
 const mailboxBuildInputs = readFileSync(new URL('./survival-dev-mailbox-build-inputs.ps1', import.meta.url), 'utf8');
@@ -209,7 +210,8 @@ test('every stateful service uses a named volume and operator commands are docum
     'registry-state', 'staking-state', 'storage-state', 'file-state', 'push-state', 'membership-route-artifact', 'mailbox-rehearsal-state'
   ]) assert.match(compose, new RegExp(`^  ${volume}:$`, 'm'));
   assert.match(serviceBlock('registry'), /Calls__StatePath: \/state\/calls-v2\.json/);
-  assert.match(serviceBlock('registry'), /41823:8080/);
+  assert.match(serviceBlock('registry'), /ASPNETCORE_URLS: http:\/\/0\.0\.0\.0:8080;http:\/\/0\.0\.0\.0:8081/);
+  assert.match(serviceBlock('registry'), /41823:8081/);
   assert.match(docs, /survival-dev\.ps1 -Action Up/);
   assert.match(docs, /docker compose -f docker-compose\.survival\.dev\.yml ps/);
   assert.match(docs, /docker compose -f docker-compose\.survival\.dev\.yml logs -f --tail=200/);
@@ -591,7 +593,7 @@ test('resend uncertainty chaos is a bounded survival-only real-ingress interpose
   assert.match(resendChaosIntegration, /'--output-privacy-routes-android'/);
   assert.match(resendChaosIntegration, /'--output-privacy-routes-windows'/);
   assert.match(resendChaosIntegration, /'--privacy-entry-host', \$BindHost/);
-  assert.match(resendChaosIntegration, /'--privacy-routes', \(Join-Path \$BuildWork 'privacy-routes\.android\.v1\.json'\)/);
+  assert.match(resendChaosIntegration, /'--privacy-routes', \(Join-Path \$BuildWork 'privacy-routes\.android\.v2\.json'\)/);
   assert.match(resendChaosIntegration, /function Assert-OrdinaryStack\(\)/);
   for (const role of ['file', 'push', 'registry', 'storage', 'survival-uat-crl',
     'survival-uat-tls-ingress', 'turn', 'xnode-1', 'xnode-2', 'xnode-3',
@@ -730,11 +732,11 @@ test('P10E uses real current/next MIP1/RIP1 authority, bounded client ingress, a
     /chown 65532:65532 \/state \/state\/driver/);
   assert.doesNotMatch(mailboxDriverStateInit, /chmod|777|DAC_OVERRIDE/);
   assert.match(compose, /XNODE_REVISION: 00280a643cfdc1e0780147eceb1da5c7b6fd2799/);
-  assert.match(compose, /XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: bd8cb5a16fb1d396716adc14d0adf95b005c0cccdf476cffd1cd65e5938aa102/);
+  assert.match(compose, /XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: bbb317f49bf774f0223cf0763466c01bfe1c3c896d18075da5d9873751354dbc/);
   assert.match(compose, /org\.opencontainers\.image\.revision/);
   assert.match(compose, /com\.xpoint\.source-context\.manifest-sha256/);
   assert.match(compose, /sha256sum -c -/);
-  assert.match(launcher, /\$SurvivalXNodeContextManifestSha256 = 'bd8cb5a16fb1d396716adc14d0adf95b005c0cccdf476cffd1cd65e5938aa102'/);
+  assert.match(launcher, /\$SurvivalXNodeContextManifestSha256 = 'bbb317f49bf774f0223cf0763466c01bfe1c3c896d18075da5d9873751354dbc'/);
   const revisions = [
     ...compose.matchAll(/XNODE_REVISION: ([0-9a-f]{40})/g),
     ...launcher.matchAll(/\$SurvivalXNodeCommit = '([0-9a-f]{40})'/g),
@@ -784,6 +786,15 @@ test('P10E uses real current/next MIP1/RIP1 authority, bounded client ingress, a
   assert.match(mailboxDriver, /The only mounted sender seed does not match xnode-1/);
   assert.match(mailboxDriver, /restricted to the xnode-1 sender identity/);
   assert.match(mailboxDriver, /schemaVersion = 2/);
+  assert.match(mailboxDriver, /xnode-\{index \+ 1\}-x25519\.key-id/);
+  assert.match(mailboxDriver, /\["routerOwnerId", "keyId", "epoch", "x25519PublicKey"\]/);
+  assert.match(mailboxDriver, /keyId\.Length != 64/);
+  assert.match(mailboxDriver, /GetProperty\("keyId"\), 32/);
+  assert.match(mailboxDriver, /Privacy route repeats a router owner, traffic key id, or X25519 public key/);
+  assert.match(mailboxRuntimePublisher, /privacy-routes\.v2\.json/);
+  assert.match(mailboxRuntimePublisher, /GetProperty\("keyId"\)\.GetString\(\)!, 32/);
+  assert.match(mailboxRuntimePublisher, /string\.Equals\(origin\.AbsoluteUri, originText, StringComparison\.Ordinal\)/);
+  assert.match(mailboxRuntimePublisher, /A privacy route must use three distinct owners, key ids, and X25519 keys/);
   assert.match(mailboxIntegration, /schemaVersion = 3/);
   assert.match(mailboxIntegration, /stateVolumes = \$volumeBindingsAfter/);
   assert.match(mailboxIntegration, /Get-StateVolumeBindings/);
@@ -822,7 +833,7 @@ test('P10E uses real current/next MIP1/RIP1 authority, bounded client ingress, a
   assert.match(mailboxIntegration, /docker-compose\.survival-uat-tls\.dev\.yml/);
   assert.match(mailboxIntegration, /SURVIVAL_UAT_TLS_SECRET_DIR is required for the clean-break HTTPS privacy-route rehearsal/);
   assert.match(mailboxIntegration, /'--client-url', "https:\/\/\$\{BindHost\}:41801"/);
-  assert.match(mailboxIntegration, /'--privacy-routes', '\/run\/survival\/privacy-routes\.v1\.json'/);
+  assert.match(mailboxIntegration, /'--privacy-routes', '\/run\/survival\/privacy-routes\.v2\.json'/);
   assert.match(mailboxIntegration, /SSL_CERT_FILE=\/run\/survival\/ca\.crt/);
   assert.match(mailboxIntegration, /survival-uat-tls-ingress/);
   assert.doesNotMatch(mailboxIntegration, /--client-url', 'http:\/\/xnode-1:8080/);

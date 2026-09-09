@@ -1,0 +1,58 @@
+services:
+  registry:
+    ports: !reset []
+
+  xnode-1:
+    environment:
+      PrivacyRouting__PublicPeerBaseUrl: https://${FIRST_RELEASE_PUBLIC_HOST:?set FIRST_RELEASE_PUBLIC_HOST for TLS UAT}:${FIRST_RELEASE_TLS_XNODE_1_PORT:-43001}/
+    ports: !override
+      - "${FIRST_RELEASE_BIND_HOST:?set FIRST_RELEASE_BIND_HOST for TLS UAT}:${FIRST_RELEASE_XNODE_1_VLESS_PORT:-42941}:8443"
+
+  xnode-2:
+    environment:
+      PrivacyRouting__PublicPeerBaseUrl: https://${FIRST_RELEASE_PUBLIC_HOST:?set FIRST_RELEASE_PUBLIC_HOST for TLS UAT}:${FIRST_RELEASE_TLS_XNODE_2_PORT:-43002}/
+    ports: !override
+      - "${FIRST_RELEASE_BIND_HOST:?set FIRST_RELEASE_BIND_HOST for TLS UAT}:${FIRST_RELEASE_XNODE_2_VLESS_PORT:-42942}:8443"
+
+  xnode-3:
+    environment:
+      PrivacyRouting__PublicPeerBaseUrl: https://${FIRST_RELEASE_PUBLIC_HOST:?set FIRST_RELEASE_PUBLIC_HOST for TLS UAT}:${FIRST_RELEASE_TLS_XNODE_3_PORT:-43003}/
+    ports: !override
+      - "${FIRST_RELEASE_BIND_HOST:?set FIRST_RELEASE_BIND_HOST for TLS UAT}:${FIRST_RELEASE_XNODE_3_VLESS_PORT:-42943}:8443"
+
+  tls-ingress:
+    profiles: [tls]
+    image: haproxy:3.2.22-alpine3.24@sha256:79799e8b2977e60802774fa53d29e6b54e045402cdd8a8b9fe43923e7095a047
+    init: true
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+      - /var/lib/haproxy:rw,noexec,nosuid,nodev,size=1m,mode=0700
+    ports:
+      - "${FIRST_RELEASE_BIND_HOST:?set FIRST_RELEASE_BIND_HOST for TLS UAT}:${FIRST_RELEASE_TLS_XNODE_1_PORT:-43001}:43001"
+      - "${FIRST_RELEASE_BIND_HOST:?set FIRST_RELEASE_BIND_HOST for TLS UAT}:${FIRST_RELEASE_TLS_XNODE_2_PORT:-43002}:43002"
+      - "${FIRST_RELEASE_BIND_HOST:?set FIRST_RELEASE_BIND_HOST for TLS UAT}:${FIRST_RELEASE_TLS_XNODE_3_PORT:-43003}:43003"
+      - "${FIRST_RELEASE_BIND_HOST:?set FIRST_RELEASE_BIND_HOST for TLS UAT}:${FIRST_RELEASE_TLS_REGISTRY_PORT:-43010}:43010"
+    volumes:
+      - ./config/first-release-local/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+      - "${FIRST_RELEASE_TLS_PEM_FILE:?set the protected combined certificate/key PEM file}:/run/deep-tls/server.pem:ro"
+    networks: { first-release: { ipv4_address: 172.31.93.5 } }
+    depends_on:
+      registry: { condition: service_healthy }
+      xnode-1: { condition: service_healthy }
+      xnode-2: { condition: service_healthy }
+      xnode-3: { condition: service_healthy }
+      topology-ready: { condition: service_completed_successfully }
+    healthcheck:
+      test: [CMD-SHELL, "haproxy -c -q -f /usr/local/etc/haproxy/haproxy.cfg && kill -0 1"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+    labels:
+      io.deep.stack: first-release-local
+      io.deep.optional-profile: tls
+      io.deep.production-ready: "false"

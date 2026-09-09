@@ -15,13 +15,13 @@ $DriverSource = Join-Path $Root 'tools\survival-mailbox-driver'
 $BuildHelper = Join-Path $PSScriptRoot 'survival-dev-mailbox-build-inputs.ps1'
 $ExpectedBuildHelperSha256 = 'db657dc0a596a197bc0258c00f1a81f4fe84978efe3d2535c8fc44dd31f22bc3'
 $ExpectedXNodeCommit = '00280a643cfdc1e0780147eceb1da5c7b6fd2799'
-$ExpectedXNodeManifestSha256 = 'bd8cb5a16fb1d396716adc14d0adf95b005c0cccdf476cffd1cd65e5938aa102'
+$ExpectedXNodeManifestSha256 = 'bbb317f49bf774f0223cf0763466c01bfe1c3c896d18075da5d9873751354dbc'
 $ExpectedDriverSha256 = @{
     'MailboxGrantProvisioner.cs' = '884a6670230d36333adbdad37358d082ca84740fef2d5c6e13776500a37b8d53'
-    'MailboxRuntimePublisher.cs' = 'aa725b67ddfd48193a3e5cc3f39f529130e589e05fa14b1569123c8a8cf42866'
+    'MailboxRuntimePublisher.cs' = '5718f7769aa309ce9e695ccba9b3e43541cc22aea602938ca19c47f354b0fb10'
     'PrivateCrossProcessState.cs' = '651d8256822d41b9a7bceab1e6d6bb45740026cac00f487a564befe7777f272b'
-    'Program.cs' = '5763c4556c96dbe2bd798dc79cfa1c97129adfd82691f1283734c06ee49a6562'
-    'ProductionMailboxUatPublisher.cs' = '966c6be6cfe71317c10e66265bbad30ab61736e722a120304b8ce035fb056bc7'
+    'Program.cs' = '1fea0d11d683d1a5cab99906fbd0845db903fa6cdcdfcc6153a89bb9fad37e3d'
+    'ProductionMailboxUatPublisher.cs' = '1bb55a16a29c3f911b4a789e251732eb8c4430f684af7aed3d41d49a492f5e02'
     'SurvivalMailboxDriver.csproj' = '4db436d69ea88ac3ff16f08c161b61cc0c048bad84cb7e529b2208fa569eafbe'
 }
 . (Join-Path $PSScriptRoot 'survival-dev-private-secrets.ps1')
@@ -169,8 +169,8 @@ try {
         '--coordinator-url', "https://${BindHost}:41801",
         '--output-public', $HttpsAuthority,
         '--output-client-public', (Join-Path $BuildWork 'mailbox-client-authority.https.public.json'),
-        '--output-privacy-routes-android', (Join-Path $BuildWork 'privacy-routes.android.v1.json'),
-        '--output-privacy-routes-windows', (Join-Path $BuildWork 'privacy-routes.windows.v1.json'),
+        '--output-privacy-routes-android', (Join-Path $BuildWork 'privacy-routes.android.v2.json'),
+        '--output-privacy-routes-windows', (Join-Path $BuildWork 'privacy-routes.windows.v2.json'),
         '--privacy-entry-host', $BindHost))
 
     foreach ($fault in @('post-durable-response-drop', 'pre-dispatch-outage', 'post-durable-ack-response-drop')) {
@@ -182,7 +182,7 @@ try {
                 '--authority-public', $HttpsAuthority,
                 '--coordinator-url', "https://${BindHost}:41801",
                 '--client-url', "https://${BindHost}:41801",
-                '--privacy-routes', (Join-Path $BuildWork 'privacy-routes.android.v1.json'),
+                '--privacy-routes', (Join-Path $BuildWork 'privacy-routes.android.v2.json'),
                 '--require-non-loopback-coordinator')
             if ($fault -ceq 'post-durable-ack-response-drop') {
                 # MAU2 is opaque at public ingress, so prepare Store/Retrieve before

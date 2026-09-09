@@ -201,7 +201,7 @@ internal static class MailboxRuntimePublisher
         {
             File.WriteAllBytes(Path.Combine(stage, "authority.public.json"), authorityBytes);
             File.WriteAllBytes(Path.Combine(stage, "revocations.v1.json"), revocations);
-            File.WriteAllBytes(Path.Combine(stage, "privacy-routes.v1.json"), privacyRoutes);
+            File.WriteAllBytes(Path.Combine(stage, "privacy-routes.v2.json"), privacyRoutes);
             File.WriteAllBytes(Path.Combine(stage, "pair", "current-generation.json"), pointerBytes);
             var stagedGeneration = Path.Combine(stage, "pair", "generations", generation);
             File.WriteAllBytes(Path.Combine(stagedGeneration, "android.mailbox-credentials.v1.json"),
@@ -288,13 +288,11 @@ internal static class MailboxRuntimePublisher
         Exact(root,
             ["schemaVersion", "developmentOnly", "platform", "primary", "fallback"],
             "privacy routes");
-        Require(root.GetProperty("schemaVersion").GetInt32() == 1 &&
+        Require(root.GetProperty("schemaVersion").GetInt32() == 2 &&
                 root.GetProperty("developmentOnly").GetBoolean() &&
                 root.GetProperty("platform").GetString() == expectedPlatform,
             "Privacy routes are not bound to the expected DEV platform.");
 
-        var routerIds = new HashSet<string>(StringComparer.Ordinal);
-        var agreementKeys = new HashSet<string>(StringComparer.Ordinal);
         var origins = new HashSet<string>(StringComparer.Ordinal);
         foreach (var routeName in new[] { "primary", "fallback" })
         {
@@ -307,23 +305,33 @@ internal static class MailboxRuntimePublisher
                     string.IsNullOrEmpty(origin.UserInfo) &&
                     string.IsNullOrEmpty(origin.Query) &&
                     string.IsNullOrEmpty(origin.Fragment) &&
+                    string.Equals(origin.AbsoluteUri, originText, StringComparison.Ordinal) &&
                     origins.Add(origin.AbsoluteUri),
                 "Privacy route entry origins must be distinct canonical HTTPS origins.");
             var hops = route.GetProperty("hops");
             Require(hops.ValueKind == JsonValueKind.Array && hops.GetArrayLength() == 3,
                 "A privacy route must contain exactly three hops.");
+            var routerOwnerIds = new HashSet<string>(StringComparer.Ordinal);
+            var keyIds = new HashSet<string>(StringComparer.Ordinal);
+            var agreementKeys = new HashSet<string>(StringComparer.Ordinal);
             foreach (var hop in hops.EnumerateArray())
             {
-                Exact(hop, ["routerId", "x25519PublicKey"], "privacy route hop");
-                var routerId = LowerHex(hop.GetProperty("routerId").GetString()!, 32);
+                Exact(hop,
+                    ["routerOwnerId", "keyId", "epoch", "x25519PublicKey"],
+                    "privacy route hop");
+                var routerOwnerId = LowerHex(
+                    hop.GetProperty("routerOwnerId").GetString()!, 32);
+                var keyId = LowerHex(hop.GetProperty("keyId").GetString()!, 32);
+                Require(hop.GetProperty("epoch").GetUInt64() != 0,
+                    "Privacy route key epoch must be positive.");
                 var agreementKey = LowerHex(
                     hop.GetProperty("x25519PublicKey").GetString()!, 32);
-                Require(routerIds.Add(routerId) && agreementKeys.Add(agreementKey),
-                    "Privacy routes must use six distinct router ids and X25519 keys.");
+                Require(routerOwnerIds.Add(routerOwnerId) && keyIds.Add(keyId) &&
+                        agreementKeys.Add(agreementKey),
+                    "A privacy route must use three distinct owners, key ids, and X25519 keys.");
             }
         }
-        Require(routerIds.Count == 6 && agreementKeys.Count == 6,
-            "Privacy route inventory is incomplete.");
+        Require(origins.Count == 2, "Privacy routes must use distinct entry origins.");
     }
 
     private static string SessionId(string ed25519Hex)

@@ -28,8 +28,10 @@ x-xnode-build: &xnode-build
     SDK_IMAGE: ${SURVIVAL_DOTNET_SDK_IMAGE:-mcr.microsoft.com/dotnet/sdk@sha256:7e964ea8bc6c1e18ea9fbc76ed403da41c9b19aeee2aab6bf9c845f25e891380}
     RUNTIME_IMAGE: ${SURVIVAL_DOTNET_RUNTIME_IMAGE:-mcr.microsoft.com/dotnet/aspnet@sha256:e3736b0d423db99c6988e1ddf5ea725c14b12579bb120024e5ff7ff204a14080}
     XNODE_REVISION: 00280a643cfdc1e0780147eceb1da5c7b6fd2799
-    XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: bd8cb5a16fb1d396716adc14d0adf95b005c0cccdf476cffd1cd65e5938aa102
+    XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: bbb317f49bf774f0223cf0763466c01bfe1c3c896d18075da5d9873751354dbc
   dockerfile_inline: |
+    # check=skip=InvalidDefaultArgInFrom
+    # Keep full-image references mandatory and provided via pinned compose/runtime inputs.
     ARG SDK_IMAGE
     ARG RUNTIME_IMAGE
     FROM $${SDK_IMAGE} AS build
@@ -118,8 +120,10 @@ x-mailbox-driver-build: &mailbox-driver-build
     SDK_IMAGE: ${SURVIVAL_DOTNET_SDK_IMAGE:-mcr.microsoft.com/dotnet/sdk@sha256:7e964ea8bc6c1e18ea9fbc76ed403da41c9b19aeee2aab6bf9c845f25e891380}
     RUNTIME_IMAGE: ${SURVIVAL_DOTNET_RUNTIME_IMAGE:-mcr.microsoft.com/dotnet/aspnet@sha256:e3736b0d423db99c6988e1ddf5ea725c14b12579bb120024e5ff7ff204a14080}
     XNODE_REVISION: 00280a643cfdc1e0780147eceb1da5c7b6fd2799
-    XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: bd8cb5a16fb1d396716adc14d0adf95b005c0cccdf476cffd1cd65e5938aa102
+    XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: bbb317f49bf774f0223cf0763466c01bfe1c3c896d18075da5d9873751354dbc
   dockerfile_inline: |
+    # check=skip=InvalidDefaultArgInFrom
+    # Keep full-image references mandatory and provided via pinned compose/runtime inputs.
     ARG SDK_IMAGE
     ARG RUNTIME_IMAGE
     FROM $${SDK_IMAGE} AS build
@@ -148,6 +152,8 @@ x-membership-fixture-build: &membership-fixture-build
     SDK_IMAGE: ${SURVIVAL_DOTNET_SDK_IMAGE:-mcr.microsoft.com/dotnet/sdk@sha256:7e964ea8bc6c1e18ea9fbc76ed403da41c9b19aeee2aab6bf9c845f25e891380}
     RUNTIME_IMAGE: ${SURVIVAL_DOTNET_RUNTIME_IMAGE:-mcr.microsoft.com/dotnet/aspnet@sha256:e3736b0d423db99c6988e1ddf5ea725c14b12579bb120024e5ff7ff204a14080}
   dockerfile_inline: |
+    # check=skip=InvalidDefaultArgInFrom
+    # Keep full-image references mandatory and provided via pinned compose/runtime inputs.
     ARG SDK_IMAGE
     ARG RUNTIME_IMAGE
     FROM $${SDK_IMAGE} AS build
@@ -167,6 +173,8 @@ x-compat-build: &compat-build
   args:
     NODE_IMAGE: ${SURVIVAL_NODE_IMAGE:-node@sha256:242549cd46785b480c832479a730f4f2a20865d61ea2e404fdb2a5c3d3b73ecf}
   dockerfile_inline: |
+    # check=skip=InvalidDefaultArgInFrom
+    # Keep full-image references mandatory and provided via pinned compose/runtime inputs.
     ARG NODE_IMAGE
     FROM $${NODE_IMAGE}
     WORKDIR /service
@@ -283,6 +291,8 @@ services:
       args:
         NODE_IMAGE: ${SURVIVAL_NODE_IMAGE:-node@sha256:242549cd46785b480c832479a730f4f2a20865d61ea2e404fdb2a5c3d3b73ecf}
       dockerfile_inline: |
+        # check=skip=InvalidDefaultArgInFrom
+        # Keep full-image references mandatory and provided via pinned compose/runtime inputs.
         ARG NODE_IMAGE
         FROM $${NODE_IMAGE}
         WORKDIR /workspace
@@ -515,6 +525,8 @@ services:
         SDK_IMAGE: ${SURVIVAL_DOTNET_SDK_IMAGE:-mcr.microsoft.com/dotnet/sdk@sha256:7e964ea8bc6c1e18ea9fbc76ed403da41c9b19aeee2aab6bf9c845f25e891380}
         RUNTIME_IMAGE: ${SURVIVAL_DOTNET_RUNTIME_IMAGE:-mcr.microsoft.com/dotnet/aspnet@sha256:e3736b0d423db99c6988e1ddf5ea725c14b12579bb120024e5ff7ff204a14080}
       dockerfile_inline: |
+        # check=skip=InvalidDefaultArgInFrom
+        # Keep full-image references mandatory and provided via pinned compose/runtime inputs.
         ARG SDK_IMAGE
         ARG RUNTIME_IMAGE
         FROM $${SDK_IMAGE} AS build
@@ -528,7 +540,10 @@ services:
         USER 65532:65532
         ENTRYPOINT ["dotnet","Deep.Registry.Api.dll"]
     environment:
-      ASPNETCORE_URLS: http://0.0.0.0:8080
+      # Docker Desktop on Windows cannot publish two LAN host ports to the
+      # same container target. Keep one Registry process, but expose its
+      # Registry and call-signalling host ports through distinct listeners.
+      ASPNETCORE_URLS: http://0.0.0.0:8080;http://0.0.0.0:8081
       Registry__StatePath: /state/registry.json
       Registry__StakingBackendBaseUrl: http://staking-backend:8080
       Registry__MembershipRouteArtifactPath: /run/deep-membership/membership-route-catalog.json
@@ -544,7 +559,7 @@ services:
       Calls__IceUrls__3: turns:${SURVIVAL_BIND_HOST:-127.0.0.1}:5349?transport=tcp
     ports:
       - "${SURVIVAL_BIND_HOST:-127.0.0.1}:41810:8080"
-      - "${SURVIVAL_BIND_HOST:-127.0.0.1}:41823:8080"
+      - "${SURVIVAL_BIND_HOST:-127.0.0.1}:41823:8081"
     volumes: [registry-state:/state, membership-route-artifact:/run/deep-membership:ro]
     secrets:
       - source: turn-shared-secret
@@ -566,6 +581,8 @@ services:
         SDK_IMAGE: ${SURVIVAL_DOTNET_SDK_IMAGE:-mcr.microsoft.com/dotnet/sdk@sha256:7e964ea8bc6c1e18ea9fbc76ed403da41c9b19aeee2aab6bf9c845f25e891380}
         RUNTIME_IMAGE: ${SURVIVAL_DOTNET_RUNTIME_IMAGE:-mcr.microsoft.com/dotnet/aspnet@sha256:e3736b0d423db99c6988e1ddf5ea725c14b12579bb120024e5ff7ff204a14080}
       dockerfile_inline: |
+        # check=skip=InvalidDefaultArgInFrom
+        # Keep full-image references mandatory and provided via pinned compose/runtime inputs.
         ARG SDK_IMAGE
         ARG RUNTIME_IMAGE
         FROM $${SDK_IMAGE} AS build

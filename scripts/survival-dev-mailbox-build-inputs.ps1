@@ -293,8 +293,7 @@ function Set-MailboxDirectoryExclusiveWritable([string]$Path) {
         $system = [Security.Principal.SecurityIdentifier]::new('S-1-5-18')
         $administrators = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
         $item = [IO.DirectoryInfo](Get-Item -Force -LiteralPath $Path)
-        $owner = $item.GetAccessControl(
-            [Security.AccessControl.AccessControlSections]::Owner).GetOwner(
+        $owner = (Get-Acl -LiteralPath $Path).GetOwner(
                 [Security.Principal.SecurityIdentifier])
         if (-not $owner.Equals($current)) {
             throw 'Mailbox writable directory owner must be the exact current Windows identity.'
@@ -310,7 +309,7 @@ function Set-MailboxDirectoryExclusiveWritable([string]$Path) {
                 [Security.AccessControl.PropagationFlags]::None,
                 [Security.AccessControl.AccessControlType]::Allow))
         }
-        $item.SetAccessControl($security)
+        Set-Acl -LiteralPath $Path -AclObject $security
     } else {
         [IO.File]::SetUnixFileMode(
             $Path,
@@ -329,8 +328,7 @@ function Set-MailboxFileExclusiveWritable([string]$Path) {
         $system = [Security.Principal.SecurityIdentifier]::new('S-1-5-18')
         $administrators = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
         $item = [IO.FileInfo](Get-Item -Force -LiteralPath $Path)
-        $owner = $item.GetAccessControl(
-            [Security.AccessControl.AccessControlSections]::Owner).GetOwner(
+        $owner = (Get-Acl -LiteralPath $Path).GetOwner(
                 [Security.Principal.SecurityIdentifier])
         if (-not $owner.Equals($current)) {
             throw 'Mailbox private-state file owner must be the exact current Windows identity.'
@@ -343,7 +341,7 @@ function Set-MailboxFileExclusiveWritable([string]$Path) {
                 [Security.AccessControl.FileSystemRights]::FullControl,
                 [Security.AccessControl.AccessControlType]::Allow))
         }
-        $item.SetAccessControl($security)
+        Set-Acl -LiteralPath $Path -AclObject $security
         [IO.File]::SetAttributes(
             $Path,
             [IO.File]::GetAttributes($Path) -band (-bnot [IO.FileAttributes]::ReadOnly))
@@ -428,9 +426,9 @@ function Set-MailboxTreeReadOnly([string]$Root) {
                     [Security.AccessControl.AccessControlType]::Allow))
             }
             if ($item.PSIsContainer) {
-                ([IO.DirectoryInfo]$item).SetAccessControl($security)
+                Set-Acl -LiteralPath $item.FullName -AclObject $security
             } else {
-                ([IO.FileInfo]$item).SetAccessControl($security)
+                Set-Acl -LiteralPath $item.FullName -AclObject $security
             }
         }
     } else {
@@ -473,9 +471,9 @@ function Set-MailboxTreeWritable([string]$Root) {
                 [Security.AccessControl.FileSystemRights]::FullControl,
                 [Security.AccessControl.AccessControlType]::Allow))
             if ($item.PSIsContainer) {
-                ([IO.DirectoryInfo]$item).SetAccessControl($security)
+                Set-Acl -LiteralPath $item.FullName -AclObject $security
             } else {
-                ([IO.FileInfo]$item).SetAccessControl($security)
+                Set-Acl -LiteralPath $item.FullName -AclObject $security
             }
         }
     } else {

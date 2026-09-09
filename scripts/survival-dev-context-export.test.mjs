@@ -170,3 +170,32 @@ test('expected commit requires the exact clean source revision before export', (
     rmSync(item.root, { recursive: true, force: true });
   }
 });
+
+test('pinned export uses exact git blobs instead of autocrlf working-tree bytes', () => {
+  const item = fixture();
+  try {
+    git(item.source, 'add', '.');
+    git(item.source, '-c', 'user.email=survival@example.invalid', '-c', 'user.name=Survival', 'commit', '--quiet', '-m', 'fixture');
+    const expected = git(item.source, 'rev-parse', 'HEAD').trim();
+    git(item.source, 'config', 'core.autocrlf', 'true');
+    rmSync(path.join(item.source, 'src', 'App', 'Program.cs'));
+    git(item.source, 'checkout', '--', 'src/App/Program.cs');
+    assert.equal(
+      readFileSync(path.join(item.source, 'src', 'App', 'Program.cs'), 'utf8'),
+      'class Program {}\r\n'
+    );
+    assert.equal(git(item.source, 'status', '--porcelain=v1', '--untracked-files=all').trim(), '');
+
+    const destination = path.join(item.owned, 'xnode');
+    exportDevelopmentContext({
+      kind: 'dotnet', source: item.source, destination, ownedRoot: item.owned, expectedCommit: expected
+    });
+
+    assert.equal(
+      readFileSync(path.join(destination, 'src', 'App', 'Program.cs'), 'utf8'),
+      'class Program {}\n'
+    );
+  } finally {
+    rmSync(item.root, { recursive: true, force: true });
+  }
+});

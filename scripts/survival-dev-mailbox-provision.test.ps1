@@ -196,7 +196,7 @@ try {
             -Destination $Destination `
             -ExpectedCommit '00280a643cfdc1e0780147eceb1da5c7b6fd2799' `
             -ExpectedManifestSha256 `
-                'bd8cb5a16fb1d396716adc14d0adf95b005c0cccdf476cffd1cd65e5938aa102' `
+                'bbb317f49bf774f0223cf0763466c01bfe1c3c896d18075da5d9873751354dbc' `
             -ExpectedDriverSha256 $driverHashes
     }
 
@@ -258,6 +258,9 @@ try {
         $privacyPath = Join-Path $secrets "xnode-$index-x25519.private"
         [IO.File]::WriteAllText($privacyPath, ('{0:x64}' -f (1000 + $index)) + "`n")
         Protect-TestSecret $privacyPath
+        $privacyKeyIdPath = Join-Path $secrets "xnode-$index-x25519.key-id"
+        [IO.File]::WriteAllText($privacyKeyIdPath, ('{0:x64}' -f (2000 + $index)) + "`n")
+        Protect-TestSecret $privacyKeyIdPath
     }
     $issuer = Join-Path $secrets 'mailbox-client-issuer.seed'
     [IO.File]::WriteAllText($issuer, ('{0:x64}' -f 1001) + "`n")
@@ -270,8 +273,8 @@ try {
         '--output-client-env', (Join-Path $temporary 'client.env'),
         '--output-public', $authority,
         '--output-client-public', $runtimeAuthority,
-        '--output-privacy-routes-android', (Join-Path $temporary 'privacy-routes.android.v1.json'),
-        '--output-privacy-routes-windows', (Join-Path $temporary 'privacy-routes.windows.v1.json'),
+        '--output-privacy-routes-android', (Join-Path $temporary 'privacy-routes.android.v2.json'),
+        '--output-privacy-routes-windows', (Join-Path $temporary 'privacy-routes.windows.v2.json'),
         '--privacy-entry-host', '192.168.1.44',
         '--coordinator-url', 'http://192.168.1.44:41801')
     $authorityHash = Get-LowerSha256 $authority
@@ -460,15 +463,17 @@ try {
     Protect-TestSecret $testPublicKey
     $privacyRoutes = @{}
     foreach ($platform in @('android', 'windows')) {
-        $privacyPath = Join-Path $temporary "privacy-routes.$platform.v1.json"
+        $privacyPath = Join-Path $temporary "privacy-routes.$platform.v2.json"
         $hops = 1..6 | ForEach-Object {
             [pscustomobject][ordered]@{
-                routerId = $_.ToString('x64')
+                routerOwnerId = $_.ToString('x64')
+                keyId = (1000 + $_).ToString('x64')
+                epoch = [uint64]3
                 x25519PublicKey = (100 + $_).ToString('x64')
             }
         }
         $privacyDocument = [pscustomobject][ordered]@{
-            schemaVersion = 1
+            schemaVersion = 2
             developmentOnly = $true
             platform = $platform
             primary = [pscustomobject][ordered]@{
@@ -477,7 +482,9 @@ try {
             }
             fallback = [pscustomobject][ordered]@{
                 entryOrigin = 'https://192.0.2.10:41805/'
-                hops = @($hops[4], $hops[5], $hops[1])
+                # Cross-route overlap is valid for the initial three-node
+                # profile; uniqueness is enforced within each route.
+                hops = @($hops[2], $hops[4], $hops[1])
             }
         }
         [IO.File]::WriteAllText(
@@ -510,11 +517,27 @@ try {
             [string]$activation.authoritySha256 -cne $runtimeAuthorityHash -or
             [string]::IsNullOrWhiteSpace([string]$activation.privacyRoutesSha256) -or
             @($revocations.revoked).Count -ne 0 -or
-            -not (Test-Path -LiteralPath (Join-Path $published 'privacy-routes.v1.json')) -or
+            -not (Test-Path -LiteralPath (Join-Path $published 'privacy-routes.v2.json')) -or
             (Get-Item (Join-Path $published 'mr-x-mailbox-policy.signature')).Length -ne 64) {
             throw "Published $platform runtime is not the exact bounded signed schema."
         }
     }
+    $shortKeyIdRoutes = Join-Path $temporary 'privacy-routes.android.short-key-id.v2.json'
+    $canonicalKeyId = (1003).ToString('x64')
+    $shortKeyId = (1003).ToString('x32')
+    $shortKeyIdDocument = (Get-Content -Raw -LiteralPath $privacyRoutes.android).
+        Replace($canonicalKeyId, $shortKeyId, [StringComparison]::Ordinal)
+    if ($shortKeyIdDocument -ceq (Get-Content -Raw -LiteralPath $privacyRoutes.android)) {
+        throw 'The short traffic-key-id hostile fixture did not mutate the route.'
+    }
+    [IO.File]::WriteAllText(
+        $shortKeyIdRoutes,
+        $shortKeyIdDocument,
+        [Text.UTF8Encoding]::new($false))
+    $badKeyIdPublish = @($publishRuntime)
+    $badKeyIdPublish[[Array]::IndexOf($badKeyIdPublish, '--android-privacy-routes') + 1] =
+        $shortKeyIdRoutes
+    Invoke-Driver $badKeyIdPublish -ExpectFailure
     $badPublicKey = Join-Path $temporary 'synthetic-mr-x.bad-public'
     [IO.File]::WriteAllBytes($badPublicKey, [byte[]](1..32))
     Protect-TestSecret $badPublicKey

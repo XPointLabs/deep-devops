@@ -67,9 +67,13 @@ try {
     [IO.File]::WriteAllText((Join-Path $secretRoot 'node-ed25519'), 'lab-only', [Text.UTF8Encoding]::new($false))
     [IO.File]::WriteAllText((Join-Path $secretRoot 'node-x25519'), ('11' * 32), [Text.UTF8Encoding]::new($false))
     [IO.File]::WriteAllText((Join-Path $secretRoot 'node-bls'), 'lab-only', [Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText((Join-Path $secretRoot 'vless-client-id'), '00000000-0000-4000-8000-000000000001', [Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText((Join-Path $secretRoot 'reality-private-key'), ('A' * 43), [Text.UTF8Encoding]::new($false))
     Protect-Key (Join-Path $secretRoot 'node-ed25519')
     Protect-Key (Join-Path $secretRoot 'node-x25519')
     Protect-Key (Join-Path $secretRoot 'node-bls')
+    Protect-Key (Join-Path $secretRoot 'vless-client-id')
+    Protect-Key (Join-Path $secretRoot 'reality-private-key')
 
     $helper = Join-Path $PSScriptRoot 'production-ingress-spki.mjs'
     $baseHelper = @($helper, '--profile', 'operator-managed', '--host', 'node.deep.test',
@@ -108,8 +112,8 @@ try {
         'DEEP_PRIVACY_PEER_1_ROUTER_ID=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', 'DEEP_PRIVACY_PEER_1_BASE_URL=https://peer-1.deep.test/', 'DEEP_PRIVACY_PEER_1_CURRENT_SPKI_SHA256=1111111111111111111111111111111111111111111111111111111111111111', 'DEEP_PRIVACY_PEER_1_NEXT_SPKI_SHA256=2222222222222222222222222222222222222222222222222222222222222222',
         'DEEP_PRIVACY_PEER_2_ROUTER_ID=cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc', 'DEEP_PRIVACY_PEER_2_BASE_URL=https://peer-2.deep.test/', 'DEEP_PRIVACY_PEER_2_CURRENT_SPKI_SHA256=3333333333333333333333333333333333333333333333333333333333333333', 'DEEP_PRIVACY_PEER_2_NEXT_SPKI_SHA256=4444444444444444444444444444444444444444444444444444444444444444',
         'DEEP_PRIVACY_PEER_3_ROUTER_ID=dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd', 'DEEP_PRIVACY_PEER_3_BASE_URL=https://peer-3.deep.test/', 'DEEP_PRIVACY_PEER_3_CURRENT_SPKI_SHA256=5555555555555555555555555555555555555555555555555555555555555555', 'DEEP_PRIVACY_PEER_3_NEXT_SPKI_SHA256=6666666666666666666666666666666666666666666666666666666666666666',
-        "DEEP_NODE_BLS_PRIVATE_KEY_FILE=$secretPath/node-bls", 'DEEP_NODE_VLESS_CLIENT_ID=00000000-0000-4000-8000-000000000001',
-        'DEEP_NODE_REALITY_SERVER_NAME=www.microsoft.com', 'DEEP_NODE_REALITY_PUBLIC_KEY=lab-public', 'DEEP_NODE_REALITY_PRIVATE_KEY=lab-private', 'DEEP_NODE_REALITY_SHORT_ID=0123456789abcdef', 'DEEP_QUORUM_COORDINATOR_CIDR=111.235.151.150/32',
+        "DEEP_NODE_BLS_PRIVATE_KEY_FILE=$secretPath/node-bls", "DEEP_NODE_VLESS_CLIENT_ID_FILE=$secretPath/vless-client-id",
+        'DEEP_NODE_REALITY_SERVER_NAME=www.microsoft.com', 'DEEP_NODE_REALITY_PUBLIC_KEY=lab-public', "DEEP_NODE_REALITY_PRIVATE_KEY_FILE=$secretPath/reality-private-key", 'DEEP_NODE_REALITY_SHORT_ID=0123456789abcdef', 'DEEP_QUORUM_COORDINATOR_CIDR=111.235.151.150/32',
         'DEEP_OPERATOR_ADDRESS=0x0000000000000000000000000000000000000001', 'DEEP_REWARDS_ADDRESS=0x0000000000000000000000000000000000000001',
         'DEEP_SERVICE_NODE_REWARDS_ADDRESS=0x0000000000000000000000000000000000000001', 'DEEP_STAKING_BACKEND_URL=https://staking.deep.test'
     )

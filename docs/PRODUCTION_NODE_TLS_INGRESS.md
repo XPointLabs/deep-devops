@@ -15,9 +15,13 @@ The ingress inspects the TLS ClientHello without logging its contents:
 - exact `DEEP_INGRESS_HOST` SNI is terminated with the approved HTTPS
   certificate;
 - exact `DEEP_NODE_REALITY_SERVER_NAME` SNI is passed through to Xray Reality;
-- every other SNI is dropped.
+- every other non-empty SNI is dropped;
+- a client addressing a node by public IPv4 may omit SNI and is routed only to
+  the pinned HTTPS terminator.
 
-The HTTPS lane requires the same exact SNI and `Host`, strips all inbound
+The HTTPS lane requires an exact `Host`; when SNI is present it must also match
+exactly. For an IPv4 origin, the certificate IP SAN, validity window, and exact
+signed SPKI pin remain mandatory. The lane strips all inbound
 `Forwarded`/`X-Forwarded-*` identity claims, and only exposes the explicit
 bootstrap, contact, membership, Session RPC, MAU2 client, onion-peer, and
 mailbox-peer paths. Health, status, metrics, debug, storage, and admin endpoints
@@ -33,13 +37,18 @@ are rejected.
 
 Choose exactly one profile in `.env.node.prod`:
 
+- `pinned-self-issued`: the node generates distinct current/next HTTPS keys and
+  exact-host certificates locally. No public CA, purchased certificate, or
+  operator-owned domain is a trust prerequisite; the signed PMT2 current/next
+  SPKI set is the authority. TLS consumers may ignore only the expected
+  self-issued chain error after exact hostname, validity, and SPKI validation.
 - `deep-managed`: Mr. X/Deep operations owns the HTTPS identity and PMT1 pin
   publication.
 - `operator-managed`: an independent node owner supplies its own publicly
   trusted certificate and publishes its public current/next pins through the
   approved PMT1 workflow. It does not weaken ingress policy.
 
-Both profiles require six files outside Git:
+All profiles require six files outside Git:
 
 ```text
 secrets/ingress/current.crt

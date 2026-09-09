@@ -71,18 +71,18 @@ if ([string]::IsNullOrWhiteSpace($MailboxSecretDirectory)) { $MailboxSecretDirec
 # This wrapper intentionally does not call Docker or export the issuer seed.
 $expectedXNodeCommit = '00280a643cfdc1e0780147eceb1da5c7b6fd2799'
 $expectedXNodeManifestSha256 =
-    'bd8cb5a16fb1d396716adc14d0adf95b005c0cccdf476cffd1cd65e5938aa102'
+    'bbb317f49bf774f0223cf0763466c01bfe1c3c896d18075da5d9873751354dbc'
 $expectedDriverSha256 = @{
     'MailboxGrantProvisioner.cs' =
         '884a6670230d36333adbdad37358d082ca84740fef2d5c6e13776500a37b8d53'
     'MailboxRuntimePublisher.cs' =
-        'aa725b67ddfd48193a3e5cc3f39f529130e589e05fa14b1569123c8a8cf42866'
+        '5718f7769aa309ce9e695ccba9b3e43541cc22aea602938ca19c47f354b0fb10'
     'PrivateCrossProcessState.cs' =
         '651d8256822d41b9a7bceab1e6d6bb45740026cac00f487a564befe7777f272b'
     'Program.cs' =
-        '5763c4556c96dbe2bd798dc79cfa1c97129adfd82691f1283734c06ee49a6562'
+        '1fea0d11d683d1a5cab99906fbd0845db903fa6cdcdfcc6153a89bb9fad37e3d'
     'ProductionMailboxUatPublisher.cs' =
-        '966c6be6cfe71317c10e66265bbad30ab61736e722a120304b8ce035fb056bc7'
+        '1bb55a16a29c3f911b4a789e251732eb8c4430f684af7aed3d41d49a492f5e02'
     'SurvivalMailboxDriver.csproj' =
         '4db436d69ea88ac3ff16f08c161b61cc0c048bad84cb7e529b2208fa569eafbe'
 }
@@ -214,8 +214,8 @@ try {
             }
         }
         $privacyRoutesRoot = Join-Path $root 'artifacts\survival-dev'
-        $androidPrivacyRoutes = Join-Path $privacyRoutesRoot 'privacy-routes.android.v1.json'
-        $windowsPrivacyRoutes = Join-Path $privacyRoutesRoot 'privacy-routes.windows.v1.json'
+        $androidPrivacyRoutes = Join-Path $privacyRoutesRoot 'privacy-routes.android.v2.json'
+        $windowsPrivacyRoutes = Join-Path $privacyRoutesRoot 'privacy-routes.windows.v2.json'
         foreach ($privacyRoutes in @($androidPrivacyRoutes, $windowsPrivacyRoutes)) {
             if (-not (Test-Path -LiteralPath $privacyRoutes -PathType Leaf)) {
                 throw 'The generated DEV privacy-route inventory is missing.'

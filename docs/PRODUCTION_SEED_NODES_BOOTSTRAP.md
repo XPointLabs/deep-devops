@@ -139,12 +139,13 @@ DEEP_NODE_ED25519_PUBLIC_KEY=...
 DEEP_NODE_ED25519_PRIVATE_KEY_FILE=./secrets/key_ed25519
 DEEP_NODE_X25519_PRIVATE_KEY_FILE=./secrets/key_x25519
 DEEP_NODE_BLS_PRIVATE_KEY_FILE=./secrets/key_bls
-DEEP_NODE_VLESS_CLIENT_ID=...
+DEEP_NODE_VLESS_CLIENT_ID_FILE=./secrets/vless-client-id
 ```
 
-Back up `secrets/key_ed25519`, `secrets/key_x25519`, `secrets/key_bls`, and
-`.env.node.prod` in the production secret store. Losing these files means
-losing the node identity or the ability to open privacy traffic.
+Back up `secrets/key_ed25519`, `secrets/key_x25519`, `secrets/key_bls`,
+`secrets/vless-client-id`, and `.env.node.prod` in the production secret store.
+Losing these files means losing the node identity or the ability to open
+privacy traffic.
 
 ## Generate Xray Reality Keys
 
@@ -155,10 +156,12 @@ docker run --rm --entrypoint xray ghcr.io/xpointlabs/xnode:latest x25519
 openssl rand -hex 8
 ```
 
-Put the generated values into `.env.node.prod`:
+Write the private key as one line to `./secrets/reality-private-key`, protect it
+with mode `0600`, and put only its path plus public values into
+`.env.node.prod`:
 
 ```text
-DEEP_NODE_REALITY_PRIVATE_KEY=<xray private key>
+DEEP_NODE_REALITY_PRIVATE_KEY_FILE=./secrets/reality-private-key
 DEEP_NODE_REALITY_PUBLIC_KEY=<xray public key>
 DEEP_NODE_REALITY_SHORT_ID=<unique 8-byte lowercase hex from openssl>
 ```

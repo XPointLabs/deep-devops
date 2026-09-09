@@ -133,14 +133,14 @@ $uatTlsArguments = @('compose') + $projectDirectoryArguments + @('-p', $Project,
 $chaosArguments = @('compose') + $projectDirectoryArguments + @('-p', $Project, '-f', $ComposePath, '-f', $UatTlsComposePath, '-f', $ChaosComposePath, '--profile', 'resend-chaos')
 $ContextRoot = Join-Path $Root 'artifacts\survival-dev\build-contexts'
 $SurvivalXNodeCommit = '00280a643cfdc1e0780147eceb1da5c7b6fd2799'
-$SurvivalXNodeContextManifestSha256 = 'bd8cb5a16fb1d396716adc14d0adf95b005c0cccdf476cffd1cd65e5938aa102'
-$SurvivalMailboxBuildHelperSha256 = 'db657dc0a596a197bc0258c00f1a81f4fe84978efe3d2535c8fc44dd31f22bc3'
+$SurvivalXNodeContextManifestSha256 = 'bbb317f49bf774f0223cf0763466c01bfe1c3c896d18075da5d9873751354dbc'
+$SurvivalMailboxBuildHelperSha256 = 'a120bc84bfb04ff9885081190caabc2a65881da1929859ca79f82c60d17d1063'
 $SurvivalMailboxDriverSha256 = @{
     'MailboxGrantProvisioner.cs' = '884a6670230d36333adbdad37358d082ca84740fef2d5c6e13776500a37b8d53'
-    'MailboxRuntimePublisher.cs' = 'aa725b67ddfd48193a3e5cc3f39f529130e589e05fa14b1569123c8a8cf42866'
+    'MailboxRuntimePublisher.cs' = '46283d1d43d30707ddb4365e7e7164c0df5023d8453ca36019f4272a2fbb117e'
     'PrivateCrossProcessState.cs' = '651d8256822d41b9a7bceab1e6d6bb45740026cac00f487a564befe7777f272b'
-    'Program.cs' = '5763c4556c96dbe2bd798dc79cfa1c97129adfd82691f1283734c06ee49a6562'
-    'ProductionMailboxUatPublisher.cs' = '966c6be6cfe71317c10e66265bbad30ab61736e722a120304b8ce035fb056bc7'
+    'Program.cs' = '28d0abff6ba8c35d0403982e790e3dd3e10201ed66b239f09ed6ae0c8d9d48ca'
+    'ProductionMailboxUatPublisher.cs' = '742bf2def113c2047396ff303f79ce0fbce87a095fd91b8c2bdef20127711551'
     'SurvivalMailboxDriver.csproj' = '4db436d69ea88ac3ff16f08c161b61cc0c048bad84cb7e529b2208fa569eafbe'
 }
 $ChainLifecycleServices = @(
@@ -363,8 +363,8 @@ function Prepare-SurvivalMailboxPeerAuthority([string]$PinnedXNodeSource = '') {
     $clientAuthorityPath = Join-Path $outputDirectory 'mailbox-client-xnode-1.env'
     $publicPath = Join-Path $outputDirectory 'mailbox-peer-authority.public.json'
     $clientPublicPath = Join-Path $outputDirectory 'mailbox-client-authority.public.json'
-    $privacyAndroidPath = Join-Path $outputDirectory 'privacy-routes.android.v1.json'
-    $privacyWindowsPath = Join-Path $outputDirectory 'privacy-routes.windows.v1.json'
+    $privacyAndroidPath = Join-Path $outputDirectory 'privacy-routes.android.v2.json'
+    $privacyWindowsPath = Join-Path $outputDirectory 'privacy-routes.windows.v2.json'
     $coordinatorHost = [Environment]::GetEnvironmentVariable('SURVIVAL_BIND_HOST')
     if ([string]::IsNullOrWhiteSpace($coordinatorHost)) { $coordinatorHost = '127.0.0.1' }
     $authorityStatePath = Get-SurvivalMailboxAuthorityState
@@ -501,6 +501,16 @@ function Get-SurvivalMailboxAuthorityState() {
 function Prepare-SurvivalXNodeIdentitySecrets() {
     $directory = Join-Path $Root '.secrets\survival-dev'
     [void][IO.Directory]::CreateDirectory($directory)
+    # These are independent issued-record identifiers, deliberately not
+    # derived from a private scalar, owner id, or X25519 public key.
+    $privacyKeyIds = @(
+        'e3ddfab64e124494a601ae9df3c0e1018ee213dd05014862a8a2227fbc5d3601',
+        'ae27f6bfb3224c518da76047509456b24fc6a60dbbba450389b5070a250a29ac',
+        '4e27047d0ed1425a9c76ee48bf6d6846394084b980c34689ae39ea9cde86aef9',
+        '9663414173fc4529b8a32264f9fc80e8b36f41e2716f4df48d03081b96a95de5',
+        '82696d0705b94e0f9b6155e423a90acfc513f898593e443ba19c4ace027f8190',
+        '9d2a4b61d1f8419697cf3e83c3497d6cde83a61beb74488b87a3928cfd16d11'
+    )
     foreach ($index in 1..6) {
         $path = Join-Path $directory "xnode-$index-ed25519.seed"
         $seed = ('{0:x64}' -f $index)
@@ -527,6 +537,23 @@ function Prepare-SurvivalXNodeIdentitySecrets() {
                 [Text.UTF8Encoding]::new($false))
         }
         Protect-SurvivalDevPrivateFile $privacyPath
+
+        # This dev-only issuance record is the authoritative keyId source for
+        # v2 route artifacts. It remains independent from the scalar and is
+        # bound by the driver to the owner, current topology epoch and key.
+        $privacyKeyIdPath = Join-Path $directory "xnode-$index-x25519.key-id"
+        $privacyKeyId = $privacyKeyIds[$index - 1]
+        if (Test-Path -LiteralPath $privacyKeyIdPath -PathType Leaf) {
+            if (([IO.File]::ReadAllText($privacyKeyIdPath).Trim()) -cne $privacyKeyId) {
+                throw 'Existing DEV-LOCAL-ONLY XNode privacy key id does not match the issued fixture record.'
+            }
+        } else {
+            [IO.File]::WriteAllText(
+                $privacyKeyIdPath,
+                $privacyKeyId + "`n",
+                [Text.UTF8Encoding]::new($false))
+        }
+        Protect-SurvivalDevPrivateFile $privacyKeyIdPath
     }
     $issuerPath = Join-Path $directory 'mailbox-client-issuer.seed'
     $issuerSeed = ('{0:x64}' -f 1001)

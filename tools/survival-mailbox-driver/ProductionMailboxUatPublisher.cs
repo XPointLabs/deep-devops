@@ -71,7 +71,7 @@ internal static class ProductionMailboxUatPublisher
             .Select(index => ReadHexSecret(Path.Combine(
                 input.SecretDirectory, $"xnode-{index}-ed25519.seed")))
             .ToArray();
-        var x25519PublicKeys = new byte[6][];
+        var x25519KeyRecords = new PrivacyRouteKeyRecord[6];
         KeyPair? mrX = null;
         try
         {
@@ -80,27 +80,44 @@ internal static class ProductionMailboxUatPublisher
             mrX = PublicKeyAuth.GenerateKeyPair(mrXSeed);
             var networkId = DomainHash(
                 "Deep/survival-uat/production-mailbox/network/v1", mrX.PublicKey)[..16];
-            for (var index = 0; index < x25519PublicKeys.Length; index++)
+            for (var index = 0; index < x25519KeyRecords.Length; index++)
             {
                 var privateKey = ReadHexSecret(Path.Combine(
                     input.SecretDirectory, $"xnode-{index + 1}-x25519.private"));
                 var privateKeyBytes = Convert.FromHexString(privateKey);
-                try { x25519PublicKeys[index] = ScalarMult.Base(privateKeyBytes); }
+                try
+                {
+                    var publicKey = ScalarMult.Base(privateKeyBytes);
+                    try
+                    {
+                        x25519KeyRecords[index] = ReadPrivacyRouteKeyRecord(
+                            Path.Combine(input.SecretDirectory,
+                                $"xnode-{index + 1}-x25519.record.v2.json"),
+                            fixture.Descriptors[index],
+                            publicKey);
+                    }
+                    finally { CryptographicOperations.ZeroMemory(publicKey); }
+                }
                 finally { CryptographicOperations.ZeroMemory(privateKeyBytes); }
             }
-            if (x25519PublicKeys.Any(key => key.Length != 32 ||
-                    key.AsSpan().IndexOfAnyExcept((byte)0) < 0) ||
-                x25519PublicKeys.Select(static key => Convert.ToHexStringLower(key))
+            if (x25519KeyRecords.Any(static record => record is null) ||
+                x25519KeyRecords.Select(static record => record.RouterOwnerId)
+                    .Distinct(StringComparer.Ordinal).Count() != 6 ||
+                x25519KeyRecords.Select(static record => record.KeyId)
+                    .Distinct(StringComparer.Ordinal).Count() != 6 ||
+                x25519KeyRecords.Select(static record => record.X25519PublicKey)
                     .Distinct(StringComparer.Ordinal).Count() != 6)
-                throw new InvalidDataException("UAT privacy X25519 public keys are invalid.");
+                throw new InvalidDataException("UAT privacy issued X25519 key records are not independent.");
 
             object Route(int port, int[] indices) => new
             {
                 entryOrigin = $"https://{input.PublicHost}:{port}/",
                 hops = indices.Select(index => new
                 {
-                    routerId = Lower(fixture.Descriptors[index].RouterId.Span),
-                    x25519PublicKey = Lower(x25519PublicKeys[index])
+                    routerOwnerId = x25519KeyRecords[index].RouterOwnerId,
+                    keyId = x25519KeyRecords[index].KeyId,
+                    epoch = x25519KeyRecords[index].Epoch,
+                    x25519PublicKey = x25519KeyRecords[index].X25519PublicKey
                 }).ToArray()
             };
             var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
@@ -110,7 +127,7 @@ internal static class ProductionMailboxUatPublisher
                 throw new InvalidDataException("UAT privacy-route window is not live.");
             var json = JsonSerializer.SerializeToUtf8Bytes(new
             {
-                schemaVersion = 1,
+                schemaVersion = 2,
                 developmentOnly = false,
                 networkId = Lower(networkId),
                 notBeforeUnixSeconds = Math.Max(0, now - 60),
@@ -122,19 +139,17 @@ internal static class ProductionMailboxUatPublisher
             if (!PublicKeyAuth.VerifyDetached(signature, json, mrX.PublicKey))
                 throw new CryptographicException("UAT privacy-route signature failed verification.");
             WriteAtomic(Path.Combine(input.OutputDirectory,
-                "production-mailbox-privacy-routes.v1.json"), json);
+                "production-mailbox-privacy-routes.v2.json"), json);
             WriteAtomic(Path.Combine(input.OutputDirectory,
-                "production-mailbox-privacy-routes.v1.sig"), signature);
+                "production-mailbox-privacy-routes.v2.sig"), signature);
             WriteAtomic(Path.Combine(input.OutputDirectory,
-                "production-mailbox-privacy-routes.v1.pub"), mrX.PublicKey);
+                "production-mailbox-privacy-routes.v2.pub"), mrX.PublicKey);
             CryptographicOperations.ZeroMemory(json);
             CryptographicOperations.ZeroMemory(signature);
         }
         finally
         {
             CryptographicOperations.ZeroMemory(mrXSeed);
-            foreach (var key in x25519PublicKeys)
-                if (key is not null) CryptographicOperations.ZeroMemory(key);
             if (mrX is not null)
             {
                 CryptographicOperations.ZeroMemory(mrX.PrivateKey);
@@ -638,6 +653,55 @@ internal static class ProductionMailboxUatPublisher
         return SHA256.HashData(certificate.PublicKey.ExportSubjectPublicKeyInfo());
     }
 
+    private static PrivacyRouteKeyRecord ReadPrivacyRouteKeyRecord(
+        string path,
+        MembershipRouteDescriptor descriptor,
+        ReadOnlySpan<byte> actualPublicKey)
+    {
+        var bytes = File.ReadAllBytes(Path.GetFullPath(path));
+        if (bytes.Length is 0 or > 4096)
+            throw new InvalidDataException("A UAT issued X25519 key record is outside its byte bound.");
+        using var document = JsonDocument.Parse(bytes, new JsonDocumentOptions
+        {
+            AllowTrailingCommas = false,
+            CommentHandling = JsonCommentHandling.Disallow,
+            MaxDepth = 4
+        });
+        var root = document.RootElement;
+        if (root.ValueKind != JsonValueKind.Object)
+            throw new InvalidDataException("A UAT issued X25519 key record has an invalid schema.");
+        var properties = root.EnumerateObject().Select(static property => property.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        if (properties.Count != 4 ||
+            !properties.SetEquals(["routerOwnerId", "keyId", "epoch", "x25519PublicKey"]))
+            throw new InvalidDataException("A UAT issued X25519 key record has an invalid schema.");
+        string Hex(string name, int byteLength)
+        {
+            var value = root.GetProperty(name).GetString();
+            if (value is null || value.Length != byteLength * 2 ||
+                value.Any(static character => character is not (
+                    >= '0' and <= '9' or >= 'a' and <= 'f')) ||
+                value.All(static character => character == '0'))
+                throw new InvalidDataException($"UAT issued X25519 key record {name} is invalid.");
+            return value;
+        }
+        var owner = Hex("routerOwnerId", 32);
+        var keyId = Hex("keyId", 32);
+        var epoch = root.GetProperty("epoch").GetUInt64();
+        var publicKey = Hex("x25519PublicKey", 32);
+        var publicKeyBytes = Convert.FromHexString(publicKey);
+        try
+        {
+            if (epoch == 0 || owner != Lower(descriptor.RouterId.Span) ||
+                epoch != descriptor.Epoch ||
+                !CryptographicOperations.FixedTimeEquals(publicKeyBytes, actualPublicKey))
+                throw new InvalidDataException(
+                    "UAT issued X25519 key record is not bound to the authenticated topology descriptor and actual key.");
+        }
+        finally { CryptographicOperations.ZeroMemory(publicKeyBytes); }
+        return new PrivacyRouteKeyRecord(owner, keyId, epoch, publicKey);
+    }
+
     private static byte[] ReadSecret(string path)
     {
         var bytes = File.ReadAllBytes(Path.GetFullPath(path));
@@ -671,6 +735,12 @@ internal static class ProductionMailboxUatPublisher
 
     private static string Lower(ReadOnlySpan<byte> value) =>
         Convert.ToHexStringLower(value);
+
+    private sealed record PrivacyRouteKeyRecord(
+        string RouterOwnerId,
+        string KeyId,
+        ulong Epoch,
+        string X25519PublicKey);
 
     private static void WriteJson(string path, object value) => WriteAtomic(
         path, Encoding.UTF8.GetBytes(JsonSerializer.Serialize(value, Json) + "\n"));

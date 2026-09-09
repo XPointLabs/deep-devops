@@ -29,6 +29,18 @@ reuse UAT keys, certificates, volumes or state in production.
 
 ## Local development and UAT
 
+For the clean first-release lane (Registry plus exactly three XNodes, direct
+development without HAProxy and an optional TLS profile), use
+`docs/FIRST_RELEASE_LOCAL_STACK.md`. It has its own Docker project, ports,
+network and volumes and does not replace or mutate the survival stack.
+Create a fresh protected identity set and start it with
+`./scripts/first-release-local-bootstrap.ps1 -Start`.
+The command also provisions distinct ONION durable-state keys. Until the
+Registry production CDR1 trusted-time, one-use ledger, witness-custody and
+current-closure authoring services exist, `Config` succeeds while `Up` and
+`Verify` stop at the documented fail-closed authority preflight without
+building images or changing the stack.
+
 Start, verify and stop the persistent development stack through its guarded
 launcher:
 

@@ -98,7 +98,8 @@ switch (arguments.Command)
             arguments.CoordinatorUrl,
             arguments.OutputClientPublic);
         WritePrivacyRouteArtifacts(
-            fixture.RouterIds,
+            fixture.Descriptors,
+            fixture.CurrentEpoch,
             arguments.SecretsDirectory,
             arguments.OutputPrivacyRoutesAndroid!,
             arguments.OutputPrivacyRoutesWindows!,
@@ -174,13 +175,14 @@ switch (arguments.Command)
 }
 
 static void WritePrivacyRouteArtifacts(
-    IReadOnlyList<RouterId> routerIds,
+    IReadOnlyList<MembershipRouteDescriptor> descriptors,
+    ulong epoch,
     string secretsDirectory,
     string androidOutput,
     string windowsOutput,
     string entryHost)
 {
-    if (routerIds.Count != 6 ||
+    if (descriptors.Count != 6 || epoch == 0 ||
         string.IsNullOrWhiteSpace(androidOutput) ||
         string.IsNullOrWhiteSpace(windowsOutput) ||
         !System.Net.IPAddress.TryParse(entryHost, out var address) ||
@@ -191,10 +193,10 @@ static void WritePrivacyRouteArtifacts(
             "Privacy route publication requires six routers and an exact IPv4 entry host.");
     }
 
-    var publicKeys = new byte[routerIds.Count][];
+    var keyRecords = new IssuedDevPrivacyRouteKey[descriptors.Count];
     try
     {
-        for (var index = 0; index < routerIds.Count; index++)
+        for (var index = 0; index < descriptors.Count; index++)
         {
             var path = Path.Combine(
                 secretsDirectory,
@@ -211,13 +213,29 @@ static void WritePrivacyRouteArtifacts(
             var privateKey = Convert.FromHexString(value);
             try
             {
-                publicKeys[index] = ScalarMult.Base(privateKey);
-                if (publicKeys[index].Length != 32 ||
-                    publicKeys[index].All(static item => item == 0))
+                var publicKey = ScalarMult.Base(privateKey);
+                if (publicKey.Length != 32 ||
+                    publicKey.All(static item => item == 0))
                 {
                     throw new InvalidDataException(
                         "A privacy-routing fixture public key is invalid.");
                 }
+                var keyId = File.ReadAllText(Path.Combine(
+                    secretsDirectory,
+                    $"xnode-{index + 1}-x25519.key-id")).Trim();
+                if (keyId.Length != 64 || keyId.All(static character => character == '0') ||
+                    keyId.Any(character => character is not (
+                        >= '0' and <= '9' or >= 'a' and <= 'f')))
+                {
+                    CryptographicOperations.ZeroMemory(publicKey);
+                    throw new InvalidDataException(
+                        "A privacy-routing fixture issued key id is not canonical lowercase nonzero hex.");
+                }
+                keyRecords[index] = new IssuedDevPrivacyRouteKey(
+                    Convert.ToHexStringLower(descriptors[index].RouterId.Span),
+                    keyId,
+                    epoch,
+                    publicKey);
             }
             finally
             {
@@ -225,14 +243,16 @@ static void WritePrivacyRouteArtifacts(
             }
         }
 
-        for (var left = 0; left < publicKeys.Length; left++)
-        for (var right = left + 1; right < publicKeys.Length; right++)
+        for (var left = 0; left < keyRecords.Length; left++)
+        for (var right = left + 1; right < keyRecords.Length; right++)
         {
-            if (CryptographicOperations.FixedTimeEquals(
-                    publicKeys[left], publicKeys[right]))
+            if (keyRecords[left].RouterOwnerId == keyRecords[right].RouterOwnerId ||
+                keyRecords[left].KeyId == keyRecords[right].KeyId ||
+                CryptographicOperations.FixedTimeEquals(
+                    keyRecords[left].X25519PublicKey, keyRecords[right].X25519PublicKey))
             {
                 throw new InvalidDataException(
-                    "Privacy-routing fixture X25519 public keys must be distinct.");
+                    "Privacy-routing fixture issued key records must be independently bound.");
             }
         }
 
@@ -241,8 +261,10 @@ static void WritePrivacyRouteArtifacts(
             entryOrigin = $"https://{entryHost}:{entryPort}/",
             hops = indices.Select(index => new
             {
-                routerId = routerIds[index].Value,
-                x25519PublicKey = Convert.ToHexStringLower(publicKeys[index])
+                routerOwnerId = keyRecords[index].RouterOwnerId,
+                keyId = keyRecords[index].KeyId,
+                epoch = keyRecords[index].Epoch,
+                x25519PublicKey = Convert.ToHexStringLower(keyRecords[index].X25519PublicKey)
             }).ToArray()
         };
 
@@ -254,7 +276,7 @@ static void WritePrivacyRouteArtifacts(
         {
             var bytes = JsonSerializer.SerializeToUtf8Bytes(new
             {
-                schemaVersion = 1,
+                schemaVersion = 2,
                 developmentOnly = true,
                 platform,
                 primary = Route(41803, [2, 3, 0]),
@@ -266,10 +288,10 @@ static void WritePrivacyRouteArtifacts(
     }
     finally
     {
-        foreach (var publicKey in publicKeys)
+        foreach (var keyRecord in keyRecords)
         {
-            if (publicKey is not null)
-                CryptographicOperations.ZeroMemory(publicKey);
+            if (keyRecord is not null)
+                CryptographicOperations.ZeroMemory(keyRecord.X25519PublicKey);
         }
     }
 }
@@ -2803,6 +2825,12 @@ sealed record ExactPrivacyRoute(
     Uri EntryOrigin,
     IReadOnlyList<PrivacyRoutingHop> Hops);
 
+sealed record IssuedDevPrivacyRouteKey(
+    string RouterOwnerId,
+    string KeyId,
+    ulong Epoch,
+    byte[] X25519PublicKey);
+
 sealed record ExactPrivacyRoutes(
     ExactPrivacyRoute Primary,
     ExactPrivacyRoute Fallback)
@@ -2811,7 +2839,8 @@ sealed record ExactPrivacyRoutes(
     private static readonly string[] RootProperties =
         ["schemaVersion", "developmentOnly", "platform", "primary", "fallback"];
     private static readonly string[] RouteProperties = ["entryOrigin", "hops"];
-    private static readonly string[] HopProperties = ["routerId", "x25519PublicKey"];
+    private static readonly string[] HopProperties =
+        ["routerOwnerId", "keyId", "epoch", "x25519PublicKey"];
 
     public static ExactPrivacyRoutes Load(string path)
     {
@@ -2830,7 +2859,7 @@ sealed record ExactPrivacyRoutes(
         });
         var root = document.RootElement;
         ExactProperties(root, RootProperties, "privacy routes");
-        Require(root.GetProperty("schemaVersion").GetInt32() == 1,
+        Require(root.GetProperty("schemaVersion").GetInt32() == 2,
             "Privacy routes schema version is unsupported.");
         Require(root.GetProperty("developmentOnly").GetBoolean(),
             "Privacy routes must be explicitly development-only.");
@@ -2838,28 +2867,20 @@ sealed record ExactPrivacyRoutes(
         Require(platform is "android" or "windows",
             "Privacy routes platform is unsupported.");
 
-        var routerIds = new HashSet<string>(StringComparer.Ordinal);
-        var agreementKeys = new HashSet<string>(StringComparer.Ordinal);
         var origins = new HashSet<string>(StringComparer.Ordinal);
         var primary = ParseRoute(
             root.GetProperty("primary"),
-            routerIds,
-            agreementKeys,
             origins);
         var fallback = ParseRoute(
             root.GetProperty("fallback"),
-            routerIds,
-            agreementKeys,
             origins);
-        Require(routerIds.Count == 6 && agreementKeys.Count == 6 && origins.Count == 2,
-            "Privacy routes must be two origin- and identity-disjoint three-hop routes.");
+        Require(origins.Count == 2,
+            "Privacy routes must have distinct canonical HTTPS entry origins.");
         return new ExactPrivacyRoutes(primary, fallback);
     }
 
     private static ExactPrivacyRoute ParseRoute(
         JsonElement element,
-        ISet<string> routerIds,
-        ISet<string> agreementKeys,
         ISet<string> origins)
     {
         ExactProperties(element, RouteProperties, "privacy route");
@@ -2885,33 +2906,50 @@ sealed record ExactPrivacyRoutes(
                 hopsElement.GetArrayLength() == PrivacyRoutingLimits.RouteHopCount,
             "Privacy route must contain exactly three hops.");
         var hops = new List<PrivacyRoutingHop>(PrivacyRoutingLimits.RouteHopCount);
+        var routerOwnerIds = new HashSet<string>(StringComparer.Ordinal);
+        var keyIds = new HashSet<string>(StringComparer.Ordinal);
+        var agreementKeys = new HashSet<string>(StringComparer.Ordinal);
+        var hopIndex = 0;
         foreach (var hopElement in hopsElement.EnumerateArray())
         {
             ExactProperties(hopElement, HopProperties, "privacy route hop");
-            var routerIdText = CanonicalLowerHex(
-                hopElement.GetProperty("routerId"),
-                "Privacy route router id");
+            var routerOwnerIdText = CanonicalLowerHex(
+                hopElement.GetProperty("routerOwnerId"), 32,
+                "Privacy route router owner id");
+            var keyIdText = CanonicalLowerHex(
+                hopElement.GetProperty("keyId"), 32,
+                "Privacy route traffic key id");
+            var epoch = hopElement.GetProperty("epoch").GetUInt64();
+            Require(epoch != 0, "Privacy route traffic key epoch must be positive.");
             var agreementKeyText = CanonicalLowerHex(
                 hopElement.GetProperty("x25519PublicKey"),
+                32,
                 "Privacy route X25519 public key");
-            Require(routerIds.Add(routerIdText) && agreementKeys.Add(agreementKeyText),
-                "Privacy routes repeat a router id or X25519 public key.");
+            Require(routerOwnerIds.Add(routerOwnerIdText) &&
+                    keyIds.Add(keyIdText) &&
+                    agreementKeys.Add(agreementKeyText),
+                "Privacy route repeats a router owner, traffic key id, or X25519 public key.");
             hops.Add(new PrivacyRoutingHop(
-                Convert.FromHexString(routerIdText),
+                Convert.FromHexString(routerOwnerIdText),
+                Convert.FromHexString(keyIdText),
+                epoch,
+                hopIndex++ == PrivacyRoutingLimits.RouteHopCount - 1
+                    ? PrivacyRoutingKeyRole.Exit
+                    : PrivacyRoutingKeyRole.Relay,
                 Convert.FromHexString(agreementKeyText)));
         }
 
         return new ExactPrivacyRoute(origin, hops);
     }
 
-    private static string CanonicalLowerHex(JsonElement element, string label)
+    private static string CanonicalLowerHex(JsonElement element, int byteLength, string label)
     {
         var value = element.GetString();
         Require(value is not null &&
-                value.Length == 64 &&
+                value.Length == byteLength * 2 &&
                 value.All(static character => character is
                     >= '0' and <= '9' or >= 'a' and <= 'f'),
-            $"{label} must be canonical lowercase 32-byte hex.");
+            $"{label} must be canonical lowercase {byteLength}-byte hex.");
         return value!;
     }
 

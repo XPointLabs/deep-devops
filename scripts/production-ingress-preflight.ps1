@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('deep-managed', 'operator-managed')]
+    [ValidateSet('pinned-self-issued', 'deep-managed', 'operator-managed')]
     [string]$Profile = 'deep-managed',
     [Parameter(Mandatory = $true)]
     [string]$HostName,

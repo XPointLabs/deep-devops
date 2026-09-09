@@ -6,6 +6,93 @@ import { fileURLToPath } from 'node:url';
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const digestPinnedNode = /^node:24-bookworm-slim@sha256:[0-9a-f]{64}$/;
+const composeSurvivalPath = path.join(repositoryRoot, 'docker-compose.survival.dev.yml');
+const expectedSurvivalDotnetSdk = 'mcr.microsoft.com/dotnet/sdk@sha256:7e964ea8bc6c1e18ea9fbc76ed403da41c9b19aeee2aab6bf9c845f25e891380';
+const expectedSurvivalRuntime = 'mcr.microsoft.com/dotnet/aspnet@sha256:e3736b0d423db99c6988e1ddf5ea725c14b12579bb120024e5ff7ff204a14080';
+const expectedSurvivalNode = 'node@sha256:242549cd46785b480c832479a730f4f2a20865d61ea2e404fdb2a5c3d3b73ecf';
+const scopedSurvivalInlineBuilds = [
+  { name: 'x-xnode-build', args: ['SDK_IMAGE', 'RUNTIME_IMAGE'] },
+  { name: 'x-mailbox-driver-build', args: ['SDK_IMAGE', 'RUNTIME_IMAGE'] },
+  { name: 'x-membership-fixture-build', args: ['SDK_IMAGE', 'RUNTIME_IMAGE'] },
+  { name: 'x-compat-build', args: ['NODE_IMAGE'] },
+  { name: 'contracts-devnet', args: ['NODE_IMAGE'] },
+  { name: 'registry', args: ['SDK_IMAGE', 'RUNTIME_IMAGE'] },
+  { name: 'staking-backend', args: ['SDK_IMAGE', 'RUNTIME_IMAGE'] },
+];
+
+function topLevelComposeBlock(source, name) {
+  const lines = source.split(/\r?\n/);
+  const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\\\$&');
+  const headerPattern = new RegExp(`^([ \\t]*)${escapedName}:(?:\\s+&[^\\s]+)?`);
+  let headerIndex = -1;
+  let indent = 0;
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = lines[index].match(headerPattern);
+    if (!match) {
+      continue;
+    }
+    headerIndex = index;
+    indent = match[1].length;
+    break;
+  }
+  assert.ok(headerIndex !== -1, `missing ${name} block`);
+  const bodyLines = [];
+  for (let index = headerIndex + 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line.trim() === '') {
+      bodyLines.push(line);
+      continue;
+    }
+    const headerLike = line.match(/^([ \t]*)([A-Za-z][A-Za-z0-9_-]*:|services:|volumes:|networks:|secrets:)/);
+    if (headerLike !== null && headerLike[1].length <= indent) {
+      break;
+    }
+    bodyLines.push(line);
+  }
+  return bodyLines.join('\n');
+}
+
+function extractInlineDockerfileFromCompose(source, name) {
+  const block = topLevelComposeBlock(source, name);
+  const lines = block.split(/\r?\n/);
+  const marker = lines.findIndex(line => /^\s*dockerfile_inline:\s*\|$/.test(line));
+  assert.notEqual(marker, -1, `${name} must include dockerfile_inline`);
+  const markerIndent = lines[marker].match(/^[ \t]*/)?.[0] ?? '';
+  const bodyIndent = `${markerIndent}  `;
+  const bodyLines = [];
+  for (let index = marker + 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line.length === 0) {
+      bodyLines.push('');
+      continue;
+    }
+    if (!line.startsWith(bodyIndent)) break;
+    bodyLines.push(line.slice(bodyIndent.length));
+  }
+  const body = bodyLines.join('\n');
+  assert.match(body, /^# /m, `${name} inline dockerfile must keep a directive comment`);
+  return body;
+}
+
+function assertScopedInvalidDefaultArgInFromPolicy(source, label, expectedArgs, fromInline = false) {
+  const checks = [...source.matchAll(/^\s*#\s*check=skip=([^\r\n]+)\s*$/gm)];
+  assert.equal(checks.length, 1, `${label} must declare exactly one check policy`);
+  assert.equal(checks[0][1].trim(), 'InvalidDefaultArgInFrom', `${label} must only skip InvalidDefaultArgInFrom`);
+  for (const arg of expectedArgs) {
+    assert.match(source, new RegExp(`^\\s*ARG ${arg}\\s*$`, 'm'), `${label} must declare ${arg} without default`);
+    const fromPattern = fromInline
+      ? new RegExp(`^\\s*FROM .*\\$\\$\\{${arg}\\}`, 'm')
+      : new RegExp(`^\\s*FROM .*\\$\\{${arg}\\}`, 'm');
+    assert.match(source, fromPattern, `${label} must consume ${arg}`);
+  }
+}
+
+function assertNoGlobalCheckPolicy(source, label) {
+  const checkAll = [...source.matchAll(/^\s*#\s*check=([^\r\n]+)\s*$/gm)];
+  for (const match of checkAll) {
+    assert.equal(match[1].trim(), 'skip=InvalidDefaultArgInFrom', `${label} declares a non-targeted check directive`);
+  }
+}
 
 test('all Node compatibility-service builds pass one immutable digest-pinned NODE_IMAGE', async () => {
   const compose = await readFile(path.join(repositoryRoot, 'docker-compose.yml'), 'utf8');
@@ -27,6 +114,11 @@ test('mandatory NODE_IMAGE Dockerfiles and production storage build use the revi
     assert.match(source, /^ARG NODE_IMAGE\s*$/m, `${name} must not define a mutable Dockerfile default`);
     assert.match(source, /^FROM \$\{NODE_IMAGE\}\s*$/m, `${name} must consume the required build arg`);
   }
+  const dotnetService = await readFile(path.join(repositoryRoot, 'docker', 'dotnet-service.Dockerfile'), 'utf8');
+  assert.match(dotnetService, /^ARG SDK_IMAGE\s*$/m, 'dotnet-service must not define a mutable SDK image default');
+  assert.match(dotnetService, /^ARG RUNTIME_IMAGE\s*$/m, 'dotnet-service must not define a mutable runtime image default');
+  assert.match(dotnetService, /^FROM \$\{SDK_IMAGE\} AS build$/m, 'dotnet-service must consume required SDK image arg');
+  assert.match(dotnetService, /^FROM \$\{RUNTIME_IMAGE\} AS runtime$/m, 'dotnet-service must consume required runtime image arg');
 
   const workflow = await readFile(
     path.join(repositoryRoot, '.github', 'workflows', 'publish-production-images.yml'),
@@ -90,4 +182,56 @@ test('no-mock compose pins both supported Xray platform assets and Dockerfile se
   assert.match(dockerfile, /--retry 5 --retry-all-errors/);
   assert.doesNotMatch(dockerfile, /dotnet restore[^\r\n]*--(?:arch|runtime|-r)\b/);
   assert.match(dockerfile, /dotnet publish[^\r\n]*--runtime "linux-\$DOTNET_ARCH"[^\r\n]*--no-restore/);
+});
+
+test('mandatory whole-image ARGs stay explicit and checks are scoped to InvalidDefaultArgInFrom', async () => {
+  const composeSurvival = await readFile(composeSurvivalPath, 'utf8');
+  const dotnetDockerfile = await readFile(path.join(repositoryRoot, 'docker', 'dotnet-service.Dockerfile'), 'utf8');
+  const xnodeDockerfile = await readFile(path.join(repositoryRoot, 'docker', 'xnode-xray.Dockerfile'), 'utf8');
+
+  assertScopedInvalidDefaultArgInFromPolicy(dotnetDockerfile, 'dotnet-service.Dockerfile', ['SDK_IMAGE', 'RUNTIME_IMAGE']);
+  assertScopedInvalidDefaultArgInFromPolicy(xnodeDockerfile, 'xnode-xray.Dockerfile', ['SDK_IMAGE', 'RUNTIME_IMAGE']);
+  for (const { name, args } of scopedSurvivalInlineBuilds) {
+    assertScopedInvalidDefaultArgInFromPolicy(
+      extractInlineDockerfileFromCompose(composeSurvival, name),
+      `${name} inline dockerfile`,
+      args,
+      true
+    );
+  }
+});
+
+test('survival compose keeps immutable digest pins for SDK/RUNTIME/NODE image args', async () => {
+  const composeSurvival = await readFile(composeSurvivalPath, 'utf8');
+  const pinnedSdk = [...composeSurvival.matchAll(/^[ \t]*SDK_IMAGE:\s*\$\{SURVIVAL_DOTNET_SDK_IMAGE:-([^}]+)\}/gm)].map(match => match[1]);
+  const pinnedRuntime = [...composeSurvival.matchAll(/^[ \t]*RUNTIME_IMAGE:\s*\$\{SURVIVAL_DOTNET_RUNTIME_IMAGE:-([^}]+)\}/gm)].map(match => match[1]);
+  const pinnedNode = [...composeSurvival.matchAll(/^[ \t]*NODE_IMAGE:\s*\$\{SURVIVAL_NODE_IMAGE:-([^}]+)\}/gm)].map(match => match[1]);
+  assert.ok(pinnedSdk.every(value => value === expectedSurvivalDotnetSdk));
+  assert.ok(pinnedRuntime.every(value => value === expectedSurvivalRuntime));
+  assert.ok(pinnedNode.every(value => value === expectedSurvivalNode));
+  assert.equal(new Set(pinnedSdk).size, 1);
+  assert.equal(new Set(pinnedRuntime).size, 1);
+  assert.equal(new Set(pinnedNode).size, 1);
+  assert.equal(pinnedSdk.length, 5);
+  assert.equal(pinnedRuntime.length, 5);
+  assert.equal(pinnedNode.length, 2);
+});
+
+test('InvalidDefaultArgInFrom skip is intentionally local, not global', async () => {
+  const composeSurvival = await readFile(composeSurvivalPath, 'utf8');
+  const composeScopedPolicies = [...composeSurvival.matchAll(/^\s*#\s*check=skip=InvalidDefaultArgInFrom\s*$/gm)];
+  assert.equal(composeScopedPolicies.length, scopedSurvivalInlineBuilds.length);
+  for (const { name, args } of scopedSurvivalInlineBuilds) {
+    assertScopedInvalidDefaultArgInFromPolicy(
+      extractInlineDockerfileFromCompose(composeSurvival, name),
+      `${name} inline dockerfile`,
+      args,
+      true
+    );
+  }
+  const dotnetDockerfile = await readFile(path.join(repositoryRoot, 'docker', 'dotnet-service.Dockerfile'), 'utf8');
+  const xnodeDockerfile = await readFile(path.join(repositoryRoot, 'docker', 'xnode-xray.Dockerfile'), 'utf8');
+  assertNoGlobalCheckPolicy(dotnetDockerfile, 'dotnet-service.Dockerfile');
+  assertNoGlobalCheckPolicy(xnodeDockerfile, 'xnode-xray.Dockerfile');
+  assertNoGlobalCheckPolicy(composeSurvival, 'docker-compose.survival.dev.yml');
 });

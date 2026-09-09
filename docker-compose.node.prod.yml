@@ -153,6 +153,11 @@ services:
 
       PrivacyRouting__Enabled: "true"
       PrivacyRouting__X25519PrivateKeyPath: /run/secrets/node-x25519-private-key
+      PrivacyRouting__StateProtectionKeyPath: /run/secrets/node-onion-state-protection
+      PrivacyRouting__ReplayStateRelativePath: privacy-routing/replay.state
+      PrivacyRouting__EntropyStateRelativePath: privacy-routing/entropy.state
+      PrivacyRouting__KeyVaultDirectoryRelativePath: privacy-routing/key-vault
+      PrivacyRouting__ReceivePosition: ${DEEP_NODE_ONION_RECEIVE_POSITION:?set DEEP_NODE_ONION_RECEIVE_POSITION}
       PrivacyRouting__PublicPeerBaseUrl: https://${DEEP_NODE_PUBLIC_HOST:?set DEEP_NODE_PUBLIC_HOST}/
       PrivacyRouting__MaximumConcurrentRequests: ${DEEP_PRIVACY_MAXIMUM_CONCURRENT_REQUESTS:-64}
       PrivacyRouting__RequestsPerMinute: ${DEEP_PRIVACY_REQUESTS_PER_MINUTE:-600}
@@ -169,11 +174,6 @@ services:
       PrivacyRouting__Peers__1__BaseUrl: ${DEEP_PRIVACY_PEER_2_BASE_URL:?set DEEP_PRIVACY_PEER_2_BASE_URL}
       PrivacyRouting__Peers__1__CurrentSpkiSha256: ${DEEP_PRIVACY_PEER_2_CURRENT_SPKI_SHA256:?set DEEP_PRIVACY_PEER_2_CURRENT_SPKI_SHA256}
       PrivacyRouting__Peers__1__NextSpkiSha256: ${DEEP_PRIVACY_PEER_2_NEXT_SPKI_SHA256:?set DEEP_PRIVACY_PEER_2_NEXT_SPKI_SHA256}
-      PrivacyRouting__Peers__2__RouterId: ${DEEP_PRIVACY_PEER_3_ROUTER_ID:?set DEEP_PRIVACY_PEER_3_ROUTER_ID}
-      PrivacyRouting__Peers__2__BaseUrl: ${DEEP_PRIVACY_PEER_3_BASE_URL:?set DEEP_PRIVACY_PEER_3_BASE_URL}
-      PrivacyRouting__Peers__2__CurrentSpkiSha256: ${DEEP_PRIVACY_PEER_3_CURRENT_SPKI_SHA256:?set DEEP_PRIVACY_PEER_3_CURRENT_SPKI_SHA256}
-      PrivacyRouting__Peers__2__NextSpkiSha256: ${DEEP_PRIVACY_PEER_3_NEXT_SPKI_SHA256:?set DEEP_PRIVACY_PEER_3_NEXT_SPKI_SHA256}
-
       StorageRpc__BaseUrl: http://172.31.241.20:8080
 
       Vless__Enabled: "true"
@@ -187,12 +187,12 @@ services:
       Vless__PublicPort: ${DEEP_NODE_PUBLIC_PORT:-443}
       Vless__ApiIngressHost: 172.31.241.10
       Vless__ApiIngressPort: "8080"
-      Vless__ClientId: ${DEEP_NODE_VLESS_CLIENT_ID:?set DEEP_NODE_VLESS_CLIENT_ID}
+      Vless__ClientIdFile: /run/secrets/node-vless-client-id
       Vless__MaskDomain: ${DEEP_NODE_MASK_DOMAIN:-www.microsoft.com}
       Vless__TransportMode: Reality
       Vless__Reality__ServerName: ${DEEP_NODE_REALITY_SERVER_NAME:-www.microsoft.com}
       Vless__Reality__PublicKey: ${DEEP_NODE_REALITY_PUBLIC_KEY:?set DEEP_NODE_REALITY_PUBLIC_KEY}
-      Vless__Reality__PrivateKey: ${DEEP_NODE_REALITY_PRIVATE_KEY:?set DEEP_NODE_REALITY_PRIVATE_KEY}
+      Vless__Reality__PrivateKeyFile: /run/secrets/node-reality-private-key
       Vless__Reality__ShortId: ${DEEP_NODE_REALITY_SHORT_ID:?set DEEP_NODE_REALITY_SHORT_ID}
       Vless__Reality__Fingerprint: ${DEEP_NODE_REALITY_FINGERPRINT:-chrome}
       Vless__Reality__SpiderX: ${DEEP_NODE_REALITY_SPIDER_X:-/}
@@ -229,8 +229,14 @@ services:
         target: node-ed25519-private-key
       - source: node-x25519-private-key
         target: node-x25519-private-key
+      - source: node-onion-state-protection
+        target: node-onion-state-protection
       - source: node-bls-private-key
         target: node-bls-private-key
+      - source: node-vless-client-id
+        target: node-vless-client-id
+      - source: node-reality-private-key
+        target: node-reality-private-key
     networks:
       ingress-upstream:
         ipv4_address: 172.31.241.10
@@ -318,5 +324,11 @@ secrets:
     file: ${DEEP_NODE_ED25519_PRIVATE_KEY_FILE:?set DEEP_NODE_ED25519_PRIVATE_KEY_FILE}
   node-x25519-private-key:
     file: ${DEEP_NODE_X25519_PRIVATE_KEY_FILE:?set DEEP_NODE_X25519_PRIVATE_KEY_FILE}
+  node-onion-state-protection:
+    file: ${DEEP_NODE_ONION_STATE_PROTECTION_FILE:?set DEEP_NODE_ONION_STATE_PROTECTION_FILE}
   node-bls-private-key:
     file: ${DEEP_NODE_BLS_PRIVATE_KEY_FILE:?set DEEP_NODE_BLS_PRIVATE_KEY_FILE}
+  node-vless-client-id:
+    file: ${DEEP_NODE_VLESS_CLIENT_ID_FILE:?set DEEP_NODE_VLESS_CLIENT_ID_FILE}
+  node-reality-private-key:
+    file: ${DEEP_NODE_REALITY_PRIVATE_KEY_FILE:?set DEEP_NODE_REALITY_PRIVATE_KEY_FILE}

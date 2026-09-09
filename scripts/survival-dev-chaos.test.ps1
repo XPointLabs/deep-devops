@@ -19,7 +19,7 @@ if (-not $script.Contains("'stop', `$node") -or
     throw 'Chaos script does not restore each stopped XNode in a finally block.'
 }
 foreach ($required in @(
-    'RetryableBeforeForward_UsesFreshDisjointFallback',
+    'InitialThreeNodeProfile_AllowsBestEffortFallbackNodeReuse',
     'OutcomeUnknown_NeverUsesFallback',
     'TerminalOutcomeUnknown_NeverUsesFallback',
     'UnauthenticatedReply_IsOutcomeUnknownAndDoesNotFallback',
@@ -31,7 +31,7 @@ foreach ($required in @(
         throw "Chaos script is missing required bounded evidence declaration: $required"
     }
 }
-if ($script -match 'ClientLiveAcceptanceTests|duplicateAssertion|two-disjoint-three-hop-attempts') {
+if ($script -match 'ClientLiveAcceptanceTests|duplicateAssertion|two-disjoint-three-hop-attempts|strictly disjoint') {
     throw 'Chaos script retains an unsupported live delivery, deduplication, or disjoint-route claim.'
 }
 if ($script -match 'catch \[System\.Net\.Http\.HttpRequestException\]') {

@@ -1,0 +1,418 @@
+name: deep-first-release-local
+
+x-runtime-image: &runtime-image mcr.microsoft.com/dotnet/aspnet@sha256:e3736b0d423db99c6988e1ddf5ea725c14b12579bb120024e5ff7ff204a14080
+
+x-service: &service
+  init: true
+  restart: unless-stopped
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  networks: [first-release]
+  labels:
+    io.deep.stack: first-release-local
+    io.deep.production-ready: "false"
+
+x-health: &health
+  interval: 3s
+  timeout: 3s
+  retries: 40
+  start_period: 20s
+
+x-xnode-build: &xnode-build
+  context: ${FIRST_RELEASE_XNODE_SOURCE:-../xnode}
+  dockerfile: ${FIRST_RELEASE_XNODE_DOCKERFILE:-../deep-devops/docker/first-release-xnode.Dockerfile}
+  additional_contexts:
+    devops_context: ./docker
+    protocol_cutover: ${FIRST_RELEASE_XNODE_PROTOCOL_CUTOVER_CONTEXT:-../xnode/artifacts/local-protocol-cutover}
+  args:
+    SDK_IMAGE: ${FIRST_RELEASE_DOTNET_SDK_IMAGE:-mcr.microsoft.com/dotnet/sdk@sha256:7e964ea8bc6c1e18ea9fbc76ed403da41c9b19aeee2aab6bf9c845f25e891380}
+    RUNTIME_IMAGE: ${FIRST_RELEASE_DOTNET_RUNTIME_IMAGE:-mcr.microsoft.com/dotnet/aspnet@sha256:e3736b0d423db99c6988e1ddf5ea725c14b12579bb120024e5ff7ff204a14080}
+    PROJECT: src/XNode/XNode.csproj
+    APP_DLL: XNode.dll
+    DEEP_PROTOCOL_LOCAL_PACKAGE_VERSION: ${FIRST_RELEASE_DEEP_PROTOCOL_PACKAGE_VERSION:-0.6.0-local.2ee5f72df11c}
+    DEEP_PROTOCOL_PACKAGE_SHA256: ${FIRST_RELEASE_DEEP_PROTOCOL_PACKAGE_SHA256:-bc76d6748a1910a90bfd7544f2e0da2b73d83dc297171a3a2ec6ccb6f0c45c86}
+    DEEP_PROTOCOL_MEMBERSHIP_ROUTES_PACKAGE_SHA256: ${FIRST_RELEASE_DEEP_PROTOCOL_MEMBERSHIP_ROUTES_PACKAGE_SHA256:-09968cb919f33cc7ecdedb6e70f27c6be2ba5f2d9b3dd19092292323779d51d3}
+    XRAY_VERSION: ${FIRST_RELEASE_XRAY_VERSION:-v26.3.27}
+    XRAY_SHA256_AMD64: ${FIRST_RELEASE_XRAY_SHA256_AMD64:-23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae}
+    XRAY_SHA256_ARM64: ${FIRST_RELEASE_XRAY_SHA256_ARM64:-4d30283ae614e3057f730f67cd088a42be6fdf91f8639d82cb69e48cde80413c}
+
+x-xnode-environment: &xnode-environment
+  ASPNETCORE_ENVIRONMENT: Development
+  ASPNETCORE_URLS: http://0.0.0.0:8080
+  Node__ApiListenUrl: http://0.0.0.0:8080
+  Node__PeerRpcListenUrl: http://0.0.0.0:8081
+  Node__ManagedIngressH2ListenUrl: http://0.0.0.0:8082
+  Node__PrivacyPeerH2ListenUrl: http://0.0.0.0:8083
+  Node__ManagedIngressTrustedProxyAddresses__0: 172.31.93.5
+  Node__DataDirectory: /state
+  Node__Network: local
+  Node__IsRelay: "true"
+  Runtime__BootstrapFromStorage: "false"
+  Runtime__RequireSignedRelayContacts: "true"
+  PrivacyRouting__Enabled: "true"
+  PrivacyRouting__X25519PrivateKeyPath: /run/secrets/xnode-x25519.private
+  PrivacyRouting__StateProtectionKeyPath: /run/secrets/onion-state-protection.key
+  PrivacyRouting__ReplayStateRelativePath: privacy-routing/replay.state
+  PrivacyRouting__EntropyStateRelativePath: privacy-routing/entropy.state
+  PrivacyRouting__KeyVaultDirectoryRelativePath: privacy-routing/key-vault
+  PrivacyRouting__AllowInsecureHttpPeerTransport: "true"
+  PrivacyRouting__MaximumConcurrentRequests: "64"
+  PrivacyRouting__RequestsPerMinute: "600"
+  PrivacyRouting__RequestTimeoutSeconds: "30"
+  PrivacyRouting__ReplyPaddingBlockBytes: "4096"
+  PrivacyRouting__ReplayCapacity: "100000"
+  PrivacyRouting__ReplayTtlSeconds: "300"
+  Mailbox__Enabled: "false"
+  RequiredTerminals__Contact: "true"
+  RequiredTerminals__GroupControl: "true"
+  RegistryHeartbeat__Enabled: "true"
+  RegistryHeartbeat__Endpoint: http://registry:8080/api/nodes/register
+  RegistryHeartbeat__Interval: 00:00:15
+  RegistryRegistration__OperatorFeeBps: "0"
+  RegistryRegistration__StakeAtomic: ${FIRST_RELEASE_STAKE_ATOMIC:-25000000000000}
+  RegistryRegistration__ChainId: "31337"
+  RegistryRegistration__ServiceNodeRewardsAddress: "0x000000000000000000000000000000000000f001"
+  RegistryRegistration__Ed25519Signature1: 0000000000000000000000000000000000000000000000000000000000000000
+  RegistryRegistration__Ed25519Signature2: 0000000000000000000000000000000000000000000000000000000000000000
+  Vless__Enabled: "true"
+  Vless__MockProcess: "false"
+  Vless__XrayExecutablePath: /usr/local/bin/xray
+  Vless__GeneratedConfigPath: /tmp/deep/xray.generated.json
+  Vless__WorkingDirectory: /tmp/deep/xray
+  Vless__InboundListenHost: 0.0.0.0
+  Vless__InboundListenPort: "8443"
+  Vless__ApiIngressHost: 127.0.0.1
+  Vless__ApiIngressPort: "8080"
+  Vless__TransportMode: Reality
+  Vless__MaskDomain: ${FIRST_RELEASE_MASK_DOMAIN:?set FIRST_RELEASE_MASK_DOMAIN in the private environment file}
+  Vless__Reality__ServerName: ${FIRST_RELEASE_MASK_DOMAIN:?set FIRST_RELEASE_MASK_DOMAIN in the private environment file}
+  Vless__Reality__Fingerprint: chrome
+  Vless__Reality__SpiderX: /
+
+x-xnode: &xnode
+  <<: *service
+  image: deep-first-release/xnode:local
+  build: *xnode-build
+  user: "65532:65532"
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
+  depends_on:
+    state-init: { condition: service_completed_successfully }
+    registry: { condition: service_healthy }
+  healthcheck:
+    <<: *health
+    test:
+      - CMD-SHELL
+      - >-
+        body="$$(curl -fsS http://127.0.0.1:8080/status)" &&
+        printf '%s' "$$body" | grep -q '"running":true' &&
+        printf '%s' "$$body" | grep -q '"mocked":false' &&
+        printf '%s' "$$body" | grep -q '"degraded":false' &&
+        printf '%s' "$$body" | grep -q '"contact":"ready"' &&
+        printf '%s' "$$body" | grep -q '"groupControl":"ready"' &&
+        curl -fsS http://127.0.0.1:8080/health/ready >/dev/null
+
+services:
+  state-init:
+    image: *runtime-image
+    user: "0:0"
+    restart: "no"
+    read_only: true
+    network_mode: none
+    cap_drop: [ALL]
+    cap_add: [CHOWN]
+    security_opt: [no-new-privileges:true]
+    volumes:
+      - registry-state:/volumes/registry
+      - xnode-1-state:/volumes/xnode-1
+      - xnode-2-state:/volumes/xnode-2
+      - xnode-3-state:/volumes/xnode-3
+    command:
+      - sh
+      - -ec
+      - >-
+        chown 65532:65532 /volumes/registry /volumes/xnode-1
+        /volumes/xnode-2 /volumes/xnode-3
+    labels:
+      io.deep.stack: first-release-local
+      io.deep.production-ready: "false"
+
+  registry:
+    <<: *service
+    image: deep-first-release/registry:local
+    build:
+      context: ${FIRST_RELEASE_REGISTRY_SOURCE:-../deep-registry-api}
+      dockerfile: ${FIRST_RELEASE_REGISTRY_DOCKERFILE:-../deep-devops/docker/first-release-registry.Dockerfile}
+      additional_contexts:
+        protocol_source: ${FIRST_RELEASE_DEEP_PROTOCOL_SOURCE:-../deep-protocol}
+      args:
+        SDK_IMAGE: ${FIRST_RELEASE_DOTNET_SDK_IMAGE:-mcr.microsoft.com/dotnet/sdk@sha256:7e964ea8bc6c1e18ea9fbc76ed403da41c9b19aeee2aab6bf9c845f25e891380}
+        RUNTIME_IMAGE: ${FIRST_RELEASE_DOTNET_RUNTIME_IMAGE:-mcr.microsoft.com/dotnet/aspnet@sha256:e3736b0d423db99c6988e1ddf5ea725c14b12579bb120024e5ff7ff204a14080}
+        PROJECT: src/Deep.Registry.Api/Deep.Registry.Api.csproj
+        APP_DLL: Deep.Registry.Api.dll
+    user: "65532:65532"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://0.0.0.0:8080
+      Registry__StatePath: /state/registry.json
+      Registry__ReconciliationJobEnabled: "false"
+      Calls__Required: "false"
+      Calls__Enabled: "false"
+      ReverseProxy__KnownProxyIp: 172.31.93.5
+      DirectoryPublication__NetworkIdHex: ${FIRST_RELEASE_CONTACT_RESOLVE_NETWORK_ID:?set the protected ContactResolve network binding}
+      # DTT1 has no authority-bound replay epoch yet; public production issuance is fail-closed.
+      ContactResolveProductionAuthority__Enabled: "false"
+      ContactResolveProductionAuthority__NetworkIdHex: ${FIRST_RELEASE_CONTACT_RESOLVE_NETWORK_ID:?set the protected ContactResolve network binding}
+      ContactResolveProductionAuthority__TrustedTimeStatePath: /state/contact-resolve/trusted-time.state
+      ContactResolveProductionAuthority__TrustedTimeIntegrityKeyPath: /run/secrets/contact-resolve-trusted-time-integrity.key
+      ContactResolveProductionAuthority__RequestLedgerRootPath: /state/contact-resolve/request-ledger
+      ContactResolveProductionAuthority__RequestLedgerIntegrityKeyPath: /run/secrets/contact-resolve-request-ledger-integrity.key
+      ContactResolveProductionAuthority__RequestLedgerCapacity: "65536"
+      ContactResolveProductionAuthority__RequestLedgerCompactionInterval: "1024"
+      ContactResolveProductionAuthority__Witnesses__0__WitnessIdHex: ${FIRST_RELEASE_CONTACT_RESOLVE_WITNESS_1_ID:?set witness 1 ID}
+      ContactResolveProductionAuthority__Witnesses__0__KeyGeneration: "0"
+      ContactResolveProductionAuthority__Witnesses__0__Ed25519SeedPath: /run/secrets/contact-resolve-witness-1-ed25519.seed
+      ContactResolveProductionAuthority__Witnesses__1__WitnessIdHex: ${FIRST_RELEASE_CONTACT_RESOLVE_WITNESS_2_ID:?set witness 2 ID}
+      ContactResolveProductionAuthority__Witnesses__1__KeyGeneration: "0"
+      ContactResolveProductionAuthority__Witnesses__1__Ed25519SeedPath: /run/secrets/contact-resolve-witness-2-ed25519.seed
+      ContactResolveProductionAuthority__Witnesses__2__WitnessIdHex: ${FIRST_RELEASE_CONTACT_RESOLVE_WITNESS_3_ID:?set witness 3 ID}
+      ContactResolveProductionAuthority__Witnesses__2__KeyGeneration: "0"
+      ContactResolveProductionAuthority__Witnesses__2__Ed25519SeedPath: /run/secrets/contact-resolve-witness-3-ed25519.seed
+      ContactResolveDirectoryArtifacts__ReadOnlyRoot: /contact-resolve/artifacts
+      ContactResolveDirectoryArtifacts__StatePath: /state/contact-resolve/artifact-lkg.state
+      ContactResolveDirectoryArtifacts__IntegrityKeyPath: /run/secrets/contact-resolve-artifact-state-integrity.key
+      ContactResolveDirectoryArtifacts__NetworkIdHex: ${FIRST_RELEASE_CONTACT_RESOLVE_NETWORK_ID:?set the protected ContactResolve network binding}
+      ContactResolveDirectoryArtifacts__GenesisAuthorityCoreHashHex: ${FIRST_RELEASE_CONTACT_RESOLVE_GENESIS_AUTHORITY_CORE_HASH:-}
+    volumes:
+      - registry-state:/state
+      - type: bind
+        source: ${FIRST_RELEASE_CONTACT_RESOLVE_ARTIFACT_ROOT:?set the protected ContactResolve artifact root}
+        target: /contact-resolve/artifacts
+        read_only: true
+      - type: bind
+        source: ${FIRST_RELEASE_CONTACT_RESOLVE_OPERATOR_ROOT:?set the protected ContactResolve operator exchange root}
+        target: /contact-resolve/operator
+    secrets:
+      - { source: contact-resolve-trusted-time-integrity, target: contact-resolve-trusted-time-integrity.key }
+      - { source: contact-resolve-request-ledger-integrity, target: contact-resolve-request-ledger-integrity.key }
+      - { source: contact-resolve-artifact-state-integrity, target: contact-resolve-artifact-state-integrity.key }
+      - { source: contact-resolve-witness-1-ed25519, target: contact-resolve-witness-1-ed25519.seed }
+      - { source: contact-resolve-witness-2-ed25519, target: contact-resolve-witness-2-ed25519.seed }
+      - { source: contact-resolve-witness-3-ed25519, target: contact-resolve-witness-3-ed25519.seed }
+    ports:
+      - "${FIRST_RELEASE_BIND_HOST:-127.0.0.1}:${FIRST_RELEASE_REGISTRY_PORT:-42910}:8080"
+    depends_on:
+      state-init: { condition: service_completed_successfully }
+    healthcheck:
+      <<: *health
+      test:
+        - CMD-SHELL
+        - >-
+          curl -fsS http://127.0.0.1:8080/health/live >/dev/null &&
+          curl -fsS http://127.0.0.1:8080/health/ready >/dev/null
+
+  xnode-1:
+    <<: *xnode
+    environment:
+      <<: *xnode-environment
+      Node__RouterId: ${FIRST_RELEASE_XNODE_1_ROUTER_ID:?set FIRST_RELEASE_XNODE_1_ROUTER_ID}
+      Node__Ed25519PrivateKeyPath: /run/secrets/xnode-ed25519.seed
+      Node__PublicHost: ${FIRST_RELEASE_PUBLIC_HOST:-127.0.0.1}
+      Node__PublicPort: ${FIRST_RELEASE_XNODE_1_VLESS_PORT:-42941}
+      PrivacyRouting__PublicPeerBaseUrl: http://${FIRST_RELEASE_PUBLIC_HOST:-127.0.0.1}:${FIRST_RELEASE_XNODE_1_API_PORT:-42901}/
+      PrivacyRouting__ReceivePosition: Ingress
+      PrivacyRouting__Peers__0__RouterId: ${FIRST_RELEASE_XNODE_2_ROUTER_ID:?set FIRST_RELEASE_XNODE_2_ROUTER_ID}
+      PrivacyRouting__Peers__0__BaseUrl: http://172.31.93.12:8083/
+      PrivacyRouting__Peers__1__RouterId: ${FIRST_RELEASE_XNODE_3_ROUTER_ID:?set FIRST_RELEASE_XNODE_3_ROUTER_ID}
+      PrivacyRouting__Peers__1__BaseUrl: http://172.31.93.13:8083/
+      RegistryRegistration__OperatorAddress: ${FIRST_RELEASE_XNODE_1_OPERATOR_ADDRESS:-0x0000000000000000000000000000000000000001}
+      RegistryRegistration__RewardsAddress: ${FIRST_RELEASE_XNODE_1_OPERATOR_ADDRESS:-0x0000000000000000000000000000000000000001}
+      RegistryRegistration__Ed25519PublicKey: ${FIRST_RELEASE_XNODE_1_ROUTER_ID:?set FIRST_RELEASE_XNODE_1_ROUTER_ID}
+      RegistryRegistration__BlsPublicKey: ${FIRST_RELEASE_XNODE_1_BLS_PUBLIC_KEY:?set the public BLS registration key}
+      RegistryRegistration__BlsSignature: ${FIRST_RELEASE_XNODE_1_BLS_SIGNATURE:?set the public BLS proof}
+      Vless__PublicHost: ${FIRST_RELEASE_PUBLIC_HOST:-127.0.0.1}
+      Vless__PublicPort: ${FIRST_RELEASE_XNODE_1_VLESS_PORT:-42941}
+      Vless__ClientIdFile: /run/secrets/vless-client-id
+      Vless__Reality__PublicKey: ${FIRST_RELEASE_XNODE_1_REALITY_PUBLIC_KEY:?set the node 1 Reality public key}
+      Vless__Reality__PrivateKeyFile: /run/secrets/reality-private.key
+      Vless__Reality__ShortId: ${FIRST_RELEASE_XNODE_1_REALITY_SHORT_ID:?set the node 1 Reality short id}
+    ports:
+      - "${FIRST_RELEASE_BIND_HOST:-127.0.0.1}:${FIRST_RELEASE_XNODE_1_API_PORT:-42901}:8080"
+      - "${FIRST_RELEASE_BIND_HOST:-127.0.0.1}:${FIRST_RELEASE_XNODE_1_VLESS_PORT:-42941}:8443"
+    networks: { first-release: { ipv4_address: 172.31.93.11 } }
+    volumes: [xnode-1-state:/state]
+    secrets:
+      - { source: xnode-1-ed25519, target: xnode-ed25519.seed }
+      - { source: xnode-1-x25519, target: xnode-x25519.private }
+      - { source: xnode-1-onion-state-protection, target: onion-state-protection.key }
+      - { source: xnode-1-vless-client-id, target: vless-client-id }
+      - { source: xnode-1-reality-private, target: reality-private.key }
+
+  xnode-2:
+    <<: *xnode
+    environment:
+      <<: *xnode-environment
+      Node__RouterId: ${FIRST_RELEASE_XNODE_2_ROUTER_ID:?set FIRST_RELEASE_XNODE_2_ROUTER_ID}
+      Node__Ed25519PrivateKeyPath: /run/secrets/xnode-ed25519.seed
+      Node__PublicHost: ${FIRST_RELEASE_PUBLIC_HOST:-127.0.0.1}
+      Node__PublicPort: ${FIRST_RELEASE_XNODE_2_VLESS_PORT:-42942}
+      PrivacyRouting__PublicPeerBaseUrl: http://${FIRST_RELEASE_PUBLIC_HOST:-127.0.0.1}:${FIRST_RELEASE_XNODE_2_API_PORT:-42902}/
+      PrivacyRouting__ReceivePosition: Core
+      PrivacyRouting__Peers__0__RouterId: ${FIRST_RELEASE_XNODE_1_ROUTER_ID:?set FIRST_RELEASE_XNODE_1_ROUTER_ID}
+      PrivacyRouting__Peers__0__BaseUrl: http://172.31.93.11:8083/
+      PrivacyRouting__Peers__1__RouterId: ${FIRST_RELEASE_XNODE_3_ROUTER_ID:?set FIRST_RELEASE_XNODE_3_ROUTER_ID}
+      PrivacyRouting__Peers__1__BaseUrl: http://172.31.93.13:8083/
+      RegistryRegistration__OperatorAddress: ${FIRST_RELEASE_XNODE_2_OPERATOR_ADDRESS:-0x0000000000000000000000000000000000000002}
+      RegistryRegistration__RewardsAddress: ${FIRST_RELEASE_XNODE_2_OPERATOR_ADDRESS:-0x0000000000000000000000000000000000000002}
+      RegistryRegistration__Ed25519PublicKey: ${FIRST_RELEASE_XNODE_2_ROUTER_ID:?set FIRST_RELEASE_XNODE_2_ROUTER_ID}
+      RegistryRegistration__BlsPublicKey: ${FIRST_RELEASE_XNODE_2_BLS_PUBLIC_KEY:?set the public BLS registration key}
+      RegistryRegistration__BlsSignature: ${FIRST_RELEASE_XNODE_2_BLS_SIGNATURE:?set the public BLS proof}
+      Vless__PublicHost: ${FIRST_RELEASE_PUBLIC_HOST:-127.0.0.1}
+      Vless__PublicPort: ${FIRST_RELEASE_XNODE_2_VLESS_PORT:-42942}
+      Vless__ClientIdFile: /run/secrets/vless-client-id
+      Vless__Reality__PublicKey: ${FIRST_RELEASE_XNODE_2_REALITY_PUBLIC_KEY:?set the node 2 Reality public key}
+      Vless__Reality__PrivateKeyFile: /run/secrets/reality-private.key
+      Vless__Reality__ShortId: ${FIRST_RELEASE_XNODE_2_REALITY_SHORT_ID:?set the node 2 Reality short id}
+    ports:
+      - "${FIRST_RELEASE_BIND_HOST:-127.0.0.1}:${FIRST_RELEASE_XNODE_2_API_PORT:-42902}:8080"
+      - "${FIRST_RELEASE_BIND_HOST:-127.0.0.1}:${FIRST_RELEASE_XNODE_2_VLESS_PORT:-42942}:8443"
+    networks: { first-release: { ipv4_address: 172.31.93.12 } }
+    volumes: [xnode-2-state:/state]
+    secrets:
+      - { source: xnode-2-ed25519, target: xnode-ed25519.seed }
+      - { source: xnode-2-x25519, target: xnode-x25519.private }
+      - { source: xnode-2-onion-state-protection, target: onion-state-protection.key }
+      - { source: xnode-2-vless-client-id, target: vless-client-id }
+      - { source: xnode-2-reality-private, target: reality-private.key }
+
+  xnode-3:
+    <<: *xnode
+    environment:
+      <<: *xnode-environment
+      Node__RouterId: ${FIRST_RELEASE_XNODE_3_ROUTER_ID:?set FIRST_RELEASE_XNODE_3_ROUTER_ID}
+      Node__Ed25519PrivateKeyPath: /run/secrets/xnode-ed25519.seed
+      Node__PublicHost: ${FIRST_RELEASE_PUBLIC_HOST:-127.0.0.1}
+      Node__PublicPort: ${FIRST_RELEASE_XNODE_3_VLESS_PORT:-42943}
+      PrivacyRouting__PublicPeerBaseUrl: http://${FIRST_RELEASE_PUBLIC_HOST:-127.0.0.1}:${FIRST_RELEASE_XNODE_3_API_PORT:-42903}/
+      PrivacyRouting__ReceivePosition: Exit
+      PrivacyRouting__Peers__0__RouterId: ${FIRST_RELEASE_XNODE_1_ROUTER_ID:?set FIRST_RELEASE_XNODE_1_ROUTER_ID}
+      PrivacyRouting__Peers__0__BaseUrl: http://172.31.93.11:8083/
+      PrivacyRouting__Peers__1__RouterId: ${FIRST_RELEASE_XNODE_2_ROUTER_ID:?set FIRST_RELEASE_XNODE_2_ROUTER_ID}
+      PrivacyRouting__Peers__1__BaseUrl: http://172.31.93.12:8083/
+      RegistryRegistration__OperatorAddress: ${FIRST_RELEASE_XNODE_3_OPERATOR_ADDRESS:-0x0000000000000000000000000000000000000003}
+      RegistryRegistration__RewardsAddress: ${FIRST_RELEASE_XNODE_3_OPERATOR_ADDRESS:-0x0000000000000000000000000000000000000003}
+      RegistryRegistration__Ed25519PublicKey: ${FIRST_RELEASE_XNODE_3_ROUTER_ID:?set FIRST_RELEASE_XNODE_3_ROUTER_ID}
+      RegistryRegistration__BlsPublicKey: ${FIRST_RELEASE_XNODE_3_BLS_PUBLIC_KEY:?set the public BLS registration key}
+      RegistryRegistration__BlsSignature: ${FIRST_RELEASE_XNODE_3_BLS_SIGNATURE:?set the public BLS proof}
+      Vless__PublicHost: ${FIRST_RELEASE_PUBLIC_HOST:-127.0.0.1}
+      Vless__PublicPort: ${FIRST_RELEASE_XNODE_3_VLESS_PORT:-42943}
+      Vless__ClientIdFile: /run/secrets/vless-client-id
+      Vless__Reality__PublicKey: ${FIRST_RELEASE_XNODE_3_REALITY_PUBLIC_KEY:?set the node 3 Reality public key}
+      Vless__Reality__PrivateKeyFile: /run/secrets/reality-private.key
+      Vless__Reality__ShortId: ${FIRST_RELEASE_XNODE_3_REALITY_SHORT_ID:?set the node 3 Reality short id}
+    ports:
+      - "${FIRST_RELEASE_BIND_HOST:-127.0.0.1}:${FIRST_RELEASE_XNODE_3_API_PORT:-42903}:8080"
+      - "${FIRST_RELEASE_BIND_HOST:-127.0.0.1}:${FIRST_RELEASE_XNODE_3_VLESS_PORT:-42943}:8443"
+    networks: { first-release: { ipv4_address: 172.31.93.13 } }
+    volumes: [xnode-3-state:/state]
+    secrets:
+      - { source: xnode-3-ed25519, target: xnode-ed25519.seed }
+      - { source: xnode-3-x25519, target: xnode-x25519.private }
+      - { source: xnode-3-onion-state-protection, target: onion-state-protection.key }
+      - { source: xnode-3-vless-client-id, target: vless-client-id }
+      - { source: xnode-3-reality-private, target: reality-private.key }
+
+  topology-ready:
+    image: node:24-alpine@sha256:f70403e87646dc51b45295f4b8b70cdad0b63d2297c4c9899119b03f7af7a6b3
+    init: true
+    user: "65532:65532"
+    restart: "no"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    networks: [first-release]
+    environment:
+      XNODE_1_ROUTER_ID: ${FIRST_RELEASE_XNODE_1_ROUTER_ID:?set FIRST_RELEASE_XNODE_1_ROUTER_ID}
+      XNODE_2_ROUTER_ID: ${FIRST_RELEASE_XNODE_2_ROUTER_ID:?set FIRST_RELEASE_XNODE_2_ROUTER_ID}
+      XNODE_3_ROUTER_ID: ${FIRST_RELEASE_XNODE_3_ROUTER_ID:?set FIRST_RELEASE_XNODE_3_ROUTER_ID}
+    depends_on:
+      registry: { condition: service_healthy }
+      xnode-1: { condition: service_healthy }
+      xnode-2: { condition: service_healthy }
+      xnode-3: { condition: service_healthy }
+    command:
+      - node
+      - --input-type=module
+      - --eval
+      - |
+        const expected = new Set([
+          process.env.XNODE_1_ROUTER_ID,
+          process.env.XNODE_2_ROUTER_ID,
+          process.env.XNODE_3_ROUTER_ID
+        ]);
+        for (let attempt = 0; attempt < 45; attempt += 1) {
+          try {
+            const [runtimeResponse, nodesResponse] = await Promise.all([
+              fetch('http://registry:8080/api/nodes/runtime'),
+              fetch('http://registry:8080/api/nodes')
+            ]);
+            if (runtimeResponse.ok && nodesResponse.ok) {
+              const runtime = await runtimeResponse.json();
+              const nodes = await nodesResponse.json();
+              const actual = new Set(nodes.map(node => node.nodeId));
+              const exactIdentities = actual.size === expected.size &&
+                [...expected].every(value => actual.has(value));
+              const transportsReady = nodes.length === 3 && nodes.every(node =>
+                node.transportStatus?.enabled === true &&
+                node.transportStatus?.running === true &&
+                node.transportStatus?.mocked === false &&
+                node.transportStatus?.degraded === false);
+              if (runtime.totalNodes === 3 && exactIdentities && transportsReady) {
+                process.exit(0);
+              }
+            }
+          } catch {}
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        }
+        console.error('first-release topology did not reach exact three-node readiness');
+        process.exit(1);
+    labels:
+      io.deep.stack: first-release-local
+      io.deep.production-ready: "false"
+
+networks:
+  first-release:
+    name: deep-first-release-local-network
+    driver: bridge
+    ipam:
+      config: [{ subnet: 172.31.93.0/24 }]
+
+volumes:
+  registry-state: { name: deep-first-release-local-registry-state }
+  xnode-1-state: { name: deep-first-release-local-xnode-1-state }
+  xnode-2-state: { name: deep-first-release-local-xnode-2-state }
+  xnode-3-state: { name: deep-first-release-local-xnode-3-state }
+
+secrets:
+  xnode-1-ed25519: { file: "${FIRST_RELEASE_XNODE_1_ED25519_FILE:?set the protected node 1 Ed25519 seed file}" }
+  xnode-2-ed25519: { file: "${FIRST_RELEASE_XNODE_2_ED25519_FILE:?set the protected node 2 Ed25519 seed file}" }
+  xnode-3-ed25519: { file: "${FIRST_RELEASE_XNODE_3_ED25519_FILE:?set the protected node 3 Ed25519 seed file}" }
+  xnode-1-x25519: { file: "${FIRST_RELEASE_XNODE_1_X25519_FILE:?set the protected node 1 X25519 scalar file}" }
+  xnode-2-x25519: { file: "${FIRST_RELEASE_XNODE_2_X25519_FILE:?set the protected node 2 X25519 scalar file}" }
+  xnode-3-x25519: { file: "${FIRST_RELEASE_XNODE_3_X25519_FILE:?set the protected node 3 X25519 scalar file}" }
+  xnode-1-onion-state-protection: { file: "${FIRST_RELEASE_XNODE_1_ONION_STATE_PROTECTION_FILE:?set the protected node 1 ONION state key file}" }
+  xnode-2-onion-state-protection: { file: "${FIRST_RELEASE_XNODE_2_ONION_STATE_PROTECTION_FILE:?set the protected node 2 ONION state key file}" }
+  xnode-3-onion-state-protection: { file: "${FIRST_RELEASE_XNODE_3_ONION_STATE_PROTECTION_FILE:?set the protected node 3 ONION state key file}" }
+  xnode-1-vless-client-id: { file: "${FIRST_RELEASE_XNODE_1_VLESS_CLIENT_ID_FILE:?set the protected node 1 VLESS client-id file}" }
+  xnode-2-vless-client-id: { file: "${FIRST_RELEASE_XNODE_2_VLESS_CLIENT_ID_FILE:?set the protected node 2 VLESS client-id file}" }
+  xnode-3-vless-client-id: { file: "${FIRST_RELEASE_XNODE_3_VLESS_CLIENT_ID_FILE:?set the protected node 3 VLESS client-id file}" }
+  xnode-1-reality-private: { file: "${FIRST_RELEASE_XNODE_1_REALITY_PRIVATE_KEY_FILE:?set the protected node 1 REALITY private-key file}" }
+  xnode-2-reality-private: { file: "${FIRST_RELEASE_XNODE_2_REALITY_PRIVATE_KEY_FILE:?set the protected node 2 REALITY private-key file}" }
+  xnode-3-reality-private: { file: "${FIRST_RELEASE_XNODE_3_REALITY_PRIVATE_KEY_FILE:?set the protected node 3 REALITY private-key file}" }
+  contact-resolve-trusted-time-integrity: { file: "${FIRST_RELEASE_CONTACT_RESOLVE_TRUSTED_TIME_KEY_FILE:?set the protected trusted-time integrity key}" }
+  contact-resolve-request-ledger-integrity: { file: "${FIRST_RELEASE_CONTACT_RESOLVE_REQUEST_LEDGER_KEY_FILE:?set the protected request-ledger integrity key}" }
+  contact-resolve-artifact-state-integrity: { file: "${FIRST_RELEASE_CONTACT_RESOLVE_ARTIFACT_STATE_KEY_FILE:?set the protected artifact-state integrity key}" }
+  contact-resolve-witness-1-ed25519: { file: "${FIRST_RELEASE_CONTACT_RESOLVE_WITNESS_1_SEED_FILE:?set the protected witness 1 seed}" }
+  contact-resolve-witness-2-ed25519: { file: "${FIRST_RELEASE_CONTACT_RESOLVE_WITNESS_2_SEED_FILE:?set the protected witness 2 seed}" }
+  contact-resolve-witness-3-ed25519: { file: "${FIRST_RELEASE_CONTACT_RESOLVE_WITNESS_3_SEED_FILE:?set the protected witness 3 seed}" }

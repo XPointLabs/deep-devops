@@ -1,3 +1,5 @@
+# check=skip=InvalidDefaultArgInFrom
+# Keep full-image references mandatory and provided via pinned compose/runtime inputs.
 ARG SDK_IMAGE
 ARG RUNTIME_IMAGE
 

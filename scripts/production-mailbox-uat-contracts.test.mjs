@@ -97,7 +97,13 @@ assert.match(publisher, /AndroidReleaseBuildArtifactSha256 = \[input\.AndroidBui
 assert.match(publisher, /input\.WindowsSigningCertificateSha256 is \{ \} windowsSigner/);
 assert.match(publisher, /input\.WindowsBuildArtifactSha256 is \{ \} windowsArtifact/);
 assert.match(publisher, /publish-production-uat-routes/);
-assert.match(publisher, /production-mailbox-privacy-routes\.v1\.sig/);
+assert.match(publisher, /schemaVersion = 2/);
+assert.match(publisher, /production-mailbox-privacy-routes\.v2\.sig/);
+assert.match(publisher, /xnode-\{index \+ 1\}-x25519\.record\.v2\.json/);
+assert.match(publisher, /\["routerOwnerId", "keyId", "epoch", "x25519PublicKey"\]/);
+assert.match(publisher, /Hex\("keyId", 32\)/);
+assert.match(publisher, /epoch != descriptor\.Epoch/);
+assert.match(publisher, /FixedTimeEquals\(publicKeyBytes, actualPublicKey\)/);
 assert.match(publisher, /PublicKeyAuth\.SignDetached\(json, mrX\.PrivateKey\)/);
 assert.match(publisher, /Previous UAT authority does not match its trust floor or Mr\. X root/);
 assert.match(publisher, /MaximumRevocationSnapshotLifetimeSeconds/);

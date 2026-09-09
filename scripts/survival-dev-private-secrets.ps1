@@ -42,7 +42,7 @@ function Assert-SurvivalDevPrivateFile([string]$Path) {
     if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
         $current = [Security.Principal.WindowsIdentity]::GetCurrent().User
         Assert-SurvivalDevPrivateFileWindowsSecurity `
-            ([IO.FileInfo]$item).GetAccessControl() `
+            (Get-Acl -LiteralPath $Path) `
             $current
     } elseif ([IO.File]::GetUnixFileMode($Path) -ne
         ([IO.UnixFileMode]::UserRead -bor [IO.UnixFileMode]::UserWrite)) {
@@ -57,8 +57,7 @@ function Protect-SurvivalDevPrivateFile([string]$Path) {
     }
     if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
         $current = [Security.Principal.WindowsIdentity]::GetCurrent().User
-        $owner = $item.GetAccessControl(
-            [Security.AccessControl.AccessControlSections]::Owner).GetOwner(
+        $owner = (Get-Acl -LiteralPath $Path).GetOwner(
                 [Security.Principal.SecurityIdentifier])
         if (-not $owner.Equals($current)) {
             throw 'Survival DEV private file owner must already be the exact current Windows identity.'
@@ -74,7 +73,7 @@ function Protect-SurvivalDevPrivateFile([string]$Path) {
                 [Security.AccessControl.FileSystemRights]::FullControl,
                 [Security.AccessControl.AccessControlType]::Allow))
         }
-        $item.SetAccessControl($security)
+        Set-Acl -LiteralPath $Path -AclObject $security
     } else {
         [IO.File]::SetUnixFileMode(
             $Path,

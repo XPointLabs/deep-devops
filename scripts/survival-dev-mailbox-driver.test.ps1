@@ -17,8 +17,8 @@ try {
     $authorityEnv = Join-Path $work 'authority.env'
     $clientEnv = Join-Path $work 'client.env'
     $authorityPublic = Join-Path $work 'authority.public.json'
-    $privacyRoutesAndroid = Join-Path $work 'privacy-routes.android.v1.json'
-    $privacyRoutesWindows = Join-Path $work 'privacy-routes.windows.v1.json'
+    $privacyRoutesAndroid = Join-Path $work 'privacy-routes.android.v2.json'
+    $privacyRoutesWindows = Join-Path $work 'privacy-routes.windows.v2.json'
     $state = Join-Path $work 'state'
     $artifacts = Join-Path $work 'build-artifacts'
     $common = @(

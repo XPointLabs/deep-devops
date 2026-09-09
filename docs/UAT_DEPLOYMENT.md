@@ -315,8 +315,10 @@ Invoke-RestMethod http://192.168.1.44:28082/registrations/0xb0cE3b1229c00d1B85c7
 ```
 
 Privacy-route verification is performed by the current survival UAT lane. It
-uses authenticated HTTPS managed ingress, two identity-disjoint three-hop
-routes, and independently generated X25519 agreement keys. Follow
+uses authenticated HTTPS managed ingress, exact three-hop routes with unique
+owner/key records within each route and distinct entry origins. Primary and
+fallback may overlap; independently generated X25519 agreement keys remain
+bound to their issued key records and authenticated topology descriptors. Follow
 `docs/SURVIVAL_UAT_TLS.md`; the retired onion RPC smoke is not release evidence.
 
 The current full BLS12-381 public keys and proof-of-possession signatures are

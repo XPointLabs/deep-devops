@@ -73,10 +73,10 @@ function Set-ExactProtectedAcl([string]$Path) {
             [Security.AccessControl.AccessControlType]::Allow))
     }
     if ((Get-Item -Force -LiteralPath $Path).PSIsContainer) {
-        ([IO.DirectoryInfo](Get-Item -Force -LiteralPath $Path)).SetAccessControl(
+        Set-Acl -LiteralPath $Path -AclObject (
             [Security.AccessControl.DirectorySecurity]$security)
     } else {
-        ([IO.FileInfo](Get-Item -Force -LiteralPath $Path)).SetAccessControl(
+        Set-Acl -LiteralPath $Path -AclObject (
             [Security.AccessControl.FileSecurity]$security)
     }
 }

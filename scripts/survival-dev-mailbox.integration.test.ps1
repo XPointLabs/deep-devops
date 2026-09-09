@@ -31,7 +31,7 @@ $UatTlsComposePath = Join-Path $Root 'docker-compose.survival-uat-tls.dev.yml'
 $Launcher = Join-Path $PSScriptRoot 'survival-dev.ps1'
 $Project = 'deep-survival-dev'
 $expectedCommit = '00280a643cfdc1e0780147eceb1da5c7b6fd2799'
-$expectedManifest = 'bd8cb5a16fb1d396716adc14d0adf95b005c0cccdf476cffd1cd65e5938aa102'
+$expectedManifest = 'bbb317f49bf774f0223cf0763466c01bfe1c3c896d18075da5d9873751354dbc'
 $base = @('compose', '-p', $Project, '-f', $ComposePath, '-f', $UatTlsComposePath)
 $nodes = 1..6 | ForEach-Object { "xnode-$_" }
 $TlsSecretDirectory = [Environment]::GetEnvironmentVariable('SURVIVAL_UAT_TLS_SECRET_DIR')
@@ -44,7 +44,7 @@ $TlsCaPath = Join-Path $TlsSecretDirectory 'ca.crt'
 if (-not (Test-Path -LiteralPath $TlsCaPath -PathType Leaf)) {
     throw 'The clean-break HTTPS privacy-route rehearsal requires ca.crt in SURVIVAL_UAT_TLS_SECRET_DIR.'
 }
-$PrivacyRoutesPath = Join-Path $Root 'artifacts\survival-dev\privacy-routes.android.v1.json'
+$PrivacyRoutesPath = Join-Path $Root 'artifacts\survival-dev\privacy-routes.android.v2.json'
 
 function Invoke-Checked([string]$File, [string[]]$Arguments) {
     & $File @Arguments
@@ -79,13 +79,13 @@ function Invoke-Driver([string]$Phase, [string]$RunId = '') {
     }
     $arguments = @(
         '--profile', 'mailbox-rehearsal', 'run', '--rm', '--no-deps',
-        '--volume', "${PrivacyRoutesPath}:/run/survival/privacy-routes.v1.json:ro",
+        '--volume', "${PrivacyRoutesPath}:/run/survival/privacy-routes.v2.json:ro",
         '--volume', "${TlsCaPath}:/run/survival/ca.crt:ro",
         '--env', 'SSL_CERT_FILE=/run/survival/ca.crt',
         'mailbox-driver', $Phase,
         '--state-dir', '/state/driver',
         '--client-url', "https://${BindHost}:41801",
-        '--privacy-routes', '/run/survival/privacy-routes.v1.json',
+        '--privacy-routes', '/run/survival/privacy-routes.v2.json',
         '--coordinator-url', "https://${BindHost}:41801"
     )
     if (-not [Net.IPAddress]::IsLoopback([Net.IPAddress]::Parse($BindHost))) {

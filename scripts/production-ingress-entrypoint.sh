@@ -2,7 +2,7 @@
 set -eu
 
 case "${DEEP_INGRESS_CERTIFICATE_PROFILE:-}" in
-  deep-managed|operator-managed) ;;
+  pinned-self-issued|deep-managed|operator-managed) ;;
   *) echo "Invalid DEEP_INGRESS_CERTIFICATE_PROFILE." >&2; exit 64 ;;
 esac
 
