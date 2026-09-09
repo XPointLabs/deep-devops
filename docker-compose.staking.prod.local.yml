@@ -12,7 +12,7 @@ services:
       context: ${DEEP_ROOT:-..}/xpoint-staking-backend
       dockerfile: ${DEEP_DEVOPS_DIR:-../deep-devops}/docker/dotnet-service.Dockerfile
       args:
-        SDK_IMAGE: mcr.microsoft.com/dotnet/sdk:10.0
+        SDK_IMAGE: mcr.microsoft.com/dotnet/sdk:10.0.301
         RUNTIME_IMAGE: mcr.microsoft.com/dotnet/aspnet:10.0
         PROJECT: src/XPoint.Staking.Backend/XPoint.Staking.Backend.csproj
         APP_DLL: XPoint.Staking.Backend.dll
@@ -93,7 +93,7 @@ services:
       context: ${DEEP_ROOT:-..}/deep-registry-api
       dockerfile: ${DEEP_DEVOPS_DIR:-../deep-devops}/docker/dotnet-service.Dockerfile
       args:
-        SDK_IMAGE: mcr.microsoft.com/dotnet/sdk:10.0
+        SDK_IMAGE: mcr.microsoft.com/dotnet/sdk:10.0.301
         RUNTIME_IMAGE: mcr.microsoft.com/dotnet/aspnet:10.0
         PROJECT: src/Deep.Registry.Api/Deep.Registry.Api.csproj
         APP_DLL: Deep.Registry.Api.dll

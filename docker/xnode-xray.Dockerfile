@@ -11,7 +11,7 @@ WORKDIR /src
 COPY . .
 RUN set -eu; \
     for attempt in 1 2 3; do \
-      if dotnet restore "$PROJECT" -p:DeepProtocolSourceCutover="$DEEP_PROTOCOL_SOURCE_CUTOVER" > /tmp/dotnet-restore.log 2>&1; then \
+      if dotnet restore "$PROJECT" --locked-mode -p:DeepProtocolSourceCutover="$DEEP_PROTOCOL_SOURCE_CUTOVER" > /tmp/dotnet-restore.log 2>&1; then \
         cat /tmp/dotnet-restore.log; rm -f /tmp/dotnet-restore.log; break; \
       fi; \
       cat /tmp/dotnet-restore.log >&2; \
