@@ -204,7 +204,12 @@ catch {
 }
 finally {
     Repair-HostArtifactOwnership -Path $ArtifactDir
-    & (Join-Path $ScriptDir "runtime-snapshot.ps1") -ArtifactDir $ArtifactDir
+    if ($SuiteCompletedSuccessfully) {
+        & (Join-Path $ScriptDir "collect-artifacts.ps1") -ArtifactDir $ArtifactDir -ComposeFile $ComposeFile
+    }
+    else {
+        & (Join-Path $ScriptDir "runtime-snapshot.ps1") -ArtifactDir $ArtifactDir
+    }
 
     if ($SuiteCompletedSuccessfully) {
         $snapshotPath = Join-Path $ArtifactDir "runtime.snapshot.json"

@@ -262,7 +262,47 @@ test('required evidence semantics reject failed, stale, skipped, and incomplete 
   }
 });
 
-test('multi-node evidence cannot omit registry or distinct-hop counters', async () => {
+test('runtime gate permits a no-canary CI lane but enforces a requested canary', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'deep-upload-runtime-gate-'));
+  try {
+    const source = path.join(root, 'source');
+    await mkdir(source);
+    const runtimeGate = {
+      evaluatedAtUtc: new Date().toISOString(),
+      failedHard: [],
+      requireRouterNoMock: true,
+      routerTransportMocked: false,
+      requirePushProviderCanary: false,
+      pushProviderCanaryStatus: null,
+      pushProviderCanaryDelivered: false
+    };
+    const gatePath = path.join(source, 'runtime.gate.json');
+    await writeFile(gatePath, `${JSON.stringify(runtimeGate)}\n`);
+    const manifest = await prepareUpload({
+      roots: [source],
+      requiredFiles: ['runtime.gate.json'],
+      staging: path.join(root, 'staging'),
+      manifest: path.join(root, 'manifest.json')
+    });
+    assert.equal(manifest.requiredEvidenceValidation.status, 'passed');
+
+    runtimeGate.requirePushProviderCanary = true;
+    await writeFile(gatePath, `${JSON.stringify(runtimeGate)}\n`);
+    await assert.rejects(
+      prepareUpload({
+        roots: [source],
+        requiredFiles: ['runtime.gate.json'],
+        staging: path.join(root, 'failed-staging'),
+        manifest: path.join(root, 'failed-manifest.json')
+      }),
+      /runtime release gate/
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('multi-node evidence requires registry and fail-closed authority proof', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'deep-upload-topology-'));
   try {
     const source = path.join(root, 'source', 'test-results');
@@ -272,13 +312,14 @@ test('multi-node evidence cannot omit registry or distinct-hop counters', async 
       generatedAt: new Date().toISOString(),
       routers: Array.from({ length: 3 }, (_, index) => ({
         routerId: `router-${index}`,
-        transportMocked: false
+        transportMocked: false,
+        privacyContactStatus: 503
       })),
       reconciliationIssues: []
     };
     for (const mutation of [
       value => { value.registryRuntime = { totalNodes: 3 }; },
-      value => { value.selectedPath = { distinctHops: 3 }; }
+      value => { value.privacyAuthorityBoundary = 'fail-closed-without-verified-authority'; }
     ]) {
       const document = structuredClone(topology);
       mutation(document);
@@ -293,6 +334,17 @@ test('multi-node evidence cannot omit registry or distinct-hop counters', async 
         /three real routers/
       );
     }
+
+    topology.registryRuntime = { totalNodes: 3 };
+    topology.privacyAuthorityBoundary = 'fail-closed-without-verified-authority';
+    await writeFile(path.join(source, 'multi-node-topology.json'), `${JSON.stringify(topology)}\n`);
+    const manifest = await prepareUpload({
+      roots: [path.join(root, 'source')],
+      requiredFiles: ['test-results/multi-node-topology.json'],
+      staging: path.join(root, 'valid-staging'),
+      manifest: path.join(root, 'valid-manifest.json')
+    });
+    assert.equal(manifest.requiredEvidenceValidation.status, 'passed');
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -361,6 +413,17 @@ test('SBOM evidence rejects legacy, host-bound, duplicate, and unsorted inventor
       manifest: path.join(root, 'manifest.json')
     });
     assert.equal(manifest.requiredEvidenceValidation.schemaContractsValidated, 1);
+
+    delete valid.metadata.timestamp;
+    await writeFile(sbomPath, `${JSON.stringify(valid)}\n`);
+    const deterministicManifest = await prepareUpload({
+      roots: [source],
+      requiredFiles: ['sbom.json'],
+      staging: path.join(root, 'deterministic-staging'),
+      manifest: path.join(root, 'deterministic-manifest.json')
+    });
+    assert.ok(Date.parse(
+      deterministicManifest.requiredEvidenceValidation.evidenceBindings[0].generatedAt));
   } finally {
     await rm(root, { recursive: true, force: true });
   }

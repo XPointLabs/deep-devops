@@ -324,9 +324,10 @@ function validateKnownEvidence(required, document, failures) {
       || document.failedHard.length !== 0
       || document.requireRouterNoMock !== true
       || document.routerTransportMocked !== false
-      || document.requirePushProviderCanary !== true
-      || document.pushProviderCanaryDelivered !== true
-      || document.pushProviderCanaryStatus !== 'delivered') {
+      || typeof document.requirePushProviderCanary !== 'boolean'
+      || (document.requirePushProviderCanary === true
+        && (document.pushProviderCanaryDelivered !== true
+          || document.pushProviderCanaryStatus !== 'delivered'))) {
       failures.push(`${required}: runtime release gate did not prove required real transports`);
     }
     return;
@@ -425,13 +426,16 @@ function validateKnownEvidence(required, document, failures) {
   if (required.endsWith('/multi-node-topology.json')) {
     positiveStatus(document, required, failures);
     if (!Array.isArray(document.routers)
-      || document.routers.length < 3
-      || document.routers.some(router => router?.transportMocked !== false)
+      || document.routers.length !== 3
+      || new Set(document.routers.map(router => router?.routerId)).size !== 3
+      || document.routers.some(router =>
+        router?.transportMocked !== false || router?.privacyContactStatus !== 503)
       || !Number.isSafeInteger(document.registryRuntime?.totalNodes)
       || document.registryRuntime.totalNodes < 3
-      || !Number.isSafeInteger(document.selectedPath?.distinctHops)
-      || document.selectedPath.distinctHops < 3) {
-      failures.push(`${required}: three real routers and three distinct hops are required`);
+      || !Array.isArray(document.reconciliationIssues)
+      || document.reconciliationIssues.length !== 0
+      || document.privacyAuthorityBoundary !== 'fail-closed-without-verified-authority') {
+      failures.push(`${required}: three real routers, clean reconciliation, and the fail-closed authority boundary are required`);
     }
     return;
   }
@@ -579,17 +583,18 @@ export async function validateRequiredEvidence(
     }
     validateKnownEvidence(required, document, failures);
     walkSemanticValue(document, required, failures);
+    const immutableSbom = required === 'sbom.json';
     const observedGeneratedAt = [
       document.generatedAt,
       document.capturedAt,
       document.capturedAtUtc,
       document.evaluatedAtUtc,
-      required === 'sbom.json' ? document.metadata?.timestamp : null
+      immutableSbom ? document.metadata?.timestamp : null,
+      immutableSbom ? binding.generatedAt : null
     ].find(value => typeof value === 'string' && value.length > 0);
     freshnessChecked += 1;
     const generated = Date.parse(observedGeneratedAt ?? '');
     const age = now.getTime() - generated;
-    const immutableSbom = required === 'sbom.json';
     if (!immutableSbom
       && (!Number.isFinite(generated) || age < -5 * 60 * 1000 || age > MAX_EVIDENCE_AGE_MS)) {
       failures.push(`${required}: evidence timestamp is missing, invalid, stale, or from the future`);

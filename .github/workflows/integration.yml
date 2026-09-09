@@ -73,8 +73,24 @@ jobs:
         run: ./deep-devops/scripts/test-env.ps1 -Suite smoke -BackendMode external -ManagedExternalProfile backend-external -RequireRouterNoMock
 
       - name: Run multi-node no-mock rehearsal
+        id: multi_node
         shell: pwsh
         run: ./deep-devops/scripts/multi-node-rehearsal.ps1
+
+      - name: Stage exact current multi-node evidence
+        shell: pwsh
+        run: |
+          $runs = @(Get-ChildItem deep-devops/artifacts/rehearsals/multi-node -Directory)
+          if ($runs.Count -ne 1) {
+            throw "Expected exactly one isolated multi-node run; found $($runs.Count)."
+          }
+          $source = Join-Path $runs[0].FullName 'test-results/multi-node-topology.json'
+          if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+            throw 'The isolated multi-node topology evidence is missing.'
+          }
+          $destination = 'deep-devops/artifacts/test-results/multi-node-topology.json'
+          New-Item -ItemType Directory -Force (Split-Path -Parent $destination) | Out-Null
+          Copy-Item -LiteralPath $source -Destination $destination
 
       - name: Prepare exact integration artifact manifest
         id: prepare_upload
