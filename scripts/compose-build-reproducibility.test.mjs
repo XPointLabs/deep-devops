@@ -125,6 +125,11 @@ test('mandatory NODE_IMAGE Dockerfiles and production storage build use the revi
     'utf8'
   );
   assert.match(workflow, /NODE_IMAGE=node:24-bookworm-slim@sha256:[0-9a-f]{64}/);
+  assert.match(
+    workflow,
+    /build-contexts:\s*\|\s*\r?\n\s+deep_protocol=\.\/deep-protocol/,
+    'production xnode publication must bind the checked-out protocol source as a named build context'
+  );
 });
 
 test('multi-node compose startup is isolated, bounded, observable, and always cleaned', async () => {
