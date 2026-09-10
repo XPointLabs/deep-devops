@@ -7,8 +7,8 @@ import { fileURLToPath } from 'node:url';
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const digestPinnedNode = /^node:24-bookworm-slim@sha256:[0-9a-f]{64}$/;
 const composeSurvivalPath = path.join(repositoryRoot, 'docker-compose.survival.dev.yml');
-const expectedSurvivalDotnetSdk = 'mcr.microsoft.com/dotnet/sdk@sha256:7e964ea8bc6c1e18ea9fbc76ed403da41c9b19aeee2aab6bf9c845f25e891380';
-const expectedSurvivalRuntime = 'mcr.microsoft.com/dotnet/aspnet@sha256:e3736b0d423db99c6988e1ddf5ea725c14b12579bb120024e5ff7ff204a14080';
+const expectedSurvivalDotnetSdk = 'mcr.microsoft.com/dotnet/sdk:10.0.301@sha256:ea8bde36c11b6e7eec2656d0e59101d4462f6bd630730f2c8201ed0572b295d5';
+const expectedSurvivalRuntime = 'mcr.microsoft.com/dotnet/aspnet:10.0.9@sha256:7644f992230d35cf230017189d4038c0ae0f7388b13f4f7ae1900a155bafb597';
 const expectedSurvivalNode = 'node@sha256:242549cd46785b480c832479a730f4f2a20865d61ea2e404fdb2a5c3d3b73ecf';
 const scopedSurvivalInlineBuilds = [
   { name: 'x-xnode-build', args: ['SDK_IMAGE', 'RUNTIME_IMAGE'] },

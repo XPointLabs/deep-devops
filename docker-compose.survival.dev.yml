@@ -25,8 +25,8 @@ x-xnode-build: &xnode-build
   additional_contexts:
     xnode_source: ${SURVIVAL_XNODE_BUILD_CONTEXT:-./artifacts/survival-dev/build-contexts/xnode}
   args:
-    SDK_IMAGE: ${SURVIVAL_DOTNET_SDK_IMAGE:-mcr.microsoft.com/dotnet/sdk@sha256:7e964ea8bc6c1e18ea9fbc76ed403da41c9b19aeee2aab6bf9c845f25e891380}
-    RUNTIME_IMAGE: ${SURVIVAL_DOTNET_RUNTIME_IMAGE:-mcr.microsoft.com/dotnet/aspnet@sha256:e3736b0d423db99c6988e1ddf5ea725c14b12579bb120024e5ff7ff204a14080}
+    SDK_IMAGE: ${SURVIVAL_DOTNET_SDK_IMAGE:-mcr.microsoft.com/dotnet/sdk:10.0.301@sha256:ea8bde36c11b6e7eec2656d0e59101d4462f6bd630730f2c8201ed0572b295d5}
+    RUNTIME_IMAGE: ${SURVIVAL_DOTNET_RUNTIME_IMAGE:-mcr.microsoft.com/dotnet/aspnet:10.0.9@sha256:7644f992230d35cf230017189d4038c0ae0f7388b13f4f7ae1900a155bafb597}
     XNODE_REVISION: 00280a643cfdc1e0780147eceb1da5c7b6fd2799
     XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: bbb317f49bf774f0223cf0763466c01bfe1c3c896d18075da5d9873751354dbc
   dockerfile_inline: |
@@ -117,8 +117,8 @@ x-mailbox-driver-build: &mailbox-driver-build
   additional_contexts:
     xnode_source: ${SURVIVAL_XNODE_BUILD_CONTEXT:-./artifacts/survival-dev/build-contexts/xnode}
   args:
-    SDK_IMAGE: ${SURVIVAL_DOTNET_SDK_IMAGE:-mcr.microsoft.com/dotnet/sdk@sha256:7e964ea8bc6c1e18ea9fbc76ed403da41c9b19aeee2aab6bf9c845f25e891380}
-    RUNTIME_IMAGE: ${SURVIVAL_DOTNET_RUNTIME_IMAGE:-mcr.microsoft.com/dotnet/aspnet@sha256:e3736b0d423db99c6988e1ddf5ea725c14b12579bb120024e5ff7ff204a14080}
+    SDK_IMAGE: ${SURVIVAL_DOTNET_SDK_IMAGE:-mcr.microsoft.com/dotnet/sdk:10.0.301@sha256:ea8bde36c11b6e7eec2656d0e59101d4462f6bd630730f2c8201ed0572b295d5}
+    RUNTIME_IMAGE: ${SURVIVAL_DOTNET_RUNTIME_IMAGE:-mcr.microsoft.com/dotnet/aspnet:10.0.9@sha256:7644f992230d35cf230017189d4038c0ae0f7388b13f4f7ae1900a155bafb597}
     XNODE_REVISION: 00280a643cfdc1e0780147eceb1da5c7b6fd2799
     XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: bbb317f49bf774f0223cf0763466c01bfe1c3c896d18075da5d9873751354dbc
   dockerfile_inline: |
@@ -149,8 +149,8 @@ x-membership-fixture-build: &membership-fixture-build
   additional_contexts:
     membership_packages: ${SURVIVAL_MEMBERSHIP_PACKAGES_BUILD_CONTEXT:-./artifacts/survival-dev/build-contexts/membership-packages}
   args:
-    SDK_IMAGE: ${SURVIVAL_DOTNET_SDK_IMAGE:-mcr.microsoft.com/dotnet/sdk@sha256:7e964ea8bc6c1e18ea9fbc76ed403da41c9b19aeee2aab6bf9c845f25e891380}
-    RUNTIME_IMAGE: ${SURVIVAL_DOTNET_RUNTIME_IMAGE:-mcr.microsoft.com/dotnet/aspnet@sha256:e3736b0d423db99c6988e1ddf5ea725c14b12579bb120024e5ff7ff204a14080}
+    SDK_IMAGE: ${SURVIVAL_DOTNET_SDK_IMAGE:-mcr.microsoft.com/dotnet/sdk:10.0.301@sha256:ea8bde36c11b6e7eec2656d0e59101d4462f6bd630730f2c8201ed0572b295d5}
+    RUNTIME_IMAGE: ${SURVIVAL_DOTNET_RUNTIME_IMAGE:-mcr.microsoft.com/dotnet/aspnet:10.0.9@sha256:7644f992230d35cf230017189d4038c0ae0f7388b13f4f7ae1900a155bafb597}
   dockerfile_inline: |
     # check=skip=InvalidDefaultArgInFrom
     # Keep full-image references mandatory and provided via pinned compose/runtime inputs.
@@ -188,7 +188,7 @@ x-compat-build: &compat-build
 services:
   mailbox-driver-state-init:
     profiles: [mailbox-rehearsal]
-    image: ${SURVIVAL_DOTNET_RUNTIME_IMAGE:-mcr.microsoft.com/dotnet/aspnet@sha256:e3736b0d423db99c6988e1ddf5ea725c14b12579bb120024e5ff7ff204a14080}
+    image: ${SURVIVAL_DOTNET_RUNTIME_IMAGE:-mcr.microsoft.com/dotnet/aspnet:10.0.9@sha256:7644f992230d35cf230017189d4038c0ae0f7388b13f4f7ae1900a155bafb597}
     user: "0:0"
     restart: "no"
     cap_drop: [ALL]
@@ -522,8 +522,8 @@ services:
       additional_contexts:
         registry_source: ${SURVIVAL_REGISTRY_BUILD_CONTEXT:-./artifacts/survival-dev/build-contexts/registry}
       args:
-        SDK_IMAGE: ${SURVIVAL_DOTNET_SDK_IMAGE:-mcr.microsoft.com/dotnet/sdk@sha256:7e964ea8bc6c1e18ea9fbc76ed403da41c9b19aeee2aab6bf9c845f25e891380}
-        RUNTIME_IMAGE: ${SURVIVAL_DOTNET_RUNTIME_IMAGE:-mcr.microsoft.com/dotnet/aspnet@sha256:e3736b0d423db99c6988e1ddf5ea725c14b12579bb120024e5ff7ff204a14080}
+        SDK_IMAGE: ${SURVIVAL_DOTNET_SDK_IMAGE:-mcr.microsoft.com/dotnet/sdk:10.0.301@sha256:ea8bde36c11b6e7eec2656d0e59101d4462f6bd630730f2c8201ed0572b295d5}
+        RUNTIME_IMAGE: ${SURVIVAL_DOTNET_RUNTIME_IMAGE:-mcr.microsoft.com/dotnet/aspnet:10.0.9@sha256:7644f992230d35cf230017189d4038c0ae0f7388b13f4f7ae1900a155bafb597}
       dockerfile_inline: |
         # check=skip=InvalidDefaultArgInFrom
         # Keep full-image references mandatory and provided via pinned compose/runtime inputs.
@@ -578,8 +578,8 @@ services:
       additional_contexts:
         staking_source: ${SURVIVAL_STAKING_BUILD_CONTEXT:-./artifacts/survival-dev/build-contexts/staking}
       args:
-        SDK_IMAGE: ${SURVIVAL_DOTNET_SDK_IMAGE:-mcr.microsoft.com/dotnet/sdk@sha256:7e964ea8bc6c1e18ea9fbc76ed403da41c9b19aeee2aab6bf9c845f25e891380}
-        RUNTIME_IMAGE: ${SURVIVAL_DOTNET_RUNTIME_IMAGE:-mcr.microsoft.com/dotnet/aspnet@sha256:e3736b0d423db99c6988e1ddf5ea725c14b12579bb120024e5ff7ff204a14080}
+        SDK_IMAGE: ${SURVIVAL_DOTNET_SDK_IMAGE:-mcr.microsoft.com/dotnet/sdk:10.0.301@sha256:ea8bde36c11b6e7eec2656d0e59101d4462f6bd630730f2c8201ed0572b295d5}
+        RUNTIME_IMAGE: ${SURVIVAL_DOTNET_RUNTIME_IMAGE:-mcr.microsoft.com/dotnet/aspnet:10.0.9@sha256:7644f992230d35cf230017189d4038c0ae0f7388b13f4f7ae1900a155bafb597}
       dockerfile_inline: |
         # check=skip=InvalidDefaultArgInFrom
         # Keep full-image references mandatory and provided via pinned compose/runtime inputs.
