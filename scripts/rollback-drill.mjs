@@ -43,7 +43,9 @@ const composeEnv = {
   DEEP_ROOT: process.env.DEEP_ROOT ?? workspaceRoot,
   DEEP_DEVOPS_DIR: process.env.DEEP_DEVOPS_DIR ?? devopsRoot,
   XNODE_DOCKERFILE: process.env.XNODE_DOCKERFILE ?? path.join(devopsRoot, 'docker', 'xnode-xray.Dockerfile'),
-  XNODE_ASPNETCORE_ENVIRONMENT: process.env.XNODE_ASPNETCORE_ENVIRONMENT ?? 'Production',
+  // The rollback rehearsal proves the real Xray process and transport. The
+  // production authority profile is validated by the separate readiness gate.
+  XNODE_ASPNETCORE_ENVIRONMENT: process.env.XNODE_ASPNETCORE_ENVIRONMENT ?? 'Development',
   XNODE_VLESS_MOCK_PROCESS: process.env.XNODE_VLESS_MOCK_PROCESS ?? 'false',
   XNODE_XRAY_EXECUTABLE_PATH: process.env.XNODE_XRAY_EXECUTABLE_PATH ?? '/usr/local/bin/xray',
   XNODE_TRANSPORT_MODE: process.env.XNODE_TRANSPORT_MODE ?? 'Tcp',

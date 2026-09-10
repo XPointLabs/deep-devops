@@ -297,7 +297,20 @@ jobs:
         id: rollback_drill
         if: ${{ always() && steps.provider_config.outcome == 'success' && steps.p6_inputs.outcome == 'success' }}
         continue-on-error: true
-        run: node deep-devops/scripts/rollback-drill.mjs
+        shell: pwsh
+        run: |
+          . ./deep-devops/scripts/ephemeral-compose-secrets.ps1
+          $generatedComposeSecretNames = Initialize-DeepEphemeralComposeSecrets `
+            -ScriptDirectory ./deep-devops/scripts
+          try {
+            node deep-devops/scripts/rollback-drill.mjs
+            if ($LASTEXITCODE -ne 0) {
+              throw "rollback drill failed with exit code $LASTEXITCODE"
+            }
+          }
+          finally {
+            Clear-DeepEphemeralComposeSecrets -GeneratedNames $generatedComposeSecretNames
+          }
 
       - name: Run registry recovery drill
         id: registry_recovery
@@ -315,8 +328,7 @@ jobs:
           path: deep-devops/artifacts/hydrated/xnode-c3
           github-token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
           repository: ${{ github.repository_owner }}/xnode
-          token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
-          run-id: ${{ steps.attached_ci.outputs.node_router_c3_run_id }}
+          run-id: ${{ steps.attached_ci.outputs.xnode_c3_run_id }}
 
       - name: Run observability gate
         id: observability

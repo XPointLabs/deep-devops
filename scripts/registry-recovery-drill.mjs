@@ -53,6 +53,8 @@ const commandArgs = [
   solutionPath,
   '--configuration',
   'Release',
+  '-p:DeepProtocolLocalCutover=true',
+  '-p:DeepProtocolSourceCutover=true',
   '--filter',
   filter,
   '--logger',
