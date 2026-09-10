@@ -3,7 +3,10 @@ import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { createTestStorageSigningIdentity } from '../tools/compat-services/storage-signatures.mjs';
+import {
+  createAvatarAuthorizationHeaders,
+  createTestStorageSigningIdentity
+} from '../tools/compat-services/storage-signatures.mjs';
 import { registrationPayloads } from '../../deep-tests-e2e/src/fixtures.mjs';
 
 const restartPlan = Object.freeze({
@@ -207,6 +210,19 @@ async function getServiceStats(urls) {
   return { storage, file, push, registry };
 }
 
+async function putAvatar(baseUrl, path, bytes, contentType, identity) {
+  const response = await fetch(new URL(path, baseUrl), {
+    method: 'PUT',
+    headers: {
+      'content-type': contentType,
+      ...createAvatarAuthorizationHeaders(identity, path, bytes)
+    },
+    body: bytes
+  });
+  await assertOk(response, `PUT ${path}`);
+  return response.json();
+}
+
 function restartManagedExternalServices() {
   const composeFile = process.env.DEEP_COMPOSE_FILE;
   assert.ok(composeFile, 'DEEP_COMPOSE_FILE must be set for backend-external restart rehearsal');
@@ -333,17 +349,19 @@ async function main() {
   const fileBytesBeforeRestart = await getBytes(urls.file, `/file/${uploadedBeforeRestart.id}`);
   assert.deepEqual(fileBytesBeforeRestart, filePayload);
 
-  const avatarBeforeRestart = await postBytes(
+  const avatarPath = `/avatar/${encodeURIComponent(storageIdentity.sessionPubkey)}`;
+  const avatarBeforeRestart = await putAvatar(
     urls.file,
-    `/avatar/${encodeURIComponent(storageIdentity.directPubkey)}`,
+    avatarPath,
     avatarPayload,
-    'image/png'
+    'image/png',
+    storageIdentity
   );
   const avatarInfoBeforeRestart = await getJson(
     urls.file,
-    `/avatar/${encodeURIComponent(storageIdentity.directPubkey)}/info`
+    `${avatarPath}/info`
   );
-  const avatarBytesBeforeRestart = await getBytes(urls.file, `/avatar/${encodeURIComponent(storageIdentity.directPubkey)}`);
+  const avatarBytesBeforeRestart = await getBytes(urls.file, avatarPath);
   assert.equal(avatarBeforeRestart.fileId, avatarInfoBeforeRestart.fileId);
   assert.equal(avatarInfoBeforeRestart.contentType, 'image/png');
   assert.deepEqual(avatarBytesBeforeRestart, avatarPayload);
@@ -408,10 +426,10 @@ async function main() {
 
   const avatarInfoAfterRestart = await getJson(
     urls.file,
-    `/avatar/${encodeURIComponent(storageIdentity.directPubkey)}/info`
+    `${avatarPath}/info`
   );
   assert.deepEqual(avatarInfoAfterRestart, avatarInfoBeforeRestart);
-  const avatarBytesAfterRestart = await getBytes(urls.file, `/avatar/${encodeURIComponent(storageIdentity.directPubkey)}`);
+  const avatarBytesAfterRestart = await getBytes(urls.file, avatarPath);
   assert.deepEqual(avatarBytesAfterRestart, avatarPayload);
 
   const subscriptionsAfterRestart = await getJson(

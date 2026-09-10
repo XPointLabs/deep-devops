@@ -5,8 +5,10 @@ import { tmpdir } from 'node:os';
 import test from 'node:test';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { createHash, randomBytes } from 'node:crypto';
-import { createTestStorageSigningIdentity } from '../compat-services/storage-signatures.mjs';
+import {
+  createAvatarAuthorizationHeaders as avatarAuthorizationHeaders,
+  createTestStorageSigningIdentity
+} from '../compat-services/storage-signatures.mjs';
 
 const scriptPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'file-service.mjs');
 const sessionFileIdFixturePath = path.resolve(
@@ -75,34 +77,6 @@ async function startFileService({ port, stateDir, extraEnv = {} }) {
 
 function randomPort() {
   return 22000 + Math.floor(Math.random() * 1000);
-}
-
-function avatarAuthorizationHeaders(identity, requestPath, content, overrides = {}) {
-  const timestamp = overrides.timestamp ?? Date.now();
-  const nonce = overrides.nonce ?? randomBytes(16).toString('hex');
-  const contentSha256 = overrides.contentSha256
-    ?? createHash('sha256').update(content).digest('hex');
-  const sessionId = overrides.sessionId ?? identity.sessionPubkey;
-  const pubkeyEd25519 = overrides.pubkeyEd25519 ?? identity.pubkeyEd25519;
-  const signingPayload = Buffer.from([
-    'deep-avatar-upload-v1',
-    'PUT',
-    requestPath,
-    sessionId,
-    pubkeyEd25519,
-    String(timestamp),
-    nonce,
-    contentSha256
-  ].join('\n'), 'utf8');
-
-  return {
-    'x-deep-session-id': sessionId,
-    'x-deep-ed25519': pubkeyEd25519,
-    'x-deep-timestamp': String(timestamp),
-    'x-deep-nonce': nonce,
-    'x-deep-content-sha256': contentSha256,
-    'x-deep-signature': identity.signMessage(signingPayload)
-  };
 }
 
 test('health and stats endpoints honor SERVICE_NAME override', async () => {

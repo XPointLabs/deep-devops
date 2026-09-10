@@ -3,7 +3,10 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createTestStorageSigningIdentity } from '../tools/compat-services/storage-signatures.mjs';
+import {
+  createAvatarAuthorizationHeaders,
+  createTestStorageSigningIdentity
+} from '../tools/compat-services/storage-signatures.mjs';
 import { registrationPayloads } from '../../deep-tests-e2e/src/fixtures.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -122,6 +125,19 @@ async function postBytes(baseUrl, endpoint, bytes, contentType) {
     body: bytes
   });
   await assertOk(response, `POST ${endpoint}`);
+  return response.json();
+}
+
+async function putAvatar(baseUrl, endpoint, bytes, contentType, identity) {
+  const response = await fetch(new URL(endpoint, baseUrl), {
+    method: 'PUT',
+    headers: {
+      'content-type': contentType,
+      ...createAvatarAuthorizationHeaders(identity, endpoint, bytes)
+    },
+    body: bytes
+  });
+  await assertOk(response, `PUT ${endpoint}`);
   return response.json();
 }
 
@@ -284,9 +300,10 @@ async function runPostRollbackSmoke() {
     size: fileInfo.size
   });
 
-  const avatar = await postBytes(urls.file, `/avatar/${encodeURIComponent(identity.directPubkey)}`, avatarBytes, 'image/png');
-  const avatarInfo = await getJson(urls.file, `/avatar/${encodeURIComponent(identity.directPubkey)}/info`);
-  const avatarDownloaded = await getBytes(urls.file, `/avatar/${encodeURIComponent(identity.directPubkey)}`);
+  const avatarPath = `/avatar/${encodeURIComponent(identity.sessionPubkey)}`;
+  const avatar = await putAvatar(urls.file, avatarPath, avatarBytes, 'image/png', identity);
+  const avatarInfo = await getJson(urls.file, `${avatarPath}/info`);
+  const avatarDownloaded = await getBytes(urls.file, avatarPath);
   addCheck('smoke:avatar-roundtrip', Buffer.compare(avatarDownloaded, avatarBytes) === 0 && avatarInfo.fileId === avatar.fileId, {
     fileId: avatar.fileId,
     contentType: avatarInfo.contentType

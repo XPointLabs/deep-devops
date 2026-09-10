@@ -1,4 +1,10 @@
-import { generateKeyPairSync, sign as cryptoSign, verify as cryptoVerify } from 'node:crypto';
+import {
+  createHash,
+  generateKeyPairSync,
+  randomBytes,
+  sign as cryptoSign,
+  verify as cryptoVerify
+} from 'node:crypto';
 
 const ed25519SpkiPrefix = Buffer.from('302a300506032b6570032100', 'hex');
 const curve25519Prime = (1n << 255n) - 19n;
@@ -14,6 +20,34 @@ export const storageSubaccountAccess = Object.freeze({
   DELETE: 0x04,
   ANY_PREFIX: 0x08
 });
+
+export function createAvatarAuthorizationHeaders(identity, requestPath, content, overrides = {}) {
+  const timestamp = overrides.timestamp ?? Date.now();
+  const nonce = overrides.nonce ?? randomBytes(16).toString('hex');
+  const contentSha256 = overrides.contentSha256
+    ?? createHash('sha256').update(content).digest('hex');
+  const sessionId = overrides.sessionId ?? identity.sessionPubkey;
+  const pubkeyEd25519 = overrides.pubkeyEd25519 ?? identity.pubkeyEd25519;
+  const signingPayload = Buffer.from([
+    'deep-avatar-upload-v1',
+    'PUT',
+    requestPath,
+    sessionId,
+    pubkeyEd25519,
+    String(timestamp),
+    nonce,
+    contentSha256
+  ].join('\n'), 'utf8');
+
+  return {
+    'x-deep-session-id': sessionId,
+    'x-deep-ed25519': pubkeyEd25519,
+    'x-deep-timestamp': String(timestamp),
+    'x-deep-nonce': nonce,
+    'x-deep-content-sha256': contentSha256,
+    'x-deep-signature': identity.signMessage(signingPayload)
+  };
+}
 
 function isHexWithLength(value, length) {
   return typeof value === 'string' && value.length === length && /^[0-9a-f]+$/i.test(value);
