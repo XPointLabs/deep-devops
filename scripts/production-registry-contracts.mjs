@@ -7,6 +7,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const compose = readFileSync(path.join(root, 'docker-compose.staking.prod.local.yml'), 'utf8');
 const provision = readFileSync(
   path.join(root, 'scripts', 'Prepare-ProductionRegistryCandidate.ps1'), 'utf8');
+const smoke = readFileSync(
+  path.join(root, 'scripts', 'Test-ProductionRegistryAuthority.ps1'), 'utf8');
 
 const registryStart = compose.indexOf('\n  registry:\n');
 const portalStart = compose.indexOf('\n  staking-portal:\n');
@@ -36,9 +38,13 @@ assert.match(provision, /registry-dtt-signer-2\.ed25519\.seed/);
 assert.match(provision, /registry-dtt-signer-3\.ed25519\.seed/);
 assert.doesNotMatch(provision, /offline-root-1\.ed25519\.seed/,
   'offline root seed must never be copied into a deployment candidate');
+assert.match(smoke, /\[ValidatePattern\('\^https:\/\/'\)\]/);
+assert.match(smoke, /application\/vnd\.deep\.contact-resolve-directory-request\.v1/);
+assert.match(smoke, /application\/vnd\.deep\.contact-resolve-directory\.v1/);
+assert.match(smoke, /cryptographicClosureVerification = 'delegated-to-xnode-readiness'/);
 
 process.stdout.write(`${JSON.stringify({
   schema: 'deep-production-registry-contracts.v1',
   status: 'ok',
-  checked: 16,
+  checked: 20,
 }, null, 2)}\n`);
