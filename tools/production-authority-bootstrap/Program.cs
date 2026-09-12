@@ -345,7 +345,7 @@ sealed class FileSigner :
     private readonly byte[] id;
     private readonly byte[] publicKey;
     private readonly byte[] custodyDomain;
-    private readonly byte[] privateKey;
+    private readonly byte[] signingKeyBytes;
     private readonly bool root;
 
     private FileSigner(CustodyRole role, string seedPath, bool root)
@@ -359,7 +359,7 @@ sealed class FileSigner :
         {
             var pair = PublicKeyAuth.GenerateKeyPair(seed);
             publicKey = pair.PublicKey.ToArray();
-            privateKey = pair.PrivateKey.ToArray();
+            signingKeyBytes = pair.PrivateKey.ToArray();
         }
         finally
         {
@@ -429,12 +429,12 @@ sealed class FileSigner :
         cancellationToken.ThrowIfCancellationRequested();
         if (root) throw new CryptographicException("The offline root cannot sign DTT1.");
         return ValueTask.FromResult<ReadOnlyMemory<byte>>(
-            PublicKeyAuth.SignDetached(signingInput.ToArray(), privateKey));
+            PublicKeyAuth.SignDetached(signingInput.ToArray(), signingKeyBytes));
     }
 
     private ValueTask<int> Sign(ReadOnlyMemory<byte> input, Memory<byte> destination)
     {
-        var signature = PublicKeyAuth.SignDetached(input.ToArray(), privateKey);
+        var signature = PublicKeyAuth.SignDetached(input.ToArray(), signingKeyBytes);
         try
         {
             signature.CopyTo(destination);
@@ -448,7 +448,7 @@ sealed class FileSigner :
 
     public void Dispose()
     {
-        CryptographicOperations.ZeroMemory(privateKey);
+        CryptographicOperations.ZeroMemory(signingKeyBytes);
         CryptographicOperations.ZeroMemory(id);
         CryptographicOperations.ZeroMemory(publicKey);
         CryptographicOperations.ZeroMemory(custodyDomain);
@@ -461,7 +461,7 @@ sealed class NodeInput : IDisposable
     private readonly string root;
     private readonly IDictionary<string, string> environment;
     private readonly byte[] ed25519Seed;
-    private readonly byte[] ed25519PrivateKey;
+    private readonly byte[] ed25519SigningKeyBytes;
     private readonly byte[] publicKey;
     private readonly byte[] currentX25519;
     private readonly byte[] nextX25519;
@@ -477,7 +477,7 @@ sealed class NodeInput : IDisposable
         ed25519Seed = ReadSeed(Path.Combine(secrets, "key_ed25519"));
         var pair = PublicKeyAuth.GenerateKeyPair(ed25519Seed);
         publicKey = pair.PublicKey.ToArray();
-        ed25519PrivateKey = pair.PrivateKey.ToArray();
+        ed25519SigningKeyBytes = pair.PrivateKey.ToArray();
         if (!string.Equals(environment["DEEP_NODE_ED25519_PUBLIC_KEY"],
                 Convert.ToHexString(publicKey).ToLowerInvariant(), StringComparison.Ordinal))
             throw new CryptographicException($"{name} Ed25519 seed does not match its public environment binding.");
@@ -498,7 +498,7 @@ sealed class NodeInput : IDisposable
         var spkiRoot = ExistingDirectory(Path.Combine(root, "secrets", "ingress"));
         var currentSpki = ReadHexText(Path.Combine(spkiRoot, "current.spki-sha256"), 32, "current ingress SPKI");
         var nextSpki = ReadHexText(Path.Combine(spkiRoot, "next.spki-sha256"), 32, "next ingress SPKI");
-        var identity = new NodeSigner(publicKey, ed25519PrivateKey);
+        var identity = new NodeSigner(publicKey, ed25519SigningKeyBytes);
         var address = ip.GetAddressBytes();
         return new XPointNetworkOperationalNode(
             identity,
@@ -562,7 +562,7 @@ sealed class NodeInput : IDisposable
     public void Dispose()
     {
         CryptographicOperations.ZeroMemory(ed25519Seed);
-        CryptographicOperations.ZeroMemory(ed25519PrivateKey);
+        CryptographicOperations.ZeroMemory(ed25519SigningKeyBytes);
         CryptographicOperations.ZeroMemory(publicKey);
         CryptographicOperations.ZeroMemory(currentX25519);
         CryptographicOperations.ZeroMemory(nextX25519);
@@ -571,7 +571,7 @@ sealed class NodeInput : IDisposable
     }
 }
 
-sealed class NodeSigner(byte[] publicKey, byte[] privateKey) : IXPointNetworkOperationalSigner
+sealed class NodeSigner(byte[] publicKey, byte[] signingKeyBytes) : IXPointNetworkOperationalSigner
 {
     public ReadOnlyMemory<byte> SignerId => publicKey.ToArray();
     public ulong KeyGeneration => 0;
@@ -588,7 +588,7 @@ sealed class NodeSigner(byte[] publicKey, byte[] privateKey) : IXPointNetworkOpe
             !request.ExpectedEd25519PublicKey.Span.SequenceEqual(publicKey) ||
             request.KeyGeneration != 0)
             throw new CryptographicException("A node identity rejected an out-of-policy signing request.");
-        var signature = PublicKeyAuth.SignDetached(request.SigningInput.ToArray(), privateKey);
+        var signature = PublicKeyAuth.SignDetached(request.SigningInput.ToArray(), signingKeyBytes);
         try
         {
             signature.CopyTo(signature64);
