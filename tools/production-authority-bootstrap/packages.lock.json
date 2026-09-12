@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net10.0": {
+      "libsodium": {
+        "type": "Transitive",
+        "resolved": "1.0.22",
+        "contentHash": "KPD9SloJFclrsjnhABu7dzWrcyYkwPbvx5l1gRSPAX/0n+OBtSiVCKtGFv4n+ecWUHU0tCG9LSSwoZZx673zBQ=="
+      },
+      "Sodium.Core": {
+        "type": "Transitive",
+        "resolved": "1.4.1",
+        "contentHash": "K1Xhi20h9H15UPOa6NDNgW81NYN6AAvVT+v0Jz3n1qLS/nqiWzamWCyHyFxgoriCEMA90L1KQbYrIqBH+zKbrg==",
+        "dependencies": {
+          "libsodium": "[1.0.22, 1.0.23)"
+        }
+      },
+      "deep.protocol": {
+        "type": "Project",
+        "dependencies": {
+          "Sodium.Core": "[1.4.1, 1.4.1]"
+        }
+      }
+    }
+  }
+}

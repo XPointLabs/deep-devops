@@ -8,6 +8,11 @@ on:
         required: false
         default: main
         type: string
+      registry_ref:
+        description: deep-registry-api branch, tag, or SHA to build
+        required: false
+        default: main
+        type: string
       image_tag:
         description: Optional common image tag. Defaults to prod-<xnode-sha>-<devops-sha>.
         required: false
@@ -62,6 +67,14 @@ jobs:
           token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
           path: deep-protocol
 
+      - name: Checkout registry
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/deep-registry-api
+          ref: ${{ inputs.registry_ref || env.DEFAULT_XNODE_REF }}
+          token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
+          path: deep-registry-api
+
       - name: Resolve image tags
         id: versions
         shell: bash
@@ -72,6 +85,8 @@ jobs:
           xnode_short="$(git -C xnode rev-parse --short=12 HEAD)"
           devops_sha="$(git -C deep-devops rev-parse HEAD)"
           devops_short="$(git -C deep-devops rev-parse --short=12 HEAD)"
+          registry_sha="$(git -C deep-registry-api rev-parse HEAD)"
+          registry_short="$(git -C deep-registry-api rev-parse --short=12 HEAD)"
 
           image_tag="${IMAGE_TAG_INPUT}"
           if [ -z "$image_tag" ]; then
@@ -85,6 +100,8 @@ jobs:
             echo "xnode_short=$xnode_short"
             echo "devops_sha=$devops_sha"
             echo "devops_short=$devops_short"
+            echo "registry_sha=$registry_sha"
+            echo "registry_short=$registry_short"
             echo "image_tag=$image_tag"
             echo "xnode_tags<<EOF"
             echo "${IMAGE_PREFIX}/xnode:${image_tag}"
@@ -98,6 +115,13 @@ jobs:
             echo "${IMAGE_PREFIX}/deep-storage-service:devops-${devops_short}"
             if [ "$push_latest" = "true" ]; then
               echo "${IMAGE_PREFIX}/deep-storage-service:latest"
+            fi
+            echo "EOF"
+            echo "registry_tags<<EOF"
+            echo "${IMAGE_PREFIX}/deep-registry-api:${image_tag}"
+            echo "${IMAGE_PREFIX}/deep-registry-api:registry-${registry_short}"
+            if [ "$push_latest" = "true" ]; then
+              echo "${IMAGE_PREFIX}/deep-registry-api:latest"
             fi
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
@@ -163,6 +187,28 @@ jobs:
           cache-from: type=gha,scope=deep-storage-service-production
           cache-to: type=gha,scope=deep-storage-service-production,mode=max
 
+      - name: Build and push registry
+        uses: docker/build-push-action@v6
+        with:
+          context: deep-registry-api
+          file: deep-devops/docker/first-release-registry.Dockerfile
+          build-contexts: |
+            protocol_source=./deep-protocol
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            SDK_IMAGE=mcr.microsoft.com/dotnet/sdk:10.0.301@sha256:ea8bde36c11b6e7eec2656d0e59101d4462f6bd630730f2c8201ed0572b295d5
+            RUNTIME_IMAGE=mcr.microsoft.com/dotnet/aspnet:10.0.9@sha256:7644f992230d35cf230017189d4038c0ae0f7388b13f4f7ae1900a155bafb597
+            PROJECT=src/Deep.Registry.Api/Deep.Registry.Api.csproj
+          tags: ${{ steps.versions.outputs.registry_tags }}
+          labels: |
+            org.opencontainers.image.title=Deep Registry API
+            org.opencontainers.image.description=XPoint production registry and authenticated directory authority
+            org.opencontainers.image.source=https://github.com/XPointLabs/deep-registry-api
+            org.opencontainers.image.revision=${{ steps.versions.outputs.registry_sha }}
+          cache-from: type=gha,scope=deep-registry-api-production
+          cache-to: type=gha,scope=deep-registry-api-production,mode=max
+
       - name: Summary
         run: |
           {
@@ -175,4 +221,7 @@ jobs:
             echo
             echo "### deep-storage-service"
             echo '${{ steps.versions.outputs.storage_tags }}' | sed 's/^/- `/' | sed 's/$/`/'
+            echo
+            echo "### deep-registry-api"
+            echo '${{ steps.versions.outputs.registry_tags }}' | sed 's/^/- `/' | sed 's/$/`/'
           } >> "$GITHUB_STEP_SUMMARY"

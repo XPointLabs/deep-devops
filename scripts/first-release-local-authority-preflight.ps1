@@ -28,25 +28,24 @@ $hasGenesisAuthor = $source -match '\bclass\s+XPointNetworkBootstrapAuthor\b' -a
     $source -match '\bAuthorGenesisAsync\b'
 $hasProofAuthor = $source -match '\bclass\s+AccountDirectoryProofAuthor\b' -and
     $source -match '\bIssueAsync\b'
-$hasRootCustody = $source -match
-    '\bclass\s+[A-Za-z0-9_]+[^\{]*:\s*[^\{]*\bIXPointNetworkBootstrapRootSigner\b'
-$missingGenesisAuthors = [Collections.Generic.List[string]]::new()
-foreach ($magic in @('ADH1', 'ADC1', 'XVP1', 'XNV1', 'XNH1', 'XND1', 'PMT2')) {
-    if ($source -notmatch "(?is)\b(?:class|interface)\s+[A-Za-z0-9_]*$magic[A-Za-z0-9_]*Author[A-Za-z0-9_]*\b") {
-        $missingGenesisAuthors.Add($magic)
-    }
-}
+$hasOperationalGenesisAuthor = $source -match
+    '\bclass\s+XPointNetworkOperationalGenesisAuthor\b' -and
+    $source -match '\bXPointNetworkOperationalGenesisRequest\b'
 $source = $null
+
+$custodyTool = Join-Path $repository 'tools\production-authority-bootstrap\Program.cs'
+$hasRootCustody = (Test-Path -LiteralPath $custodyTool -PathType Leaf) -and
+    ([IO.File]::ReadAllText($custodyTool) -match
+        '\bclass\s+FileSigner[^\{]*:\s*[^\{]*\bIXPointNetworkBootstrapRootSigner\b')
 
 if (-not $hasGenesisAuthor -or -not $hasProofAuthor) {
     throw 'First-release authority blocker: the required Protocol production authoring APIs are unavailable.'
 }
-if (-not $hasRootCustody -or $missingGenesisAuthors.Count -gt 0) {
-    throw ('First-release signing-authority blocker: no production ' +
-        'IXPointNetworkBootstrapRootSigner custody implementation is available for ' +
-        'XNA1/DTS1, and no production genesis authoring entry point exists for ' +
-        ($missingGenesisAuthors -join '/') + '. Registry production authoring covers ' +
-        'only nonce-bound DTT1/ADP1. Exact closure required: ' +
-        'XNA1/DTS1/XVP1/XNV1/XNH1/XND1/PMT2/ADH1/DTT1/ADP1/ADC1. ' +
-        'DEV trust and synthetic artifacts are forbidden.')
+if (-not $hasRootCustody -or -not $hasOperationalGenesisAuthor) {
+    throw ('First-release signing-authority blocker: the production ' +
+        'IXPointNetworkBootstrapRootSigner custody adapter and the complete ' +
+        'XPointNetworkOperationalGenesisAuthor must both be present. Required genesis closure: ' +
+        'XNA1/DTS1/XVP1/XNV1/XNH1/XND1/PMT2/ADH1/DTT1/ADP1. ' +
+        'ADC1 is intentionally absent from the empty generation-zero directory and is admitted ' +
+        'only by the verified account-publication pipeline. DEV trust and synthetic artifacts are forbidden.')
 }
