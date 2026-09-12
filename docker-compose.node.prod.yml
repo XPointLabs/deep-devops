@@ -174,6 +174,29 @@ services:
       PrivacyRouting__Peers__1__BaseUrl: ${DEEP_PRIVACY_PEER_2_BASE_URL:?set DEEP_PRIVACY_PEER_2_BASE_URL}
       PrivacyRouting__Peers__1__CurrentSpkiSha256: ${DEEP_PRIVACY_PEER_2_CURRENT_SPKI_SHA256:?set DEEP_PRIVACY_PEER_2_CURRENT_SPKI_SHA256}
       PrivacyRouting__Peers__1__NextSpkiSha256: ${DEEP_PRIVACY_PEER_2_NEXT_SPKI_SHA256:?set DEEP_PRIVACY_PEER_2_NEXT_SPKI_SHA256}
+
+      ContactService__RuntimeActivation: "true"
+      ContactService__MapReplicaEndpoint: "true"
+      ContactService__ReplicaTimeoutSeconds: ${DEEP_CONTACT_REPLICA_TIMEOUT_SECONDS:-5}
+      ContactService__ReplayCapacity: ${DEEP_CONTACT_REPLAY_CAPACITY:-100000}
+      ContactService__ReplayTtlSeconds: ${DEEP_CONTACT_REPLAY_TTL_SECONDS:-300}
+      ContactAuthority__Enabled: "true"
+      ContactAuthority__RegistryOrigin: ${DEEP_REGISTRY_URL:?set DEEP_REGISTRY_URL}
+      ContactAuthority__NetworkIdHex: ${DEEP_XPOINT_NETWORK_ID_HEX:?set DEEP_XPOINT_NETWORK_ID_HEX}
+      ContactAuthority__XPointNetworkGenesisPinHex: ${DEEP_XPOINT_GENESIS_PIN_HEX:?set DEEP_XPOINT_GENESIS_PIN_HEX}
+      ContactAuthority__DirectoryLeafKeyHex: ${DEEP_XPOINT_DIRECTORY_LEAF_KEY_HEX:?set DEEP_XPOINT_DIRECTORY_LEAF_KEY_HEX}
+      ContactAuthority__StateRelativePath: contact-authority/snapshot.state
+      ContactAuthority__SupportedDirectoryReader: "1"
+      ContactAuthority__MaximumResponseBytes: "71565312"
+      ContactAuthority__MaximumProtectedStateBytes: "83886080"
+      ContactAuthority__RequestTimeoutSeconds: ${DEEP_CONTACT_AUTHORITY_TIMEOUT_SECONDS:-30}
+      ContactRouteClosure__Enabled: "true"
+      ContactRouteClosure__RegistryOrigin: ${DEEP_REGISTRY_URL:?set DEEP_REGISTRY_URL}
+      ContactRouteClosure__StateRelativePath: contact-authority/route-closure.state
+      ContactRouteClosure__MaximumProtectedStateBytes: "4194304"
+      ContactRouteClosure__RequestTimeoutSeconds: ${DEEP_CONTACT_AUTHORITY_TIMEOUT_SECONDS:-30}
+      RequiredTerminals__Contact: "true"
+      RequiredTerminals__GroupControl: "false"
       StorageRpc__BaseUrl: http://172.31.241.20:8080
 
       Vless__Enabled: "true"

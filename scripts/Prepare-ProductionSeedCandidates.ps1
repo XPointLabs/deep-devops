@@ -112,6 +112,9 @@ foreach ($state in $states.Values) {
         DEEP_INGRESS_HOST = $state.Definition.HostName
         DEEP_INGRESS_HTTPS_BIND = '443'
         DEEP_QUORUM_COORDINATOR_CIDR = '111.235.151.150/32'
+        DEEP_XPOINT_NETWORK_ID_HEX = 'edc5dc1516a847a65fc8ba0e690d000d'
+        DEEP_XPOINT_GENESIS_PIN_HEX = '304911104767ae1036a44c71116a5fcdee3449fc71ea1467c09295f89be3a2b7'
+        DEEP_XPOINT_DIRECTORY_LEAF_KEY_HEX = '3fd0371522bcfe473b36645f76a3817c722887fcbaa39ef75f4644a124d7b359'
     }
     for ($index = 0; $index -lt 2; $index++) {
         $ordinal = $index + 1
