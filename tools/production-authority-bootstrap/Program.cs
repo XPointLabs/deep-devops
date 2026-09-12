@@ -21,6 +21,7 @@ var bootId = Hex(arguments.Required("--boot-id"), 16, "boot ID");
 var nonceCreated = arguments.RequiredU64("--nonce-created");
 var responseReceived = arguments.RequiredU64("--response-received");
 var currentSample = arguments.RequiredU64("--current-sample");
+var previousBootstrapRoot = arguments.Optional("--previous-bootstrap-root");
 var manifestPath = Path.Combine(authorityRoot, "public", "custody-manifest.v1.json");
 var manifest = CustodyManifest.Load(manifestPath);
 if (!string.Equals(manifest.AuthorityOwner, "Mr. X", StringComparison.Ordinal) ||
@@ -52,32 +53,40 @@ var timeSources = new[]
     TimeSource("time.cloudflare.com", "cloudflare", "48f93d4f1ecaf8e2323bc2e5be015b331d65cb8e40a1b28be50eb4ba9230e789"),
     TimeSource("nts.netnod.se", "netnod", "bd44c55cfd57e38da3a6aea80bf65f9c441b63fbd8667e057b0f112fc3211efa"),
 }.OrderBy(static value => value.SourceId.ToArray(), ByteArrayComparer.Instance).ToArray();
-var bootstrapRequest = new XPointNetworkGenesisAuthoringRequest(
-    ceremony,
-    network,
-    [new XPointNetworkBootstrapRootKey(
-        root.RootKeyId.Span, root.KeyGeneration, root.Ed25519PublicKey.Span,
-        root.CustodyDomainHash.Span)],
-    1,
-    witnesses.Select(static value => new XPointNetworkBootstrapWitnessKey(
-        value.SignerId.Span, value.KeyGeneration, value.Ed25519PublicKey.Span,
-        value.FailureDomainHash.Span)).ToArray(),
-    2,
-    timeSources,
-    5,
-    10,
-    notBefore,
-    notBefore,
-    authorityExpires,
-    notBefore,
-    timePolicyExpires,
-    1,
-    1);
-var bootstrap = await XPointNetworkBootstrapAuthor.AuthorGenesisAsync(
-    bootstrapRequest, [root]);
 var queryLeaf = HashDomain(
     "Deep/XPoint/V1/contact-authority-bootstrap-leaf",
     manifest.Role("contact-xpk").PublicKey());
+VerifiedXPointNetworkBootstrap bootstrap;
+if (string.IsNullOrWhiteSpace(previousBootstrapRoot))
+{
+    var bootstrapRequest = new XPointNetworkGenesisAuthoringRequest(
+        ceremony,
+        network,
+        [new XPointNetworkBootstrapRootKey(
+            root.RootKeyId.Span, root.KeyGeneration, root.Ed25519PublicKey.Span,
+            root.CustodyDomainHash.Span)],
+        1,
+        witnesses.Select(static value => new XPointNetworkBootstrapWitnessKey(
+            value.SignerId.Span, value.KeyGeneration, value.Ed25519PublicKey.Span,
+            value.FailureDomainHash.Span)).ToArray(),
+        2,
+        timeSources,
+        5,
+        10,
+        notBefore,
+        notBefore,
+        authorityExpires,
+        notBefore,
+        timePolicyExpires,
+        1,
+        1);
+    bootstrap = await XPointNetworkBootstrapAuthor.AuthorGenesisAsync(
+        bootstrapRequest, [root]);
+}
+else
+{
+    bootstrap = LoadExistingBootstrap(previousBootstrapRoot, network, queryLeaf);
+}
 var nodeRecords = nodes.Select(node => node.ToOperationalNode(network)).ToArray();
 var snapshotNonce = RandomNumberGenerator.GetBytes(32);
 try
@@ -176,6 +185,63 @@ static AccountDirectoryDts1Source TimeSource(string host, string family, string 
     Hex(spkiHex, 32, $"{host} SPKI"),
     5);
 
+static VerifiedXPointNetworkBootstrap LoadExistingBootstrap(
+    string previousRoot,
+    ReadOnlySpan<byte> expectedNetwork,
+    ReadOnlySpan<byte> expectedDirectoryLeaf)
+{
+    previousRoot = ExistingDirectory(previousRoot);
+    var manifestBytes = File.ReadAllBytes(
+        ExistingFile(Path.Combine(previousRoot, "public-manifest.v1.json")));
+    try
+    {
+        var manifest = JsonSerializer.Deserialize<PublicBootstrapManifest>(manifestBytes,
+                           new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+                       ?? throw new InvalidDataException(
+                           "The previous public bootstrap manifest is empty.");
+        if (!string.Equals(manifest.Schema, "deep-production-authority-bootstrap.v1",
+                StringComparison.Ordinal) ||
+            !string.Equals(manifest.AuthorityOwner, "Mr. X", StringComparison.Ordinal))
+            throw new InvalidDataException(
+                "The previous bootstrap is outside the approved production boundary.");
+        var network = Hex(manifest.NetworkIdHex, 16, "previous network ID");
+        var genesis = Hex(manifest.GenesisAuthorityCoreHashHex, 32, "previous genesis pin");
+        var directoryLeaf = Hex(manifest.DirectoryLeafKeyHex, 32, "previous directory leaf key");
+        try
+        {
+            if (!CryptographicOperations.FixedTimeEquals(network, expectedNetwork) ||
+                !CryptographicOperations.FixedTimeEquals(directoryLeaf, expectedDirectoryLeaf))
+                throw new CryptographicException(
+                    "The previous bootstrap belongs to a different production authority.");
+            var bootstrapRoot = ExistingDirectory(Path.Combine(previousRoot, "bootstrap"));
+            var xna = File.ReadAllBytes(
+                ExistingFile(Path.Combine(bootstrapRoot, "xna1.0000.bin")));
+            var dts = File.ReadAllBytes(
+                ExistingFile(Path.Combine(bootstrapRoot, "dts1.0000.bin")));
+            try
+            {
+                return XPointNetworkBootstrapAuthor.VerifyExistingGenesis(
+                    xna, dts, new XPointNetworkGenesisPin(network, genesis));
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(xna);
+                CryptographicOperations.ZeroMemory(dts);
+            }
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(network);
+            CryptographicOperations.ZeroMemory(genesis);
+            CryptographicOperations.ZeroMemory(directoryLeaf);
+        }
+    }
+    finally
+    {
+        CryptographicOperations.ZeroMemory(manifestBytes);
+    }
+}
+
 static IReadOnlyList<ArtifactEntry> WriteArtifacts(
     string directory,
     IReadOnlyList<(string Role, byte[] Bytes)> artifacts)
@@ -212,18 +278,22 @@ sealed class Arguments
         {
             "--authority-root", "--seed1-root", "--seed2-root", "--seed3-root", "--output",
             "--observed-unix", "--boot-id", "--nonce-created", "--response-received", "--current-sample",
+            "--previous-bootstrap-root",
         };
         var values = new Dictionary<string, string>(StringComparer.Ordinal);
         for (var index = 0; index < args.Length; index += 2)
             if (!allowed.Contains(args[index]) || string.IsNullOrWhiteSpace(args[index + 1]) ||
                 !values.TryAdd(args[index], args[index + 1]))
                 throw new ArgumentException("An authority bootstrap argument is unknown, empty, or duplicated.");
-        if (values.Count != allowed.Count)
+        var required = allowed.Where(static value =>
+            !string.Equals(value, "--previous-bootstrap-root", StringComparison.Ordinal));
+        if (required.Any(value => !values.ContainsKey(value)))
             throw new ArgumentException("The authority bootstrap argument set is incomplete.");
         return new Arguments(values);
     }
 
     internal string Required(string name) => values[name];
+    internal string? Optional(string name) => values.TryGetValue(name, out var value) ? value : null;
     internal ulong RequiredU64(string name) => ulong.TryParse(values[name], out var parsed)
         ? parsed
         : throw new ArgumentException($"{name} is not an unsigned integer.");

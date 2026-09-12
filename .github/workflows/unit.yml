@@ -95,6 +95,7 @@ jobs:
           node --test ./tools/file-service/file-service-runtime.test.mjs
           node --test ./tools/push-service/push-service-runtime.test.mjs
           node --test ./tools/calls-service/calls-service-runtime.test.mjs
+          node ./scripts/production-registry-contracts.mjs
 
       - name: Prepare exact failed-test artifact manifest
         id: prepare_unit_upload

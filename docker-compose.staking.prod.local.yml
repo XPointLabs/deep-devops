@@ -89,16 +89,12 @@ services:
         condition: service_healthy
 
   registry:
-    build:
-      context: ${DEEP_ROOT:-..}/deep-registry-api
-      dockerfile: ${DEEP_DEVOPS_DIR:-../deep-devops}/docker/dotnet-service.Dockerfile
-      args:
-        SDK_IMAGE: mcr.microsoft.com/dotnet/sdk:10.0.301
-        RUNTIME_IMAGE: mcr.microsoft.com/dotnet/aspnet:10.0
-        PROJECT: src/Deep.Registry.Api/Deep.Registry.Api.csproj
-        APP_DLL: Deep.Registry.Api.dll
+    image: ${DEEP_REGISTRY_IMAGE:?set an immutable deep-registry-api image digest}
+    pull_policy: always
+    restart: unless-stopped
     logging: *prod-logging
     environment:
+      ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://0.0.0.0:8080
       Registry__StakingRequirementAtomic: ${STAKING_REQUIREMENT_ATOMIC:-25000000000000}
       Registry__StatePath: /var/lib/deep/registry/registry-state.json
@@ -110,11 +106,50 @@ services:
       Calls__IceUrls__0: stun:${DEEP_TURN_PUBLIC_HOST:-111.235.151.150}:3478
       Calls__IceUrls__1: turn:${DEEP_TURN_PUBLIC_HOST:-111.235.151.150}:3478?transport=udp
       Calls__IceUrls__2: turn:${DEEP_TURN_PUBLIC_HOST:-111.235.151.150}:3478?transport=tcp
+      DirectoryPublication__NetworkIdHex: ${DEEP_XPOINT_NETWORK_ID_HEX:?set DEEP_XPOINT_NETWORK_ID_HEX}
+      ContactResolveProductionAuthority__Enabled: "true"
+      ContactResolveProductionAuthority__NetworkIdHex: ${DEEP_XPOINT_NETWORK_ID_HEX:?set DEEP_XPOINT_NETWORK_ID_HEX}
+      ContactResolveProductionAuthority__TrustedTimeStatePath: /var/lib/deep/registry/contact-resolve/trusted-time.state
+      ContactResolveProductionAuthority__TrustedTimeIntegrityKeyPath: /run/secrets/contact-resolve-trusted-time-integrity.key
+      ContactResolveProductionAuthority__RequestLedgerRootPath: /var/lib/deep/registry/contact-resolve/request-ledger
+      ContactResolveProductionAuthority__RequestLedgerIntegrityKeyPath: /run/secrets/contact-resolve-request-ledger-integrity.key
+      ContactResolveProductionAuthority__RequestLedgerCapacity: "65536"
+      ContactResolveProductionAuthority__RequestLedgerCompactionInterval: "1024"
+      ContactResolveProductionAuthority__Witnesses__0__WitnessIdHex: ${DEEP_CONTACT_RESOLVE_WITNESS_1_ID_HEX:?set witness 1 ID}
+      ContactResolveProductionAuthority__Witnesses__0__KeyGeneration: "0"
+      ContactResolveProductionAuthority__Witnesses__0__Ed25519SeedPath: /run/secrets/contact-resolve-witness-1-ed25519.seed
+      ContactResolveProductionAuthority__Witnesses__1__WitnessIdHex: ${DEEP_CONTACT_RESOLVE_WITNESS_2_ID_HEX:?set witness 2 ID}
+      ContactResolveProductionAuthority__Witnesses__1__KeyGeneration: "0"
+      ContactResolveProductionAuthority__Witnesses__1__Ed25519SeedPath: /run/secrets/contact-resolve-witness-2-ed25519.seed
+      ContactResolveProductionAuthority__Witnesses__2__WitnessIdHex: ${DEEP_CONTACT_RESOLVE_WITNESS_3_ID_HEX:?set witness 3 ID}
+      ContactResolveProductionAuthority__Witnesses__2__KeyGeneration: "0"
+      ContactResolveProductionAuthority__Witnesses__2__Ed25519SeedPath: /run/secrets/contact-resolve-witness-3-ed25519.seed
+      ContactResolveDirectoryArtifacts__ReadOnlyRoot: /contact-resolve/artifacts
+      ContactResolveDirectoryArtifacts__StatePath: /var/lib/deep/registry/contact-resolve/artifact-lkg.state
+      ContactResolveDirectoryArtifacts__IntegrityKeyPath: /run/secrets/contact-resolve-artifact-state-integrity.key
+      ContactResolveDirectoryArtifacts__NetworkIdHex: ${DEEP_XPOINT_NETWORK_ID_HEX:?set DEEP_XPOINT_NETWORK_ID_HEX}
+      ContactResolveDirectoryArtifacts__GenesisAuthorityCoreHashHex: ${DEEP_XPOINT_GENESIS_PIN_HEX:?set DEEP_XPOINT_GENESIS_PIN_HEX}
     volumes:
       - prod-registry-state:/var/lib/deep/registry
+      - type: bind
+        source: ${DEEP_CONTACT_RESOLVE_ARTIFACT_ROOT:?set the protected ContactResolve artifact root}
+        target: /contact-resolve/artifacts
+        read_only: true
     secrets:
       - turn-shared-secret
       - push-internal-token
+      - source: contact-resolve-trusted-time-integrity
+        target: contact-resolve-trusted-time-integrity.key
+      - source: contact-resolve-request-ledger-integrity
+        target: contact-resolve-request-ledger-integrity.key
+      - source: contact-resolve-artifact-state-integrity
+        target: contact-resolve-artifact-state-integrity.key
+      - source: contact-resolve-witness-1-ed25519
+        target: contact-resolve-witness-1-ed25519.seed
+      - source: contact-resolve-witness-2-ed25519
+        target: contact-resolve-witness-2-ed25519.seed
+      - source: contact-resolve-witness-3-ed25519
+        target: contact-resolve-witness-3-ed25519.seed
     networks:
       - default
       - client-services
@@ -173,6 +208,18 @@ secrets:
     file: ${DEEP_TURN_SHARED_SECRET_FILE:-./secrets/turn-shared-secret}
   push-internal-token:
     file: ${DEEP_PUSH_INTERNAL_TOKEN_FILE:-./secrets/push-internal-token}
+  contact-resolve-trusted-time-integrity:
+    file: ${DEEP_CONTACT_RESOLVE_TRUSTED_TIME_KEY_FILE:?set the trusted-time integrity key file}
+  contact-resolve-request-ledger-integrity:
+    file: ${DEEP_CONTACT_RESOLVE_REQUEST_LEDGER_KEY_FILE:?set the request-ledger integrity key file}
+  contact-resolve-artifact-state-integrity:
+    file: ${DEEP_CONTACT_RESOLVE_ARTIFACT_STATE_KEY_FILE:?set the artifact-state integrity key file}
+  contact-resolve-witness-1-ed25519:
+    file: ${DEEP_CONTACT_RESOLVE_WITNESS_1_SEED_FILE:?set witness 1 seed file}
+  contact-resolve-witness-2-ed25519:
+    file: ${DEEP_CONTACT_RESOLVE_WITNESS_2_SEED_FILE:?set witness 2 seed file}
+  contact-resolve-witness-3-ed25519:
+    file: ${DEEP_CONTACT_RESOLVE_WITNESS_3_SEED_FILE:?set witness 3 seed file}
 
 networks:
   client-services:
