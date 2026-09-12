@@ -185,6 +185,23 @@ static AccountDirectoryDts1Source TimeSource(string host, string family, string 
     Hex(spkiHex, 32, $"{host} SPKI"),
     5);
 
+static int ArtifactRoleOrder(string role) => role switch
+{
+    "xna1" => 0,
+    "dts1" => 1,
+    "adh1" => 2,
+    "snapshot-dtt1" => 3,
+    "snapshot-adp1" => 4,
+    "xvp1" => 5,
+    "xnv1" => 6,
+    "xnh1" => 7,
+    "xnd1" => 8,
+    "pmt2" => 9,
+    "response-adp1" => 10,
+    "caller-adh1" => 11,
+    _ => throw new InvalidDataException("The production artifact role is unknown."),
+};
+
 static VerifiedXPointNetworkBootstrap LoadExistingBootstrap(
     string previousRoot,
     ReadOnlySpan<byte> expectedNetwork,
@@ -247,7 +264,9 @@ static IReadOnlyList<ArtifactEntry> WriteArtifacts(
     IReadOnlyList<(string Role, byte[] Bytes)> artifacts)
 {
     var entries = new List<ArtifactEntry>();
-    foreach (var group in artifacts.GroupBy(static value => value.Role, StringComparer.Ordinal))
+    foreach (var group in artifacts
+                 .GroupBy(static value => value.Role, StringComparer.Ordinal)
+                 .OrderBy(static group => ArtifactRoleOrder(group.Key)))
     {
         var ordinal = 0;
         foreach (var artifact in group)

@@ -9,6 +9,11 @@ const provision = readFileSync(
   path.join(root, 'scripts', 'Prepare-ProductionRegistryCandidate.ps1'), 'utf8');
 const smoke = readFileSync(
   path.join(root, 'scripts', 'Test-ProductionRegistryAuthority.ps1'), 'utf8');
+const bootstrap = readFileSync(
+  path.join(root, 'tools', 'production-authority-bootstrap', 'Program.cs'), 'utf8');
+const registryArtifactSource = readFileSync(path.join(
+  root, '..', 'deep-registry-api', 'src', 'Deep.Registry.Api',
+  'DirectoryPublication', 'FileContactResolveDirectoryArtifactSource.cs'), 'utf8');
 
 const registryStart = compose.indexOf('\n  registry:\n');
 const portalStart = compose.indexOf('\n  staking-portal:\n');
@@ -43,8 +48,24 @@ assert.match(smoke, /application\/vnd\.deep\.contact-resolve-directory-request\.
 assert.match(smoke, /application\/vnd\.deep\.contact-resolve-directory\.v1/);
 assert.match(smoke, /cryptographicClosureVerification = 'delegated-to-xnode-readiness'/);
 
+const canonicalArtifactRoles = [
+  'xna1', 'dts1', 'adh1', 'snapshot-dtt1', 'snapshot-adp1', 'xvp1',
+  'xnv1', 'xnh1', 'xnd1', 'pmt2', 'response-adp1', 'caller-adh1',
+];
+for (const [ordinal, role] of canonicalArtifactRoles.entries()) {
+  const escapedRole = role.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const mapping = new RegExp(`"${escapedRole}"\\s*=>\\s*${ordinal}\\b`);
+  assert.match(bootstrap, mapping,
+    `authority bootstrap is missing canonical artifact role ${role}`);
+  assert.match(registryArtifactSource, mapping,
+    `Registry is missing canonical artifact role ${role}`);
+}
+assert.match(bootstrap,
+  /\.GroupBy\(static value => value\.Role, StringComparer\.Ordinal\)[\s\S]*?\.OrderBy\(static group => ArtifactRoleOrder\(group\.Key\)\)/,
+  'authority bootstrap must canonicalize artifact roles before writing inventory');
+
 process.stdout.write(`${JSON.stringify({
   schema: 'deep-production-registry-contracts.v1',
   status: 'ok',
-  checked: 20,
+  checked: 45,
 }, null, 2)}\n`);
