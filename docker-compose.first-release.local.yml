@@ -163,6 +163,7 @@ services:
       DirectoryPublication__NetworkIdHex: ${FIRST_RELEASE_CONTACT_RESOLVE_NETWORK_ID:?set the protected ContactResolve network binding}
       # DTT1 has no authority-bound replay epoch yet; public production issuance is fail-closed.
       ContactResolveProductionAuthority__Enabled: "false"
+      ContactRouteAuthority__Enabled: "false"
       ContactResolveProductionAuthority__NetworkIdHex: ${FIRST_RELEASE_CONTACT_RESOLVE_NETWORK_ID:?set the protected ContactResolve network binding}
       ContactResolveProductionAuthority__TrustedTimeStatePath: /state/contact-resolve/trusted-time.state
       ContactResolveProductionAuthority__TrustedTimeIntegrityKeyPath: /run/secrets/contact-resolve-trusted-time-integrity.key

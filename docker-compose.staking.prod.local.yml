@@ -108,6 +108,7 @@ services:
       Calls__IceUrls__2: turn:${DEEP_TURN_PUBLIC_HOST:-111.235.151.150}:3478?transport=tcp
       DirectoryPublication__NetworkIdHex: ${DEEP_XPOINT_NETWORK_ID_HEX:?set DEEP_XPOINT_NETWORK_ID_HEX}
       ContactResolveProductionAuthority__Enabled: "true"
+      ContactRouteAuthority__Enabled: "true"
       ContactResolveProductionAuthority__NetworkIdHex: ${DEEP_XPOINT_NETWORK_ID_HEX:?set DEEP_XPOINT_NETWORK_ID_HEX}
       ContactResolveProductionAuthority__TrustedTimeStatePath: /var/lib/deep/registry/contact-resolve/trusted-time.state
       ContactResolveProductionAuthority__TrustedTimeIntegrityKeyPath: /run/secrets/contact-resolve-trusted-time-integrity.key

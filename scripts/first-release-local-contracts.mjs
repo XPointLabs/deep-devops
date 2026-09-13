@@ -139,6 +139,7 @@ function validateCommonTopology(topology, expectedServices) {
   assert.match(topology.services.registry.build.dockerfile.replaceAll('\\', '/'), /deep-devops\/docker\/first-release-registry\.Dockerfile$/);
   assert.match(topology.services.registry.build.additional_contexts.protocol_source.replaceAll('\\', '/'), /deep-protocol$/);
   assert.equal(topology.services.registry.environment.ContactResolveProductionAuthority__Enabled, 'false');
+  assert.equal(topology.services.registry.environment.ContactRouteAuthority__Enabled, 'false');
   assert.equal(topology.services.registry.environment.ContactResolveDirectoryArtifacts__GenesisAuthorityCoreHashHex, 'cd'.repeat(32));
   assert.equal(topology.services.registry.volumes.some(volume =>
     volume.type === 'bind' && volume.target === '/contact-resolve/artifacts' && volume.read_only === true), true);
@@ -273,6 +274,7 @@ export async function validateSourceContracts() {
   assert.match(registryDockerfile, /-p:DeepProtocolLocalCutover=true/g);
   assert.match(registryDockerfile, /ENTRYPOINT \["dotnet", "Deep\.Registry\.Api\.dll"\]/);
   assert.match(baseSource, /ContactResolveProductionAuthority__Enabled: "false"/);
+  assert.match(baseSource, /ContactRouteAuthority__Enabled: "false"/);
   assert.match(baseSource, /ContactResolveDirectoryArtifacts__ReadOnlyRoot/);
   assert.match(baseSource, /RequiredTerminals__Contact: "true"/);
   assert.match(baseSource, /RequiredTerminals__GroupControl: "true"/);

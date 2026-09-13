@@ -99,7 +99,10 @@ the one-use request ledger, three file-backed DTT1 witness keys, the read-only
 canonical artifact source, and the `contact-resolve-authority provision-time`
 and `author-package` operator actions all use dedicated first-release custody
 and state paths. The Registry image builds with the local Protocol source so
-those production-only APIs are present; no DEV authority is enabled.
+those production-only APIs are present; no DEV authority is enabled. The
+client-facing contact route-authority endpoint remains disabled in this local
+lane until that same production authority closure has been provisioned; it has
+no synthetic signer or direct-Registry fallback.
 
 `Up`, `Verify`, and both operator actions nevertheless stop before image build
 or any Docker mutation. There is no production implementation of

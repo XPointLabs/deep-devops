@@ -25,6 +25,7 @@ assert.match(registry,
 assert.doesNotMatch(registry, /^    build:/m,
   'production Registry must consume an immutable image and never build on the host');
 assert.match(registry, /^      ContactResolveProductionAuthority__Enabled: "true"$/m);
+assert.match(registry, /^      ContactRouteAuthority__Enabled: "true"$/m);
 assert.match(registry, /^      DirectoryPublication__NetworkIdHex: \$\{DEEP_XPOINT_NETWORK_ID_HEX:\?set DEEP_XPOINT_NETWORK_ID_HEX\}$/m);
 assert.match(registry, /^      ContactResolveDirectoryArtifacts__GenesisAuthorityCoreHashHex: \$\{DEEP_XPOINT_GENESIS_PIN_HEX:\?set DEEP_XPOINT_GENESIS_PIN_HEX\}$/m);
 assert.match(registry, /^        read_only: true$/m);
