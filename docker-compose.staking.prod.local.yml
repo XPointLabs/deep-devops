@@ -129,6 +129,14 @@ services:
       ContactResolveDirectoryArtifacts__IntegrityKeyPath: /run/secrets/contact-resolve-artifact-state-integrity.key
       ContactResolveDirectoryArtifacts__NetworkIdHex: ${DEEP_XPOINT_NETWORK_ID_HEX:?set DEEP_XPOINT_NETWORK_ID_HEX}
       ContactResolveDirectoryArtifacts__GenesisAuthorityCoreHashHex: ${DEEP_XPOINT_GENESIS_PIN_HEX:?set DEEP_XPOINT_GENESIS_PIN_HEX}
+      AccountDirectoryAuthority__Enabled: "true"
+      AccountDirectoryAuthority__NetworkIdHex: ${DEEP_XPOINT_NETWORK_ID_HEX:?set DEEP_XPOINT_NETWORK_ID_HEX}
+      AccountDirectoryAuthority__StatePath: /var/lib/deep/registry/account-directory/authority.state
+      AccountDirectoryAuthority__IntegrityKeyPath: /run/secrets/account-directory-authority-integrity.key
+      AccountDirectoryAuthority__DeploymentProfileId: "1"
+      AccountDirectoryAuthority__SupportedReader: "1"
+      AccountDirectoryAuthority__HeadValiditySeconds: "43200"
+      AccountDirectoryAuthority__RenewalLeadSeconds: "3600"
     volumes:
       - prod-registry-state:/var/lib/deep/registry
       - type: bind
@@ -150,6 +158,8 @@ services:
         target: contact-resolve-witness-2-ed25519.seed
       - source: contact-resolve-witness-3-ed25519
         target: contact-resolve-witness-3-ed25519.seed
+      - source: account-directory-authority-integrity
+        target: account-directory-authority-integrity.key
     networks:
       - default
       - client-services
@@ -220,6 +230,8 @@ secrets:
     file: ${DEEP_CONTACT_RESOLVE_WITNESS_2_SEED_FILE:?set witness 2 seed file}
   contact-resolve-witness-3-ed25519:
     file: ${DEEP_CONTACT_RESOLVE_WITNESS_3_SEED_FILE:?set witness 3 seed file}
+  account-directory-authority-integrity:
+    file: ${DEEP_ACCOUNT_DIRECTORY_AUTHORITY_KEY_FILE:?set the account-directory authority integrity key file}
 
 networks:
   client-services:

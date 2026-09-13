@@ -98,6 +98,7 @@ $privateFiles = [ordered]@{
     'trusted-time-integrity.key' = 'trusted-time-integrity.key'
     'request-ledger-integrity.key' = 'request-ledger-integrity.key'
     'artifact-state-integrity.key' = 'artifact-state-integrity.key'
+    'account-directory-integrity.key' = 'account-directory-integrity.key'
     'registry-dtt-signer-1.ed25519.seed' = 'witness-1-ed25519.seed'
     'registry-dtt-signer-2.ed25519.seed' = 'witness-2-ed25519.seed'
     'registry-dtt-signer-3.ed25519.seed' = 'witness-3-ed25519.seed'
@@ -150,6 +151,7 @@ try {
         "DEEP_CONTACT_RESOLVE_TRUSTED_TIME_KEY_FILE=$remoteRoot/private/trusted-time-integrity.key"
         "DEEP_CONTACT_RESOLVE_REQUEST_LEDGER_KEY_FILE=$remoteRoot/private/request-ledger-integrity.key"
         "DEEP_CONTACT_RESOLVE_ARTIFACT_STATE_KEY_FILE=$remoteRoot/private/artifact-state-integrity.key"
+        "DEEP_ACCOUNT_DIRECTORY_AUTHORITY_KEY_FILE=$remoteRoot/private/account-directory-integrity.key"
         "DEEP_CONTACT_RESOLVE_WITNESS_1_ID_HEX=$($witnessIds[0])"
         "DEEP_CONTACT_RESOLVE_WITNESS_1_SEED_FILE=$remoteRoot/private/witness-1-ed25519.seed"
         "DEEP_CONTACT_RESOLVE_WITNESS_2_ID_HEX=$($witnessIds[1])"
