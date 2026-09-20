@@ -61,6 +61,11 @@ On the registry production host, this stack also backs
 containers after registry maintenance; a healthy registry alone does not prove
 that the staking portal is available. The backend, indexer, and portal use
 `restart: unless-stopped` so host restarts do not leave them permanently down.
+For a complete external response check, use `curl --compressed` against both
+`/` and `/api/network/info`; a HEAD response alone does not prove that the
+HTML stream completes. An uncompressed Cloudflare GET stalled after a partial
+response during the 2026-09-20 check, while compressed browser-style GETs and
+the origin response completed. Keep the edge behavior under observation.
 
 On 2026-09-20, the public portal returned 502 while the portal, backend, and
 indexer containers were stopped. The portal's last log showed a Node.js heap
