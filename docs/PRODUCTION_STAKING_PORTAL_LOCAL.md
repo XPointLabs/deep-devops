@@ -56,6 +56,26 @@ docker compose --env-file .\.env.staking.prod.local -f .\docker-compose.staking.
 docker compose --env-file .\.env.staking.prod.local -f .\docker-compose.staking.prod.local.yml logs --tail 100 staking-indexer
 ```
 
+On the registry production host, this stack also backs
+`https://staking.xpoint.network/`. Check the public URL and all three staking
+containers after registry maintenance; a healthy registry alone does not prove
+that the staking portal is available. The backend, indexer, and portal use
+`restart: unless-stopped` so host restarts do not leave them permanently down.
+
+On 2026-09-20, the public portal returned 502 while the portal, backend, and
+indexer containers were stopped. The portal's last log showed a Node.js heap
+out-of-memory failure; the backend and indexer had exited with status 137.
+The existing containers were started without rebuilding images or touching
+volumes, and the public portal returned 200 again. This restores availability
+but does not resolve the portal's possible memory growth. Monitor container
+memory and exit status, especially on the approximately 2 GiB host, and
+investigate repeated exits before calling the incident permanently closed.
+
+For incident recovery, first inspect `docker ps -a` and recent container logs.
+Starting existing stopped containers preserves their image and volume state.
+Do not use `down -v` on the production host: it deletes persistent staking and
+registry state.
+
 The staking backend reads quorum signer metadata from
 `http://registry:8080/api/internal/nodes` on the private Compose network. Add
 `nginx/registry-internal-deny.conf` to the public registry virtual host; the
@@ -78,8 +98,6 @@ stakingRequirementAtomic=25000000000000
 docker compose --env-file .\.env.staking.prod.local -f .\docker-compose.staking.prod.local.yml down
 ```
 
-To reset only local projection/cache state:
-
-```powershell
-docker compose --env-file .\.env.staking.prod.local -f .\docker-compose.staking.prod.local.yml down -v
-```
+The `down` command stops the portal, backend, indexer and registry together;
+never use it as a portal-only recovery step on the production host. Do not
+pass `-v`: this stack includes persistent registry and staking volumes.

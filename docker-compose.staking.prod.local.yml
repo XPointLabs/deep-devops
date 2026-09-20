@@ -8,6 +8,7 @@ x-prod-logging: &prod-logging
 
 services:
   staking-backend:
+    restart: unless-stopped
     build:
       context: ${DEEP_ROOT:-..}/xpoint-staking-backend
       dockerfile: ${DEEP_DEVOPS_DIR:-../deep-devops}/docker/dotnet-service.Dockerfile
@@ -56,6 +57,7 @@ services:
       start_period: 10s
 
   staking-indexer:
+    restart: unless-stopped
     build:
       context: ${DEEP_DEVOPS_DIR:-.}
       dockerfile: docker/uat-chain-indexer.Dockerfile
@@ -177,6 +179,7 @@ services:
       start_period: 10s
 
   staking-portal:
+    restart: unless-stopped
     build:
       context: ${DEEP_STAKING_PORTAL_DIR:-../xpoint-staking-portal}
       dockerfile: ../deep-devops/docker/xpoint-staking-portal.Dockerfile
