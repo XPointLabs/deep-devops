@@ -167,7 +167,8 @@ $windowsArguments = if ($windowsInputs.Count -eq 2) {
 $project = Join-Path $root 'tools\survival-mailbox-driver\SurvivalMailboxDriver.csproj'
 $publisherArguments = @(
     'run', '--project', $project, '--configuration', 'Release',
-    "-p:XNodeSource=$xnode", '--',
+    "-p:XNodeSource=$xnode", '-p:DeepProtocolSourceCutover=true',
+    '-p:RecoveryTestSeam=true', '--',
     $publisherCommand,
     '--secrets-dir', $xnodeSecrets,
     '--private-dir', $private,
