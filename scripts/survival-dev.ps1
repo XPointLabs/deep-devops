@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)]
-    [ValidateSet('Prepare','Up','Down','Status','Logs','Build','Restart','ChaosBegin','ChaosEnd','ChaosStatus')]
+    [ValidateSet('Prepare','RefreshAuthority','Up','Down','Status','Logs','Build','Restart','ChaosBegin','ChaosEnd','ChaosStatus')]
     [string]$Action,
     [string[]]$Service = @(),
     [string]$LanHost,
@@ -1006,6 +1006,13 @@ if ($RecoverExpiredMailboxAuthority -and $Action -cnotin @('Prepare', 'Up')) {
 }
 
 switch ($Action) {
+    'RefreshAuthority' {
+        if ($Chain -or $Service.Count -gt 0 -or $Reset -or $RecoverExpiredMailboxAuthority) {
+            throw 'RefreshAuthority accepts no chain, service, reset, or recovery switches.'
+        }
+        $null = Get-SurvivalMailboxAuthorityState
+        Write-Output 'DEV mailbox authority checkpoint is ready.'
+    }
     'Prepare' {
         if ($Chain -or $Service.Count -gt 0 -or $Reset) {
             throw 'Prepare does not accept -Chain, -Service, or -Reset.'

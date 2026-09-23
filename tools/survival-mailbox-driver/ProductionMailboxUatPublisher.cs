@@ -159,6 +159,86 @@ internal static class ProductionMailboxUatPublisher
         Console.WriteLine("UAT privacy-route public artifacts published.");
     }
 
+    public static void IssueRouteKeyRecords(string[] args)
+    {
+        var input = RouteInput.Parse(args);
+        RequireDirectory(input.SecretDirectory, "secret directory");
+        RequireDirectory(input.PrivateDirectory, "private directory");
+        var mrXSeed = ReadSecret(Path.Combine(input.PrivateDirectory, "mrx.seed"));
+        try
+        {
+            var xnodeSeeds = Enumerable.Range(1, 6)
+                .Select(index => ReadHexSecret(Path.Combine(
+                    input.SecretDirectory, $"xnode-{index}-ed25519.seed")))
+                .ToArray();
+            var fixture = Fixture.CreateAuthority(xnodeSeeds,
+                Convert.ToHexString(mrXSeed), AuthorityWindow.Load(input.AuthorityStatePath));
+            var missing = new List<(string Path, byte[] Bytes)>();
+            for (var index = 0; index < 6; index++)
+            {
+                var node = index + 1;
+                var keyId = File.ReadAllText(Path.Combine(
+                    input.SecretDirectory, $"xnode-{node}-x25519.key-id")).Trim();
+                if (keyId.Length != 64 || keyId.All(static value => value == '0') ||
+                    keyId.Any(static value => value is not (
+                        >= '0' and <= '9' or >= 'a' and <= 'f')))
+                    throw new InvalidDataException("UAT issued X25519 key id is invalid.");
+                var privateHex = ReadHexSecret(Path.Combine(
+                    input.SecretDirectory, $"xnode-{node}-x25519.private"));
+                var privateKey = Convert.FromHexString(privateHex);
+                try
+                {
+                    var publicKey = ScalarMult.Base(privateKey);
+                    try
+                    {
+                        if (publicKey.Length != 32 ||
+                            publicKey.AsSpan().IndexOfAnyExcept((byte)0) < 0)
+                            throw new InvalidDataException("UAT X25519 public key is invalid.");
+                        var path = Path.Combine(input.SecretDirectory,
+                            $"xnode-{node}-x25519.record.v2.json");
+                        if (File.Exists(path))
+                        {
+                            var existing = ReadPrivacyRouteKeyRecord(
+                                path, fixture.Descriptors[index], publicKey);
+                            if (!string.Equals(existing.KeyId, keyId,
+                                    StringComparison.Ordinal))
+                                throw new InvalidDataException(
+                                    "UAT issued X25519 key record differs from its pinned key id.");
+                        }
+                        else
+                        {
+                            var bytes = JsonSerializer.SerializeToUtf8Bytes(new
+                            {
+                                routerOwnerId = Lower(fixture.Descriptors[index].RouterId.Span),
+                                keyId,
+                                epoch = fixture.Descriptors[index].Epoch,
+                                x25519PublicKey = Lower(publicKey)
+                            }, Json);
+                            missing.Add((path, bytes));
+                        }
+                    }
+                    finally { CryptographicOperations.ZeroMemory(publicKey); }
+                }
+                finally { CryptographicOperations.ZeroMemory(privateKey); }
+            }
+            foreach (var (path, bytes) in missing)
+            {
+                var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+                try
+                {
+                    File.WriteAllBytes(temporary, bytes);
+                    File.Move(temporary, path);
+                }
+                finally
+                {
+                    if (File.Exists(temporary)) File.Delete(temporary);
+                    CryptographicOperations.ZeroMemory(bytes);
+                }
+            }
+        }
+        finally { CryptographicOperations.ZeroMemory(mrXSeed); }
+    }
+
     private static void Write(
         Input input,
         Fixture fixture,
@@ -868,9 +948,10 @@ internal static class ProductionMailboxUatPublisher
                 "--authority-state", "--public-host"
             };
             if (args.Length != 1 + names.Length * 2 ||
-                args[0] != "publish-production-uat-routes")
+                args[0] is not ("publish-production-uat-routes" or
+                    "issue-production-uat-route-key-records"))
                 throw new InvalidOperationException(
-                    "publish-production-uat-routes requires the exact documented argument set.");
+                    "The UAT route command requires the exact documented argument set.");
             var values = new Dictionary<string, string>(StringComparer.Ordinal);
             for (var index = 1; index < args.Length; index += 2)
                 if (!names.Contains(args[index], StringComparer.Ordinal) ||

@@ -32,10 +32,11 @@ function Assert-NoInstanceAclApi([Management.Automation.Language.Ast]$Ast) {
     $calls = @($Ast.FindAll({
         param($node)
         $node -is [Management.Automation.Language.InvokeMemberExpressionAst] -and
+            $node.Expression -isnot [Management.Automation.Language.TypeExpressionAst] -and
             $node.Member.Value -in @('GetAccessControl', 'SetAccessControl')
     }, $true))
     if ($calls.Count -ne 0) {
-        throw 'Windows ACL compatibility requires Get-Acl/Set-Acl, not instance ACL methods.'
+        throw 'Windows ACL compatibility must not depend on instance ACL methods.'
     }
 }
 
@@ -63,7 +64,14 @@ foreach ($path in @($privateSecretsPath, $mailboxInputsPath)) {
     $ast = Get-ScriptAst $path
     Assert-NoInstanceAclApi $ast
     Assert-CommandPresent $ast 'Get-Acl'
-    Assert-CommandPresent $ast 'Set-Acl'
+    if ($path -eq $privateSecretsPath) {
+        if ((Get-Content -LiteralPath $path -Raw) -notmatch
+                '\[IO\.FileSystemAclExtensions\]::SetAccessControl\(\$item, \$security\)') {
+            throw 'Private-file ACL writes must use the supported framework extension.'
+        }
+    } else {
+        Assert-CommandPresent $ast 'Set-Acl'
+    }
 }
 
 if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {

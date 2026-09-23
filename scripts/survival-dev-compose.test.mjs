@@ -449,7 +449,7 @@ test('future DEV consumer contract rejects TOFU, pin mismatch, remote roots, and
 
 test('daily launcher always uses the fixed project without release-gate ceremony', () => {
   assert.match(launcher, /'deep-survival-dev'/);
-  assert.match(launcher, /ValidateSet\('Prepare','Up','Down','Status','Logs','Build','Restart','ChaosBegin','ChaosEnd','ChaosStatus'\)/);
+  assert.match(launcher, /ValidateSet\('Prepare','RefreshAuthority','Up','Down','Status','Logs','Build','Restart','ChaosBegin','ChaosEnd','ChaosStatus'\)/);
   assert.match(launcher,
     /\$baseArguments = @\('compose'\) \+ \$projectDirectoryArguments \+ @\('-p', \$Project, '-f', \$ComposePath\)/);
   assert.match(launcher, /\[string\]\$LanHost/);

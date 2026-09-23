@@ -73,7 +73,10 @@ function Protect-SurvivalDevPrivateFile([string]$Path) {
                 [Security.AccessControl.FileSystemRights]::FullControl,
                 [Security.AccessControl.AccessControlType]::Allow))
         }
-        Set-Acl -LiteralPath $Path -AclObject $security
+        # Use the framework setter directly: unlike PowerShell's Set-Acl
+        # wrapper it writes only the DACL on this Windows build and does not
+        # require SeSecurityPrivilege for a normal developer session.
+        [IO.FileSystemAclExtensions]::SetAccessControl($item, $security)
     } else {
         [IO.File]::SetUnixFileMode(
             $Path,

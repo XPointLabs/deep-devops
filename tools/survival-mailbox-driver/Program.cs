@@ -30,6 +30,11 @@ if (args.Length > 0 && args[0] == "publish-production-uat-routes")
     ProductionMailboxUatPublisher.PublishRoutes(args);
     return;
 }
+if (args.Length > 0 && args[0] == "issue-production-uat-route-key-records")
+{
+    ProductionMailboxUatPublisher.IssueRouteKeyRecords(args);
+    return;
+}
 
 var arguments = Arguments.Parse(args);
 if (arguments.Command == "private-state-test-write")
@@ -2351,7 +2356,8 @@ sealed class ExactHttpClient
         var authenticatedOperation = contract.AuthenticatedOperation ??
             throw new InvalidOperationException(
                 "Privacy-routed ExactHttpClient accepts only authenticated MAU2 endpoints.");
-        ValidateCanonicalMau2(canonicalRequest, authenticatedOperation);
+        var verifiedRequest = ValidateCanonicalMau2(
+            canonicalRequest, authenticatedOperation);
         var operation = authenticatedOperation switch
         {
             MailboxAuthenticatedOperation.Store => PrivacyRoutingOperation.Store,
@@ -2372,7 +2378,8 @@ sealed class ExactHttpClient
                     route,
                     operation,
                     contract,
-                    canonicalRequest);
+                    canonicalRequest,
+                    verifiedRequest.Presentation.Grant.NetworkId);
             }
             catch (ExactPrivacyBeforeForwardException)
             {
@@ -2386,7 +2393,8 @@ sealed class ExactHttpClient
                 privacyRoutes.Primary,
                 operation,
                 contract,
-                canonicalRequest);
+                canonicalRequest,
+                verifiedRequest.Presentation.Grant.NetworkId);
         }
         catch (ExactPrivacyBeforeForwardException exception) when (exception.Retryable)
         {
@@ -2396,7 +2404,8 @@ sealed class ExactHttpClient
                     privacyRoutes.Fallback,
                     operation,
                     contract,
-                    canonicalRequest);
+                    canonicalRequest,
+                    verifiedRequest.Presentation.Grant.NetworkId);
             }
             catch (ExactPrivacyBeforeForwardException)
             {
@@ -2409,7 +2418,7 @@ sealed class ExactHttpClient
         }
     }
 
-    private static void ValidateCanonicalMau2(
+    private static MailboxAuthenticatedClientRequest ValidateCanonicalMau2(
         byte[] canonicalRequest,
         MailboxAuthenticatedOperation expectedOperation)
     {
@@ -2438,6 +2447,7 @@ sealed class ExactHttpClient
                 throw new InvalidDataException(
                     "Privacy-routed ExactHttpClient rejected non-canonical or mismatched MAU2.");
             }
+            return decoded;
         }
         finally
         {
@@ -2449,9 +2459,11 @@ sealed class ExactHttpClient
         ExactPrivacyRoute route,
         PrivacyRoutingOperation operation,
         MailboxHttpEndpointContract contract,
-        byte[] canonicalRequest)
+        byte[] canonicalRequest,
+        ReadOnlyMemory<byte> networkId)
     {
-        using var built = PrivacyRoutingRequestBuilder.BuildForCanonicalMailboxRequest(
+        using var built = PrivacyRoutingRequestBuilder.BuildForCanonicalRequest(
+            networkId.Span,
             route.Hops,
             operation,
             canonicalRequest);
