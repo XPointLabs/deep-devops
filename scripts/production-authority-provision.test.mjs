@@ -14,7 +14,8 @@ try {
   assert.equal(manifest.roles.length, 12);
   assert.equal(new Set(manifest.roles.map((role) => role.ed25519PublicKeyHex)).size, 12);
   assert.equal(new Set(manifest.roles.map((role) => role.custodyDomainHashHex)).size, 12);
-  assert.equal(readdirSync(path.join(target, 'private')).length, 15);
+  assert.equal(readdirSync(path.join(target, 'private')).length, 16);
+  assert.equal(readFileSync(path.join(target, 'private', 'account-directory-integrity.key')).length, 32);
   assert.throws(() => main(['--out-dir', target]), /not empty/u);
 
   const oldSeed = readFileSync(path.join(target, 'private', 'offline-root-1.ed25519.seed'));
@@ -32,7 +33,7 @@ try {
   assert.deepEqual(readFileSync(path.join(target, 'private', 'offline-root-1.ed25519.seed')), oldSeed);
   assert.deepEqual(JSON.parse(readFileSync(path.join(target, 'public',
     'custody-manifest.pre-mailbox.v1.json'), 'utf8')), oldManifest);
-  assert.equal(readdirSync(path.join(target, 'private')).length, 15);
+  assert.equal(readdirSync(path.join(target, 'private')).length, 16);
   assert.throws(() => augmentMailbox(['--authority-root', target]), /pre-mailbox/u);
 
   const partial = path.join(root, 'partial');
@@ -55,7 +56,7 @@ try {
   }
   writeFileSync(path.join(tampered, 'public', 'offline-root-1.ed25519.public'), Buffer.alloc(32));
   assert.throws(() => augmentMailbox(['--authority-root', tampered]), /does not match/u);
-  assert.equal(readdirSync(path.join(tampered, 'private')).length, 13);
+  assert.equal(readdirSync(path.join(tampered, 'private')).length, 14);
   process.stdout.write('production authority provisioning tests passed\n');
 } finally {
   rmSync(root, { recursive: true, force: true });

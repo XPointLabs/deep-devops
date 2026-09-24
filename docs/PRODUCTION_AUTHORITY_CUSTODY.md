@@ -17,6 +17,8 @@ atomic directory rename. Private files are raw 32-byte Ed25519 seeds or raw
 32-byte integrity keys. Public keys, role IDs, custody-domain hashes, thresholds,
 and the generated production network ID are recorded in
 `public/custody-manifest.v1.json`.
+New custody includes a separate 32-byte account-directory integrity key;
+it is not derived from any signer seed.
 
 The `offline-root-1` private seed is local-only and must never be copied to a
 registry or node host. Registry DTT signers use a logical 2-of-3 policy even

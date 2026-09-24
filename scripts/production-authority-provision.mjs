@@ -87,7 +87,8 @@ export function main(argv) {
       key.seed.fill(0);
     }
 
-    for (const name of ['trusted-time-integrity', 'request-ledger-integrity', 'artifact-state-integrity']) {
+    for (const name of ['trusted-time-integrity', 'request-ledger-integrity',
+      'artifact-state-integrity', 'account-directory-integrity']) {
       const secretPath = path.join(privateDir, `${name}.key`);
       writeFileSync(secretPath, randomBytes(32), { mode: 0o600, flag: 'wx' });
       setPrivateMode(secretPath);
