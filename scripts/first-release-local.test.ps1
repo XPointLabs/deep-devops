@@ -43,6 +43,11 @@ if ($launcherSource -notmatch "'ProvisionTime'" -or
     $launcherSource -notmatch "'contact-resolve-authority'") {
     throw 'The launcher does not expose the Registry production operator command safely.'
 }
+if ($launcherSource -notmatch 'Assert-FirstReleaseGenesisPin' -or
+    $launcherSource -notmatch 'FIRST_RELEASE_CONTACT_RESOLVE_GENESIS_AUTHORITY_CORE_HASH' -or
+    $launcherSource -notmatch 'before starting the topology') {
+    throw 'The launcher must reject a missing genesis authority pin before Docker build.'
+}
 if ($launcherSource -notmatch "'build', 'registry', 'xnode-1'" -or
     $launcherSource -notmatch "'up', '-d', '--no-build'") {
     throw 'The launcher must build the shared XNode image exactly once before Up.'

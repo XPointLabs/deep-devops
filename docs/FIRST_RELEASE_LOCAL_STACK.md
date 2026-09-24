@@ -108,7 +108,8 @@ The Protocol operational-genesis author and file-backed root/witness signer now
 exist, so source capability preflight passes and `Up` can build both images.
 The current protected local environment still has no independently pinned
 XNA1 genesis authority hash or matching complete signed artifact inventory.
-Registry therefore fails closed at startup; do not fill the pin with arbitrary
+`Up`/`Verify` now reject the missing pin before Docker build, and Registry
+also fails closed if an inventory is incomplete; do not fill the pin with arbitrary
 bytes or disable its artifact-source validation. A reviewed authority ceremony,
 independent pin, exact artifacts, and then Contact/GroupControl composition are
 required before `Up` can be called ready. `Config` checks only the Compose

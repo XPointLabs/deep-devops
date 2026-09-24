@@ -159,6 +159,18 @@ function Get-RequiredPrivateValue([string] $Name) {
     return $value
 }
 
+function Assert-FirstReleaseGenesisPin {
+    $pin = ''
+    if (-not $privateEnvironment.TryGetValue(
+            'FIRST_RELEASE_CONTACT_RESOLVE_GENESIS_AUTHORITY_CORE_HASH',
+            [ref]$pin) -or
+        $pin -cnotmatch '^[0-9a-fA-F]{64}$' -or
+        $pin -match '^0{64}$') {
+        throw ('First-release authority blocker: independently pin the exact ' +
+            'nonzero XNA1 genesis core hash before starting the topology.')
+    }
+}
+
 function Resolve-OperatorExchangePath([string] $Path, [bool] $MustExist) {
     $root = [IO.Path]::GetFullPath((Get-RequiredPrivateValue `
         'FIRST_RELEASE_CONTACT_RESOLVE_OPERATOR_ROOT'))
@@ -244,6 +256,7 @@ switch ($Action) {
         Assert-FirstReleaseRuntimeCapability
         Assert-FirstReleaseContactAuthorityPrerequisites
         Assert-ExactProductionAuthorityClosure
+        Assert-FirstReleaseGenesisPin
         Invoke-Docker ($compose + @('build', 'registry', 'xnode-1'))
         Invoke-Docker ($compose + @('up', '-d', '--no-build', '--wait', '--wait-timeout', '300'))
         Invoke-Docker ($compose + @('run', '--rm', '--no-deps', 'topology-ready'))
@@ -253,6 +266,7 @@ switch ($Action) {
         Assert-FirstReleaseRuntimeCapability
         Assert-FirstReleaseContactAuthorityPrerequisites
         Assert-ExactProductionAuthorityClosure
+        Assert-FirstReleaseGenesisPin
         Invoke-Docker ($compose + @('run', '--rm', '--no-deps', 'topology-ready'))
         Invoke-Docker ($compose + @('ps'))
         Write-Output 'First-release local topology verification passed.'
