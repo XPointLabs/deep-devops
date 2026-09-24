@@ -1,8 +1,9 @@
 # DID2 latest-head floor production candidate
 
 Status on 2026-09-24: **isolated floor service deployed on seed2; Registry
-cutover not approved**. The database has its schema and roles, but no signed
-genesis row. Registry still serves its previous configuration.
+cutover not approved**. The database has its schema, distinct roles and the
+exact signed empty genesis row. Registry still serves its previous
+configuration.
 
 The Registry ADA2 file and its latest-head rollback floor must not share a
 snapshot or restore domain. The candidate floor is one isolated PostgreSQL
@@ -51,8 +52,12 @@ Deployment is gated in this order:
    RSA-3072 CA because PostgreSQL/libpq rejected an Ed25519-signed server
    certificate during SCRAM channel binding; this does not alter DID2 keys.
 5. Verify that the floor row equals the independently pinned ADA2 head.
-   Then prove that floor outage and a restored-old ADA2 both block Registry
-   readiness. Take and test a floor backup independent of Registry snapshots.
+   The live candidate passed exact-byte comparison to the signed head and
+   rejected duplicate provisioning. A consistent PostgreSQL dump and roles
+   dump were copied to private local storage with SHA-256 verification; an
+   isolated temporary container restored the row byte-for-byte. The roles
+   dump was not replayed in that drill. Floor-outage and restored-old-ADA2
+   startup rejection remain open, as does a full role-recovery drill.
 6. Only after the full DID2 client and physical E2E gates pass may the
    explicit Registry production-cutover attestation be set. It remains off.
 
