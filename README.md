@@ -35,11 +35,10 @@ development without HAProxy and an optional TLS profile), use
 network and volumes and does not replace or mutate the survival stack.
 Create a fresh protected identity set and start it with
 `./scripts/first-release-local-bootstrap.ps1 -Start`.
-The command also provisions distinct ONION durable-state keys. Until the
-Registry production CDR1 trusted-time, one-use ledger, witness-custody and
-current-closure authoring services exist, `Config` succeeds while `Up` and
-`Verify` stop at the documented fail-closed authority preflight without
-building images or changing the stack.
+The command also provisions distinct ONION durable-state keys. `Config` checks
+the Compose contract only. `Up` builds the images, but Registry remains
+fail-closed until a separately reviewed and pinned XNA1/current authority
+inventory is provisioned; see `docs/FIRST_RELEASE_LOCAL_STACK.md`.
 
 Start, verify and stop the persistent development stack through its guarded
 launcher:

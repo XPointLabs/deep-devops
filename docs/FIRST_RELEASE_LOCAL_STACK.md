@@ -104,19 +104,16 @@ client-facing contact route-authority endpoint remains disabled in this local
 lane until that same production authority closure has been provisioned; it has
 no synthetic signer or direct-Registry fallback.
 
-`Up`, `Verify`, and both operator actions nevertheless stop before image build
-or any Docker mutation. There is no production implementation of
-`IXPointNetworkBootstrapRootSigner` for `XNA1/DTS1` root custody, and there is no
-production genesis author entry point for
-`ADH1/ADC1/XVP1/XNV1/XNH1/XND1/PMT2`. Existing production authors cover genesis
-`XNA1/DTS1` only when a real root signer is supplied, plus nonce-bound
-`DTT1/ADP1` issuance from an already verified closure. Arbitrary bytes, test
-fixtures, DEV trust, an OS-clock witness, and synthetic signers remain
-forbidden. The earliest missing signing authority is the offline
-`IXPointNetworkBootstrapRootSigner` custody implementation; the remaining
-listed genesis publishers/authors are also required before this lane can start.
-`Config` is independently usable and currently passes with the protected local
-environment; it does not waive this authority preflight or mutate Docker state.
+The Protocol operational-genesis author and file-backed root/witness signer now
+exist, so source capability preflight passes and `Up` can build both images.
+The current protected local environment still has no independently pinned
+XNA1 genesis authority hash or matching complete signed artifact inventory.
+Registry therefore fails closed at startup; do not fill the pin with arbitrary
+bytes or disable its artifact-source validation. A reviewed authority ceremony,
+independent pin, exact artifacts, and then Contact/GroupControl composition are
+required before `Up` can be called ready. `Config` checks only the Compose
+contract and cannot prove those authority inputs. DEV trust, an OS-clock
+witness, and synthetic signers are not substitutes.
 
 The XNode health contract also marks both Contact and GroupControl terminals as
 required. They are deliberately not activated from partial inputs: Contact

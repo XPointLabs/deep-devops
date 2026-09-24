@@ -31,7 +31,7 @@ $xnodeImage = 'deep-first-release/xnode:local'
 $anvilImage = 'ghcr.io/foundry-rs/foundry@sha256:8347b728d5d393dac1c018691b36f506d23b9dcd78341d40ea0fcb11c3a19cdd'
 $anvilContainer = 'deep-first-release-bls-bootstrap-rpc'
 $anvilPort = 42990
-$protocolVersion = '0.6.0-local.2ee5f72df11c'
+$protocolVersion = '0.6.0-local.aecdd7518dc3'
 $blsDomainAddress = '000000000000000000000000000000000000f001'
 $committed = $false
 

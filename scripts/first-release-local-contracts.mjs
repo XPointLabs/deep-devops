@@ -172,7 +172,7 @@ function validateCommonTopology(topology, expectedServices) {
     assert.equal(Object.hasOwn(service.environment, 'Vless__Reality__PrivateKey'), false);
     assert.equal(service.environment.Node__RouterId, routerIds[index]);
     assert.match(service.build.dockerfile.replaceAll('\\', '/'), /deep-devops\/docker\/first-release-xnode\.Dockerfile$/);
-    assert.equal(service.build.args.DEEP_PROTOCOL_LOCAL_PACKAGE_VERSION, '0.6.0-local.2ee5f72df11c');
+    assert.equal(service.build.args.DEEP_PROTOCOL_LOCAL_PACKAGE_VERSION, '0.6.0-local.aecdd7518dc3');
     assert.match(service.build.additional_contexts.protocol_cutover.replaceAll('\\', '/'), /xnode\/artifacts\/local-protocol-cutover$/);
     assert.match(service.build.additional_contexts.devops_context.replaceAll('\\', '/'), /deep-devops\/docker$/);
     assert.match(service.healthcheck.test.join(' '), /health\/ready/);

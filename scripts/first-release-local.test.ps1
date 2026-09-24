@@ -33,7 +33,7 @@ if ($launcherSource -notmatch 'ProductionCapabilityAvailable\\s\*=>\\s\*false' -
 foreach ($required in @(
     'IXPointNetworkBootstrapRootSigner',
     'ADH1', 'ADC1', 'XVP1', 'XNV1', 'XNH1', 'XND1', 'PMT2',
-    'only nonce-bound DTT1/ADP1')) {
+    'XPointNetworkOperationalGenesisAuthor')) {
     if ($authorityPreflightSource.IndexOf($required, [StringComparison]::Ordinal) -lt 0) {
         throw "The exact production-authority preflight is missing: $required"
     }
