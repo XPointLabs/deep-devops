@@ -19,6 +19,9 @@ certificate identifiers belong in this repository. The bind address must be
 the host address intended for the Registry-to-floor connection, not a proxy
 address. `scripts/New-Did2FloorPgHba.ps1` creates the private, TLS-only
 single-source authentication file without printing the source address.
+`scripts/New-Did2FloorPassfiles.ps1` creates distinct protected runtime and
+one-time provisioning passfiles for Npgsql; neither connection string needs
+an inline password.
 
 Deployment is gated in this order:
 
