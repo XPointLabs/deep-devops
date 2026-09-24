@@ -1,9 +1,9 @@
 # DID2 latest-head floor production candidate
 
-Status on 2026-09-24: **isolated floor service deployed on seed2; Registry
-cutover not approved**. The database has its schema, distinct roles and the
-exact signed empty genesis row. Registry still serves its previous
-configuration.
+Status on 2026-09-24: **isolated floor service deployed on seed2 and a
+loopback-only DID2 Registry canary is running; Registry cutover not approved**.
+The database has its schema, distinct roles and the exact signed empty
+genesis row. The public Registry still serves its previous configuration.
 
 The Registry ADA2 file and its latest-head rollback floor must not share a
 snapshot or restore domain. The candidate floor is one isolated PostgreSQL
@@ -56,8 +56,22 @@ Deployment is gated in this order:
    rejected duplicate provisioning. A consistent PostgreSQL dump and roles
    dump were copied to private local storage with SHA-256 verification; an
    isolated temporary container restored the row byte-for-byte. The roles
-   dump was not replayed in that drill. Floor-outage and restored-old-ADA2
-   startup rejection remain open, as does a full role-recovery drill.
+   dump was not replayed in that drill. A separate, loopback-only canary on
+   the Registry host then accepted one real PQ-backed DID2 genesis and issued
+   an independently verified nonce-fresh proof. The client's protected LKG
+   advanced to tree size 1; the independent floor advanced to the same new
+   head hash. The post-admission ADA2 and floor dump were copied to private
+   local storage and hash-checked. This is a real Registry/DB exchange, not
+   device E2E or production cutover. A separate, non-published Production-mode
+   process using the earlier valid ADA2 was rejected at startup because its
+   head differed from the independent floor; a control process using the
+   current ADA2 started under the same configuration. A second isolated
+   Production-mode process with its network disabled failed on the PostgreSQL
+   connection before HTTP startup. UAT mode does not run this startup barrier,
+   so a UAT process starting is not evidence for the production gate. A full
+   role-recovery drill remains open.
+   The canary's trusted-time state is short-lived and must be refreshed by
+   the authorized operator before subsequent admission/proof tests.
 6. Only after the full DID2 client and physical E2E gates pass may the
    explicit Registry production-cutover attestation be set. It remains off.
 
