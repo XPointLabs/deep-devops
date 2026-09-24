@@ -36,7 +36,7 @@ services:
     secrets:
       - did2-floor-admin-password
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -q -h /var/run/postgresql -U postgres -d deep_did2_floor"]
+      test: ["CMD-SHELL", "gosu postgres psql -qAt -h /var/run/postgresql -U postgres -d deep_did2_floor -c 'SELECT 1' | grep -qx 1"]
       interval: 10s
       timeout: 3s
       retries: 6

@@ -1,6 +1,8 @@
 # DID2 latest-head floor production candidate
 
-Status: **prepared locally, not deployed or approved for cutover**.
+Status on 2026-09-24: **isolated floor service deployed on seed2; Registry
+cutover not approved**. The database has its schema and roles, but no signed
+genesis row. Registry still serves its previous configuration.
 
 The Registry ADA2 file and its latest-head rollback floor must not share a
 snapshot or restore domain. The candidate floor is one isolated PostgreSQL
@@ -26,9 +28,12 @@ Deployment is gated in this order:
 2. Verify image provenance, available memory/disk, certificate chain and
    private-key permissions. The server private key must be readable only by
    the PostgreSQL process; never copy the offline CA private key to a server.
-3. Install a persistent host firewall rule restricting the published floor
-   port to the Registry source before starting the compose service. Check the
-   effective rule after Docker restart. `pg_hba.conf` independently allows
+3. Generate the private pre-Docker nftables guard with
+   `scripts/New-Did2FloorFirewall.ps1`. Install and activate the generated
+   service before starting the compose service, and make Docker require the
+   guard on boot. Check the effective rule after Docker restart. It drops
+   traffic to the floor host/port unless sourced from Registry, before Docker
+   DNAT. `pg_hba.conf` independently allows
    only that source, only TLS, and only the runtime and separately credentialed
    operator-provisioning roles.
 4. Start the floor service and test both allowed TLS/SCRAM access with a
@@ -36,7 +41,12 @@ Deployment is gated in this order:
    the schema and initial signed empty head via an operator-only path.
    The Registry runtime role gets `SELECT` and `UPDATE`, but no DDL,
    `INSERT`, `DELETE`, or `TRUNCATE`. The operator-provisioning role gets
-   `INSERT` only for the signed empty genesis.
+   `INSERT` only for the signed empty genesis. On the live candidate, the
+   exact-source nftables guard, Docker boot dependency, `verify-full` TLS,
+   non-TLS rejection, distinct roles and their grants were checked. An
+   outside-Registry workstation could not open the port. TLS uses a private
+   RSA-3072 CA because PostgreSQL/libpq rejected an Ed25519-signed server
+   certificate during SCRAM channel binding; this does not alter DID2 keys.
 5. Verify that the floor row equals the independently pinned ADA2 head.
    Then prove that floor outage and a restored-old ADA2 both block Registry
    readiness. Take and test a floor backup independent of Registry snapshots.
