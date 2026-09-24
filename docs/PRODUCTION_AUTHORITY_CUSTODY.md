@@ -21,5 +21,22 @@ and the generated production network ID are recorded in
 The `offline-root-1` private seed is local-only and must never be copied to a
 registry or node host. Registry DTT signers use a logical 2-of-3 policy even
 while one person holds all three custody boundaries. MSG evidence, Contact/XPK,
-and Group GSR1/DCR1 each have a distinct key. Release signing credentials remain
-separate from protocol authorities.
+Group GSR1/DCR1, and the mailbox deposit/retrieve issuers each have distinct
+keys. Release signing credentials remain separate from protocol authorities.
+
+An existing pre-mailbox authority directory must **not** be regenerated or
+rotated. After reviewing the exact ten-role Mr. X manifest and protecting its
+offline root, add the two new mailbox roles once:
+
+```powershell
+node .\scripts\production-authority-provision.mjs --augment-mailbox `
+  --authority-root C:\Work\DeepSession\secrets\prod\authority
+```
+
+The command validates every existing seed against its public key, role ID and
+custody domain, refuses partial/replayed augmentation, stages new independent
+keys, retains the original public manifest as
+`custody-manifest.pre-mailbox.v1.json`, and atomically replaces only the public
+manifest. It never rotates existing keys. A leftover augmentation lock or
+staging directory means the transaction needs manual review; do not retry by
+deleting it. The offline root remains local-only.
