@@ -1,9 +1,19 @@
 # DID2 latest-head floor production candidate
 
-Status on 2026-09-24: **isolated floor service deployed on seed2 and a
-loopback-only DID2 Registry canary is running; Registry cutover not approved**.
+Status on 2026-09-25: **isolated floor service remains deployed on seed2;
+both loopback-only DID2 Registry canaries are stopped pending a safe forward
+checkpoint; Registry cutover is not approved**.
 The database has its schema, distinct roles and the exact signed empty
 genesis row. The public Registry still serves its previous configuration.
+
+An additional UAT-only floor schema and ADA2 state were provisioned without
+overwriting the original candidate. Physical Android confirmed the first
+signed admission/proof and protected restart; an external Windows test then
+created later heads. Review found that the experimental multi-hop issuer
+could sign an older intermediate head with a fresh DTT1 as if it were current.
+Both canaries were stopped without deleting their state. Neither that result
+nor the isolated loopback route is release evidence. The next image must fail
+closed across this gap until DID2 forward-checkpoint publication is complete.
 
 The Registry ADA2 file and its latest-head rollback floor must not share a
 snapshot or restore domain. The candidate floor is one isolated PostgreSQL
