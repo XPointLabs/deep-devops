@@ -1,0 +1,50 @@
+services:
+  did2-floor-db:
+    image: postgres@sha256:dc17045ccfd343b49600570ea734b9c4991cf1c3f3302e67df51e3b402dd55c4
+    restart: unless-stopped
+    init: true
+    mem_limit: 384m
+    cpus: 0.5
+    pids_limit: 128
+    shm_size: 64m
+    stop_grace_period: 45s
+    environment:
+      POSTGRES_DB: deep_did2_floor
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/did2-floor-admin-password
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256 --data-checksums
+    command:
+      - postgres
+      - -c
+      - ssl=on
+      - -c
+      - ssl_min_protocol_version=TLSv1.2
+      - -c
+      - ssl_cert_file=/run/did2-floor-tls/floor-server.crt.pem
+      - -c
+      - ssl_key_file=/run/did2-floor-tls/floor-server.key.pem
+      - -c
+      - hba_file=/run/did2-floor-auth/pg_hba.conf
+      - -c
+      - password_encryption=scram-sha-256
+    ports:
+      - "${DEEP_DID2_FLOOR_BIND_ADDRESS:?bind only the intended host IPv4}:${DEEP_DID2_FLOOR_PORT:-5432}:5432"
+    volumes:
+      - did2-floor-data:/var/lib/postgresql/data
+      - ${DEEP_DID2_FLOOR_TLS_DIR:?provide the private TLS directory}:/run/did2-floor-tls:ro
+      - ${DEEP_DID2_FLOOR_AUTH_DIR:?provide the private pg_hba directory}:/run/did2-floor-auth:ro
+    secrets:
+      - did2-floor-admin-password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -q -h /var/run/postgresql -U postgres -d deep_did2_floor"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 30s
+
+volumes:
+  did2-floor-data:
+
+secrets:
+  did2-floor-admin-password:
+    file: ${DEEP_DID2_FLOOR_ADMIN_PASSWORD_FILE:?provide the private admin password file}
