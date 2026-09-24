@@ -1,15 +1,39 @@
 [CmdletBinding()]
 param(
-    [string] $SecretRoot = 'C:\Work\DeepSession\secrets\prod'
+    [string] $SecretRoot = 'C:\Work\DeepSession\secrets\prod',
+    [Parameter(Mandatory = $true)]
+    [string] $Seed1ProxyPublicIp,
+    [Parameter(Mandatory = $true)]
+    [string] $Seed2ProxyPublicIp,
+    [Parameter(Mandatory = $true)]
+    [string] $Seed3ProxyPublicIp,
+    [Parameter(Mandatory = $true)]
+    [string] $QuorumCoordinatorCidr
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $root = [IO.Path]::GetFullPath($SecretRoot)
+$proxyPublicIps = @{ seed1 = $Seed1ProxyPublicIp; seed2 = $Seed2ProxyPublicIp; seed3 = $Seed3ProxyPublicIp }
+foreach ($name in @('seed1', 'seed2', 'seed3')) {
+    $ip = $null
+    if (-not [Net.IPAddress]::TryParse($proxyPublicIps[$name], [ref]$ip) -or
+        $ip.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork) {
+        throw "A valid public proxy IPv4 address is required for $name."
+    }
+}
+if ($QuorumCoordinatorCidr -cnotmatch '^(?:\d{1,3}\.){3}\d{1,3}/32$') {
+    throw 'A narrow quorum coordinator IPv4 /32 is required.'
+}
+$quorumIp = $null
+if (-not [Net.IPAddress]::TryParse($QuorumCoordinatorCidr.Split('/')[0], [ref]$quorumIp) -or
+    $quorumIp.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork) {
+    throw 'A valid quorum coordinator IPv4 /32 is required.'
+}
 $nodes = @(
-    [pscustomobject]@{ Name = 'seed1'; Role = 'Ingress'; HostName = 'seed1.xpoint.network'; Ip = '45.13.226.112' },
-    [pscustomobject]@{ Name = 'seed2'; Role = 'Core'; HostName = 'seed2.xpoint.network'; Ip = '107.161.160.34' },
-    [pscustomobject]@{ Name = 'seed3'; Role = 'Exit'; HostName = 'seed3.xpoint.network'; Ip = '185.206.171.178' }
+    [pscustomobject]@{ Name = 'seed1'; Role = 'Ingress'; HostName = 'seed1.xpoint.network'; Ip = $Seed1ProxyPublicIp },
+    [pscustomobject]@{ Name = 'seed2'; Role = 'Core'; HostName = 'seed2.xpoint.network'; Ip = $Seed2ProxyPublicIp },
+    [pscustomobject]@{ Name = 'seed3'; Role = 'Exit'; HostName = 'seed3.xpoint.network'; Ip = $Seed3ProxyPublicIp }
 )
 
 function Read-Environment([string] $Path) {
@@ -111,7 +135,7 @@ foreach ($state in $states.Values) {
         DEEP_INGRESS_CERTIFICATE_PROFILE = 'pinned-self-issued'
         DEEP_INGRESS_HOST = $state.Definition.HostName
         DEEP_INGRESS_HTTPS_BIND = '443'
-        DEEP_QUORUM_COORDINATOR_CIDR = '111.235.151.150/32'
+        DEEP_QUORUM_COORDINATOR_CIDR = $QuorumCoordinatorCidr
         DEEP_XPOINT_NETWORK_ID_HEX = 'edc5dc1516a847a65fc8ba0e690d000d'
         DEEP_XPOINT_GENESIS_PIN_HEX = '304911104767ae1036a44c71116a5fcdee3449fc71ea1467c09295f89be3a2b7'
         DEEP_XPOINT_DIRECTORY_LEAF_KEY_HEX = '3fd0371522bcfe473b36645f76a3817c722887fcbaa39ef75f4644a124d7b359'

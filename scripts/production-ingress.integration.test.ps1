@@ -79,13 +79,13 @@ try {
     $baseHelper = @($helper, '--profile', 'operator-managed', '--host', 'node.deep.test',
         '--current-cert', (Join-Path $secretRoot 'current.crt'), '--current-key', (Join-Path $secretRoot 'current.key'), '--current-pin', (Join-Path $secretRoot 'current.spki-sha256'),
         '--next-cert', (Join-Path $secretRoot 'next.crt'), '--next-key', (Join-Path $secretRoot 'next.key'), '--next-pin', (Join-Path $secretRoot 'next.spki-sha256'),
-        '--client-timeout-seconds', '30', '--server-timeout-seconds', '30', '--quorum-cidr', '111.235.151.150/32', '--allow-lab-certificate')
+        '--client-timeout-seconds', '30', '--server-timeout-seconds', '30', '--quorum-cidr', '8.8.8.8/32', '--allow-lab-certificate')
     $currentPinPath = Join-Path $secretRoot 'current.spki-sha256'
     $currentPinValue = [IO.File]::ReadAllText($currentPinPath)
     [IO.File]::WriteAllText($currentPinPath, "$('0' * 64)`n", [Text.UTF8Encoding]::new($false))
     Invoke-ExpectedFailure { & node @baseHelper } 'Mismatched SPKI pin did not fail closed.'
     [IO.File]::WriteAllText($currentPinPath, $currentPinValue, [Text.UTF8Encoding]::new($false))
-    $broadCidr = @($baseHelper); $broadCidr[$broadCidr.IndexOf('111.235.151.150/32')] = '0.0.0.0/0'
+    $broadCidr = @($baseHelper); $broadCidr[$broadCidr.IndexOf('8.8.8.8/32')] = '0.0.0.0/0'
     Invoke-ExpectedFailure { & node @broadCidr } 'Broad quorum CIDR did not fail closed.'
     $zeroTimeout = @($baseHelper); $zeroTimeout[$zeroTimeout.IndexOf('30')] = '0'
     Invoke-ExpectedFailure { & node @zeroTimeout } 'Zero client timeout did not fail closed.'
@@ -96,7 +96,7 @@ try {
         -Profile operator-managed -HostName node.deep.test `
         -CurrentCertificate (Join-Path $secretRoot 'current.crt') -CurrentPrivateKey (Join-Path $secretRoot 'current.key') -CurrentPin $currentPinPath `
         -NextCertificate (Join-Path $secretRoot 'next.crt') -NextPrivateKey (Join-Path $secretRoot 'next.key') -NextPin (Join-Path $secretRoot 'next.spki-sha256') `
-        -ClientTimeoutSeconds 30 -ServerTimeoutSeconds 30 -QuorumCoordinatorCidr '111.235.151.150/32' -AllowLabCertificate
+        -ClientTimeoutSeconds 30 -ServerTimeoutSeconds 30 -QuorumCoordinatorCidr '8.8.8.8/32' -AllowLabCertificate
     if ($LASTEXITCODE -ne 0) { throw 'Lab certificate preflight failed.' }
 
     $secretPath = $secretRoot.Replace('\','/')
@@ -113,7 +113,7 @@ try {
         'DEEP_PRIVACY_PEER_2_ROUTER_ID=cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc', 'DEEP_PRIVACY_PEER_2_BASE_URL=https://peer-2.deep.test/', 'DEEP_PRIVACY_PEER_2_CURRENT_SPKI_SHA256=3333333333333333333333333333333333333333333333333333333333333333', 'DEEP_PRIVACY_PEER_2_NEXT_SPKI_SHA256=4444444444444444444444444444444444444444444444444444444444444444',
         'DEEP_PRIVACY_PEER_3_ROUTER_ID=dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd', 'DEEP_PRIVACY_PEER_3_BASE_URL=https://peer-3.deep.test/', 'DEEP_PRIVACY_PEER_3_CURRENT_SPKI_SHA256=5555555555555555555555555555555555555555555555555555555555555555', 'DEEP_PRIVACY_PEER_3_NEXT_SPKI_SHA256=6666666666666666666666666666666666666666666666666666666666666666',
         "DEEP_NODE_BLS_PRIVATE_KEY_FILE=$secretPath/node-bls", "DEEP_NODE_VLESS_CLIENT_ID_FILE=$secretPath/vless-client-id",
-        'DEEP_NODE_REALITY_SERVER_NAME=www.microsoft.com', 'DEEP_NODE_REALITY_PUBLIC_KEY=lab-public', "DEEP_NODE_REALITY_PRIVATE_KEY_FILE=$secretPath/reality-private-key", 'DEEP_NODE_REALITY_SHORT_ID=0123456789abcdef', 'DEEP_QUORUM_COORDINATOR_CIDR=111.235.151.150/32',
+        'DEEP_NODE_REALITY_SERVER_NAME=www.microsoft.com', 'DEEP_NODE_REALITY_PUBLIC_KEY=lab-public', "DEEP_NODE_REALITY_PRIVATE_KEY_FILE=$secretPath/reality-private-key", 'DEEP_NODE_REALITY_SHORT_ID=0123456789abcdef', 'DEEP_QUORUM_COORDINATOR_CIDR=8.8.8.8/32',
         'DEEP_OPERATOR_ADDRESS=0x0000000000000000000000000000000000000001', 'DEEP_REWARDS_ADDRESS=0x0000000000000000000000000000000000000001',
         'DEEP_SERVICE_NODE_REWARDS_ADDRESS=0x0000000000000000000000000000000000000001', 'DEEP_STAKING_BACKEND_URL=https://staking.deep.test'
     )

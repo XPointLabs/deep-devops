@@ -131,7 +131,8 @@ Write the generated private key as one line to a protected local file and set
 - `DEEP_NODE_PUBLIC_PORT`: public shared ingress/VLESS Reality port clients use.
   Keep it equal to `DEEP_INGRESS_HTTPS_BIND` unless an approved NAT rule
   translates the port.
-- `DEEP_NODE_PUBLIC_IP`: public origin IPv4 address advertised to other nodes.
+- `DEEP_NODE_PUBLIC_IP`: public proxy IPv4 address advertised to other nodes;
+  never place a private origin address in this value or in repository files.
 - `DEEP_NODE_X25519_PRIVATE_KEY_FILE`: independent X25519 private scalar used
   to open exactly one native privacy layer.
 - `DEEP_PRIVACY_PEER_<N>_*`: the two other routers in the three-router seed

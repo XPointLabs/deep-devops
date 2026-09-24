@@ -176,7 +176,7 @@ DEEP_STORAGE_SERVICE_IMAGE=ghcr.io/xpointlabs/deep-storage-service:<release-tag>
 DEEP_NETWORK=mainnet
 
 DEEP_NODE_PUBLIC_PORT=443
-DEEP_NODE_PUBLIC_IP=<public origin IPv4 address>
+DEEP_NODE_PUBLIC_IP=<public-proxy-IPv4>
 DEEP_NODE_X25519_PRIVATE_KEY_FILE=./secrets/key_x25519
 
 # Repeat the four values for every next hop this node may call.
