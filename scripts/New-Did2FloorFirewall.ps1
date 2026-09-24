@@ -83,7 +83,6 @@ $service = @(
     '[Unit]',
     'Description=Private DID2 floor pre-Docker ingress guard',
     'Before=docker.service',
-    'ConditionPathExists=/etc/deep-did2-floor/guard.nft',
     '',
     '[Service]',
     'Type=oneshot',
