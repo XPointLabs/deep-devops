@@ -72,7 +72,7 @@ if ([string]$custody.schema -cne 'deep-production-authority-custody.v1' -or
     [string]$custody.authorityOwner -cne 'Mr. X' -or
     [string]$publicManifest.schema -cne 'deep-production-authority-bootstrap.v1' -or
     [string]$publicManifest.authorityOwner -cne 'Mr. X' -or
-    [string]$inventory.format -cne 'deep-contact-resolve-readonly-v1') {
+    [string]$inventory.format -cne 'deep-contact-resolve-readonly-v2') {
     throw 'The authority inputs do not belong to the approved Mr. X production boundary.'
 }
 

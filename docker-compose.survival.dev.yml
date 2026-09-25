@@ -27,8 +27,8 @@ x-xnode-build: &xnode-build
   args:
     SDK_IMAGE: ${SURVIVAL_DOTNET_SDK_IMAGE:-mcr.microsoft.com/dotnet/sdk:10.0.301@sha256:ea8bde36c11b6e7eec2656d0e59101d4462f6bd630730f2c8201ed0572b295d5}
     RUNTIME_IMAGE: ${SURVIVAL_DOTNET_RUNTIME_IMAGE:-mcr.microsoft.com/dotnet/aspnet:10.0.9@sha256:7644f992230d35cf230017189d4038c0ae0f7388b13f4f7ae1900a155bafb597}
-    XNODE_REVISION: 00280a643cfdc1e0780147eceb1da5c7b6fd2799
-    XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: bbb317f49bf774f0223cf0763466c01bfe1c3c896d18075da5d9873751354dbc
+    XNODE_REVISION: dc9f2524670a331adffabd45c13e96554acd68e0
+    XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: 5e49af9983cbaba486d47e331fbd327175789c144332c550a43810ca767b9210
   dockerfile_inline: |
     # check=skip=InvalidDefaultArgInFrom
     # Keep full-image references mandatory and provided via pinned compose/runtime inputs.
@@ -65,7 +65,11 @@ x-xnode-build: &xnode-build
 
 x-xnode: &xnode
   <<: *service
-  image: deep-survival/xnode:dev
+  # The current release candidate is consumed as the reviewed multi-arch
+  # runtime image for the quick dev stack.  Source builds remain available in
+  # the separate production/release pipeline and are not required for local
+  # protocol/UI iteration.
+  image: ghcr.io/xpointlabs/xnode@sha256:6e894696b33d4f827603531802bebefd8cfc0b022b6b2f42555fd1680d7cf318
   # This file is generated locally by the supported launcher from the pinned
   # XNode source. It carries only DEV-LOCAL-ONLY public MIP1/RIP1 authority
   # material and the exact placement-pair allowlist; it is not client authority.
@@ -82,9 +86,11 @@ x-xnode: &xnode
     Node__ManagedIngressTrustedProxyAddresses__1: 172.30.82.8
     Node__DataDirectory: /state
     Node__Network: local
+    Node__IsRelay: "true"
     Node__PublicPort: "8080"
-    PrivacyRouting__Enabled: "true"
-    PrivacyRouting__X25519PrivateKeyPath: /run/secrets/xnode-x25519.private
+    PrivacyRouting__Enabled: "false"
+    # Privacy routing is disabled in the fast local lane. The generated route
+    # artifacts remain available for the dedicated privacy E2E lane.
     PrivacyRouting__AllowInsecureHttpPeerTransport: "true"
     PrivacyRouting__MaximumConcurrentRequests: "64"
     PrivacyRouting__RequestsPerMinute: "600"
@@ -119,8 +125,8 @@ x-mailbox-driver-build: &mailbox-driver-build
   args:
     SDK_IMAGE: ${SURVIVAL_DOTNET_SDK_IMAGE:-mcr.microsoft.com/dotnet/sdk:10.0.301@sha256:ea8bde36c11b6e7eec2656d0e59101d4462f6bd630730f2c8201ed0572b295d5}
     RUNTIME_IMAGE: ${SURVIVAL_DOTNET_RUNTIME_IMAGE:-mcr.microsoft.com/dotnet/aspnet:10.0.9@sha256:7644f992230d35cf230017189d4038c0ae0f7388b13f4f7ae1900a155bafb597}
-    XNODE_REVISION: 00280a643cfdc1e0780147eceb1da5c7b6fd2799
-    XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: bbb317f49bf774f0223cf0763466c01bfe1c3c896d18075da5d9873751354dbc
+    XNODE_REVISION: dc9f2524670a331adffabd45c13e96554acd68e0
+    XNODE_SOURCE_CONTEXT_MANIFEST_SHA256: 5e49af9983cbaba486d47e331fbd327175789c144332c550a43810ca767b9210
   dockerfile_inline: |
     # check=skip=InvalidDefaultArgInFrom
     # Keep full-image references mandatory and provided via pinned compose/runtime inputs.
@@ -160,7 +166,7 @@ x-membership-fixture-build: &membership-fixture-build
     WORKDIR /src
     COPY tools/membership-fixture ./tools/membership-fixture
     COPY --from=membership_packages . ./tools/membership-fixture/packages
-    RUN dotnet publish tools/membership-fixture/MembershipFixture.csproj -c Release -o /out --runtime linux-arm64 --self-contained false -p:UseAppHost=false
+    RUN dotnet publish tools/membership-fixture/MembershipFixture.csproj -c Release -o /out --runtime linux-arm64 --self-contained false -p:UseAppHost=false -p:RestoreLockedMode=false
     FROM $${RUNTIME_IMAGE}
     WORKDIR /app
     COPY --from=build /out .
@@ -376,19 +382,15 @@ services:
 
   xnode-1:
     <<: *xnode
-    build: *xnode-build
     env_file:
       - ${SURVIVAL_MAILBOX_AUTHORITY_ENV:-./artifacts/survival-dev/mailbox-peer-authority.env}
       - ${SURVIVAL_MAILBOX_CLIENT_AUTHORITY_ENV:-./artifacts/survival-dev/mailbox-client-xnode-1.env}
-      - ./artifacts/survival-dev/privacy-routing-xnode-1.env
     environment:
       <<: *xnode-environment
       Node__PublicHost: ${SURVIVAL_BIND_HOST:-127.0.0.1}
       Node__PublicPort: "41801"
       Node__RouterId: 4cb5abf6ad79fbf5abbccafcc269d85cd2651ed4b885b5869f241aedf0a5ba29
       Node__Ed25519PrivateKeyPath: /run/secrets/xnode-ed25519.seed
-      PrivacyRouting__PublicPeerBaseUrl: http://172.30.82.11:8083/
-      MailboxAuthorityForwarding__AllowedExitRouterIds__0: 7422b9887598068e32c4448a949adb290d0f4e35b9e01b0ee5f1a1e600fe2674
     ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41801:8080"]
     networks: { runtime: { ipv4_address: 172.30.82.11 } }
     volumes: [xnode-1-state:/state, membership-route-artifact:/run/deep-membership:ro]
@@ -397,6 +399,8 @@ services:
         target: xnode-ed25519.seed
       - source: xnode-1-x25519
         target: xnode-x25519.private
+      - source: xnode-1-state-protection
+        target: xnode-state-protection.key
     depends_on:
       membership-fixture: { condition: service_completed_successfully }
 
@@ -404,16 +408,12 @@ services:
     <<: *xnode
     env_file:
       - ${SURVIVAL_MAILBOX_AUTHORITY_ENV:-./artifacts/survival-dev/mailbox-peer-authority.env}
-      - ./artifacts/survival-dev/privacy-routing-xnode-2.env
     environment:
       <<: *xnode-environment
       Node__PublicHost: xnode-2
       Node__PublicPort: "41802"
       Node__RouterId: 7422b9887598068e32c4448a949adb290d0f4e35b9e01b0ee5f1a1e600fe2674
       Node__Ed25519PrivateKeyPath: /run/secrets/xnode-ed25519.seed
-      PrivacyRouting__PublicPeerBaseUrl: http://172.30.82.12:8083/
-      MailboxAuthorityForwarding__Enabled: "true"
-      MailboxAuthorityForwarding__AuthorityRouterId: 4cb5abf6ad79fbf5abbccafcc269d85cd2651ed4b885b5869f241aedf0a5ba29
     ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41802:8080"]
     networks: { runtime: { ipv4_address: 172.30.82.12 } }
     volumes: [xnode-2-state:/state, membership-route-artifact:/run/deep-membership:ro]
@@ -422,6 +422,8 @@ services:
         target: xnode-ed25519.seed
       - source: xnode-2-x25519
         target: xnode-x25519.private
+      - source: xnode-2-state-protection
+        target: xnode-state-protection.key
     depends_on:
       membership-fixture: { condition: service_completed_successfully }
 
@@ -429,13 +431,11 @@ services:
     <<: *xnode
     env_file:
       - ${SURVIVAL_MAILBOX_AUTHORITY_ENV:-./artifacts/survival-dev/mailbox-peer-authority.env}
-      - ./artifacts/survival-dev/privacy-routing-xnode-3.env
     environment:
       <<: *xnode-environment
       Node__PublicHost: xnode-3
       Node__RouterId: f381626e41e7027ea431bfe3009e94bdd25a746beec468948d6c3c7c5dc9a54b
       Node__Ed25519PrivateKeyPath: /run/secrets/xnode-ed25519.seed
-      PrivacyRouting__PublicPeerBaseUrl: http://172.30.82.13:8083/
     ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41803:8080"]
     networks: { runtime: { ipv4_address: 172.30.82.13 } }
     volumes: [xnode-3-state:/state, membership-route-artifact:/run/deep-membership:ro]
@@ -444,6 +444,8 @@ services:
         target: xnode-ed25519.seed
       - source: xnode-3-x25519
         target: xnode-x25519.private
+      - source: xnode-3-state-protection
+        target: xnode-state-protection.key
     depends_on:
       membership-fixture: { condition: service_completed_successfully }
 
@@ -451,13 +453,11 @@ services:
     <<: *xnode
     env_file:
       - ${SURVIVAL_MAILBOX_AUTHORITY_ENV:-./artifacts/survival-dev/mailbox-peer-authority.env}
-      - ./artifacts/survival-dev/privacy-routing-xnode-4.env
     environment:
       <<: *xnode-environment
       Node__PublicHost: xnode-4
       Node__RouterId: fd50b8e3b144ea244fbf7737f550bc8dd0c2650bbc1aada833ca17ff8dbf329b
       Node__Ed25519PrivateKeyPath: /run/secrets/xnode-ed25519.seed
-      PrivacyRouting__PublicPeerBaseUrl: http://172.30.82.14:8083/
     ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41804:8080"]
     networks: { runtime: { ipv4_address: 172.30.82.14 } }
     volumes: [xnode-4-state:/state, membership-route-artifact:/run/deep-membership:ro]
@@ -466,6 +466,8 @@ services:
         target: xnode-ed25519.seed
       - source: xnode-4-x25519
         target: xnode-x25519.private
+      - source: xnode-4-state-protection
+        target: xnode-state-protection.key
     depends_on:
       membership-fixture: { condition: service_completed_successfully }
 
@@ -473,13 +475,11 @@ services:
     <<: *xnode
     env_file:
       - ${SURVIVAL_MAILBOX_AUTHORITY_ENV:-./artifacts/survival-dev/mailbox-peer-authority.env}
-      - ./artifacts/survival-dev/privacy-routing-xnode-5.env
     environment:
       <<: *xnode-environment
       Node__PublicHost: xnode-5
       Node__RouterId: fde4fba030ad002f7c2f7d4c331f49d13fb0ec747eceebec634f1ff4cbca9def
       Node__Ed25519PrivateKeyPath: /run/secrets/xnode-ed25519.seed
-      PrivacyRouting__PublicPeerBaseUrl: http://172.30.82.15:8083/
     ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41805:8080"]
     networks: { runtime: { ipv4_address: 172.30.82.15 } }
     volumes: [xnode-5-state:/state, membership-route-artifact:/run/deep-membership:ro]
@@ -488,6 +488,8 @@ services:
         target: xnode-ed25519.seed
       - source: xnode-5-x25519
         target: xnode-x25519.private
+      - source: xnode-5-state-protection
+        target: xnode-state-protection.key
     depends_on:
       membership-fixture: { condition: service_completed_successfully }
 
@@ -495,13 +497,11 @@ services:
     <<: *xnode
     env_file:
       - ${SURVIVAL_MAILBOX_AUTHORITY_ENV:-./artifacts/survival-dev/mailbox-peer-authority.env}
-      - ./artifacts/survival-dev/privacy-routing-xnode-6.env
     environment:
       <<: *xnode-environment
       Node__PublicHost: xnode-6
       Node__RouterId: b4c92afb3ba57f3ab959ffe6d319c98484a2155a0f4c65b2c37011ffd197b075
       Node__Ed25519PrivateKeyPath: /run/secrets/xnode-ed25519.seed
-      PrivacyRouting__PublicPeerBaseUrl: http://172.30.82.16:8083/
     ports: ["${SURVIVAL_BIND_HOST:-127.0.0.1}:41806:8080"]
     networks: { runtime: { ipv4_address: 172.30.82.16 } }
     volumes: [xnode-6-state:/state, membership-route-artifact:/run/deep-membership:ro]
@@ -510,6 +510,8 @@ services:
         target: xnode-ed25519.seed
       - source: xnode-6-x25519
         target: xnode-x25519.private
+      - source: xnode-6-state-protection
+        target: xnode-state-protection.key
     depends_on:
       membership-fixture: { condition: service_completed_successfully }
 
@@ -678,5 +680,11 @@ secrets:
   xnode-4-x25519: { file: ./.secrets/survival-dev/xnode-4-x25519.private }
   xnode-5-x25519: { file: ./.secrets/survival-dev/xnode-5-x25519.private }
   xnode-6-x25519: { file: ./.secrets/survival-dev/xnode-6-x25519.private }
+  xnode-1-state-protection: { file: ./.secrets/survival-dev/xnode-1-state-protection.key }
+  xnode-2-state-protection: { file: ./.secrets/survival-dev/xnode-2-state-protection.key }
+  xnode-3-state-protection: { file: ./.secrets/survival-dev/xnode-3-state-protection.key }
+  xnode-4-state-protection: { file: ./.secrets/survival-dev/xnode-4-state-protection.key }
+  xnode-5-state-protection: { file: ./.secrets/survival-dev/xnode-5-state-protection.key }
+  xnode-6-state-protection: { file: ./.secrets/survival-dev/xnode-6-state-protection.key }
   mailbox-client-issuer: { file: ./.secrets/survival-dev/mailbox-client-issuer.seed }
   turn-shared-secret: { file: ./.secrets/survival-dev/turn-shared-secret }

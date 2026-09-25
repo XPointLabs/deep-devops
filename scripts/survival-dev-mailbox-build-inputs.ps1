@@ -426,9 +426,9 @@ function Set-MailboxTreeReadOnly([string]$Root) {
                     [Security.AccessControl.AccessControlType]::Allow))
             }
             if ($item.PSIsContainer) {
-                Set-Acl -LiteralPath $item.FullName -AclObject $security
+                [IO.Directory]::SetAccessControl($item.FullName, $security)
             } else {
-                Set-Acl -LiteralPath $item.FullName -AclObject $security
+                [IO.File]::SetAccessControl($item.FullName, $security)
             }
         }
     } else {
@@ -471,9 +471,9 @@ function Set-MailboxTreeWritable([string]$Root) {
                 [Security.AccessControl.FileSystemRights]::FullControl,
                 [Security.AccessControl.AccessControlType]::Allow))
             if ($item.PSIsContainer) {
-                Set-Acl -LiteralPath $item.FullName -AclObject $security
+                [IO.Directory]::SetAccessControl($item.FullName, $security)
             } else {
-                Set-Acl -LiteralPath $item.FullName -AclObject $security
+                [IO.File]::SetAccessControl($item.FullName, $security)
             }
         }
     } else {

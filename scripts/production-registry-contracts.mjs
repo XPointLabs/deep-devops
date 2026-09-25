@@ -26,6 +26,7 @@ assert.doesNotMatch(registry, /^    build:/m,
   'production Registry must consume an immutable image and never build on the host');
 assert.match(registry, /^      ContactResolveProductionAuthority__Enabled: "true"$/m);
 assert.match(registry, /^      ContactRouteAuthority__Enabled: "true"$/m);
+assert.match(registry, /^      ContactPublicationAuthority__Enabled: "true"$/m);
 assert.match(registry, /^      DirectoryPublication__NetworkIdHex: \$\{DEEP_XPOINT_NETWORK_ID_HEX:\?set DEEP_XPOINT_NETWORK_ID_HEX\}$/m);
 assert.match(registry, /^      ContactResolveDirectoryArtifacts__GenesisAuthorityCoreHashHex: \$\{DEEP_XPOINT_GENESIS_PIN_HEX:\?set DEEP_XPOINT_GENESIS_PIN_HEX\}$/m);
 assert.match(registry, /^        read_only: true$/m);
@@ -51,7 +52,7 @@ assert.match(smoke, /cryptographicClosureVerification = 'delegated-to-xnode-read
 
 const canonicalArtifactRoles = [
   'xna1', 'dts1', 'adh1', 'snapshot-dtt1', 'snapshot-adp1', 'xvp1',
-  'xnv1', 'xnh1', 'xnd1', 'pmt2', 'response-adp1', 'caller-adh1',
+  'xnv1', 'xnh1', 'xnd1', 'pma2', 'pmt2', 'response-adp1', 'caller-adh1',
 ];
 for (const [ordinal, role] of canonicalArtifactRoles.entries()) {
   const escapedRole = role.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

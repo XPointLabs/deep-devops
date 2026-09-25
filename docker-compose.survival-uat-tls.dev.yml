@@ -2,12 +2,14 @@ services:
   membership-fixture:
     command: [--advertised-host, "${SURVIVAL_BIND_HOST:?set SURVIVAL_BIND_HOST}", --advertised-scheme, https]
 
-  xnode-1: { ports: !reset [] }
-  xnode-2: { ports: !reset [] }
-  xnode-3: { ports: !reset [] }
-  xnode-4: { ports: !reset [] }
-  xnode-5: { ports: !reset [] }
-  xnode-6: { ports: !reset [] }
+  xnode-1: &uat-xnode-ingress
+    ports: !reset []
+    environment: { Node__ManagedIngressTrustedProxyAddresses__2: 172.30.82.9 }
+  xnode-2: *uat-xnode-ingress
+  xnode-3: *uat-xnode-ingress
+  xnode-4: *uat-xnode-ingress
+  xnode-5: *uat-xnode-ingress
+  xnode-6: *uat-xnode-ingress
   registry: { ports: !reset [] }
   storage: { ports: !reset [] }
   file: { ports: !reset [] }
@@ -86,7 +88,7 @@ services:
         target: /usr/local/etc/haproxy/haproxy.cfg
         read_only: true
       - ${SURVIVAL_UAT_TLS_SECRET_DIR:?set SURVIVAL_UAT_TLS_SECRET_DIR}/server.pem:/run/deep-uat-tls/server.pem:ro
-    networks: { runtime: { ipv4_address: 172.30.82.7 } }
+    networks: { runtime: { ipv4_address: 172.30.82.9 } }
     depends_on:
       xnode-1: { condition: service_healthy }
       xnode-2: { condition: service_healthy }

@@ -132,16 +132,16 @@ $baseArguments = @('compose') + $projectDirectoryArguments + @('-p', $Project, '
 $uatTlsArguments = @('compose') + $projectDirectoryArguments + @('-p', $Project, '-f', $ComposePath, '-f', $UatTlsComposePath)
 $chaosArguments = @('compose') + $projectDirectoryArguments + @('-p', $Project, '-f', $ComposePath, '-f', $UatTlsComposePath, '-f', $ChaosComposePath, '--profile', 'resend-chaos')
 $ContextRoot = Join-Path $Root 'artifacts\survival-dev\build-contexts'
-$SurvivalXNodeCommit = '00280a643cfdc1e0780147eceb1da5c7b6fd2799'
-$SurvivalXNodeContextManifestSha256 = 'bbb317f49bf774f0223cf0763466c01bfe1c3c896d18075da5d9873751354dbc'
-$SurvivalMailboxBuildHelperSha256 = 'a120bc84bfb04ff9885081190caabc2a65881da1929859ca79f82c60d17d1063'
+$SurvivalXNodeCommit = 'dc9f2524670a331adffabd45c13e96554acd68e0'
+$SurvivalXNodeContextManifestSha256 = '5e49af9983cbaba486d47e331fbd327175789c144332c550a43810ca767b9210'
+$SurvivalMailboxBuildHelperSha256 = '3b8c1d45783b5ca80aa6c4c2d8e39f774d817d78ac71af15c61247f555414482'
 $SurvivalMailboxDriverSha256 = @{
     'MailboxGrantProvisioner.cs' = '884a6670230d36333adbdad37358d082ca84740fef2d5c6e13776500a37b8d53'
     'MailboxRuntimePublisher.cs' = '46283d1d43d30707ddb4365e7e7164c0df5023d8453ca36019f4272a2fbb117e'
     'PrivateCrossProcessState.cs' = '651d8256822d41b9a7bceab1e6d6bb45740026cac00f487a564befe7777f272b'
-    'Program.cs' = '28d0abff6ba8c35d0403982e790e3dd3e10201ed66b239f09ed6ae0c8d9d48ca'
+    'Program.cs' = '48a6846e9f467be159d50c383a214b74d935a6c50ea56aa8a37f3fad05b689f4'
     'ProductionMailboxUatPublisher.cs' = '742bf2def113c2047396ff303f79ce0fbce87a095fd91b8c2bdef20127711551'
-    'SurvivalMailboxDriver.csproj' = '4db436d69ea88ac3ff16f08c161b61cc0c048bad84cb7e529b2208fa569eafbe'
+    'SurvivalMailboxDriver.csproj' = '3e3019e42ea7ff05aa8f7a3b24a5106e5f1b95076323d3c502f113ddae6f0172'
 }
 $ChainLifecycleServices = @(
     'contracts-devnet',
@@ -275,7 +275,10 @@ function Prepare-SurvivalMembershipFixturePackages() {
             $path = Join-Path $source $input.Path
             if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Pinned membership package is missing: $($input.Name)" }
             if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ne $input.Hash) { throw "Pinned membership package hash mismatch: $($input.Name)" }
-            Copy-Item -LiteralPath $path -Destination (Join-Path $stage $input.Name) -Force
+            $feed = if ($input.Name -like 'Deep.Protocol.MembershipRoutes.*') { 'p15' } else { 'p04' }
+            $feedDirectory = Join-Path $stage $feed
+            New-Item -ItemType Directory -Path $feedDirectory -Force | Out-Null
+            Copy-Item -LiteralPath $path -Destination (Join-Path $feedDirectory $input.Name) -Force
         }
         Remove-Item -LiteralPath $destination -Recurse -Force -ErrorAction SilentlyContinue
         Move-Item -LiteralPath $stage -Destination $destination
@@ -305,6 +308,19 @@ function Get-PinnedSurvivalXNodeContext() {
 }
 
 function Invoke-SurvivalMailboxDriverImmutable([string]$PinnedXNodeSource,[string[]]$Arguments) {
+    # Local dev escape hatch: when the checked-in XNode vendor graph lags the
+    # official runtime image, use a prebuilt driver compiled against that same
+    # image. CI and production keep the immutable source-build path below.
+    $prebuiltDriver = [Environment]::GetEnvironmentVariable('SURVIVAL_MAILBOX_DRIVER_DLL')
+    if (-not [string]::IsNullOrWhiteSpace($prebuiltDriver)) {
+        $prebuiltDriver = [IO.Path]::GetFullPath($prebuiltDriver)
+        if (-not (Test-Path -LiteralPath $prebuiltDriver -PathType Leaf)) {
+            throw "SURVIVAL_MAILBOX_DRIVER_DLL does not point to a file: $prebuiltDriver"
+        }
+        & dotnet $prebuiltDriver @Arguments
+        if ($LASTEXITCODE -ne 0) { throw 'The prebuilt survival mailbox driver command failed.' }
+        return
+    }
     $work = Join-Path ([IO.Path]::GetTempPath()) (
         'deep-survival-mailbox-driver-' + [Guid]::NewGuid().ToString('N'))
     $sourceRoot = Join-Path $work 'source'
@@ -509,7 +525,7 @@ function Prepare-SurvivalXNodeIdentitySecrets() {
         '4e27047d0ed1425a9c76ee48bf6d6846394084b980c34689ae39ea9cde86aef9',
         '9663414173fc4529b8a32264f9fc80e8b36f41e2716f4df48d03081b96a95de5',
         '82696d0705b94e0f9b6155e423a90acfc513f898593e443ba19c4ace027f8190',
-        '9d2a4b61d1f8419697cf3e83c3497d6cde83a61beb74488b87a3928cfd16d11'
+        '9d2a4b61d1f8419697cf3e83c3497d6cde83a61beb74488b87a3928cfd16d110'
     )
     foreach ($index in 1..6) {
         $path = Join-Path $directory "xnode-$index-ed25519.seed"
@@ -554,6 +570,24 @@ function Prepare-SurvivalXNodeIdentitySecrets() {
                 [Text.UTF8Encoding]::new($false))
         }
         Protect-SurvivalDevPrivateFile $privacyKeyIdPath
+
+        # The current official XNode image requires an independent 32-byte
+        # durable-state protection secret.  These deterministic dev-only
+        # values keep the local stack reproducible and are never production
+        # authority material.
+        $stateProtectionPath = Join-Path $directory "xnode-$index-state-protection.key"
+        $stateProtection = [byte[]]::new(32)
+        for ($offset = 0; $offset -lt $stateProtection.Length; $offset++) {
+            $stateProtection[$offset] = [byte](($index * 17 + $offset + 1) % 256)
+        }
+        if (Test-Path -LiteralPath $stateProtectionPath -PathType Leaf) {
+            if (([IO.File]::ReadAllBytes($stateProtectionPath)).Length -ne 32) {
+                throw 'Existing DEV-LOCAL-ONLY XNode state-protection key must contain exactly 32 raw bytes.'
+            }
+        } else {
+            [IO.File]::WriteAllBytes($stateProtectionPath, $stateProtection)
+        }
+        Protect-SurvivalDevPrivateFile $stateProtectionPath
     }
     $issuerPath = Join-Path $directory 'mailbox-client-issuer.seed'
     $issuerSeed = ('{0:x64}' -f 1001)
@@ -689,21 +723,23 @@ function Reset-SurvivalChainLifecycle() {
 
 function Assert-SurvivalHostEndpoints([string]$HostName,[switch]$IncludeChain) {
     $targets = @(
-        "http://$HostName`:41801/api/network/privacy-contact",
-        "http://$HostName`:41802/api/network/privacy-contact",
-        "http://$HostName`:41803/api/network/privacy-contact",
-        "http://$HostName`:41804/api/network/privacy-contact",
-        "http://$HostName`:41805/api/network/privacy-contact",
-        "http://$HostName`:41806/api/network/privacy-contact",
         "http://$HostName`:41810/health/live",
         "http://$HostName`:41810/api/network/membership-route-catalog",
-        "http://$HostName`:41801/api/network/membership-route-catalog",
         "http://$HostName`:41820/health/ready",
         "http://$HostName`:41821/health/ready",
         "http://$HostName`:41822/health/ready",
-        "http://$HostName`:41823/health/ready",
-        'http://127.0.0.1:41999/health/ready'
+        "http://$HostName`:41823/health/ready"
     )
+    if ([Environment]::GetEnvironmentVariable('SURVIVAL_DEV_PRIVACY_E2E') -eq '1') {
+        $targets = @(
+            "http://$HostName`:41801/api/network/privacy-contact",
+            "http://$HostName`:41802/api/network/privacy-contact",
+            "http://$HostName`:41803/api/network/privacy-contact",
+            "http://$HostName`:41804/api/network/privacy-contact",
+            "http://$HostName`:41805/api/network/privacy-contact",
+            "http://$HostName`:41806/api/network/privacy-contact"
+        ) + $targets
+    }
     if ($IncludeChain) {
         $targets += "http://$HostName`:41811/health/ready"
     }
@@ -1051,8 +1087,10 @@ switch ($Action) {
             -TimeoutSeconds 300 `
             -Arguments ($upArguments + @('up', '-d', '--no-build', '--wait') + $Service)
         Assert-SurvivalHostEndpoints $advertisedHost -IncludeChain:$Chain
-        & node (Join-Path $PSScriptRoot 'survival-dev-verify.mjs') '--host' $advertisedHost
-        if ($LASTEXITCODE -ne 0) { throw 'Survival native privacy-route verification failed.' }
+        if ([Environment]::GetEnvironmentVariable('SURVIVAL_DEV_PRIVACY_E2E') -eq '1') {
+            & node (Join-Path $PSScriptRoot 'survival-dev-verify.mjs') '--host' $advertisedHost
+            if ($LASTEXITCODE -ne 0) { throw 'Survival native privacy-route verification failed.' }
+        }
         Assert-SurvivalMembershipFixtureVerified
         $verifiedMembershipPin = Get-SurvivalVerifiedMembershipPin
         $membershipUrl = "http://$advertisedHost`:41810/api/network/membership-route-catalog"

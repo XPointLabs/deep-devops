@@ -100,7 +100,9 @@ try
         queryLeaf,
         HashDomain("Deep/XPoint/V1/XCC1/first-release-profile", network),
         HashDomain("Deep/XPoint/V1/XCB1/first-release-carrier-set", network),
-        HashDomain("Deep/XPoint/V1/PMA2/first-release-placement", network),
+        HashDomain("Deep/XPoint/V1/PMA2/first-release-authority-id", ceremony),
+        manifest.Role("mailbox-deposit-issuer").PublicKey(),
+        manifest.Role("mailbox-retrieve-issuer").PublicKey(),
         notBefore,
         notBefore,
         operationalExpires,
@@ -126,13 +128,14 @@ try
         ("xvp1", authored.ExactXvp1.ToArray()),
         ("xnv1", authored.ExactXnv1.ToArray()),
         ("xnh1", authored.ExactXnh1.ToArray()),
+        ("pma2", authored.ExactPma2.ToArray()),
         ("pmt2", authored.ExactPmt2.ToArray()),
         ("response-adp1", authored.ExactAdp1.ToArray()),
     };
     artifacts.AddRange(authored.ExactXnd1.Select(static value => ("xnd1", value.ToArray())));
     var entries = WriteArtifacts(bootstrapDirectory, artifacts);
     var inventory = new ArtifactInventory(
-        "deep-contact-resolve-readonly-v1",
+        "deep-contact-resolve-readonly-v2",
         Convert.ToHexString(network).ToLowerInvariant(),
         Convert.ToHexString(bootstrap.GenesisPin.AuthorityCoreHash.Span).ToLowerInvariant(),
         1,
@@ -196,9 +199,10 @@ static int ArtifactRoleOrder(string role) => role switch
     "xnv1" => 6,
     "xnh1" => 7,
     "xnd1" => 8,
-    "pmt2" => 9,
-    "response-adp1" => 10,
-    "caller-adh1" => 11,
+    "pma2" => 9,
+    "pmt2" => 10,
+    "response-adp1" => 11,
+    "caller-adh1" => 12,
     _ => throw new InvalidDataException("The production artifact role is unknown."),
 };
 
@@ -419,7 +423,8 @@ sealed class FileSigner :
             request.KeyGeneration != KeyGeneration ||
             request.Purpose is not (XPointNetworkRootSignaturePurpose.GenesisAuthority or
                 XPointNetworkRootSignaturePurpose.DirectoryTimeSourcePolicy or
-                XPointNetworkRootSignaturePurpose.NetworkPolicy))
+                XPointNetworkRootSignaturePurpose.NetworkPolicy or
+                XPointNetworkRootSignaturePurpose.MailboxAuthority))
             throw new CryptographicException("The offline root rejected an out-of-policy signing request.");
         return Sign(request.SigningInput, signature64);
     }

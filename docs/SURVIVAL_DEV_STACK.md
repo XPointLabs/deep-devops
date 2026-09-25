@@ -7,6 +7,43 @@ contains no remote chain, release evidence, retained receipt, or one-shot
 cleanup workflow. Release evidence is produced only by the current strict
 client, service and production-readiness gates.
 
+## Current client E2E status (2026-09-12)
+
+The 12-container contour is healthy, but infrastructure health is not client
+E2E evidence. The physical Android↔Windows `ProvisionIdentity` phase passes on
+persisted, separate account state. It validates the one-button account flow,
+canonical Deep ID, and retained 24-word recovery phrase reveal/hide controls in
+the isolated `network.xpoint.deep.e2e` package. It did not modify the production
+Android package. On Windows the phrase stays outside the ordinary accessibility
+tree; the strict test reads the explicitly revealed editor through the raw UIA
+tree and never writes its value to evidence.
+
+The earlier WinUI `0xc000027b` startup blocker was traced to an unauthorized
+owner rewrite while canonicalizing an inherited E2E app-data root. The root path
+now verifies and preserves its already-current owner while installing the exact
+private ACL; mailbox children retain the stricter exact-owner operation. Native
+`win-arm64` build, focused ACL tests, and physical provisioning pass after the
+change.
+
+Message, attachment, group-text, and payload-matrix phases MUST NOT be reported
+as passed. Physical `Attach` currently stops before `Conversations.Root`: the
+production client composition rejects the current transport because it has no
+`IMsg01AuthenticatedEvidenceSource` / owned E2EE-01 authority. The existing DPE1
+and caller-controlled verification paths are intentionally not accepted as
+fallbacks. `GroupText` and `PayloadMatrix` configuration preflights pass, but
+their UI execution is upstream-blocked by the same runtime authority. DEV0
+becomes green only after that authority and the complete Deep-native messaging
+composition exist and all physical phases produce strict evidence. A mock,
+legacy transport, or `requireE2eeTransport=false` is not an acceptable
+workaround.
+
+`DEV-E2EE-01` is specified by the master architecture document
+`docs/architecture/LOCAL-DEV-E2EE-AUTHORITY.md`, but is deferred until an
+explicit post-release decision. It is not part of the current production
+release path and cannot satisfy production-readiness evidence. When resumed,
+it must exercise the real DPK2/DPH2/DPE2/TRS1 and MSG-01 transition path; it is
+not permission to enable a test verifier or restore DPE1.
+
 From the `deep-devops` repository, start the loopback-only messenger stack:
 
 ```powershell
@@ -155,9 +192,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/survival-dev.ps1 -Ac
 ## P10E mailbox client and peer rehearsal
 
 The survival stack pins its filtered XNode context to accepted source
-`00280a643cfdc1e0780147eceb1da5c7b6fd2799`; a dirty checkout, another revision,
+`dc9f2524670a331adffabd45c13e96554acd68e0`; a dirty checkout, another revision,
 or a filtered-source manifest other than
-`bbb317f49bf774f0223cf0763466c01bfe1c3c896d18075da5d9873751354dbc`
+`5e49af9983cbaba486d47e331fbd327175789c144332c550a43810ca767b9210`
 fails closed before build. The source exporter writes a deterministic
 `.survival-source-manifest.json`, and the shared XNode image carries both the exact
 revision and manifest SHA-256 as OCI labels. The live rehearsal requires all six
