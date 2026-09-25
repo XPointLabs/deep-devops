@@ -87,6 +87,7 @@ jobs:
           dotnet test deep-registry-api/Deep.Registry.Api.slnx --configuration Release --logger "trx;LogFileName=registry.trx" -p:DeepProtocolLocalCutover=true -p:DeepProtocolSourceCutover=true
           dotnet test xpoint-staking-backend/XPoint.Staking.Backend.slnx --configuration Release --logger "trx;LogFileName=staking-backend.trx"
           dotnet test deep-protocol/Deep.Protocol.slnx --configuration Release --logger "trx;LogFileName=protocol.trx"
+          dotnet build deep-devops/tools/did2-adf1-offline/Did2Adf1Offline.csproj --configuration Release -p:RestoreLockedMode=true
           cd deep-tests-e2e
           npm run fixtures:validate
           npm run compat
