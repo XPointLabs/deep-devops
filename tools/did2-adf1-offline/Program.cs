@@ -64,6 +64,50 @@ var source = DeepIdV2DirectoryBootstrapVerifier.RestoreGenesis(authority,
     Options.ReadBounded(options.Required("--source-adh1"), 4096), sourcePin);
 var target = AccountDirectoryProtectedLkgFactory.Restore(authority,
     Options.ReadBounded(options.Required("--target-adh1"), 4096), targetPin);
+var lineageManifestPath = Path.GetFullPath(
+    options.Required("--covered-manifest"));
+using var lineageDocument = JsonDocument.Parse(
+    Options.ReadBounded(lineageManifestPath, 1_048_576));
+var lineage = lineageDocument.RootElement;
+if (lineage.GetProperty("schema").GetString() !=
+        "deep-did2-authenticated-covered-lineage.v1" ||
+    !CryptographicOperations.FixedTimeEquals(
+        Options.Hex(lineage.GetProperty("currentFloorCoreHashHex").GetString(),
+            32, "independent current floor"), targetPin))
+    throw new CryptographicException(
+        "The covered-head export does not bind the independently pinned target floor.");
+var listed = lineage.GetProperty("coveredHeads").EnumerateArray().ToArray();
+if (listed.Length is < 1 or > 4096)
+    throw new InvalidDataException("The covered-head manifest has an invalid count.");
+var covered = new List<AccountDirectoryProtectedLkg>(listed.Length);
+for (var index = 0; index < listed.Length; index++)
+{
+    var item = listed[index];
+    var name = $"head-{index:D4}.adh1";
+    if (item.GetProperty("generation").GetUInt64() != (ulong)index ||
+        item.GetProperty("fileName").GetString() != name)
+        throw new InvalidDataException(
+            "The covered-head export is not in exact generation order.");
+    var exact = Options.ReadBounded(Path.Combine(
+        Path.GetDirectoryName(lineageManifestPath)!, name), 4096);
+    var expectedSha = Options.Hex(item.GetProperty("sha256Hex").GetString(),
+        32, "covered-head file SHA-256");
+    if (!CryptographicOperations.FixedTimeEquals(SHA256.HashData(exact),
+            expectedSha))
+        throw new CryptographicException(
+            "A covered-head file differs from its authenticated export.");
+    var expectedCore = Options.Hex(
+        item.GetProperty("coreHashHex").GetString(), 32,
+        "covered-head core hash");
+    covered.Add(AccountDirectoryProtectedLkgFactory.Restore(authority,
+        exact, expectedCore));
+}
+if (!CryptographicOperations.FixedTimeEquals(
+        covered[0].ExactAdh1.Span, source.ExactAdh1.Span) ||
+    !CryptographicOperations.FixedTimeEquals(
+        covered[0].CoreHash.Span, sourcePin))
+    throw new CryptographicException(
+        "The covered-head export does not begin at the independently pinned genesis.");
 var issuedAt = ulong.Parse(options.Required("--issued-at-unix"),
     NumberStyles.None, CultureInfo.InvariantCulture);
 var reader = ushort.Parse(options.Required("--minimum-reader"),
@@ -80,7 +124,7 @@ try
 {
     using var signer = new RootSigner(rootId, expectedPublic, seed);
     var exact = await AccountDirectoryAdf1OfflineAuthor.AuthorInitialAsync(
-        authority, source, target, issuedAt, reader, [signer]);
+        authority, covered, target, issuedAt, reader, [signer]);
     // A decode/re-encode round trip is an independent canonical-file check;
     // the author already verified every signer result against exact XNA1.
     var parsed = AccountDirectoryAdf1Codec.Decode(exact);
@@ -95,6 +139,7 @@ try
     Console.WriteLine($"Output SHA-256: {Convert.ToHexString(SHA256.HashData(exact))}");
     Console.WriteLine($"Source ADH1: {Convert.ToHexString(source.CoreHash.Span)}");
     Console.WriteLine($"Target ADH1: {Convert.ToHexString(target.CoreHash.Span)}");
+    Console.WriteLine($"Covered signed heads: {covered.Count}");
 }
 finally { CryptographicOperations.ZeroMemory(seed); }
 
@@ -153,7 +198,7 @@ internal sealed class Options
             "--authority-root", "--output", "--xna1-core-hash", "--xna1",
             "--dts1", "--source-adh1", "--source-adh1-core-hash",
             "--target-adh1", "--target-adh1-core-hash",
-            "--issued-at-unix", "--minimum-reader"
+            "--covered-manifest", "--issued-at-unix", "--minimum-reader"
         };
         if (args.Length != expected.Count * 2)
             throw new ArgumentException("The exact offline ADF1 input set is required.");
