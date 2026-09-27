@@ -42,3 +42,12 @@ keys, retains the original public manifest as
 manifest. It never rotates existing keys. A leftover augmentation lock or
 staging directory means the transaction needs manual review; do not retry by
 deleting it. The offline root remains local-only.
+
+`tools/production-authority-bootstrap` is a one-time genesis author, not an
+operational renewal tool. It no longer accepts `--previous-bootstrap-root`:
+that path retained the old XNA1/DTS1 pin while re-authoring XVP1/XND1/XNV1/XNH1
+as generation zero, which cannot advance an already protected operational
+head. A live network must use a separately verified, strictly monotonic
+successor ceremony; do not run genesis again to repair an expired view. The
+bootstrap binds the distinct mailbox deposit and retrieve public keys from
+the custody manifest when constructing PMA2.
