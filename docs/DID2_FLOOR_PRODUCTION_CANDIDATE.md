@@ -6,6 +6,16 @@ checkpoint; Registry cutover is not approved**.
 The database has its schema, distinct roles and the exact signed empty
 genesis row. The public Registry still serves its previous configuration.
 
+Source verification on 2026-09-28: the local-source Registry HTTP test
+`CreatedClientAccountRequiresAndCommitsRealRegistryProof` passed a multi-hop
+DID2 proof through an imported root-signed ADF1 and asserted that the new
+DTT1 names the latest head. This proves the tested code path, not the deployed
+canary or a production cutover. The saved canary environment has no
+`DeepIdV2DirectoryAuthority__ForwardCheckpointPaths` entry. Existing private
+ADF1 candidate artifacts must be independently matched to the exact restored
+ADA2 lineage and external floor before either canary is restarted. Keep the
+public route unchanged until that reconciliation and physical client E2E pass.
+
 An additional UAT-only floor schema and ADA2 state were provisioned without
 overwriting the original candidate. Physical Android confirmed the first
 signed admission/proof and protected restart; an external Windows test then
