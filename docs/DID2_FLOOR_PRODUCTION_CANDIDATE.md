@@ -1,8 +1,8 @@
 # DID2 latest-head floor production candidate
 
-Status on 2026-09-25: **isolated floor service remains deployed on seed2;
-both loopback-only DID2 Registry canaries are stopped pending a safe forward
-checkpoint; Registry cutover is not approved**.
+Status on 2026-09-28: **isolated floor service remains deployed on seed2;
+the new loopback-only UAT Registry forward-probe is ready, but Registry
+production cutover is not approved**.
 The database has its schema, distinct roles and the exact signed empty
 genesis row. The public Registry still serves its previous configuration.
 
@@ -16,18 +16,58 @@ ADF1 candidate artifacts must be independently matched to the exact restored
 ADA2 lineage and external floor before either canary is restarted. Keep the
 public route unchanged until that reconciliation and physical client E2E pass.
 
-Live read-only audit on 2026-09-28 refined this status: two separate,
-loopback-only UAT diagnostic containers are running. The forward-probe has an
+Live read-only audit on 2026-09-28 refined the earlier status: two separate,
+loopback-only UAT diagnostic containers were running. The old forward-probe has an
 ADF1 path, unlike the saved earlier canary environment, but uses an older
-image and contains three duplicate DID2 keys with conflicting values (floor
-connection, ADA2 state path, proof-ledger root). The independent UAT floor
+image and contained six duplicate configuration keys with conflicting values
+(the DID2 floor connection, ADA2 state and proof-ledger root, the ContactResolve
+trusted-time state and request-ledger root, and the Registry state path). The independent UAT floor
 and a newly copied ADA2 state agree on the exact generation-7/tree-5 head;
 the saved ADF1 targets the authenticated generation-4 ancestor. That current
-head expired on 2026-09-25. Neither probe is a production endpoint or valid
-device-E2E evidence. A newer candidate image was pulled but not started.
-The next canary composition must remove all duplicate keys, refresh the head
-through protected trusted time and the independent floor CAS, then obtain a
-fresh physical-client proof before any wider rollout.
+head expired on 2026-09-25. Neither old probe is a production endpoint or valid
+device-E2E evidence.
+
+The newer Registry candidate image was started only in a new, closed UAT
+forward-probe, bound to loopback on a separate port. A private, mode-0600
+environment file was prepared from the old Docker inspection by
+`scripts/prepare-did2-forward-probe-env.cjs`; it retains the reviewed last
+values of exactly those six overrides, requires the expected UAT artifact
+basenames and floor schema, and refuses any other duplicate. No environment
+values were printed or committed. The old protected trusted-time file was
+backed up and hash-verified before its compare-and-swap rotation from an
+independently observed UTC interval. The operator advanced the expired head
+to generation 8/tree size 5 without changing directory content. An independent
+read from the floor host returned the same new core hash, and an ADA2 export
+with that floor hash re-verified the journal. The new probe returned HTTP 200
+from `/health/did2/ready`; this is a server readiness result, not a
+nonce-fresh physical-client proof, message transport result, or cutover approval.
+The protected time anchor is intentionally short-lived and must be rotated
+again before expiry for further UAT checks.
+
+To recompose this exact reviewed UAT source, run the helper on the Registry
+Docker host with `--container`, `--output`, `--expect-state`,
+`--expect-ledger`, `--expect-registry-state`, `--expect-trusted-time`,
+`--expect-contact-ledger`, `--expect-floor-schema`, and `--expect-adf1`
+in that order. The `--expect-*` values are independently checked basenames
+or the isolated floor schema, not credentials. Use a new absolute output
+path under a private operator directory; the helper creates it exclusively
+with mode 0600 and never overwrites an existing file. Check the resulting
+container's exact network, mount count, loopback-only port and duplicate-key
+preflight before start. Keep the source container for recovery.
+
+A physical Android diagnostic then created a fresh account on the correct
+network and committed its genesis: the independent floor advanced to
+generation 9/tree size 6, and the ADA2 export verified the same head. Its
+nonce-fresh proof still failed closed. First, the test anchor's 15-second
+uncertainty exceeded the XNA1 maximum of 10 seconds; a guarded rotation to
+8 seconds removed that error. The next exact failure was that the signed
+XNV1 does not cover the issued interval. The UAT XVP1, all three XND1 and
+XNV1 expired together on 2026-09-25. This operational closure must be
+renewed with its correct predecessor, root/node/witness custody and current
+time; neither a replacement generation-zero chain nor a relaxed verifier is
+acceptable. The Android account and the floor/ADA2 state were preserved;
+the complete post-admission UAT state and independent floor dump were copied
+to private recovery storage. No physical proof or message E2E is claimed.
 
 An additional UAT-only floor schema and ADA2 state were provisioned without
 overwriting the original candidate. Physical Android confirmed the first
@@ -114,8 +154,11 @@ Deployment is gated in this order:
    environment values. Do not store or paste raw inspect output in evidence:
    it may contain secrets. Docker may normalize duplicates before process
    startup, so the Registry's raw-process-environment guard is insufficient
-   for this check. The current isolated readiness probe fails this preflight;
-   its deployment composition needs one effective value per DID2 key.
+   for this check. The old isolated probes fail this preflight. The new closed
+   UAT probe has one effective value per key; repeat the preflight on its exact
+   container before any promotion. The environment preparation helper is
+   restricted to this reviewed UAT source and is not a general-purpose
+   production composer.
 6. Only after the full DID2 client and physical E2E gates pass may the
    explicit Registry production-cutover attestation be set. It remains off.
 
