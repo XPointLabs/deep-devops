@@ -82,6 +82,17 @@ Deployment is gated in this order:
    role-recovery drill remains open.
    The canary's trusted-time state is short-lived and must be refreshed by
    the authorized operator before subsequent admission/proof tests.
+   Before promoting any Registry candidate, run
+   `node scripts/check-did2-registry-container-env.mjs --container <exact-name>`
+   on its Docker host, or pipe the exact remote `docker inspect` JSON to
+   `node scripts/check-did2-registry-container-env.mjs --stdin` locally.
+   A nonzero exit blocks promotion. The check rejects repeated DID2 authority
+   keys, including case variants and identical values, and never prints
+   environment values. Do not store or paste raw inspect output in evidence:
+   it may contain secrets. Docker may normalize duplicates before process
+   startup, so the Registry's raw-process-environment guard is insufficient
+   for this check. The current isolated readiness probe fails this preflight;
+   its deployment composition needs one effective value per DID2 key.
 6. Only after the full DID2 client and physical E2E gates pass may the
    explicit Registry production-cutover attestation be set. It remains off.
 
