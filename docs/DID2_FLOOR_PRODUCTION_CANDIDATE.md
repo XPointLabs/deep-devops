@@ -16,6 +16,19 @@ ADF1 candidate artifacts must be independently matched to the exact restored
 ADA2 lineage and external floor before either canary is restarted. Keep the
 public route unchanged until that reconciliation and physical client E2E pass.
 
+Live read-only audit on 2026-09-28 refined this status: two separate,
+loopback-only UAT diagnostic containers are running. The forward-probe has an
+ADF1 path, unlike the saved earlier canary environment, but uses an older
+image and contains three duplicate DID2 keys with conflicting values (floor
+connection, ADA2 state path, proof-ledger root). The independent UAT floor
+and a newly copied ADA2 state agree on the exact generation-7/tree-5 head;
+the saved ADF1 targets the authenticated generation-4 ancestor. That current
+head expired on 2026-09-25. Neither probe is a production endpoint or valid
+device-E2E evidence. A newer candidate image was pulled but not started.
+The next canary composition must remove all duplicate keys, refresh the head
+through protected trusted time and the independent floor CAS, then obtain a
+fresh physical-client proof before any wider rollout.
+
 An additional UAT-only floor schema and ADA2 state were provisioned without
 overwriting the original candidate. Physical Android confirmed the first
 signed admission/proof and protected restart; an external Windows test then
