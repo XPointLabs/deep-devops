@@ -29,8 +29,37 @@ $env:DEEP_DEVOPS_DIR = $DevopsDir.Path
 $env:DEEP_COMPOSE_FILE = $ComposeFile
 $env:DEEP_ARTIFACT_DIR = $TestResultDir
 $env:DEEP_REHEARSAL_RUN_DIR = $ArtifactDir
-$env:DEEP_REGISTRY_URL = "http://127.0.0.1:18080"
-$env:DEEP_MULTI_NODE_ROUTER_URLS = "http://127.0.0.1:19281,http://127.0.0.1:19282,http://127.0.0.1:19283"
+function Get-RehearsalHostPort {
+    param([string] $Name, [int] $Default)
+
+    $value = [Environment]::GetEnvironmentVariable($Name)
+    if ([string]::IsNullOrWhiteSpace($value)) { return $Default }
+    $parsed = 0
+    if (-not [int]::TryParse($value, [ref]$parsed) -or
+        $parsed -lt 1024 -or $parsed -gt 65535) {
+        throw "$Name must be an integer from 1024 through 65535"
+    }
+    return $parsed
+}
+
+$registryHostPort = Get-RehearsalHostPort -Name 'DEEP_MULTI_NODE_REGISTRY_HOST_PORT' -Default 18080
+$router1HostPort = Get-RehearsalHostPort -Name 'DEEP_MULTI_NODE_ROUTER_1_HOST_PORT' -Default 19281
+$router2HostPort = Get-RehearsalHostPort -Name 'DEEP_MULTI_NODE_ROUTER_2_HOST_PORT' -Default 19282
+$router3HostPort = Get-RehearsalHostPort -Name 'DEEP_MULTI_NODE_ROUTER_3_HOST_PORT' -Default 19283
+$rehearsalPorts = @($registryHostPort, $router1HostPort, $router2HostPort, $router3HostPort)
+if (@($rehearsalPorts | Select-Object -Unique).Count -ne $rehearsalPorts.Count) {
+    throw 'Multi-node rehearsal host ports must be distinct.'
+}
+$env:DEEP_MULTI_NODE_REGISTRY_HOST_PORT = "$registryHostPort"
+$env:DEEP_MULTI_NODE_ROUTER_1_HOST_PORT = "$router1HostPort"
+$env:DEEP_MULTI_NODE_ROUTER_2_HOST_PORT = "$router2HostPort"
+$env:DEEP_MULTI_NODE_ROUTER_3_HOST_PORT = "$router3HostPort"
+$env:DEEP_REGISTRY_URL = "http://127.0.0.1:$registryHostPort"
+$env:DEEP_MULTI_NODE_ROUTER_URLS = @(
+    "http://127.0.0.1:$router1HostPort",
+    "http://127.0.0.1:$router2HostPort",
+    "http://127.0.0.1:$router3HostPort"
+) -join ','
 . (Join-Path $ScriptDir "ephemeral-compose-secrets.ps1")
 $generatedComposeSecretNames = @(Initialize-DeepEphemeralComposeSecrets -ScriptDirectory $ScriptDir)
 

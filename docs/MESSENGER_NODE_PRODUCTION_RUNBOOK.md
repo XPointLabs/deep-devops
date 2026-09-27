@@ -115,6 +115,11 @@ Startup is isolated under compose project
 `deep-multi-node-rehearsal`, reports progress every 15 seconds, and fails with
 cleanup after the bounded timeout (`DEEP_MULTI_NODE_COMPOSE_TIMEOUT_SECONDS`,
 60-1800; default 900).
+If the default local ports are occupied by the dev contour, set the four
+distinct host-only overrides `DEEP_MULTI_NODE_REGISTRY_HOST_PORT` and
+`DEEP_MULTI_NODE_ROUTER_{1,2,3}_HOST_PORT` (1024-65535) before running the
+rehearsal. The script uses the same validated ports for Compose and its probe
+URLs; container-to-container ports and the production topology are unchanged.
 Every invocation writes only beneath a unique
 `artifacts/rehearsals/multi-node/<UTC-run-id>/` directory. Failure collection
 and secret scanning are bound to that directory and never rescan historical

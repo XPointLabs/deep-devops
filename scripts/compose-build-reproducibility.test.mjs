@@ -135,6 +135,21 @@ test('mandatory NODE_IMAGE Dockerfiles and production storage build use the revi
 test('multi-node compose startup is isolated, bounded, observable, and always cleaned', async () => {
   const source = await readFile(path.join(repositoryRoot, 'scripts', 'multi-node-rehearsal.ps1'), 'utf8');
   const rehearsal = await readFile(path.join(repositoryRoot, 'scripts', 'multi-node-rehearsal.mjs'), 'utf8');
+  const compose = await readFile(path.join(repositoryRoot, 'docker-compose.yml'), 'utf8');
+  const snapshot = await readFile(path.join(repositoryRoot, 'scripts', 'runtime-snapshot.ps1'), 'utf8');
+  for (const [name, fallback] of [
+    ['REGISTRY', '18080'],
+    ['ROUTER_1', '19281'],
+    ['ROUTER_2', '19282'],
+    ['ROUTER_3', '19283']
+  ]) {
+    assert.ok(compose.includes(`\${DEEP_MULTI_NODE_${name}_HOST_PORT:-${fallback}}:8080`));
+    assert.ok(source.includes(`DEEP_MULTI_NODE_${name}_HOST_PORT`));
+  }
+  assert.match(source, /Multi-node rehearsal host ports must be distinct/);
+  assert.match(snapshot, /DEEP_REHEARSAL_RUN_DIR/);
+  assert.match(snapshot, /\$registryBaseUrl = \$env:DEEP_REGISTRY_URL/);
+  assert.match(snapshot, /DEEP_MULTI_NODE_ROUTER_URLS/);
   assert.match(source, /\$ComposeProjectName = "deep-multi-node-rehearsal"/);
   assert.match(source, /DEEP_MULTI_NODE_COMPOSE_TIMEOUT_SECONDS/);
   assert.match(source, /Invoke-DockerBounded -TimeoutSeconds \$ComposeTimeoutSeconds/);

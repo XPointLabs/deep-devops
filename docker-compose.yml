@@ -119,7 +119,7 @@ services:
       - xnode-2-vless-client-id
       - xnode-2-reality-private-key
     ports:
-      - "19281:8080"
+      - "${DEEP_MULTI_NODE_ROUTER_1_HOST_PORT:-19281}:8080"
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health/ready >/dev/null"]
       interval: 5s
@@ -164,7 +164,7 @@ services:
       - xnode-3-vless-client-id
       - xnode-3-reality-private-key
     ports:
-      - "19282:8080"
+      - "${DEEP_MULTI_NODE_ROUTER_2_HOST_PORT:-19282}:8080"
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health/ready >/dev/null"]
       interval: 5s
@@ -209,7 +209,7 @@ services:
       - xnode-4-vless-client-id
       - xnode-4-reality-private-key
     ports:
-      - "19283:8080"
+      - "${DEEP_MULTI_NODE_ROUTER_3_HOST_PORT:-19283}:8080"
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health/ready >/dev/null"]
       interval: 5s
@@ -245,7 +245,7 @@ services:
     secrets:
       - turn-shared-secret
     ports:
-      - "18080:8080"
+      - "${DEEP_MULTI_NODE_REGISTRY_HOST_PORT:-18080}:8080"
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health/live >/dev/null"]
       interval: 5s

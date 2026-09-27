@@ -228,10 +228,17 @@ else {
     "http://127.0.0.1:18103/stats"
 }
 
+$routerBaseUrl = "http://127.0.0.1:18081"
+$registryBaseUrl = "http://127.0.0.1:18080"
+if (-not [string]::IsNullOrWhiteSpace($env:DEEP_REHEARSAL_RUN_DIR)) {
+    $routerBaseUrl = @($env:DEEP_MULTI_NODE_ROUTER_URLS -split ',')[0]
+    $registryBaseUrl = $env:DEEP_REGISTRY_URL
+}
+
 $snapshots = @(
-    (Get-Snapshot -Name "router-health-ready" -Url "http://127.0.0.1:18081/health/ready"),
-    (Get-Snapshot -Name "registry-health-live" -Url "http://127.0.0.1:18080/health/live"),
-    (Get-Snapshot -Name "registry-runtime" -Url "http://127.0.0.1:18080/api/nodes/runtime"),
+    (Get-Snapshot -Name "router-health-ready" -Url (Join-UrlPath $routerBaseUrl "/health/ready")),
+    (Get-Snapshot -Name "registry-health-live" -Url (Join-UrlPath $registryBaseUrl "/health/live")),
+    (Get-Snapshot -Name "registry-runtime" -Url (Join-UrlPath $registryBaseUrl "/api/nodes/runtime")),
     (Get-Snapshot -Name "staking-health-live" -Url "http://127.0.0.1:18082/health/live"),
     (Get-Snapshot -Name "staking-events-stats" -Url "http://127.0.0.1:18082/api/events/stats"),
     (Get-Snapshot -Name $storageStatsName -Url $storageStatsUrl),
