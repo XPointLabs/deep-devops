@@ -8,6 +8,16 @@ using Sodium;
 using static BootstrapIo;
 
 var arguments = Arguments.Parse(args);
+if (arguments.IsRolloverPreparation)
+{
+    RolloverPreparation.Run(arguments);
+    return;
+}
+if (arguments.IsSuccessor)
+{
+    await SuccessorCeremony.RunAsync(arguments);
+    return;
+}
 var authorityRoot = ExistingDirectory(arguments.Required("--authority-root"));
 var outputRoot = NewDirectoryPath(arguments.Required("--output"));
 var nodes = new[]
@@ -119,6 +129,7 @@ try
         ("xvp1", authored.ExactXvp1.ToArray()),
         ("xnv1", authored.ExactXnv1.ToArray()),
         ("xnh1", authored.ExactXnh1.ToArray()),
+        ("pma2", authored.ExactPma2.ToArray()),
         ("pmt2", authored.ExactPmt2.ToArray()),
         ("response-adp1", authored.ExactAdp1.ToArray()),
     };
@@ -189,9 +200,10 @@ static int ArtifactRoleOrder(string role) => role switch
     "xnv1" => 6,
     "xnh1" => 7,
     "xnd1" => 8,
-    "pmt2" => 9,
-    "response-adp1" => 10,
-    "caller-adh1" => 11,
+    "pma2" => 9,
+    "pmt2" => 10,
+    "response-adp1" => 11,
+    "caller-adh1" => 12,
     _ => throw new InvalidDataException("The production artifact role is unknown."),
 };
 
@@ -233,18 +245,36 @@ sealed class Arguments
         {
             "--authority-root", "--seed1-root", "--seed2-root", "--seed3-root", "--output",
             "--observed-unix", "--boot-id", "--nonce-created", "--response-received", "--current-sample",
+            "--successor-from", "--rollover-root", "--protected-head-core-hash",
+            "--protected-pmt-artifact-hash", "--current-adh1-path", "--current-adh1-core-hash",
+            "--prepare-rollover",
         };
         var values = new Dictionary<string, string>(StringComparer.Ordinal);
         for (var index = 0; index < args.Length; index += 2)
             if (!allowed.Contains(args[index]) || string.IsNullOrWhiteSpace(args[index + 1]) ||
                 !values.TryAdd(args[index], args[index + 1]))
                 throw new ArgumentException("An authority bootstrap argument is unknown, empty, or duplicated.");
-        if (allowed.Any(value => !values.ContainsKey(value)))
+        var preparation = values.ContainsKey("--prepare-rollover");
+        var successor = values.ContainsKey("--successor-from");
+        if (preparation && (!string.Equals(values["--prepare-rollover"], "true", StringComparison.Ordinal) || successor))
+            throw new ArgumentException("Rollover preparation and successor issuance are separate operations.");
+        var required = preparation
+            ? new[] { "--prepare-rollover", "--authority-root", "--seed1-root", "--seed2-root", "--seed3-root",
+                "--observed-unix" }
+            : successor
+            ? new[] { "--authority-root", "--seed1-root", "--seed2-root", "--seed3-root", "--output",
+                "--observed-unix", "--successor-from", "--rollover-root", "--protected-head-core-hash",
+                "--protected-pmt-artifact-hash", "--current-adh1-path", "--current-adh1-core-hash" }
+            : new[] { "--authority-root", "--seed1-root", "--seed2-root", "--seed3-root", "--output",
+                "--observed-unix", "--boot-id", "--nonce-created", "--response-received", "--current-sample" };
+        if (required.Any(value => !values.ContainsKey(value)) || values.Count != required.Length)
             throw new ArgumentException("The authority bootstrap argument set is incomplete.");
         return new Arguments(values);
     }
 
     internal string Required(string name) => values[name];
+    internal bool IsSuccessor => values.ContainsKey("--successor-from");
+    internal bool IsRolloverPreparation => values.ContainsKey("--prepare-rollover");
     internal ulong RequiredU64(string name) => ulong.TryParse(values[name], out var parsed)
         ? parsed
         : throw new ArgumentException($"{name} is not an unsigned integer.");
@@ -351,7 +381,8 @@ sealed class FileSigner :
             request.KeyGeneration != KeyGeneration ||
             request.Purpose is not (XPointNetworkRootSignaturePurpose.GenesisAuthority or
                 XPointNetworkRootSignaturePurpose.DirectoryTimeSourcePolicy or
-                XPointNetworkRootSignaturePurpose.NetworkPolicy))
+                XPointNetworkRootSignaturePurpose.NetworkPolicy or
+                XPointNetworkRootSignaturePurpose.MailboxAuthority))
             throw new CryptographicException("The offline root rejected an out-of-policy signing request.");
         return Sign(request.SigningInput, signature64);
     }

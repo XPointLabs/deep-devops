@@ -51,3 +51,38 @@ head. A live network must use a separately verified, strictly monotonic
 successor ceremony; do not run genesis again to repair an expired view. The
 bootstrap binds the distinct mailbox deposit and retrieve public keys from
 the custody manifest when constructing PMA2.
+
+For a strictly monotonic operational successor, the same tool accepts
+`--successor-from` together with an exact source artifact directory, the
+independently protected XNH1 core hash and PMT2 artifact hash, the current
+ADH1 bytes and independently protected ADH1 core hash, and a separate
+`--rollover-root`. Each of its `seed1`, `seed2`, and `seed3` subdirectories must
+already contain `current.x25519.seed`, `next.x25519.seed`,
+`current-origin.cer`, `current-origin.key`, `next-origin.cer`, and
+`next-origin.key`. Both certificate/key pairs must match and cover the
+new interval; their SPKI pins and both onion public keys must differ from the
+previous descriptor. The registered Ed25519 node identities are unchanged.
+The command reads existing custody, verifies the source inventory and pinned
+genesis, and writes only a new, previously absent output directory. It does
+not generate keys, alter nodes, publish to Registry, advance protected floors,
+or issue a nonce-fresh DTT1/ADP1. Certificate private keys and onion seeds must
+be installed on the intended nodes and checked against the signed descriptor
+before any network cutover. The source artifact directory alone is never an
+independent protected pin; the three expected hashes must be obtained from
+their separately protected current-state authorities.
+
+Before that ceremony, `--prepare-rollover true` with `--authority-root`,
+`--observed-unix`, and the three `--seedN-root` inputs creates a new
+`private/rollover-<observed-unix>` directory inside existing protected custody.
+It generates independent current/next X25519 seeds and matching self-issued
+TLS certificate/private-key pairs bound to the node hosts in the backed-up
+environments. It refuses an existing output directory, does not rotate
+registered node identities, and does not modify certbot or remote machines.
+The private directory must retain the custody ACL; never include it in public
+artifacts. Preparation is not deployment or proof of device readiness.
+
+Run the synthetic offline operator-input gate without opening real custody:
+
+```powershell
+dotnet run --project tools/production-authority-bootstrap-tests/ProductionAuthority.Bootstrap.Tests.csproj
+```

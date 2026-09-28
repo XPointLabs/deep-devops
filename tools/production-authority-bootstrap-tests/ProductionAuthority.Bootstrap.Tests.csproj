@@ -7,7 +7,6 @@
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\..\deep-protocol\src\Deep.Protocol\Deep.Protocol.csproj" />
-    <InternalsVisibleTo Include="ProductionAuthority.Bootstrap.Tests" />
+    <ProjectReference Include="../production-authority-bootstrap/ProductionAuthority.Bootstrap.csproj" />
   </ItemGroup>
 </Project>
