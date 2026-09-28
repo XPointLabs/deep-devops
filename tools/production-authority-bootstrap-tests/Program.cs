@@ -41,6 +41,21 @@ static void TestArguments()
     Reject<ArgumentException>(() => Arguments.Parse([.. audit, "--successor-from", "synthetic"]));
     Reject<ArgumentException>(() => Arguments.Parse([.. audit, "--authority-root", "synthetic"]));
     Reject<ArgumentException>(() => Arguments.Parse(audit[..^2]));
+    var network = new[] { "--export-network-genesis", "synthetic",
+        "--network-id-hex", "synthetic", "--genesis-core-hash", "synthetic", "--output", "synthetic" };
+    if (!Arguments.Parse(network).IsNetworkClosureExport || Arguments.Parse(network).IsNetworkClosureExtension)
+        throw new Exception("Public network genesis export mode was not exclusively selected.");
+    Reject<ArgumentException>(() => Arguments.Parse([.. network, "--authority-root", "synthetic"]));
+    Reject<ArgumentException>(() => Arguments.Parse([.. network, "--successor-from", "synthetic"]));
+    Reject<ArgumentException>(() => Arguments.Parse([.. network, "--extend-network-closure", "synthetic"]));
+    Reject<ArgumentException>(() => Arguments.Parse(network[..^2]));
+    var extension = new[] { "--extend-network-closure", "synthetic", "--network-successor-source", "synthetic",
+        "--network-id-hex", "synthetic", "--genesis-core-hash", "synthetic", "--output", "synthetic" };
+    if (!Arguments.Parse(extension).IsNetworkClosureExport || !Arguments.Parse(extension).IsNetworkClosureExtension)
+        throw new Exception("Public network successor export mode was not selected.");
+    Reject<ArgumentException>(() => Arguments.Parse([.. extension, "--prepare-rollover", "true"]));
+    Reject<ArgumentException>(() => Arguments.Parse([.. extension, "--audit-genesis-source", "synthetic"]));
+    Reject<ArgumentException>(() => Arguments.Parse(extension[..^2]));
 }
 
 static void TestSourceInventory()

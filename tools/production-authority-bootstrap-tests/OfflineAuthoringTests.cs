@@ -72,6 +72,7 @@ internal static class OfflineAuthoringTests
                 adhReference, 1_200, 1_210, 1_400));
         if (successor.ExactXnd1.Count != 3 || successor.ExactXnh1.IsEmpty || successor.ExactPma2.IsEmpty)
             throw new Exception("The operator signers did not author a complete successor.");
+        TestPublicNetworkExport(directory, bootstrap, genesis, successor);
 
         FileSigner Signer(string name, byte id, byte seedValue, byte domain, bool isRoot)
         {
@@ -89,6 +90,108 @@ internal static class OfflineAuthoringTests
 
     private static byte[] B(int length, byte value) => Enumerable.Repeat(value, length).ToArray();
     private static byte[] H(string value) => SHA256.HashData(System.Text.Encoding.ASCII.GetBytes(value));
+
+    // Genuine signed ceremony records, but export is distribution only: no
+    // nonce-fresh DID2 proof, live network capability, TLS or device claim.
+    private static void TestPublicNetworkExport(string directory,
+        VerifiedXPointNetworkBootstrap bootstrap, AuthoredXPointNetworkOperationalGenesis genesis,
+        AuthoredXPointNetworkOperationalSuccessor successor)
+    {
+        var network = Convert.ToHexString(bootstrap.GenesisPin.NetworkId.Span);
+        var pin = Convert.ToHexString(bootstrap.GenesisPin.AuthorityCoreHash.Span);
+        var initial = Path.Combine(directory, "network-initial");
+        var next = Path.Combine(directory, "network-next");
+        WriteSource(initial, false);
+        WriteSource(next, true);
+        var initialOutput = Path.Combine(directory, "network-initial.ncp2");
+        var output = Path.Combine(directory, "network-current.ncp2");
+        var initialArgs = new[] { "--export-network-genesis", initial, "--network-id-hex", network,
+            "--genesis-core-hash", pin, "--output", initialOutput };
+        NetworkClosureExport.Run(Arguments.Parse(initialArgs));
+        Reject<IOException>(() => NetworkClosureExport.Run(Arguments.Parse(initialArgs)));
+        var args = new[] { "--extend-network-closure", initialOutput, "--network-successor-source", next,
+            "--network-id-hex", network, "--genesis-core-hash", pin, "--output", output };
+        NetworkClosureExport.Run(Arguments.Parse(args));
+        var decoded = XPointNetworkClosureWireCodec.DecodeResponse(File.ReadAllBytes(output));
+        if (decoded.ExactViewChain.Count != 2 || decoded.ExactHeadChain.Count != 2 ||
+            decoded.ExactNetworkPolicyChain.Count != 2 || decoded.ExactPlacementTopologyChain.Count != 2 ||
+            decoded.ExactActiveNodeDescriptors.Count != 3 ||
+            !decoded.ExactHeadChain[0].Span.SequenceEqual(genesis.ExactXnh1.Span) ||
+            !decoded.ExactHeadChain[1].Span.SequenceEqual(successor.ExactXnh1.Span) ||
+            !decoded.ExactPlacementTopologyChain[0].Span.SequenceEqual(genesis.ExactPmt2.Span) ||
+            !decoded.ExactPlacementTopologyChain[1].Span.SequenceEqual(successor.ExactPmt2.Span))
+            throw new Exception("Public network export lost or changed exact signed history.");
+        Reject<IOException>(() => NetworkClosureExport.Run(Arguments.Parse(args)));
+        args[^1] = Path.Combine(directory, "network-rejected.ncp2");
+        args[7] = new string('1', 64);
+        Reject<XPointNetworkAuthorityVerificationException>(() =>
+            NetworkClosureExport.Run(Arguments.Parse(args)));
+        args[7] = pin;
+        args[1] = output; // Replay the same successor against an advanced base.
+        Reject<CryptographicException>(() => NetworkClosureExport.Run(Arguments.Parse(args)));
+        args[1] = initialOutput;
+        WriteSource(next, true, omitPrefix: true);
+        Reject<CryptographicException>(() => NetworkClosureExport.Run(Arguments.Parse(args)));
+        WriteSource(next, true, alterPrefix: true);
+        Reject<CryptographicException>(() => NetworkClosureExport.Run(Arguments.Parse(args)));
+        WriteSource(next, true);
+        var descriptorPath = Path.Combine(next, "bootstrap", "xnd1.0000.bin");
+        var changed = File.ReadAllBytes(descriptorPath);
+        changed[^1] ^= 1;
+        File.WriteAllBytes(descriptorPath, changed);
+        Reject<CryptographicException>(() => NetworkClosureExport.Run(Arguments.Parse(args)));
+        WriteSource(next, true);
+        var manifestPath = Path.Combine(next, "public-manifest.v1.json");
+        var manifest = JsonSerializer.Deserialize<PublicBootstrapManifest>(File.ReadAllBytes(manifestPath))!;
+        var oversized = Enumerable.Range(0, 69).Select(index => new ArtifactEntry("xnd1", index,
+            $"xnd1.{index:D4}.bin", 1_048_576, new string('1', 64))).ToList();
+        File.WriteAllBytes(manifestPath, JsonSerializer.SerializeToUtf8Bytes(manifest with { Artifacts = oversized }));
+        Reject<InvalidDataException>(() => NetworkClosureExport.Run(Arguments.Parse(args)));
+        if (File.Exists(args[^1])) throw new Exception("Rejected public export wrote an output.");
+
+        void WriteSource(string path, bool isSuccessor, bool omitPrefix = false, bool alterPrefix = false)
+        {
+            var artifacts = Path.Combine(path, "bootstrap");
+            Directory.CreateDirectory(artifacts);
+            var views = new List<ReadOnlyMemory<byte>>();
+            if (!omitPrefix)
+            {
+                var priorView = genesis.ExactXnv1.ToArray();
+                if (alterPrefix) priorView[^1] ^= 1;
+                views.Add(priorView);
+            }
+            if (isSuccessor) views.Add(successor.ExactXnv1);
+            var roles = new (string Role, IReadOnlyList<ReadOnlyMemory<byte>> Values)[]
+            {
+                ("xna1", [genesis.ExactXna1]), ("dts1", [genesis.ExactDts1]),
+                ("xvp1", [isSuccessor ? successor.ExactXvp1 : genesis.ExactXvp1]),
+                ("xnv1", views), ("xnh1", [isSuccessor ? successor.ExactXnh1 : genesis.ExactXnh1]),
+                ("xnd1", isSuccessor ? successor.ExactXnd1 : genesis.ExactXnd1),
+                ("pmt2", [isSuccessor ? successor.ExactPmt2 : genesis.ExactPmt2]),
+            };
+            var entries = new List<ArtifactEntry>();
+            foreach (var role in roles)
+                for (var ordinal = 0; ordinal < role.Values.Count; ordinal++)
+                {
+                    var value = role.Values[ordinal];
+                    var file = $"{role.Role}.{ordinal:D4}.bin";
+                    File.WriteAllBytes(Path.Combine(artifacts, file), value.ToArray());
+                    entries.Add(new(role.Role, ordinal, file, value.Length,
+                        Convert.ToHexString(SHA256.HashData(value.Span))));
+                }
+            File.WriteAllBytes(Path.Combine(path, "public-manifest.v1.json"),
+                JsonSerializer.SerializeToUtf8Bytes(new PublicBootstrapManifest(isSuccessor
+                    ? "deep-production-operational-successor.v1" : "deep-production-authority-bootstrap.v1",
+                    "Mr. X", network, pin, Convert.ToHexString(B(32, 0xf1)), 990, 1_500, entries)));
+        }
+
+        static void Reject<T>(Action action) where T : Exception
+        {
+            try { action(); }
+            catch (T) { return; }
+            throw new Exception($"Expected {typeof(T).Name} public network export rejection.");
+        }
+    }
 
     private static async Task TestCheckpointAuditAsync(string directory,
         VerifiedXPointNetworkBootstrap bootstrap, AuthoredXPointNetworkOperationalGenesis genesis)

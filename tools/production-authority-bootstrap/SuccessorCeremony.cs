@@ -117,17 +117,19 @@ internal static class SuccessorCeremony
         }
     }
 
-    internal static SourceArtifacts ReadSource(string sourceRoot)
+    internal static SourceArtifacts ReadSource(string sourceRoot,
+        long maximumArtifactBytes = long.MaxValue)
     {
+        if (maximumArtifactBytes < 1) throw new ArgumentOutOfRangeException(nameof(maximumArtifactBytes));
         var manifestPath = ExistingFile(Path.Combine(sourceRoot, "public-manifest.v1.json"));
-        if (new FileInfo(manifestPath).Length is < 1 or > 4_194_304)
-            throw new InvalidDataException("The prior artifact manifest exceeds the bounded inventory size.");
         var manifest = JsonSerializer.Deserialize<PublicBootstrapManifest>(
-                           File.ReadAllBytes(manifestPath),
+                           ReadBounded(manifestPath, 4_194_304),
                            new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
                        ?? throw new InvalidDataException("The prior public artifact manifest is empty.");
         if (manifest.Schema is not (GenesisSchema or SuccessorSchema) ||
-            manifest.Artifacts is null || manifest.Artifacts.Count is < 1 or > 8192)
+            manifest.Artifacts is null || manifest.Artifacts.Count is < 1 or > 8192 ||
+            manifest.Artifacts.Any(static entry => entry.Length is < 1 or > 1_048_576) ||
+            manifest.Artifacts.Sum(static entry => (long)entry.Length) > maximumArtifactBytes)
             throw new InvalidDataException("The prior artifact manifest has an unsupported schema or empty inventory.");
         var bootstrapDir = ExistingDirectory(Path.Combine(sourceRoot, "bootstrap"));
         var artifacts = new Dictionary<(string Role, int Ordinal), byte[]>();
@@ -139,9 +141,7 @@ internal static class SuccessorCeremony
                 !artifacts.TryAdd((entry.Role, entry.Ordinal), []))
                 throw new InvalidDataException("A protected source artifact has a duplicate or noncanonical path.");
             var path = ExistingFile(Path.Combine(bootstrapDir, entry.FileName));
-            if (new FileInfo(path).Length != entry.Length)
-                throw new CryptographicException("A protected source artifact differs from its inventory length.");
-            var bytes = File.ReadAllBytes(path);
+            var bytes = ReadBounded(path, 1_048_576, entry.Length);
             if (bytes.Length != entry.Length ||
                 !string.Equals(Convert.ToHexString(SHA256.HashData(bytes)),
                     entry.Sha256Hex, StringComparison.OrdinalIgnoreCase))
@@ -149,6 +149,20 @@ internal static class SuccessorCeremony
             artifacts[(entry.Role, entry.Ordinal)] = bytes;
         }
         return new SourceArtifacts(manifest, artifacts);
+    }
+
+    private static byte[] ReadBounded(string path, int maximum, int? expectedLength = null)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        if (expectedLength is not null && stream.Length != expectedLength)
+            throw new CryptographicException("A protected source artifact differs from its inventory length.");
+        if (stream.Length is < 1 || stream.Length > maximum)
+            throw new InvalidDataException("A public source file exceeds its read bound.");
+        var bytes = new byte[checked((int)stream.Length)];
+        stream.ReadExactly(bytes);
+        if (stream.ReadByte() != -1)
+            throw new InvalidDataException("A public source file changed while reading.");
+        return bytes;
     }
 
     private static void WriteOutput(

@@ -92,6 +92,28 @@ in operator custody before authoring its first successor. Existing readers'
 protected heads still take precedence; a mismatched accepted head must never
 be reset or self-pinned from the candidate manifest.
 
+For distribution to DID2 clients, `--export-network-genesis <public-source>`
+with independently configured `--network-id-hex`, `--genesis-core-hash` and
+`--output <new-file>` exports the exact public genesis records into NCP2.
+For each operational successor, use `--extend-network-closure <prior-ncp2>`
+with `--network-successor-source <public-source>`, the same independent pins,
+and a new output file. Extension requires the successor's complete XNV1 prefix
+to match the retained bundle exactly and to add one view. Prior XNH1, XVP1 and
+PMT2 records remain in the bundle; missing history is never synthesized.
+Both modes check the pinned genesis, bounded canonical inventory hashes and
+public path containment, refuse output replacement and open no signer keys.
+These operational export modes require the unchanged single genesis XNA1/DTS1
+pair; a root/time-policy rotation requires a separately supported complete
+authority-history export and is rejected here, never truncated to genesis.
+The output contains only the Protocol-owned seven public chains, not historical
+account proof/time snapshots from the source directory. This is distribution,
+not live verification, floor advancement or permission to deploy. Clients still
+require their own nonce-fresh DID2 proof and complete network verification.
+Mount only the resulting public file read-only using the
+[Registry distribution runbook](../../deep-registry-api/docs/NETWORK_CLOSURE_DISTRIBUTION.md).
+The exact transport envelope is owned by
+[XPOINT-NETWORK-V1 section 8.1](../../docs/architecture/XPOINT-NETWORK-V1.md#81-identity-neutral-network-closure-distribution-ncq2ncp2).
+
 Run the synthetic offline operator-input gate without opening real custody:
 
 ```powershell

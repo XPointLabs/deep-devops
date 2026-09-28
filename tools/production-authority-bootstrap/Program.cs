@@ -8,6 +8,11 @@ using Sodium;
 using static BootstrapIo;
 
 var arguments = Arguments.Parse(args);
+if (arguments.IsNetworkClosureExport)
+{
+    NetworkClosureExport.Run(arguments);
+    return;
+}
 if (arguments.IsCheckpointAudit)
 {
     await CheckpointAudit.RunAsync(arguments);
@@ -254,6 +259,7 @@ sealed class Arguments
             "--protected-pmt-artifact-hash", "--current-adh1-path", "--current-adh1-core-hash",
             "--prepare-rollover",
             "--audit-genesis-source", "--network-id-hex", "--genesis-core-hash", "--expected-xnv1-artifact-hash",
+            "--export-network-genesis", "--extend-network-closure", "--network-successor-source",
         };
         var values = new Dictionary<string, string>(StringComparer.Ordinal);
         for (var index = 0; index < args.Length; index += 2)
@@ -263,11 +269,19 @@ sealed class Arguments
         var preparation = values.ContainsKey("--prepare-rollover");
         var successor = values.ContainsKey("--successor-from");
         var audit = values.ContainsKey("--audit-genesis-source");
-        if (new[] { preparation, successor, audit }.Count(static value => value) > 1)
-            throw new ArgumentException("Audit, preparation and successor issuance are separate operations.");
+        var networkGenesis = values.ContainsKey("--export-network-genesis");
+        var networkExtension = values.ContainsKey("--extend-network-closure");
+        if (new[] { preparation, successor, audit, networkGenesis, networkExtension }
+                .Count(static value => value) > 1)
+            throw new ArgumentException("Operator audit, preparation, issuance and public export modes are separate operations.");
         if (preparation && (!string.Equals(values["--prepare-rollover"], "true", StringComparison.Ordinal) || successor))
             throw new ArgumentException("Rollover preparation and successor issuance are separate operations.");
-        var required = audit
+        var required = networkGenesis
+            ? new[] { "--export-network-genesis", "--network-id-hex", "--genesis-core-hash", "--output" }
+            : networkExtension
+            ? new[] { "--extend-network-closure", "--network-successor-source",
+                "--network-id-hex", "--genesis-core-hash", "--output" }
+            : audit
             ? new[] { "--audit-genesis-source", "--network-id-hex", "--genesis-core-hash",
                 "--expected-xnv1-artifact-hash", "--output" }
             : preparation
@@ -288,6 +302,9 @@ sealed class Arguments
     internal bool IsSuccessor => values.ContainsKey("--successor-from");
     internal bool IsCheckpointAudit => values.ContainsKey("--audit-genesis-source");
     internal bool IsRolloverPreparation => values.ContainsKey("--prepare-rollover");
+    internal bool IsNetworkClosureExport => values.ContainsKey("--export-network-genesis") ||
+        values.ContainsKey("--extend-network-closure");
+    internal bool IsNetworkClosureExtension => values.ContainsKey("--extend-network-closure");
     internal ulong RequiredU64(string name) => ulong.TryParse(values[name], out var parsed)
         ? parsed
         : throw new ArgumentException($"{name} is not an unsigned integer.");
