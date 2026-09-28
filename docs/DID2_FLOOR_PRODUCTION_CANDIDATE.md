@@ -1,6 +1,6 @@
 # DID2 latest-head floor production candidate
 
-## Current production observation (2026-09-28, 17:12 UTC)
+## Current production observation (2026-09-28, 18:06 UTC)
 
 Registry and seed1–seed3 are the authorized pre-user production test contour;
 historical `UAT` container/configuration names do not denote a separate remote
@@ -37,9 +37,9 @@ DID2 readiness and the staking portal returned HTTP 200. A bounded real XNode
 trace then showed nonce-fresh directory proof responses returning HTTP 200;
 a malformed frame through certificate-validated H2 returned HTTP 400. These
 are receive-prerequisite observations, not authenticated messaging delivery.
-The Windows publication attempt progressed to `outcome-unknown`; Android's
-latest attempt reported directory-authority unavailable. The XIC1 pair and
-Windows↔Android contact/message/media/group evidence remain unproved.
+Those earlier device attempts did not establish an XIC1 pair. The subsequent
+successful physical results after the proof-budget rollout are recorded below;
+Windows↔Android contact/message/media/group evidence remains unproved.
 
 Fresh account admissions subsequently advanced the signed head to generation
 25/tree 10. A second independently pinned offline successor now covers heads
@@ -65,8 +65,33 @@ rollout. The supported installer updated seed1, then seed2 and seed3. All three
 XNode/ingress/storage trios were healthy; registered Ed25519/BLS/X25519 keys,
 DID2 active configuration and every non-image environment value remained
 byte-identical. Registry readiness and the public staking portal returned 200.
-The checkpoints and healthy services alone do not establish successful physical
-publication or messaging; a new device attempt remains mandatory.
+After rollout, both fresh physical HTTPS QA accounts completed the authenticated
+two-replica publication path: Windows at approximately 17:49 UTC and Android
+at approximately 17:55 UTC. The account-owned return path verifies both XIC1
+signatures against the selected placement and durably records the exact pair
+before reporting success. Both applications then restarted without reset;
+their retained account and hidden encrypted recovery remained present. These
+are device publication/restart results, not contact, claim or message delivery.
+Device build and observation details belong to the
+[MAUI evidence note](../../deep-client-maui/docs/DID2-HTTPS-DEVICE-2026-09-28.md).
+One bounded traffic trace still observed a proof HTTP 429; do not claim that
+the budget change eliminates all rate limiting.
+
+Read-only independent floor observation still matched head 25/tree 10 after
+both device runs; no additional admission is inferred from publication.
+Ordinary protected-time renewal subsequently advanced the unchanged directory
+content to head 26/tree 10, with Registry readiness and staking HTTP 200.
+Independent floor and authenticated current-head export agreed on core hash
+`9A2F774185F264753F0F5C7A94D974AF1FBE821CCD1AA9CBBE7373522020AD7E`.
+After independent UTC, synchronized-clock and unchanged-boot checks, ordinary
+exact-state CAS renewed protected time to generation 14 at 18:12:08 UTC,
+valid until 20:12:08 UTC with the unchanged four-second uncertainty. The
+network-disabled operator container reused the existing protected mounts;
+no refinement, widened uncertainty or new state was used. Its hash-verified
+private backup was retained. Runtime image/listener, genesis and floor scope
+remain unchanged.
+Automatic head/time/checkpoint lifecycle and client durable DNH2 remain open;
+do not reset a floor or stretch a verifier interval to maintain readiness.
 
 Protocol focused author/reader tests passed 10/10, the full production solution
 passed 2,100 tests with 11 platform skips, and exact API/package graph validation
