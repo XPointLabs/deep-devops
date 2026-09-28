@@ -81,6 +81,17 @@ registered node identities, and does not modify certbot or remote machines.
 The private directory must retain the custody ACL; never include it in public
 artifacts. Preparation is not deployment or proof of device readiness.
 
+`--audit-genesis-source` verifies a historical generation-zero bootstrap using
+an independently configured genesis/network pin and the exact XNV1 artifact
+hash observed on the intended UAT runtime. It checks the signed snapshot and
+complete network/placement closure and writes a new audit report only; no
+signer seeds or remote state are opened. This report is explicitly historical,
+not current-time/readiness evidence and not permission to replace an existing
+protected LKG. An initial UAT checkpoint can be reviewed and retained separately
+in operator custody before authoring its first successor. Existing readers'
+protected heads still take precedence; a mismatched accepted head must never
+be reset or self-pinned from the candidate manifest.
+
 Run the synthetic offline operator-input gate without opening real custody:
 
 ```powershell

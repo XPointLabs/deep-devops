@@ -31,6 +31,16 @@ static void TestArguments()
     var invalid = preparation.ToArray();
     invalid[1] = "false";
     Reject<ArgumentException>(() => Arguments.Parse(invalid));
+    var audit = new[] { "--audit-genesis-source", "synthetic",
+        "--network-id-hex", "synthetic", "--genesis-core-hash", "synthetic",
+        "--expected-xnv1-artifact-hash", "synthetic", "--output", "synthetic" };
+    var selectedAudit = Arguments.Parse(audit);
+    if (!selectedAudit.IsCheckpointAudit || selectedAudit.IsSuccessor || selectedAudit.IsRolloverPreparation)
+        throw new Exception("Audit mode was not exclusively selected.");
+    Reject<ArgumentException>(() => Arguments.Parse([.. audit, "--prepare-rollover", "true"]));
+    Reject<ArgumentException>(() => Arguments.Parse([.. audit, "--successor-from", "synthetic"]));
+    Reject<ArgumentException>(() => Arguments.Parse([.. audit, "--authority-root", "synthetic"]));
+    Reject<ArgumentException>(() => Arguments.Parse(audit[..^2]));
 }
 
 static void TestSourceInventory()

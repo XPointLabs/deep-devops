@@ -1,5 +1,6 @@
 using System.Net;
 using System.Security.Cryptography;
+using System.Text.Json;
 using Deep.Protocol.AccountDirectoryV1;
 using Deep.Protocol.ContactV1;
 using Deep.Protocol.XPointNetworkV1;
@@ -53,6 +54,7 @@ internal static class OfflineAuthoringTests
                 PublicKeyAuth.GenerateKeyPair(B(32, 0x32)).PublicKey,
                 990, 1_000, 1_500, B(32, 0xf2), B(16, 0xf3), 100, 101, 102, 1_100, 5));
         genesis.VerifiedNetwork.EnsureCurrent();
+        await TestCheckpointAuditAsync(directory, bootstrap, genesis);
         var rollovers = nodes.Select((node, index) => new XPointNetworkOperationalNodeRollover(
             node.IdentitySigner, H($"current-{index}"), H($"next-{index}"),
             ScalarMult.Base(B(32, (byte)(0x30 + index))), ScalarMult.Base(B(32, (byte)(0x80 + index))))).ToArray();
@@ -87,4 +89,77 @@ internal static class OfflineAuthoringTests
 
     private static byte[] B(int length, byte value) => Enumerable.Repeat(value, length).ToArray();
     private static byte[] H(string value) => SHA256.HashData(System.Text.Encoding.ASCII.GetBytes(value));
+
+    private static async Task TestCheckpointAuditAsync(string directory,
+        VerifiedXPointNetworkBootstrap bootstrap, AuthoredXPointNetworkOperationalGenesis genesis)
+    {
+        var source = Path.Combine(directory, "checkpoint");
+        var artifactDirectory = Path.Combine(source, "bootstrap");
+        Directory.CreateDirectory(artifactDirectory);
+        var values = new List<(string Role, byte[] Bytes)>
+        {
+            ("xna1", genesis.ExactXna1.ToArray()), ("dts1", genesis.ExactDts1.ToArray()),
+            ("adh1", genesis.ExactAdh1.ToArray()), ("snapshot-dtt1", genesis.ExactDtt1.ToArray()),
+            ("snapshot-adp1", genesis.ExactAdp1.ToArray()), ("xvp1", genesis.ExactXvp1.ToArray()),
+            ("xnv1", genesis.ExactXnv1.ToArray()), ("xnh1", genesis.ExactXnh1.ToArray()),
+            ("pma2", genesis.ExactPma2.ToArray()), ("pmt2", genesis.ExactPmt2.ToArray()),
+        };
+        values.AddRange(genesis.ExactXnd1.Select(static bytes => ("xnd1", bytes.ToArray())));
+        var entries = new List<ArtifactEntry>();
+        foreach (var group in values.GroupBy(static value => value.Role))
+        {
+            var ordinal = 0;
+            foreach (var value in group)
+            {
+                var file = $"{group.Key}.{ordinal:D4}.bin";
+                File.WriteAllBytes(Path.Combine(artifactDirectory, file), value.Bytes);
+                entries.Add(new ArtifactEntry(group.Key, ordinal++, file, value.Bytes.Length,
+                    Convert.ToHexString(SHA256.HashData(value.Bytes))));
+            }
+        }
+        var networkHex = Convert.ToHexString(B(16, 0x11));
+        var genesisHex = Convert.ToHexString(bootstrap.GenesisPin.AuthorityCoreHash.Span);
+        var leafHex = Convert.ToHexString(B(32, 0xf1));
+        WriteManifest();
+        File.WriteAllBytes(Path.Combine(artifactDirectory, "inventory.json"),
+            JsonSerializer.SerializeToUtf8Bytes(new ArtifactInventory("deep-contact-resolve-readonly-v2",
+                networkHex, genesisHex, 1, Convert.ToHexString(B(32, 0xf2)), leafHex,
+                Convert.ToHexString(B(16, 0xf3)), 100, 101, 102, entries)));
+        var output = Path.Combine(directory, "audit.json");
+        var args = new[] { "--audit-genesis-source", source, "--network-id-hex", networkHex,
+            "--genesis-core-hash", genesisHex, "--expected-xnv1-artifact-hash",
+            Convert.ToHexString(SHA256.HashData(genesis.ExactXnv1.Span)), "--output", output };
+        await CheckpointAudit.RunAsync(Arguments.Parse(args));
+        using (var report = JsonDocument.Parse(File.ReadAllBytes(output)))
+        {
+            if (report.RootElement.GetProperty("currentTimeEvidence").GetBoolean() ||
+                report.RootElement.GetProperty("replacesProtectedLkg").GetBoolean())
+                throw new Exception("Historical audit claimed current readiness or LKG replacement.");
+        }
+        await RejectAsync<IOException>(args);
+        args[9] = Path.Combine(directory, "rejected-audit.json");
+        args[7] = new string('1', 64);
+        await RejectAsync<CryptographicException>(args);
+        args[7] = Convert.ToHexString(SHA256.HashData(genesis.ExactXnv1.Span));
+        var pma = genesis.ExactPma2.ToArray();
+        pma[^1] ^= 1;
+        File.WriteAllBytes(Path.Combine(artifactDirectory, "pma2.0000.bin"), pma);
+        var index = entries.FindIndex(static entry => entry.Role == "pma2");
+        entries[index] = entries[index] with { Sha256Hex = Convert.ToHexString(SHA256.HashData(pma)) };
+        WriteManifest();
+        await RejectAsync<CryptographicException>(args);
+        if (File.Exists(args[9])) throw new Exception("Rejected audit wrote an output.");
+
+        void WriteManifest() => File.WriteAllBytes(Path.Combine(source, "public-manifest.v1.json"),
+            JsonSerializer.SerializeToUtf8Bytes(new PublicBootstrapManifest(
+                "deep-production-authority-bootstrap.v1", "Mr. X", networkHex, genesisHex,
+                leafHex, 990, 1_500, entries)));
+
+        static async Task RejectAsync<T>(string[] arguments) where T : Exception
+        {
+            try { await CheckpointAudit.RunAsync(Arguments.Parse(arguments)); }
+            catch (T) { return; }
+            throw new Exception($"Expected {typeof(T).Name} checkpoint rejection.");
+        }
+    }
 }

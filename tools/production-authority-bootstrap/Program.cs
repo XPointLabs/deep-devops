@@ -8,6 +8,11 @@ using Sodium;
 using static BootstrapIo;
 
 var arguments = Arguments.Parse(args);
+if (arguments.IsCheckpointAudit)
+{
+    await CheckpointAudit.RunAsync(arguments);
+    return;
+}
 if (arguments.IsRolloverPreparation)
 {
     RolloverPreparation.Run(arguments);
@@ -136,7 +141,7 @@ try
     artifacts.AddRange(authored.ExactXnd1.Select(static value => ("xnd1", value.ToArray())));
     var entries = WriteArtifacts(bootstrapDirectory, artifacts);
     var inventory = new ArtifactInventory(
-        "deep-contact-resolve-readonly-v1",
+        "deep-contact-resolve-readonly-v2",
         Convert.ToHexString(network).ToLowerInvariant(),
         Convert.ToHexString(bootstrap.GenesisPin.AuthorityCoreHash.Span).ToLowerInvariant(),
         1,
@@ -248,6 +253,7 @@ sealed class Arguments
             "--successor-from", "--rollover-root", "--protected-head-core-hash",
             "--protected-pmt-artifact-hash", "--current-adh1-path", "--current-adh1-core-hash",
             "--prepare-rollover",
+            "--audit-genesis-source", "--network-id-hex", "--genesis-core-hash", "--expected-xnv1-artifact-hash",
         };
         var values = new Dictionary<string, string>(StringComparer.Ordinal);
         for (var index = 0; index < args.Length; index += 2)
@@ -256,9 +262,15 @@ sealed class Arguments
                 throw new ArgumentException("An authority bootstrap argument is unknown, empty, or duplicated.");
         var preparation = values.ContainsKey("--prepare-rollover");
         var successor = values.ContainsKey("--successor-from");
+        var audit = values.ContainsKey("--audit-genesis-source");
+        if (new[] { preparation, successor, audit }.Count(static value => value) > 1)
+            throw new ArgumentException("Audit, preparation and successor issuance are separate operations.");
         if (preparation && (!string.Equals(values["--prepare-rollover"], "true", StringComparison.Ordinal) || successor))
             throw new ArgumentException("Rollover preparation and successor issuance are separate operations.");
-        var required = preparation
+        var required = audit
+            ? new[] { "--audit-genesis-source", "--network-id-hex", "--genesis-core-hash",
+                "--expected-xnv1-artifact-hash", "--output" }
+            : preparation
             ? new[] { "--prepare-rollover", "--authority-root", "--seed1-root", "--seed2-root", "--seed3-root",
                 "--observed-unix" }
             : successor
@@ -274,6 +286,7 @@ sealed class Arguments
 
     internal string Required(string name) => values[name];
     internal bool IsSuccessor => values.ContainsKey("--successor-from");
+    internal bool IsCheckpointAudit => values.ContainsKey("--audit-genesis-source");
     internal bool IsRolloverPreparation => values.ContainsKey("--prepare-rollover");
     internal ulong RequiredU64(string name) => ulong.TryParse(values[name], out var parsed)
         ? parsed
