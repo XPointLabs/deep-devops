@@ -48,7 +48,7 @@ function appendDid2CheckpointEnvironment(inspection, expected) {
       value(prefix + 'NetworkIdHex') !== expected.networkId ||
       value(prefix + 'StatePath') !== expected.statePath ||
       schemas.length !== 1 || schemas[0][1] !== expected.floorSchema ||
-      orderedPaths.at(-1) !== expected.previous || orderedPaths.includes(expected.next))
+      orderedPaths[orderedPaths.length - 1] !== expected.previous || orderedPaths.includes(expected.next))
     throw new Error('The source DID2 state, floor or retained checkpoint differs from the selected closure.');
   return [...selected.values()].map(entry => entry.name + '=' + entry.value)
     .concat(prefix + 'ForwardCheckpointPaths__' + orderedPaths.length + '=' + expected.next);
