@@ -161,9 +161,13 @@ Write the generated private key as one line to a protected local file and set
   not put private key material directly in `.env`.
 - `DEEP_NODE_ONION_STATE_PROTECTION_FILE` is an independent raw nonzero 32-byte
   secret protecting durable replay/entropy/key-vault state.
-- `DEEP_NODE_ONION_RECEIVE_POSITION` is the exact authority-assigned
-  `Ingress`, `Core`, or `Exit` role; the first three seed nodes use those roles
-  respectively and never infer them from startup order.
+- Fixed ONION receive-position inputs are retired. Signed current DID2 network
+  descriptors determine the permitted roles; startup order assigns no authority.
+  The independent DID2 proof source, public observation credential, complete signed
+  network history and protected floor must be wired before activating the new host.
+  Existing compose preflight is configuration evidence, not a successful DID2 rollout.
+  See [the XNode operator contract](../../xnode/docs/operator.md#privacy-routing-configuration)
+  and [DR-0012](../../docs/survival-program/decisions/DR-0012-protected-network-history.md).
 - `DEEP_NODE_VLESS_CLIENT_ID_FILE` and `DEEP_NODE_REALITY_PRIVATE_KEY_FILE`:
   protected local files mounted read-only as Docker secrets; their values must
   not be placed in `.env`. Public Reality fields remain unique per node.

@@ -128,7 +128,6 @@ foreach ($state in $states.Values) {
     } | Sort-Object { $_.Definition.Name })
     if ($peers.Count -ne 2) { throw 'Each seed must have exactly two peers.' }
     $values = [ordered]@{
-        DEEP_NODE_ONION_RECEIVE_POSITION = $state.Definition.Role
         DEEP_NODE_PUBLIC_HOST = $state.Definition.HostName
         DEEP_NODE_PUBLIC_IP = $state.Definition.Ip
         DEEP_NODE_PUBLIC_PORT = '443'

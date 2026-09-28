@@ -40,10 +40,10 @@ test('base validation rejects a mocked Xray transport', () => {
   assert.throws(() => validateBase(topology));
 });
 
-test('base validation rejects a swapped ONION receive position', () => {
+test('base validation rejects a retired fixed ONION receive position', () => {
   const topology = structuredClone(renderBase());
   topology.services['xnode-1'].environment.PrivacyRouting__ReceivePosition = 'Exit';
-  assert.throws(() => validateBase(topology), /Ingress/);
+  assert.throws(() => validateBase(topology), /fixed ONION receive position is retired/);
 });
 
 test('TLS overlay hides direct APIs and keeps only direct VLESS publication', async () => {

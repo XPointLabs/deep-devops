@@ -189,7 +189,8 @@ function validateCommonTopology(topology, expectedServices) {
     assert.equal(service.environment.PrivacyRouting__ReplayStateRelativePath, 'privacy-routing/replay.state');
     assert.equal(service.environment.PrivacyRouting__EntropyStateRelativePath, 'privacy-routing/entropy.state');
     assert.equal(service.environment.PrivacyRouting__KeyVaultDirectoryRelativePath, 'privacy-routing/key-vault');
-    assert.equal(service.environment.PrivacyRouting__ReceivePosition, ['Ingress', 'Core', 'Exit'][index]);
+    assert.ok(!Object.hasOwn(service.environment, 'PrivacyRouting__ReceivePosition'),
+      'fixed ONION receive position is retired; signed DID2 descriptors select permitted roles');
     assert.ok(service.secrets.some(secret =>
       secret.source === `xnode-${index + 1}-onion-state-protection` &&
       secret.target === 'onion-state-protection.key'));

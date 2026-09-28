@@ -222,7 +222,6 @@ services:
       Node__PublicHost: ${FIRST_RELEASE_PUBLIC_HOST:-127.0.0.1}
       Node__PublicPort: ${FIRST_RELEASE_XNODE_1_VLESS_PORT:-42941}
       PrivacyRouting__PublicPeerBaseUrl: http://${FIRST_RELEASE_PUBLIC_HOST:-127.0.0.1}:${FIRST_RELEASE_XNODE_1_API_PORT:-42901}/
-      PrivacyRouting__ReceivePosition: Ingress
       PrivacyRouting__Peers__0__RouterId: ${FIRST_RELEASE_XNODE_2_ROUTER_ID:?set FIRST_RELEASE_XNODE_2_ROUTER_ID}
       PrivacyRouting__Peers__0__BaseUrl: http://172.31.93.12:8083/
       PrivacyRouting__Peers__1__RouterId: ${FIRST_RELEASE_XNODE_3_ROUTER_ID:?set FIRST_RELEASE_XNODE_3_ROUTER_ID}
@@ -259,7 +258,6 @@ services:
       Node__PublicHost: ${FIRST_RELEASE_PUBLIC_HOST:-127.0.0.1}
       Node__PublicPort: ${FIRST_RELEASE_XNODE_2_VLESS_PORT:-42942}
       PrivacyRouting__PublicPeerBaseUrl: http://${FIRST_RELEASE_PUBLIC_HOST:-127.0.0.1}:${FIRST_RELEASE_XNODE_2_API_PORT:-42902}/
-      PrivacyRouting__ReceivePosition: Core
       PrivacyRouting__Peers__0__RouterId: ${FIRST_RELEASE_XNODE_1_ROUTER_ID:?set FIRST_RELEASE_XNODE_1_ROUTER_ID}
       PrivacyRouting__Peers__0__BaseUrl: http://172.31.93.11:8083/
       PrivacyRouting__Peers__1__RouterId: ${FIRST_RELEASE_XNODE_3_ROUTER_ID:?set FIRST_RELEASE_XNODE_3_ROUTER_ID}
@@ -296,7 +294,6 @@ services:
       Node__PublicHost: ${FIRST_RELEASE_PUBLIC_HOST:-127.0.0.1}
       Node__PublicPort: ${FIRST_RELEASE_XNODE_3_VLESS_PORT:-42943}
       PrivacyRouting__PublicPeerBaseUrl: http://${FIRST_RELEASE_PUBLIC_HOST:-127.0.0.1}:${FIRST_RELEASE_XNODE_3_API_PORT:-42903}/
-      PrivacyRouting__ReceivePosition: Exit
       PrivacyRouting__Peers__0__RouterId: ${FIRST_RELEASE_XNODE_1_ROUTER_ID:?set FIRST_RELEASE_XNODE_1_ROUTER_ID}
       PrivacyRouting__Peers__0__BaseUrl: http://172.31.93.11:8083/
       PrivacyRouting__Peers__1__RouterId: ${FIRST_RELEASE_XNODE_2_ROUTER_ID:?set FIRST_RELEASE_XNODE_2_ROUTER_ID}

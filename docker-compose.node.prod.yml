@@ -157,7 +157,6 @@ services:
       PrivacyRouting__ReplayStateRelativePath: privacy-routing/replay.state
       PrivacyRouting__EntropyStateRelativePath: privacy-routing/entropy.state
       PrivacyRouting__KeyVaultDirectoryRelativePath: privacy-routing/key-vault
-      PrivacyRouting__ReceivePosition: ${DEEP_NODE_ONION_RECEIVE_POSITION:?set DEEP_NODE_ONION_RECEIVE_POSITION}
       PrivacyRouting__PublicPeerBaseUrl: https://${DEEP_NODE_PUBLIC_HOST:?set DEEP_NODE_PUBLIC_HOST}/
       PrivacyRouting__MaximumConcurrentRequests: ${DEEP_PRIVACY_MAXIMUM_CONCURRENT_REQUESTS:-64}
       PrivacyRouting__RequestsPerMinute: ${DEEP_PRIVACY_REQUESTS_PER_MINUTE:-600}
