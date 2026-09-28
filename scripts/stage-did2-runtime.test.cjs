@@ -66,6 +66,8 @@ test('rejects unexpected network, peer origin, certificate key, and original env
 test('standalone installer asset is byte-identical to canonical DevOps stager',()=>{
   assert.deepEqual(fs.readFileSync(path.join(__dirname,'stage-did2-runtime.cjs')),
     fs.readFileSync(path.join(__dirname,'../../xpoint-node-installer/assets/scripts/stage-did2-runtime.cjs')));
+  assert.deepEqual(fs.readFileSync(path.join(__dirname,'../.env.node.prod.example')),
+    fs.readFileSync(path.join(__dirname,'../../xpoint-node-installer/assets/.env.node.prod.example')));
 });
 test('normalizes one optional Registry origin slash and rejects paths or insecure origins',()=>{
   scenario((input,envFile)=>{

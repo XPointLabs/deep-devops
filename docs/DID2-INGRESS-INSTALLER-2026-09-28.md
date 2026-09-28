@@ -42,6 +42,10 @@ Operator configuration is described in [the ingress runbook](PRODUCTION_NODE_TLS
   admin/quorum routes, exact served SPKI, stale attestation refusal and refresh.
   Echo backends are not XNode authority. Application/device verification fields
   are explicitly false. Exact isolated Docker/directory cleanup passed.
+- The fresh-install environment example is now tracked as an exact allowed
+  asset (it had been accidentally ignored). It contains placeholders rather
+  than private deployment addresses and no retired fixed-role/compat setting.
+  Installer tests check that fresh preparation and rerun retain the template.
 - Three-node real-Xray rehearsal passed with `requireNoMock=true`, while
   unavailable privacy authority stayed fail-closed. This development lane is
   not authenticated DID2 delivery evidence.
@@ -49,6 +53,11 @@ Operator configuration is described in [the ingress runbook](PRODUCTION_NODE_TLS
   dependency audit reported zero vulnerabilities. The npm wrapper had a local
   command-resolution error; its exact build/verification commands passed when
   run directly. Selected source/release-contract artifact secret scan passed.
+- The required backend-external smoke was attempted but its artifact collector
+  scanned the shared historical scratch root and rejected unrelated generated
+  binaries. That invocation is **not passed**. An isolated artifact/project
+  lane remains required before it can be release evidence; no scan exception
+  was added to hide those findings.
 
 Next: build the immutable reviewed image through owner CI, deploy through the
 supported installer preserving keys/floors, verify actual signed-origin peer
