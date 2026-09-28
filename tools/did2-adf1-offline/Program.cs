@@ -123,8 +123,13 @@ var seed = Options.ReadSeed(Path.Combine(authorityRoot, "private",
 try
 {
     using var signer = new RootSigner(rootId, expectedPublic, seed);
-    var exact = await AccountDirectoryAdf1OfflineAuthor.AuthorInitialAsync(
-        authority, covered, target, issuedAt, reader, [signer]);
+    var exact = options.Optional("--previous-adf1") is { } previousPath
+        ? await AccountDirectoryAdf1OfflineAuthor.AuthorSuccessorAsync(
+            authority, covered, target, Options.ReadBounded(previousPath, 16_384),
+            Options.Hex(options.Required("--previous-adf1-core-hash"), 32,
+                "independent predecessor ADF1 pin"), issuedAt, reader, [signer])
+        : await AccountDirectoryAdf1OfflineAuthor.AuthorInitialAsync(
+            authority, covered, target, issuedAt, reader, [signer]);
     // A decode/re-encode round trip is an independent canonical-file check;
     // the author already verified every signer result against exact XNA1.
     var parsed = AccountDirectoryAdf1Codec.Decode(exact);
@@ -135,11 +140,11 @@ try
         FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough);
     await stream.WriteAsync(exact);
     stream.Flush(flushToDisk: true);
-    Console.WriteLine("PASS exact initial DID2 ADF1 signed under offline root custody.");
+    Console.WriteLine($"PASS exact DID2 ADF1 generation {parsed.CheckpointGeneration} signed under offline root custody.");
     Console.WriteLine($"Output SHA-256: {Convert.ToHexString(SHA256.HashData(exact))}");
     Console.WriteLine($"Source ADH1: {Convert.ToHexString(source.CoreHash.Span)}");
     Console.WriteLine($"Target ADH1: {Convert.ToHexString(target.CoreHash.Span)}");
-    Console.WriteLine($"Covered signed heads: {covered.Count}");
+    Console.WriteLine($"Covered signed heads: {parsed.CoveredHeadCount}");
 }
 finally { CryptographicOperations.ZeroMemory(seed); }
 
@@ -200,18 +205,24 @@ internal sealed class Options
             "--target-adh1", "--target-adh1-core-hash",
             "--covered-manifest", "--issued-at-unix", "--minimum-reader"
         };
-        if (args.Length != expected.Count * 2)
+        var optional = new HashSet<string>(StringComparer.Ordinal)
+        { "--previous-adf1", "--previous-adf1-core-hash" };
+        if (args.Length != expected.Count * 2 && args.Length != (expected.Count + optional.Count) * 2)
             throw new ArgumentException("The exact offline ADF1 input set is required.");
         var values = new Dictionary<string, string>(StringComparer.Ordinal);
         for (var index = 0; index < args.Length; index += 2)
-            if (!expected.Contains(args[index]) ||
+            if ((!expected.Contains(args[index]) && !optional.Contains(args[index])) ||
                 !values.TryAdd(args[index], args[index + 1]) ||
                 string.IsNullOrWhiteSpace(args[index + 1]))
                 throw new ArgumentException("An offline ADF1 input is absent or duplicate.");
+        if (expected.Any(key => !values.ContainsKey(key)) ||
+            values.ContainsKey("--previous-adf1") != values.ContainsKey("--previous-adf1-core-hash"))
+            throw new ArgumentException("The complete offline ADF1 input set and paired predecessor pin are required.");
         return new Options(values);
     }
 
     internal string Required(string name) => values[name];
+    internal string? Optional(string name) => values.GetValueOrDefault(name);
 
     internal static byte[] ReadBounded(string path, long maximum)
     {

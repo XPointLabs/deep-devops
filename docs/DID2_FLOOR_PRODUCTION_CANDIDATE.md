@@ -1,6 +1,55 @@
 # DID2 latest-head floor production candidate
 
-Status on 2026-09-28: **isolated floor service remains deployed on seed2;
+## Current production observation (2026-09-28, 15:20 UTC)
+
+Registry and seed1–seed3 are the authorized pre-user production test contour;
+historical `UAT` container/configuration names do not denote a separate remote
+environment. Exactly three registered node identities remain in use.
+
+The live receive failure was an imported generation-zero ADF1 covering only
+directory generations 0–3. The protected heads created later were outside that
+coverage. Independent PostgreSQL floor observation and authenticated ADA2
+export agreed on generation 22/tree 8. The imported predecessor was hash-matched
+to the original offline file before a generation-one successor was authored
+locally under Mr. X's existing root custody. It covers generations 4–21 and
+targets the exact current head. Neither floor nor genesis was reset, and no
+root private key was sent to a server.
+
+`tools/did2-adf1-offline` accepts the optional paired inputs `--previous-adf1`
+and `--previous-adf1-core-hash`. These must name the independently pinned last
+checkpoint; retain its complete predecessor chain. The full authenticated head
+export and all original mandatory inputs remain required. Run root authoring
+offline, use a new artifact output, and import only the exact signed public file.
+For the first successor, `scripts/append-did2-checkpoint-env.cjs` prepares a new
+private environment from the selected immutable Registry inspection. It checks
+the exact state path, floor schema, network and existing checkpoint path, rejects
+duplicates/preexisting successors, preserves every prior value and adds only
+`ForwardCheckpointPaths__1`. It is deliberately not a general chain-rotation
+or state-reset tool.
+
+The same deployed Registry image was recomposed with both checkpoints and the
+same mounts, external floor and loopback listener. The old stopped container is
+retained, but is not run concurrently against the same mutable state. Registry
+DID2 readiness and the staking portal returned HTTP 200. A bounded real XNode
+trace then showed nonce-fresh directory proof responses returning HTTP 200;
+a malformed frame through certificate-validated H2 returned HTTP 400. These
+are receive-prerequisite observations, not authenticated messaging delivery.
+The Windows publication attempt progressed to `outcome-unknown`; Android's
+latest attempt reported directory-authority unavailable. The XIC1 pair and
+Windows↔Android contact/message/media/group evidence remain unproved.
+
+Protocol focused author/reader tests passed 10/10, the full production solution
+passed 2,100 tests with 11 platform skips, and exact API/package graph validation
+passed. The checkpoint environment helper passed its positive and hostile-input
+tests. DevOps release-gate contracts passed 51 commands; the real readiness
+report is still blocked on missing release evidence. Local Docker smoke reached
+healthy services and passed its scenario tests, but artifact collection failed
+the secret scanner on existing mixed diagnostic binaries. Do not treat that
+aggregate smoke run as passing or exclude binaries to bypass its gate.
+
+## Earlier diagnostic history
+
+Earlier status on 2026-09-28: **isolated floor service remains deployed on seed2;
 the new loopback-only UAT Registry forward-probe is ready, but Registry
 production cutover is not approved**.
 The database has its schema, distinct roles and the exact signed empty
