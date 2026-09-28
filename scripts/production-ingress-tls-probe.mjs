@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import tls from 'node:tls';
+import { isIP } from 'node:net';
 
 const args = new Map();
 for (let index = 2; index < process.argv.length; index += 2) {
@@ -21,7 +22,7 @@ const result = await new Promise((resolve, reject) => {
   const socket = tls.connect({
     host: args.get('--address'),
     port,
-    servername: args.get('--host'),
+    servername: isIP(args.get('--host')) ? undefined : args.get('--host'),
     ca: fs.readFileSync(args.get('--ca')),
     rejectUnauthorized: true,
     minVersion: 'TLSv1.2',
@@ -31,6 +32,8 @@ const result = await new Promise((resolve, reject) => {
   socket.once('secureConnect', () => {
     try {
       if (!socket.authorized) throw new Error('Served certificate is not authorized.');
+      if (tls.checkServerIdentity(args.get('--host'), socket.getPeerCertificate(true)))
+        throw new Error('Served certificate does not match the exact requested origin.');
       const raw = socket.getPeerCertificate(true)?.raw;
       if (!raw) throw new Error('Peer certificate is unavailable.');
       const actual = crypto.createHash('sha256')

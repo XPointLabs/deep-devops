@@ -96,10 +96,14 @@ backend xnode_peer
 
 backend xnode_managed_h2
   mode http
+  # Kestrel requires :scheme to match the inner h2c transport. The exact
+  # trusted proxy marker carries the validated outer HTTPS scheme separately.
+  http-request set-uri http://%[hdr(host)]%[pathq]
   option tcp-check
   server xnode 172.31.241.10:8082 proto h2 check
 
 backend xnode_privacy_h2
   mode http
+  http-request set-uri http://%[hdr(host)]%[pathq]
   option tcp-check
   server xnode 172.31.241.10:8083 proto h2 check

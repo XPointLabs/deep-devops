@@ -74,6 +74,12 @@ try {
         $pin = (& docker run --rm --entrypoint sh -v "${mount}:/work:ro" alpine/openssl:3.5.2 -c "openssl x509 -in /work/$name.crt -pubkey -noout | openssl pkey -pubin -outform DER | openssl dgst -sha256 | sed 's/^.*= //' ").Trim()
         if ($LASTEXITCODE -ne 0 -or $pin -notmatch '^[0-9a-f]{64}$') { throw 'Could not calculate a lab SPKI pin.' }
         [IO.File]::WriteAllText((Join-Path $secretRoot "$name.spki-sha256"), "$pin`n", [Text.UTF8Encoding]::new($false))
+        # .NET exports valid PEM without a trailing newline. Exercise that
+        # actual authoring shape, not only OpenSSL's newline-terminated files.
+        foreach ($suffix in @('crt', 'key')) {
+            $pemPath = Join-Path $secretRoot "$name.$suffix"
+            [IO.File]::WriteAllText($pemPath, [IO.File]::ReadAllText($pemPath).TrimEnd([char[]]"`r`n"), [Text.UTF8Encoding]::new($false))
+        }
         Protect-Key (Join-Path $secretRoot "$name.key")
     }
     Invoke-Docker -Arguments @('run', '--rm', '-v', "${mount}:/work", 'alpine/openssl:3.5.2', 'req', '-newkey', 'rsa:2048', '-nodes', '-subj', '/CN=node.deep.test', '-keyout', '/work/cn-only.key', '-out', '/work/cn-only.csr')
@@ -155,13 +161,15 @@ try {
     $managed = & curl.exe -fsS --ssl-no-revoke --cacert $ca --resolve "node.deep.test:${port}:127.0.0.1" -H 'X-Forwarded-Proto: http' "https://node.deep.test:${port}/api/ingress/v1/capabilities"
     if ($LASTEXITCODE -ne 0) { throw 'Managed HTTP2 backend route failed.' }
     $managedJson = $managed | ConvertFrom-Json
-    if ($managedJson.port -ne 8082 -or $managedJson.protocol -ne '2.0' -or $managedJson.forwardedProto -ne 'https' -or $null -ne $managedJson.forwardedHost) { throw 'Managed ingress did not preserve the dedicated HTTP2/TLS proxy boundary.' }
+    if ($managedJson.port -ne 8082 -or $managedJson.protocol -ne '2.0' -or $managedJson.innerScheme -ne 'http' -or $managedJson.forwardedProto -ne 'https' -or $null -ne $managedJson.forwardedHost) { throw 'Managed ingress did not preserve the dedicated HTTP2/TLS proxy boundary.' }
+    $queried = & curl.exe -fsS --ssl-no-revoke --cacert $ca --resolve "node.deep.test:${port}:127.0.0.1" "https://node.deep.test:${port}/api/ingress/v1/capabilities?reject=1"
+    if ($LASTEXITCODE -ne 0 -or ($queried | ConvertFrom-Json).requestTarget -ne '/api/ingress/v1/capabilities?reject=1') { throw 'The inner scheme rewrite removed a query that the application must reject.' }
     foreach ($route in @('/api/ingress/v1/frame', '/api/peer/privacy/v1/frame', '/api/peer/contact-replica/v1/execute')) {
         $expectedPort = if ($route -eq '/api/ingress/v1/frame') { 8082 } else { 8083 }
         $result = & curl.exe -fsS --ssl-no-revoke --cacert $ca --resolve "node.deep.test:${port}:127.0.0.1" -H 'content-type: application/octet-stream' -H 'X-Forwarded-For: attacker' -H 'X-Forwarded-Proto: http' -d '{}' "https://node.deep.test:${port}$route"
         if ($LASTEXITCODE -ne 0) { throw 'Dedicated HTTP2 POST backend route failed.' }
         $json = $result | ConvertFrom-Json
-        if ($json.port -ne $expectedPort -or $json.protocol -ne '2.0' -or $json.forwardedForPresent -or $json.forwardedProto -ne 'https' -or $null -ne $json.forwardedHost) { throw 'HTTP2 POST routing or forwarding-header sanitation failed.' }
+        if ($json.port -ne $expectedPort -or $json.protocol -ne '2.0' -or $json.innerScheme -ne 'http' -or $json.requestTarget -ne $route -or $json.forwardedForPresent -or $json.forwardedProto -ne 'https' -or $null -ne $json.forwardedHost) { throw 'HTTP2 POST routing or forwarding-header sanitation failed.' }
     }
     $statusCode = & curl.exe -sS -o NUL -w '%{http_code}' --ssl-no-revoke --cacert $ca --resolve "node.deep.test:${port}:127.0.0.1" "https://node.deep.test:${port}/status"
     if ($statusCode -ne '404') { throw 'A forbidden status endpoint became public.' }

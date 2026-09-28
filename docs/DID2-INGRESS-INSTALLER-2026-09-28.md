@@ -85,3 +85,43 @@ Next: deploy the immutable reviewed image through the
 supported installer preserving keys/floors, verify actual signed-origin peer
 TLS, then complete two-replica publication/claim and Windows↔Android delivery.
 No GitHub Release or `latest` publication is authorized by these local checks.
+
+## First production installer observations
+
+- Seed1's distribution Node.js was too old for the stager's `node:`/X509 API;
+  custody activation rejected before new containers started. Installer 0.8.1
+  now uses host Node.js 22+ or the pinned official Node.js 24 container, network
+  disabled, read-only root, dropped capabilities and only required mounts.
+  Full Bash tests passed; the actual containerized stager accepted retained
+  seed1 inputs. No host package repository or Node.js replacement was required.
+- The next attempt started the new XNode, but HAProxy rejected concatenated PEM
+  with `bad end line`: .NET's valid PEM export need not have a trailing newline.
+  The entrypoint now inserts separators without editing certified input files;
+  the real TLS regression lane exercises missing trailing newlines.
+- Automatic configuration rollback selected the pre-clean-break XNode, whose
+  retired V1 Contact authority endpoint no longer returns HTTP 200. That attempt
+  did **not** restore a healthy node. Pre-break binaries are not validated DID2
+  rollback candidates; protected history/floors must never be reset to make
+  them start. Recovery is progressing on the current DID2 image, not a legacy
+  endpoint restoration. The corrected installer subsequently upgraded all
+  three production projects successfully. XNode/ingress/storage passed health;
+  public exact-origin certificate and protected-current SPKI checks passed on
+  all three. These are not application-publication or delivery assertions.
+- A real capability request then exposed HTTP 502 despite container health:
+  HTTPS `:scheme` was retained on the plaintext H2 backend. A direct request
+  from the trusted proxy namespace returned 200 with inner scheme HTTP and
+  reset code 1 with inner scheme HTTPS. Only the two H2 backends now rewrite
+  the inner URI scheme, retaining authority/path/query; the consumed trusted
+  proxy marker still conveys outer HTTPS. Kestrel alternate-scheme acceptance
+  remains disabled. See [HAProxy set-uri](https://www.haproxy.com/documentation/haproxy-configuration-manual/new/3-2r1/#set-uri)
+  and [Kestrel scheme checking](https://learn.microsoft.com/en-us/dotnet/api/microsoft.aspnetcore.server.kestrel.core.kestrelserveroptions.allowalternateschemes?view=aspnetcore-10.0).
+- The same check exposed capability GET without Content-Length being mapped
+  to unknown length even when Kestrel knows END_STREAM/no body. XNode now uses
+  its body-detection feature only for a provably bodyless GET; unknown/bodyful
+  requests still reject. Two actual Kestrel H2 cases passed (200 without body,
+  400 for nonseekable unknown-length body); full source-cutover suite passed
+  core 262/profile 107/integration 453. The updated image still needs owner CI
+  and rollout before claiming the ordinary no-Content-Length public path works.
+- PEM/inner-scheme/query-preservation TLS lab passed at `2026-09-28T10:30:50Z`;
+  application/device authority fields remain false. Exact isolated cleanup
+  passed. Preparation/staging/static contract tests: 9 passed.

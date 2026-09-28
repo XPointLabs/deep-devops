@@ -62,7 +62,12 @@ grep -Fqx "quorumCoordinatorCidr=${DEEP_QUORUM_COORDINATOR_CIDR}" "$attestation"
   exit 78
 }
 
-cat /run/secrets/ingress-current.crt /run/secrets/ingress-current.key > /var/lib/haproxy/ingress-current.pem
+{
+  cat /run/secrets/ingress-current.crt
+  printf '\n'
+  cat /run/secrets/ingress-current.key
+  printf '\n'
+} > /var/lib/haproxy/ingress-current.pem
 chmod 0400 /var/lib/haproxy/ingress-current.pem
 
 sed \
