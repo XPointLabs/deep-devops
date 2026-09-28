@@ -1,6 +1,6 @@
 # DID2 latest-head floor production candidate
 
-## Current production observation (2026-09-28, 18:06 UTC)
+## Current production observation (2026-09-28, 19:01 UTC)
 
 Registry and seed1–seed3 are the authorized pre-user production test contour;
 historical `UAT` container/configuration names do not denote a separate remote
@@ -90,6 +90,15 @@ network-disabled operator container reused the existing protected mounts;
 no refinement, widened uncertainty or new state was used. Its hash-verified
 private backup was retained. Runtime image/listener, genesis and floor scope
 remain unchanged.
+Near expiry, the supported ordinary head refresh continued the same directory
+content to generation 27/tree 10. Independent floor observation matched core
+hash `95CB4141F79C2C34E31F3516E926F3824DF1990F2615EE3C3A2C9CCE34B2D6C5`;
+Registry DID2 readiness and the staking portal returned HTTP 200. The refreshed
+head is valid until 20:00:39 UTC. Protected time remains generation 14; neither
+genesis, floor scope, account history nor the runtime image was replaced.
+Both updated physical clients also reauthenticated their protected
+publication completion with fresh authority; the exact device observations
+and limits belong to the MAUI evidence note above, not a new transport claim.
 Automatic head/time/checkpoint lifecycle and client durable DNH2 remain open;
 do not reset a floor or stretch a verifier interval to maintain readiness.
 
