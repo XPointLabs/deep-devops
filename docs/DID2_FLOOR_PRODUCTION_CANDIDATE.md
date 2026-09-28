@@ -57,9 +57,16 @@ ceiling, before device enrollment or traffic-triggered proofs. The ceiling is
 a replay-ledger safety constraint, not an arbitrary limit to raise. The XNode
 candidate reduces idle polling and reuses only a still-current, bounded local
 verified binding; see its [operator behavior](../../xnode/docs/operator.md).
-This candidate still requires an immutable CI image, supported installer
-rollout and a new physical publication attempt. The checkpoints alone do not
-establish successful publication or messaging.
+Owner CI run `36459171075` succeeded with `push_latest=false`. The immutable
+amd64 manifest
+`sha256:a8e35ebbb3f0a7ba5b815dc5929b6dcb19884435db813aa5dfb22fadcc6acd19`
+was checked against source `6764cbfce325267a60d6855fef2b7923c65dd2f2` before
+rollout. The supported installer updated seed1, then seed2 and seed3. All three
+XNode/ingress/storage trios were healthy; registered Ed25519/BLS/X25519 keys,
+DID2 active configuration and every non-image environment value remained
+byte-identical. Registry readiness and the public staking portal returned 200.
+The checkpoints and healthy services alone do not establish successful physical
+publication or messaging; a new device attempt remains mandatory.
 
 Protocol focused author/reader tests passed 10/10, the full production solution
 passed 2,100 tests with 11 platform skips, and exact API/package graph validation
