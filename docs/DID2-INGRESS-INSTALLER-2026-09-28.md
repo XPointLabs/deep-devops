@@ -150,3 +150,35 @@ No GitHub Release or `latest` publication is authorized by these local checks.
   default Windows UI remains account-only; physical HTTPS admission,
   independently authenticated two-replica publication and messaging still need
   device verification and composition. No GitHub Release or `latest` was made.
+
+## Idle authority refresh rollout
+
+- Package-owner image run `36447887244` succeeded with DevOps `ce7b075` and
+  XNode `f7caf73c99932edf833e0e01fbf559431558601d`, `push_latest=false`.
+  The OCI index is
+  `sha256:eec5f07be5316f925cba7f6863867dfd64ff2c13e432cb8dd74ba5e3f1327522`.
+  On the verified x86_64 production hosts the selected immutable amd64 manifest
+  is `sha256:344fcaf8b4df570ae0eea842425b4728652fa02b2106df3d7354b2c38a5d278e`;
+  its OCI source label was independently inspected. The index pull on the
+  first host returned not-found; the manifest pull succeeded without changing
+  package visibility, credentials or a mutable tag.
+- Supported installer `ea169fe` updated all three existing projects. Registered
+  Ed25519, BLS and X25519 files were compared before/after each successful run
+  and remained byte-identical. Existing DID2 input selection, durable volumes,
+  ingress assets and storage image were retained. All nine service health
+  states were healthy after rollout. The first failed index-pull attempt
+  restored configuration but could not make the old stale-authority image
+  healthy; the subsequent reviewed-image update completed successfully.
+- Existing Registry runtime/listener were not upgraded. Its ordinary signed
+  head was continued to generation 23/tree 8. After independent UTC and
+  NTP/no-reboot observation, the reviewed Registry `989edd` operator image
+  performed a one-shot, network-disabled exact-state-CAS interval refinement
+  with the same protected mounts: uncertainty narrowed from 8 to 4 seconds,
+  state generation 13, SHA-256
+  `D6F14F87A9FC717A9740B2B9F5164D4114086541CF5E02220164F3E0500261FE`.
+  The prior runtime lacked the new explicit refinement option and rejected it
+  before mutation. No time floor, genesis, node identity or root seed was reset
+  or moved. Readiness returned HTTP 200. Automatic head renewal is still not
+  enabled in this actual configuration.
+- This closes an operational idle-authority prerequisite only. Physical XIC1
+  publication, text, files/images and group-delivery gates remain open.
