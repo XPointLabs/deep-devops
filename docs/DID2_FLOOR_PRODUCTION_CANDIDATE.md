@@ -1,6 +1,6 @@
 # DID2 latest-head floor production candidate
 
-## Current production observation (2026-09-28, 15:20 UTC)
+## Current production observation (2026-09-28, 17:12 UTC)
 
 Registry and seed1–seed3 are the authorized pre-user production test contour;
 historical `UAT` container/configuration names do not denote a separate remote
@@ -40,6 +40,26 @@ are receive-prerequisite observations, not authenticated messaging delivery.
 The Windows publication attempt progressed to `outcome-unknown`; Android's
 latest attempt reported directory-authority unavailable. The XIC1 pair and
 Windows↔Android contact/message/media/group evidence remain unproved.
+
+Fresh account admissions subsequently advanced the signed head to generation
+25/tree 10. A second independently pinned offline successor now covers heads
+22–24 and targets that exact head. Registry retains all three checkpoints,
+the same immutable runtime image, all thirteen mounts, the same loopback
+listener and the same independent floor. The previous stopped container is
+retained; only one process writes the ADA2 state. Registry readiness, all three
+XNode health checks and the public staking portal were successful after import.
+Root custody remained local, and node keys, genesis, certbot and account floors
+were not changed.
+
+Bounded production traces also exposed proof-budget exhaustion: three idle
+XNodes polling every five seconds consume the six-per-ten-second DID2 issuance
+ceiling, before device enrollment or traffic-triggered proofs. The ceiling is
+a replay-ledger safety constraint, not an arbitrary limit to raise. The XNode
+candidate reduces idle polling and reuses only a still-current, bounded local
+verified binding; see its [operator behavior](../../xnode/docs/operator.md).
+This candidate still requires an immutable CI image, supported installer
+rollout and a new physical publication attempt. The checkpoints alone do not
+establish successful publication or messaging.
 
 Protocol focused author/reader tests passed 10/10, the full production solution
 passed 2,100 tests with 11 platform skips, and exact API/package graph validation
