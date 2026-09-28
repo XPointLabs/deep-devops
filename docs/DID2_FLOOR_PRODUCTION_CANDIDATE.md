@@ -102,6 +102,17 @@ and limits belong to the MAUI evidence note above, not a new transport claim.
 Automatic head/time/checkpoint lifecycle and client durable DNH2 remain open;
 do not reset a floor or stretch a verifier interval to maintain readiness.
 
+Post-rollout inventory found one obsolete diagnostic XNode process on each
+seed, at source `3c1b85eb86fb681691723e7a74c981668ded39b2`. They used a
+separate Docker network, loopback-only diagnostic binding, no restart policy
+and no writable mount shared with the production XNode. Inspection of the
+actual ingress configuration confirmed all five node backends target the
+production container and none target the diagnostic container or binding.
+All three obsolete diagnostics were stopped, not removed; their containers,
+configuration and state remain recoverable. All three production service trios
+remained running and healthy afterward. This removes unused diagnostic work;
+no causal proof-budget or zero-429 improvement is inferred from stopping them.
+
 Protocol focused author/reader tests passed 10/10, the full production solution
 passed 2,100 tests with 11 platform skips, and exact API/package graph validation
 passed. The checkpoint environment helper passed its positive and hostile-input
