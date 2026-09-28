@@ -1,0 +1,18 @@
+# Include only inside the existing Registry HTTPS server, never staking.
+# Render the one explicit loopback UAT port before nginx -t and reload.
+location = /api/v2/account-directory/genesis-admissions {
+  proxy_pass http://127.0.0.1:__DID2_HTTPS_UAT_PORT__;
+  include /etc/nginx/snippets/deep-did2-https-proxy.conf;
+}
+location = /api/v2/account-directory/proofs {
+  proxy_pass http://127.0.0.1:__DID2_HTTPS_UAT_PORT__;
+  include /etc/nginx/snippets/deep-did2-https-proxy.conf;
+}
+location = /api/v2/network/closure {
+  proxy_pass http://127.0.0.1:__DID2_HTTPS_UAT_PORT__;
+  include /etc/nginx/snippets/deep-did2-https-proxy.conf;
+}
+location = /health/did2/ready {
+  proxy_pass http://127.0.0.1:__DID2_HTTPS_UAT_PORT__;
+  include /etc/nginx/snippets/deep-did2-https-proxy.conf;
+}

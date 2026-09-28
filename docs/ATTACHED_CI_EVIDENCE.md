@@ -9,6 +9,13 @@ artifact handle for every release-blocking lane that cannot be proven from local
 files alone. Use `docs/templates/attached-ci-artifacts.example.json` as the
 non-secret shape reference.
 
+The `unit.yml` source-cutover lanes check out the release superproject and
+Protocol/Registry/Shared consumers from the same selected release branch.
+Registry's DID2 integration fixtures require the Shared checkout. Native test
+command failures stop the unit lane; subsequent successful commands cannot
+conceal an earlier failed build/test. This checkout wiring is not device E2E
+or production-readiness evidence.
+
 To collect the source file directly from GitHub Actions for the required lanes,
 set `DEEP_GITHUB_TOKEN`, `GH_TOKEN`, or `GITHUB_TOKEN` to a token that can
 read the private release repos, then run:

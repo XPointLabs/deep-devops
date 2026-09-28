@@ -8,6 +8,13 @@ using Sodium;
 using static BootstrapIo;
 
 var arguments = Arguments.Parse(args);
+if (arguments.IsNetworkDistributionAudit)
+{
+    using var handler = new HttpClientHandler { AllowAutoRedirect = false };
+    using var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
+    await NetworkDistributionAudit.RunAsync(arguments, http);
+    return;
+}
 if (arguments.IsNetworkClosureExport)
 {
     NetworkClosureExport.Run(arguments);
@@ -260,6 +267,7 @@ sealed class Arguments
             "--prepare-rollover",
             "--audit-genesis-source", "--network-id-hex", "--genesis-core-hash", "--expected-xnv1-artifact-hash",
             "--export-network-genesis", "--extend-network-closure", "--network-successor-source",
+            "--audit-network-distribution", "--expected-bundle-sha256",
         };
         var values = new Dictionary<string, string>(StringComparer.Ordinal);
         for (var index = 0; index < args.Length; index += 2)
@@ -271,12 +279,15 @@ sealed class Arguments
         var audit = values.ContainsKey("--audit-genesis-source");
         var networkGenesis = values.ContainsKey("--export-network-genesis");
         var networkExtension = values.ContainsKey("--extend-network-closure");
-        if (new[] { preparation, successor, audit, networkGenesis, networkExtension }
+        var distribution = values.ContainsKey("--audit-network-distribution");
+        if (new[] { preparation, successor, audit, networkGenesis, networkExtension, distribution }
                 .Count(static value => value) > 1)
             throw new ArgumentException("Operator audit, preparation, issuance and public export modes are separate operations.");
         if (preparation && (!string.Equals(values["--prepare-rollover"], "true", StringComparison.Ordinal) || successor))
             throw new ArgumentException("Rollover preparation and successor issuance are separate operations.");
-        var required = networkGenesis
+        var required = distribution
+            ? new[] { "--audit-network-distribution", "--network-id-hex", "--expected-bundle-sha256" }
+            : networkGenesis
             ? new[] { "--export-network-genesis", "--network-id-hex", "--genesis-core-hash", "--output" }
             : networkExtension
             ? new[] { "--extend-network-closure", "--network-successor-source",
@@ -299,6 +310,7 @@ sealed class Arguments
     }
 
     internal string Required(string name) => values[name];
+    internal bool IsNetworkDistributionAudit => values.ContainsKey("--audit-network-distribution");
     internal bool IsSuccessor => values.ContainsKey("--successor-from");
     internal bool IsCheckpointAudit => values.ContainsKey("--audit-genesis-source");
     internal bool IsRolloverPreparation => values.ContainsKey("--prepare-rollover");

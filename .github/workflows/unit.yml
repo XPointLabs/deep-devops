@@ -17,7 +17,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ github.repository_owner }}/deep-platform
-          ref: main
+          ref: ${{ env.RELEASE_SOURCE_REF }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -42,6 +42,15 @@ jobs:
           token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
           path: deep-registry-api
 
+      - name: Checkout Shared for Registry DID2 integration tests
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/deep-client-shared
+          ref: ${{ env.RELEASE_SOURCE_REF }}
+          fetch-depth: 0
+          token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
+          path: deep-client-shared
+
       - uses: actions/checkout@v4
         with:
           repository: ${{ github.repository_owner }}/xpoint-staking-backend
@@ -59,6 +68,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: ${{ github.repository_owner }}/xpoint-staking-contracts
+          ref: ${{ env.RELEASE_SOURCE_REF }}
           token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
           path: xpoint-staking-contracts
 
@@ -83,6 +93,8 @@ jobs:
       - name: Unit tests
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           dotnet test xnode/XNode.slnx --configuration Release --logger "trx;LogFileName=xnode.trx" -p:DeepProtocolSourceCutover=true
           dotnet test deep-registry-api/Deep.Registry.Api.slnx --configuration Release --logger "trx;LogFileName=registry.trx" -p:DeepProtocolLocalCutover=true -p:DeepProtocolSourceCutover=true
           dotnet test xpoint-staking-backend/XPoint.Staking.Backend.slnx --configuration Release --logger "trx;LogFileName=staking-backend.trx"
@@ -150,7 +162,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ github.repository_owner }}/deep-platform
-          ref: main
+          ref: ${{ env.RELEASE_SOURCE_REF }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -191,6 +203,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: ${{ github.repository_owner }}/xpoint-staking-contracts
+          ref: ${{ env.RELEASE_SOURCE_REF }}
           token: ${{ secrets.XPOINTLABS_CI_TOKEN || github.token }}
           path: xpoint-staking-contracts
 
@@ -296,7 +309,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ github.repository_owner }}/deep-platform
-          ref: main
+          ref: ${{ env.RELEASE_SOURCE_REF }}
           fetch-depth: 0
           persist-credentials: false
 

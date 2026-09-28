@@ -4,7 +4,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const compose = readFileSync(path.join(root, 'docker-compose.staking.prod.local.yml'), 'utf8');
+const compose = readFileSync(path.join(root, 'docker-compose.staking.prod.local.yml'), 'utf8')
+  .replace(/\r\n/g, '\n');
 const provision = readFileSync(
   path.join(root, 'scripts', 'Prepare-ProductionRegistryCandidate.ps1'), 'utf8');
 const smoke = readFileSync(
@@ -51,7 +52,7 @@ assert.match(smoke, /cryptographicClosureVerification = 'delegated-to-xnode-read
 
 const canonicalArtifactRoles = [
   'xna1', 'dts1', 'adh1', 'snapshot-dtt1', 'snapshot-adp1', 'xvp1',
-  'xnv1', 'xnh1', 'xnd1', 'pmt2', 'response-adp1', 'caller-adh1',
+  'xnv1', 'xnh1', 'xnd1', 'pma2', 'pmt2', 'response-adp1', 'caller-adh1',
 ];
 for (const [ordinal, role] of canonicalArtifactRoles.entries()) {
   const escapedRole = role.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

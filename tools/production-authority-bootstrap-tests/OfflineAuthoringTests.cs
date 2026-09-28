@@ -113,6 +113,8 @@ internal static class OfflineAuthoringTests
             "--network-id-hex", network, "--genesis-core-hash", pin, "--output", output };
         NetworkClosureExport.Run(Arguments.Parse(args));
         var decoded = XPointNetworkClosureWireCodec.DecodeResponse(File.ReadAllBytes(output));
+        NetworkDistributionAuditTests.RunAsync(File.ReadAllBytes(output),
+            bootstrap.GenesisPin.NetworkId.ToArray()).GetAwaiter().GetResult();
         if (decoded.ExactViewChain.Count != 2 || decoded.ExactHeadChain.Count != 2 ||
             decoded.ExactNetworkPolicyChain.Count != 2 || decoded.ExactPlacementTopologyChain.Count != 2 ||
             decoded.ExactActiveNodeDescriptors.Count != 3 ||

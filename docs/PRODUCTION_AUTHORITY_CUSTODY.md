@@ -111,6 +111,13 @@ not live verification, floor advancement or permission to deploy. Clients still
 require their own nonce-fresh DID2 proof and complete network verification.
 Mount only the resulting public file read-only using the
 [Registry distribution runbook](../../deep-registry-api/docs/NETWORK_CLOSURE_DISTRIBUTION.md).
+After ingress cutover, `--audit-network-distribution <https-origin/>` with
+`--network-id-hex` and an independently exported `--expected-bundle-sha256`
+checks the Protocol-generated request, exact bounded public response, no-store,
+and rejection of a wrong network, query, media type and malformed envelope.
+The operator uses normal TLS certificate validation and refuses redirects.
+It does not issue an account proof, verify current network authority or satisfy
+device E2E; the account-owned client must still perform those checks.
 The exact transport envelope is owned by
 [XPOINT-NETWORK-V1 section 8.1](../../docs/architecture/XPOINT-NETWORK-V1.md#81-identity-neutral-network-closure-distribution-ncq2ncp2).
 

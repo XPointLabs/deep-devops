@@ -162,5 +162,36 @@ Deployment is gated in this order:
 6. Only after the full DID2 client and physical E2E gates pass may the
    explicit Registry production-cutover attestation be set. It remains off.
 
+### Closed HTTPS UAT distribution
+
+The reviewed unique canary can be extended with
+`scripts/prepare-did2-https-env.cjs`. Supply its exact image, protected state
+basename, independent floor schema and network scope, one known reverse-proxy
+address, a new private output file, and a canonical public bundle mount path.
+The helper refuses duplicates, production mode, an enabled V1 directory,
+cutover attestation, substituted state/network/floor and pre-existing extension
+keys. It preserves custody/state values exactly and does not disclose them.
+The resulting environment is UAT-only; it is not a production composer.
+
+Use the successful Registry CI image by immutable digest. Bind its port only
+to loopback, retain the reviewed canary mounts, and mount only the public NCP2
+directory read-only at `/app/public-network`. The public directory must not be
+inside private custody, the directory database or the web root. See the
+[public export workflow](PRODUCTION_AUTHORITY_CUSTODY.md) and
+[Registry distribution runbook](../../deep-registry-api/docs/NETWORK_CLOSURE_DISTRIBUTION.md).
+
+Render `config/did2-https-uat/nginx-location.conf.template` with the single
+loopback port and include it only in the existing Registry HTTPS server;
+`nginx-proxy.conf` is its shared proxy snippet. Headers are overwritten from
+the actual ingress scheme/address, and Registry trusts only that known proxy.
+Do not modify the staking server blocks, certificate configuration or certbot.
+Retain and hash-check the exact prior ingress file before installing the
+candidate; require `nginx -t`, current protected time, DID2 readiness and
+positive/negative transport checks before accepting the route cutover.
+Cleartext without a trusted scheme must reject. The HTTPS response must equal
+the complete operator-exported public bundle byte-for-byte. A successful
+distribution response is not a signed current network capability: the client
+must independently obtain and verify its nonce-fresh DID2 proof.
+
 The floor does not carry message payloads and is not a contact resolver.
 It is a monotonic rollback guard for the signed DID2 directory head.
