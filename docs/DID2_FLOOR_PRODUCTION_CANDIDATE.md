@@ -20,12 +20,15 @@ and `--previous-adf1-core-hash`. These must name the independently pinned last
 checkpoint; retain its complete predecessor chain. The full authenticated head
 export and all original mandatory inputs remain required. Run root authoring
 offline, use a new artifact output, and import only the exact signed public file.
-For the first successor, `scripts/append-did2-checkpoint-env.cjs` prepares a new
+For each successor, `scripts/append-did2-checkpoint-env.cjs` prepares a new
 private environment from the selected immutable Registry inspection. It checks
 the exact state path, floor schema, network and existing checkpoint path, rejects
-duplicates/preexisting successors, preserves every prior value and adds only
-`ForwardCheckpointPaths__1`. It is deliberately not a general chain-rotation
-or state-reset tool.
+duplicates, gaps, noncanonical indexes, repeated paths and a reused target,
+preserves every prior value and appends exactly one `ForwardCheckpointPaths`
+entry after the independently selected latest predecessor. It refuses a full
+64-entry chain. Protocol still verifies the complete exact signed lineage;
+path validation is not signature evidence. This is not a chain replacement,
+root-key transfer or state-reset tool.
 
 The same deployed Registry image was recomposed with both checkpoints and the
 same mounts, external floor and loopback listener. The old stopped container is

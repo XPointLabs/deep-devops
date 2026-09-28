@@ -31,15 +31,27 @@ function appendDid2CheckpointEnvironment(inspection, expected) {
     /^\s*Search Path\s*=\s*(.*?)\s*$/i.exec(part)).filter(Boolean) : [];
   const checkpoints = [...selected.keys()].filter(key =>
     key.startsWith((prefix + 'ForwardCheckpointPaths__').toLowerCase()));
+  const checkpointPrefix = (prefix + 'ForwardCheckpointPaths__').toLowerCase();
+  // Keep the complete imported chain. The supplied predecessor names its
+  // last element, never permission to replace an earlier signed checkpoint.
+  const orderedPaths = [];
+  if (checkpoints.length < 1 || checkpoints.length >= 64)
+    throw new Error('The retained checkpoint chain cannot accept another successor.');
+  for (let index = 0; index < checkpoints.length; index++) {
+    const path = value(checkpointPrefix + index);
+    if (!checkpointPath(path) || orderedPaths.includes(path))
+      throw new Error('The retained checkpoint chain is not contiguous and unique.');
+    orderedPaths.push(path);
+  }
   if (value(prefix + 'Enabled') !== 'true' || value(prefix + 'ProofEnabled') !== 'true' ||
       value('AccountDirectoryAuthority__Enabled') !== 'false' ||
       value(prefix + 'NetworkIdHex') !== expected.networkId ||
       value(prefix + 'StatePath') !== expected.statePath ||
       schemas.length !== 1 || schemas[0][1] !== expected.floorSchema ||
-      checkpoints.length !== 1 || value(prefix + 'ForwardCheckpointPaths__0') !== expected.previous)
+      orderedPaths.at(-1) !== expected.previous || orderedPaths.includes(expected.next))
     throw new Error('The source DID2 state, floor or retained checkpoint differs from the selected closure.');
   return [...selected.values()].map(entry => entry.name + '=' + entry.value)
-    .concat(prefix + 'ForwardCheckpointPaths__1=' + expected.next);
+    .concat(prefix + 'ForwardCheckpointPaths__' + orderedPaths.length + '=' + expected.next);
 }
 
 function main() {
