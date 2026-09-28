@@ -56,6 +56,17 @@ static void TestArguments()
     Reject<ArgumentException>(() => Arguments.Parse([.. extension, "--prepare-rollover", "true"]));
     Reject<ArgumentException>(() => Arguments.Parse([.. extension, "--audit-genesis-source", "synthetic"]));
     Reject<ArgumentException>(() => Arguments.Parse(extension[..^2]));
+    var assets = new[] { "--export-xnode-did2-assets", "synthetic",
+        "--network-id-hex", "synthetic", "--genesis-core-hash", "synthetic",
+        "--expected-bundle-sha256", "synthetic", "--genesis-head-path", "synthetic",
+        "--genesis-head-core-hash", "synthetic", "--observer-contact-file", "synthetic",
+        "--registry-origin", "synthetic", "--output", "synthetic" };
+    if (!Arguments.Parse(assets).IsXNodeDid2AssetsExport || Arguments.Parse(assets).IsNetworkClosureExport)
+        throw new Exception("Public DID2 host export mode was not exclusively selected.");
+    Reject<ArgumentException>(() => Arguments.Parse([.. assets, "--prepare-rollover", "true"]));
+    Reject<ArgumentException>(() => Arguments.Parse([.. assets, "--extend-network-closure", "synthetic"]));
+    Reject<ArgumentException>(() => Arguments.Parse([.. assets, "--authority-root", "synthetic"]));
+    Reject<ArgumentException>(() => Arguments.Parse(assets[..^2]));
 }
 
 static void TestSourceInventory()

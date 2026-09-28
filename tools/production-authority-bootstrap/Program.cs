@@ -8,6 +8,11 @@ using Sodium;
 using static BootstrapIo;
 
 var arguments = Arguments.Parse(args);
+if (arguments.IsXNodeDid2AssetsExport)
+{
+    XNodeDid2AssetsExport.Run(arguments);
+    return;
+}
 if (arguments.IsNetworkDistributionAudit)
 {
     using var handler = new HttpClientHandler { AllowAutoRedirect = false };
@@ -268,6 +273,8 @@ sealed class Arguments
             "--audit-genesis-source", "--network-id-hex", "--genesis-core-hash", "--expected-xnv1-artifact-hash",
             "--export-network-genesis", "--extend-network-closure", "--network-successor-source",
             "--audit-network-distribution", "--expected-bundle-sha256",
+            "--export-xnode-did2-assets", "--genesis-head-path", "--genesis-head-core-hash",
+            "--observer-contact-file", "--registry-origin",
         };
         var values = new Dictionary<string, string>(StringComparer.Ordinal);
         for (var index = 0; index < args.Length; index += 2)
@@ -280,12 +287,17 @@ sealed class Arguments
         var networkGenesis = values.ContainsKey("--export-network-genesis");
         var networkExtension = values.ContainsKey("--extend-network-closure");
         var distribution = values.ContainsKey("--audit-network-distribution");
-        if (new[] { preparation, successor, audit, networkGenesis, networkExtension, distribution }
+        var xnodeAssets = values.ContainsKey("--export-xnode-did2-assets");
+        if (new[] { preparation, successor, audit, networkGenesis, networkExtension, distribution, xnodeAssets }
                 .Count(static value => value) > 1)
             throw new ArgumentException("Operator audit, preparation, issuance and public export modes are separate operations.");
         if (preparation && (!string.Equals(values["--prepare-rollover"], "true", StringComparison.Ordinal) || successor))
             throw new ArgumentException("Rollover preparation and successor issuance are separate operations.");
-        var required = distribution
+        var required = xnodeAssets
+            ? new[] { "--export-xnode-did2-assets", "--network-id-hex", "--genesis-core-hash",
+                "--expected-bundle-sha256", "--genesis-head-path", "--genesis-head-core-hash",
+                "--observer-contact-file", "--registry-origin", "--output" }
+            : distribution
             ? new[] { "--audit-network-distribution", "--network-id-hex", "--expected-bundle-sha256" }
             : networkGenesis
             ? new[] { "--export-network-genesis", "--network-id-hex", "--genesis-core-hash", "--output" }
@@ -310,6 +322,7 @@ sealed class Arguments
     }
 
     internal string Required(string name) => values[name];
+    internal bool IsXNodeDid2AssetsExport => values.ContainsKey("--export-xnode-did2-assets");
     internal bool IsNetworkDistributionAudit => values.ContainsKey("--audit-network-distribution");
     internal bool IsSuccessor => values.ContainsKey("--successor-from");
     internal bool IsCheckpointAudit => values.ContainsKey("--audit-genesis-source");

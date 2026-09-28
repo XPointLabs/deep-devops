@@ -121,6 +121,66 @@ device E2E; the account-owned client must still perform those checks.
 The exact transport envelope is owned by
 [XPOINT-NETWORK-V1 section 8.1](../../docs/architecture/XPOINT-NETWORK-V1.md#81-identity-neutral-network-closure-distribution-ncq2ncp2).
 
+There is currently no separate remote UAT environment. The `UAT` name below is
+an isolated diagnostic software profile on production infrastructure, not a
+different fleet. Mr. X authorizes production testing until he explicitly reports
+that users exist. Keep diagnostics isolated from existing registered node state,
+ingress, certificate renewal and the staking portal; do not label these hosts UAT.
+
+For the DID2-only XNode diagnostic host, `--export-xnode-did2-assets <complete-ncp2>`
+requires the independently retained `--expected-bundle-sha256`,
+`--network-id-hex`, `--genesis-core-hash`, `--genesis-head-path`,
+`--genesis-head-core-hash`, a canonical `--registry-origin <https-origin/>`,
+`--observer-contact-file <two-line-contact-file>` and `--output <new-directory>`.
+The observer input is the existing compact descriptor followed by its exact
+public DID2 in hexadecimal. Its commitment must match; only the public DID2
+is exported, never the descriptor/read capability, account/device keys or phrase.
+No signer keys are opened. Inputs are bounded and reject ancestor links.
+
+The complete seven NCP2 chains, separately pinned reader-V2 genesis head,
+public observer and `xnode.did2.json` fragment are installed as one new directory.
+An existing output is never replaced. Mount this directory read-only at
+`/run/did2-network`; configure only a closed UAT host, disable its V1 contact
+authority and retain the registered node identities and all protected floors.
+The fragment does not configure listener, carrier, private onion custody or peer
+transport and is not a standalone production deployment file.
+
+This export verifies the independent bundle digest, pinned XNA1/DTS1 chain,
+signed DID2 genesis head and observer binding. Operational chain authentication
+and freshness remain the runtime Protocol verifier's job. A latest-only successor
+inventory cannot replace the full NCP2 history. Neither an export nor its enabled
+configuration flags prove current authority, two-replica publication or device E2E.
+The host must acquire its own nonce-fresh proof and verify its installed onion key
+before releasing receive capability; see
+[DR-0012](../../docs/survival-program/decisions/DR-0012-protected-network-history.md).
+
+`scripts/prepare-xnode-did2-uat.cjs` prepares one separate canary bundle from
+`--assets <export-directory>`, all three existing `--seed1/--seed2/--seed3
+<deployment-candidate>` roots, the already authored `--rollover <directory>`,
+`--node <seed1|seed2|seed3>` and `--output <new-absolute-directory>`.
+It checks public-file hashes, observer/config integrity, registered Ed25519
+seed/public binding, distinct peers, current origin key/SPKI and bounded seeds.
+It copies only the selected existing Ed25519 seed, rollover onion seed, origin
+key and state-protection secret; source files are not changed and no identity
+or signer is generated. The resulting directory contains private custody and
+must stay in the protected environment root, never a CI artifact or Git.
+On Windows it inherits the protected parent's ACL; on the Linux host retain
+owner-only directory/file permissions before starting the process.
+
+The preparation deliberately disables VLESS/Reality and every V1 contact/group
+authority. `docker-compose.did2-xnode-uat.yml` mounts this separate bundle and
+fresh canary state, binds only loopback, uses bounded logs and requires the
+verified immutable image digest. Set `DEEP_DID2_UAT_ROOT` to the prepared root
+and `XNODE_IMAGE` to that digest; run compose with a unique explicit project name.
+The supported production installer remains the later rollout owner; this
+isolated compose must not replace its existing node, ingress or volumes.
+Require a successful preparation exit and inspect current Registry time/head
+inputs before startup. Registry HTTP readiness alone is not proof freshness.
+Successful authenticated canary startup can establish its nonce-fresh DID2 host
+authority and installed-key binding, not peer TLS, real carrier or message delivery.
+Preserve its new directory/network floor, independent anchors and Data Protection
+key ring together for a same-image restart; do not reset them to obtain readiness.
+
 Run the synthetic offline operator-input gate without opening real custody:
 
 ```powershell

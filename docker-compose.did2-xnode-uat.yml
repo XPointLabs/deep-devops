@@ -1,0 +1,33 @@
+# Isolated host-authority canary, not a carrier/message/device release gate.
+services:
+  xnode:
+    image: ${XNODE_IMAGE:?set an immutable verified XNode image digest}
+    restart: "no"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 512m
+    cpus: 1.0
+    environment:
+      ASPNETCORE_ENVIRONMENT: UAT
+    ports:
+      - "127.0.0.1:28190:8080"
+    volumes:
+      - ${DEEP_DID2_UAT_ROOT:?set the new prepared UAT bundle}/appsettings.UAT.json:/app/appsettings.UAT.json:ro
+      - ${DEEP_DID2_UAT_ROOT}/public:/run/did2-network:ro
+      - ${DEEP_DID2_UAT_ROOT}/secrets:/run/secrets:ro
+      - ${DEEP_DID2_UAT_ROOT}/state:/var/lib/xnode
+    tmpfs:
+      - /tmp:size=16m,mode=0700
+    logging:
+      driver: json-file
+      options:
+        max-size: 1m
+        max-file: "1"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--max-time", "4", "http://127.0.0.1:8080/health/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s

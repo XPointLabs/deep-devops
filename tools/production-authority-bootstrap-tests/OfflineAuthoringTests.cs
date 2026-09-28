@@ -2,7 +2,9 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Deep.Protocol.AccountDirectoryV1;
+using Deep.Protocol.ApplicationCore;
 using Deep.Protocol.ContactV1;
+using Deep.Protocol.Identity;
 using Deep.Protocol.XPointNetworkV1;
 using Sodium;
 
@@ -72,7 +74,10 @@ internal static class OfflineAuthoringTests
                 adhReference, 1_200, 1_210, 1_400));
         if (successor.ExactXnd1.Count != 3 || successor.ExactXnh1.IsEmpty || successor.ExactPma2.IsEmpty)
             throw new Exception("The operator signers did not author a complete successor.");
-        TestPublicNetworkExport(directory, bootstrap, genesis, successor);
+        var did2Genesis = await DeepIdV2DirectoryHeadAuthor.AuthorGenesisAsync(
+            bootstrap.Authority, 990, 1_500,
+            witnesses.Select(value => (IAccountDirectoryAdh1WitnessSigner)new AdhWitness(value)).ToArray());
+        TestPublicNetworkExport(directory, bootstrap, genesis, successor, did2Genesis);
 
         FileSigner Signer(string name, byte id, byte seedValue, byte domain, bool isRoot)
         {
@@ -91,11 +96,20 @@ internal static class OfflineAuthoringTests
     private static byte[] B(int length, byte value) => Enumerable.Repeat(value, length).ToArray();
     private static byte[] H(string value) => SHA256.HashData(System.Text.Encoding.ASCII.GetBytes(value));
 
+    private sealed class AdhWitness(FileSigner signer) : IAccountDirectoryAdh1WitnessSigner
+    {
+        public ReadOnlyMemory<byte> WitnessId => signer.WitnessId;
+        public ValueTask<ReadOnlyMemory<byte>> SignAdh1Async(
+            ReadOnlyMemory<byte> input, CancellationToken cancellationToken) =>
+            signer.SignDtt1Async(input, cancellationToken);
+    }
+
     // Genuine signed ceremony records, but export is distribution only: no
     // nonce-fresh DID2 proof, live network capability, TLS or device claim.
     private static void TestPublicNetworkExport(string directory,
         VerifiedXPointNetworkBootstrap bootstrap, AuthoredXPointNetworkOperationalGenesis genesis,
-        AuthoredXPointNetworkOperationalSuccessor successor)
+        AuthoredXPointNetworkOperationalSuccessor successor,
+        AuthoredAccountDirectoryHeadMutation did2Genesis)
     {
         var network = Convert.ToHexString(bootstrap.GenesisPin.NetworkId.Span);
         var pin = Convert.ToHexString(bootstrap.GenesisPin.AuthorityCoreHash.Span);
@@ -123,6 +137,7 @@ internal static class OfflineAuthoringTests
             !decoded.ExactPlacementTopologyChain[0].Span.SequenceEqual(genesis.ExactPmt2.Span) ||
             !decoded.ExactPlacementTopologyChain[1].Span.SequenceEqual(successor.ExactPmt2.Span))
             throw new Exception("Public network export lost or changed exact signed history.");
+        TestPublicHostAssets(directory, output, network, pin, did2Genesis);
         Reject<IOException>(() => NetworkClosureExport.Run(Arguments.Parse(args)));
         args[^1] = Path.Combine(directory, "network-rejected.ncp2");
         args[7] = new string('1', 64);
@@ -192,6 +207,73 @@ internal static class OfflineAuthoringTests
             try { action(); }
             catch (T) { return; }
             throw new Exception($"Expected {typeof(T).Name} public network export rejection.");
+        }
+    }
+
+    private static void TestPublicHostAssets(string directory, string bundle,
+        string network, string pin, AuthoredAccountDirectoryHeadMutation genesis)
+    {
+        var head = Path.Combine(directory, "did2-genesis.adh1");
+        File.WriteAllBytes(head, genesis.ExactAdh1.ToArray());
+        // This is a structural public descriptor fixture, not a PQ identity
+        // verification or account admission claim. The ADH1 uses real signatures.
+        var read = B(16, 0x44);
+        var did2 = DeepIdV2Codec.AuthorDid2(B(32, 0x55), B(1952, 0x66), read);
+        var descriptor = DeepPermanentIdV2.FromCredential(did2, read).CanonicalText;
+        var contact = Path.Combine(directory, "observer-contact.txt");
+        File.WriteAllText(contact, descriptor + "\n" + Convert.ToHexString(did2.CanonicalBytes.Span) + "\n");
+        var target = Path.Combine(directory, "host-assets");
+        var args = new[] { "--export-xnode-did2-assets", bundle, "--network-id-hex", network,
+            "--genesis-core-hash", pin, "--expected-bundle-sha256",
+            Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(bundle))),
+            "--genesis-head-path", head, "--genesis-head-core-hash",
+            Convert.ToHexString(genesis.CoreHash.Span), "--observer-contact-file", contact,
+            "--registry-origin", "https://registry.invalid/", "--output", target };
+        XNodeDid2AssetsExport.Run(Arguments.Parse(args));
+        if (!File.ReadAllBytes(Path.Combine(target, "observer.did2")).AsSpan()
+                .SequenceEqual(did2.CanonicalBytes.Span))
+            throw new Exception("Observer credential changed during public export.");
+        using var config = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(target, "xnode.did2.json")));
+        var placement = config.RootElement.GetProperty("DeepIdV2NetworkPlacement");
+        if (placement.GetProperty("ExactViewPaths").GetArrayLength() != 2 ||
+            placement.GetProperty("ExactHeadPaths").GetArrayLength() != 2 ||
+            !File.ReadAllBytes(Path.Combine(target, "xnh1.0000.bin")).AsSpan().SequenceEqual(
+                XPointNetworkClosureWireCodec.DecodeResponse(File.ReadAllBytes(bundle)).ExactHeadChain[0].Span))
+            throw new Exception("Host assets lost signed predecessor history.");
+        foreach (var file in Directory.GetFiles(target))
+            if (System.Text.Encoding.UTF8.GetString(File.ReadAllBytes(file)).Contains(descriptor, StringComparison.Ordinal))
+                throw new Exception("Observer read capability was exported with host assets.");
+        using var manifest = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(target, "public-assets.v2.json")));
+        if (manifest.RootElement.GetProperty("currentTimeEvidence").GetBoolean() ||
+            manifest.RootElement.GetProperty("deploymentEvidence").GetBoolean())
+            throw new Exception("Public host export claimed live authority.");
+        Reject<IOException>(() => XNodeDid2AssetsExport.Run(Arguments.Parse(args)));
+
+        Negative<CryptographicException>("--expected-bundle-sha256", new string('1', 64));
+        Negative<CryptographicException>("--network-id-hex", new string('2', 32));
+        Negative<XPointNetworkAuthorityVerificationException>("--genesis-core-hash", new string('1', 64));
+        Negative<AccountDirectoryFreshnessVerificationException>("--genesis-head-core-hash", new string('1', 64));
+        Negative<InvalidDataException>("--registry-origin", "http://registry.invalid/");
+        Negative<InvalidDataException>("--registry-origin", "https://registry.invalid/?credential=not-allowed");
+        File.WriteAllText(contact, descriptor + "\n" + Convert.ToHexString(
+            DeepIdV2Codec.AuthorDid2(B(32, 0x77), B(1952, 0x66), read).CanonicalBytes.Span));
+        Negative<CryptographicException>("--observer-contact-file", contact);
+        File.WriteAllBytes(contact, new byte[8_193]);
+        Negative<InvalidDataException>("--observer-contact-file", contact);
+
+        void Negative<T>(string argument, string replacement) where T : Exception
+        {
+            var invalid = args.ToArray();
+            invalid[Array.IndexOf(invalid, argument) + 1] = replacement;
+            invalid[^1] = Path.Combine(directory, "host-rejected");
+            Reject<T>(() => XNodeDid2AssetsExport.Run(Arguments.Parse(invalid)));
+            if (Directory.Exists(invalid[^1])) throw new Exception("Rejected host assets wrote an output.");
+        }
+        static void Reject<T>(Action action) where T : Exception
+        {
+            try { action(); }
+            catch (T) { return; }
+            throw new Exception($"Expected {typeof(T).Name} public host asset rejection.");
         }
     }
 
