@@ -35,6 +35,11 @@ if (arguments.IsRolloverPreparation)
     RolloverPreparation.Run(arguments);
     return;
 }
+if (arguments.IsRolloverCertificateReissue)
+{
+    RolloverPreparation.ReissueCertificates(arguments);
+    return;
+}
 if (arguments.IsSuccessor)
 {
     await SuccessorCeremony.RunAsync(arguments);
@@ -269,7 +274,7 @@ sealed class Arguments
             "--observed-unix", "--boot-id", "--nonce-created", "--response-received", "--current-sample",
             "--successor-from", "--rollover-root", "--protected-head-core-hash",
             "--protected-pmt-artifact-hash", "--current-adh1-path", "--current-adh1-core-hash",
-            "--prepare-rollover",
+            "--prepare-rollover", "--reissue-rollover-certificates",
             "--audit-genesis-source", "--network-id-hex", "--genesis-core-hash", "--expected-xnv1-artifact-hash",
             "--export-network-genesis", "--extend-network-closure", "--network-successor-source",
             "--audit-network-distribution", "--expected-bundle-sha256",
@@ -282,17 +287,20 @@ sealed class Arguments
                 !values.TryAdd(args[index], args[index + 1]))
                 throw new ArgumentException("An authority bootstrap argument is unknown, empty, or duplicated.");
         var preparation = values.ContainsKey("--prepare-rollover");
+        var reissue = values.ContainsKey("--reissue-rollover-certificates");
         var successor = values.ContainsKey("--successor-from");
         var audit = values.ContainsKey("--audit-genesis-source");
         var networkGenesis = values.ContainsKey("--export-network-genesis");
         var networkExtension = values.ContainsKey("--extend-network-closure");
         var distribution = values.ContainsKey("--audit-network-distribution");
         var xnodeAssets = values.ContainsKey("--export-xnode-did2-assets");
-        if (new[] { preparation, successor, audit, networkGenesis, networkExtension, distribution, xnodeAssets }
+        if (new[] { preparation, reissue, successor, audit, networkGenesis, networkExtension, distribution, xnodeAssets }
                 .Count(static value => value) > 1)
             throw new ArgumentException("Operator audit, preparation, issuance and public export modes are separate operations.");
         if (preparation && (!string.Equals(values["--prepare-rollover"], "true", StringComparison.Ordinal) || successor))
             throw new ArgumentException("Rollover preparation and successor issuance are separate operations.");
+        if (reissue && values["--reissue-rollover-certificates"] != "true")
+            throw new ArgumentException("Certificate reissue must be explicitly selected.");
         var required = xnodeAssets
             ? new[] { "--export-xnode-did2-assets", "--network-id-hex", "--genesis-core-hash",
                 "--expected-bundle-sha256", "--genesis-head-path", "--genesis-head-core-hash",
@@ -307,6 +315,9 @@ sealed class Arguments
             : audit
             ? new[] { "--audit-genesis-source", "--network-id-hex", "--genesis-core-hash",
                 "--expected-xnv1-artifact-hash", "--output" }
+            : reissue
+            ? new[] { "--reissue-rollover-certificates", "--authority-root", "--rollover-root",
+                "--seed1-root", "--seed2-root", "--seed3-root", "--output" }
             : preparation
             ? new[] { "--prepare-rollover", "--authority-root", "--seed1-root", "--seed2-root", "--seed3-root",
                 "--observed-unix" }
@@ -327,6 +338,7 @@ sealed class Arguments
     internal bool IsSuccessor => values.ContainsKey("--successor-from");
     internal bool IsCheckpointAudit => values.ContainsKey("--audit-genesis-source");
     internal bool IsRolloverPreparation => values.ContainsKey("--prepare-rollover");
+    internal bool IsRolloverCertificateReissue => values.ContainsKey("--reissue-rollover-certificates");
     internal bool IsNetworkClosureExport => values.ContainsKey("--export-network-genesis") ||
         values.ContainsKey("--extend-network-closure");
     internal bool IsNetworkClosureExtension => values.ContainsKey("--extend-network-closure");

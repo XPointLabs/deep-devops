@@ -59,7 +59,29 @@ Operator configuration is described in [the ingress runbook](PRODUCTION_NODE_TLS
   lane remains required before it can be release evidence; no scan exception
   was added to hide those findings.
 
-Next: build the immutable reviewed image through owner CI, deploy through the
+## Retained-input and owner-CI checkpoint
+
+- Owner CI run `36405059531`, attempt 2, completed successfully from DevOps
+  `4467b09` with XNode `d4b7f2c`. Attempt 1 failed writing a Buildx layer
+  (`not_found`); rerunning the same source succeeded. The candidate is
+  `ghcr.io/xpointlabs/xnode@sha256:ed29ff6501e6d4e468d14fa9902f2e1d57c9bc35f7ab16c8954385552ec5ff4a`.
+  It is not a GitHub Release or `latest` publication.
+- Real private-input staging rejected the old origin certificates: DNS SAN
+  was present but the signed IPv4 origin had no typed IP SAN. No failed bundle
+  was deployed. The offline operator now supports the exclusive
+  `--reissue-rollover-certificates true` mode with authority/rollover roots,
+  three existing node roots and a fresh private output directory. It reissues
+  current/next certificates with both exact origins while retaining private
+  keys, SPKI pins, onion seeds and the original validity interval byte-for-byte
+  where applicable. Existing output, redirected paths and mismatched keys/pins
+  reject; no signer, network-history or registered-identity change is performed.
+- Five bootstrap test groups passed, including complete six-certificate reissue,
+  negative missing-IP-SAN, mismatched-key and existing-output cases. All three
+  real node bundles then passed bounded custody staging and strict ingress
+  preflight without the lab-certificate exception. These remain local input
+  checks, not served TLS or device-delivery evidence.
+
+Next: deploy the immutable reviewed image through the
 supported installer preserving keys/floors, verify actual signed-origin peer
 TLS, then complete two-replica publication/claim and Windows↔Android delivery.
 No GitHub Release or `latest` publication is authorized by these local checks.

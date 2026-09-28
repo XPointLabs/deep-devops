@@ -8,6 +8,7 @@ var tests = new (string Name, Action Run)[]
     ("exact mutually exclusive modes", TestArguments),
     ("canonical bounded source inventory", TestSourceInventory),
     ("installable origin key and validity", TestOriginCertificate),
+    ("origin SAN repair retains exact keys and validity", TestOriginCertificateReissue),
     ("real operator signers author genesis and successor", OfflineAuthoringTests.Run),
 };
 foreach (var (name, run) in tests)
@@ -31,6 +32,15 @@ static void TestArguments()
     var invalid = preparation.ToArray();
     invalid[1] = "false";
     Reject<ArgumentException>(() => Arguments.Parse(invalid));
+    var reissue = new[] { "--reissue-rollover-certificates", "true", "--authority-root", "synthetic",
+        "--seed1-root", "synthetic", "--seed2-root", "synthetic", "--seed3-root", "synthetic",
+        "--rollover-root", "synthetic", "--output", "synthetic" };
+    if (!Arguments.Parse(reissue).IsRolloverCertificateReissue) throw new Exception("Explicit reissue mode was not selected.");
+    Reject<ArgumentException>(() => Arguments.Parse([.. reissue, "--prepare-rollover", "true"]));
+    Reject<ArgumentException>(() => Arguments.Parse([.. reissue, "--successor-from", "synthetic"]));
+    Reject<ArgumentException>(() => Arguments.Parse([.. reissue, "--observed-unix", "1000"]));
+    var nonExplicit = reissue.ToArray(); nonExplicit[1] = "false";
+    Reject<ArgumentException>(() => Arguments.Parse(nonExplicit));
     var audit = new[] { "--audit-genesis-source", "synthetic",
         "--network-id-hex", "synthetic", "--genesis-core-hash", "synthetic",
         "--expected-xnv1-artifact-hash", "synthetic", "--output", "synthetic" };
@@ -127,6 +137,90 @@ static void TestOriginCertificate()
         using var wrongKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         File.WriteAllText(keyPath, wrongKey.ExportPkcs8PrivateKeyPem());
         Reject<ArgumentException>(() => SuccessorCeremony.VerifyOriginCertificate(certPath, start, end));
+    });
+}
+
+static void TestOriginCertificateReissue()
+{
+    WithScratch(root =>
+    {
+        File.WriteAllText(Path.Combine(root, ".env.node.prod"),
+            "DEEP_NODE_PUBLIC_HOST=node.example\nDEEP_NODE_PUBLIC_IP=8.8.8.1\n");
+        var origins = RolloverPreparation.ReadOrigins(root);
+        if (!origins.SequenceEqual(new[] { "8.8.8.1", "node.example" })) throw new Exception("Exact origins changed.");
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var request = new CertificateRequest("CN=node.example", key, HashAlgorithmName.SHA256);
+        var oldSan = new SubjectAlternativeNameBuilder(); oldSan.AddDnsName("node.example");
+        request.CertificateExtensions.Add(oldSan.Build());
+        var now = DateTimeOffset.UtcNow;
+        using var old = request.CreateSelfSigned(now.AddMinutes(-10), now.AddDays(20));
+        var certificatePath = Path.Combine(root, "current-origin.cer");
+        var keyPath = Path.Combine(root, "current-origin.key");
+        File.WriteAllText(certificatePath, old.ExportCertificatePem());
+        File.WriteAllText(keyPath, key.ExportPkcs8PrivateKeyPem());
+        var originalBytes = File.ReadAllBytes(certificatePath);
+        var originalKey = File.ReadAllBytes(keyPath);
+        if (old.MatchesHostname(origins[0], false, false)) throw new Exception("Negative IP-SAN fixture was not negative.");
+        var repairedBytes = RolloverPreparation.ReissueCertificate(certificatePath, origins);
+        using var repaired = X509Certificate2.CreateFromPem(System.Text.Encoding.ASCII.GetString(repairedBytes));
+        using var repairedKey = repaired.GetECDsaPublicKey()!;
+        if (origins.Any(host => !repaired.MatchesHostname(host, false, false)) ||
+            !repairedKey.ExportSubjectPublicKeyInfo().AsSpan().SequenceEqual(key.ExportSubjectPublicKeyInfo()) ||
+            old.NotBefore != repaired.NotBefore || old.NotAfter != repaired.NotAfter ||
+            !File.ReadAllBytes(certificatePath).AsSpan().SequenceEqual(originalBytes) ||
+            !File.ReadAllBytes(keyPath).AsSpan().SequenceEqual(originalKey))
+            throw new Exception("SAN repair changed custody/key/time or failed exact host checks.");
+        var authority = Path.Combine(root, "authority");
+        Directory.CreateDirectory(Path.Combine(authority, "public"));
+        var source = Path.Combine(authority, "private", "source");
+        Directory.CreateDirectory(source);
+        File.WriteAllText(Path.Combine(authority, "public", "custody-manifest.v1.json"),
+            "{\"Schema\":\"fixture\",\"Environment\":\"prod\",\"AuthorityOwner\":\"Mr. X\",\"NetworkIdHex\":\"\",\"Roles\":[]}");
+        var reissueArguments = new List<string> { "--reissue-rollover-certificates", "true", "--authority-root", authority,
+            "--rollover-root", source, "--output", Path.Combine(authority, "private", "repaired") };
+        for (var index = 1; index <= 3; index++)
+        {
+            var name = "seed" + index;
+            var nodeRoot = Path.Combine(root, name);
+            Directory.CreateDirectory(nodeRoot);
+            File.WriteAllText(Path.Combine(nodeRoot, ".env.node.prod"),
+                "DEEP_NODE_PUBLIC_HOST=node.example\nDEEP_NODE_PUBLIC_IP=8.8.8." + index + "\n");
+            reissueArguments.AddRange(["--" + name + "-root", nodeRoot]);
+            var custody = Path.Combine(source, name);
+            Directory.CreateDirectory(custody);
+            foreach (var role in new[] { "current", "next" })
+            {
+                File.WriteAllBytes(Path.Combine(custody, role + "-origin.cer"), originalBytes);
+                File.WriteAllBytes(Path.Combine(custody, role + "-origin.key"), originalKey);
+                File.WriteAllText(Path.Combine(custody, role + "-origin.spki-sha256"),
+                    Convert.ToHexString(SHA256.HashData(key.ExportSubjectPublicKeyInfo())).ToLowerInvariant() + "\n");
+                File.WriteAllBytes(Path.Combine(custody, role + ".x25519.seed"), RandomNumberGenerator.GetBytes(32));
+            }
+        }
+        var parsedArguments = Arguments.Parse(reissueArguments.ToArray());
+        RolloverPreparation.ReissueCertificates(parsedArguments);
+        foreach (var originalFile in Directory.GetFiles(source, "*", SearchOption.AllDirectories))
+        {
+            var relative = Path.GetRelativePath(source, originalFile);
+            var outputFile = Path.Combine(authority, "private", "repaired", relative);
+            if (!relative.EndsWith(".cer", StringComparison.Ordinal) &&
+                !File.ReadAllBytes(originalFile).AsSpan().SequenceEqual(File.ReadAllBytes(outputFile)))
+                throw new Exception("Full reissue changed retained private material or pins.");
+            if (relative.EndsWith(".cer", StringComparison.Ordinal))
+            {
+                using var actual = X509Certificate2.CreateFromPem(File.ReadAllText(outputFile));
+                var nodeNumber = relative[4].ToString();
+                if (!actual.MatchesHostname("8.8.8." + nodeNumber, false, false) ||
+                    actual.NotBefore != old.NotBefore || actual.NotAfter != old.NotAfter)
+                    throw new Exception("Full reissue did not retain time and repair the exact origin.");
+            }
+        }
+        Reject<IOException>(() => RolloverPreparation.ReissueCertificates(parsedArguments));
+        using var wrong = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        File.WriteAllText(keyPath, wrong.ExportPkcs8PrivateKeyPem());
+        Reject<ArgumentException>(() => RolloverPreparation.ReissueCertificate(certificatePath, origins));
+        File.AppendAllText(Path.Combine(root, ".env.node.prod"), "DEEP_NODE_PUBLIC_IP=8.8.8.2\n");
+        Reject<InvalidDataException>(() => RolloverPreparation.ReadOrigins(root));
     });
 }
 
