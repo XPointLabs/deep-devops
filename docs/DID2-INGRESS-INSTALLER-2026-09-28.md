@@ -1,7 +1,8 @@
 # DID2 installer/H2 prerequisite — 2026-09-28
 
-This is local implementation/transport evidence, not production peer TLS,
-two-replica publication, device messaging or release approval. Seed1–seed3
+This records implementation and production ingress transport evidence, not
+authenticated peer operations, two-replica publication, device messaging or
+release approval. Seed1–seed3
 remain production infrastructure with Mr. X's pre-user testing authorization.
 
 ## Implemented boundary
@@ -120,8 +121,32 @@ No GitHub Release or `latest` publication is authorized by these local checks.
   its body-detection feature only for a provably bodyless GET; unknown/bodyful
   requests still reject. Two actual Kestrel H2 cases passed (200 without body,
   400 for nonseekable unknown-length body); full source-cutover suite passed
-  core 262/profile 107/integration 453. The updated image still needs owner CI
-  and rollout before claiming the ordinary no-Content-Length public path works.
+  core 262/profile 107/integration 453. Subsequent owner CI and rollout are
+  recorded below; these tests alone do not prove the public path.
 - PEM/inner-scheme/query-preservation TLS lab passed at `2026-09-28T10:30:50Z`;
   application/device authority fields remain false. Exact isolated cleanup
   passed. Preparation/staging/static contract tests: 9 passed.
+
+## Final production ingress checkpoint
+
+- Owner CI run `36410301823` succeeded from DevOps `6bd02dd`, XNode
+  `4b25dc6301d14db5b116b02f4ad7ae1409f5aa2e` and the unchanged Protocol
+  branch. The selected multi-architecture image is
+  `ghcr.io/xpointlabs/xnode@sha256:4506d095b93b6ddba7049029c4f7f15a494c349bc1c1a6047cfb1940dc965fe2`;
+  its source revision was independently inspected. `push_latest=false`.
+- Supported installer `ea169fe` upgraded the existing production project on
+  all three seeds. Bounded force-recreation reloads mounted ingress assets;
+  registered identities, original secret inputs and named state/config volumes
+  remain retained. XNode, ingress and storage are healthy on all three.
+- Real external HTTP/2 capability GETs without Content-Length returned 200 and
+  `ready=true` on all three signed origins. Each connection verified certificate
+  chain/hostname and the protected current SPKI pin. This is ingress readiness,
+  not application signature validation or device-delivery evidence.
+- Ordinary signed-head renewal reached generation 16/tree 6. Protected time
+  advanced through exact-state CAS to generation 10 with unchanged uncertainty
+  after independent UTC/no-reboot checks. No genesis, directory history or
+  protected floor was reset; no offline authority seed was sent to a node.
+- Windows is available and the exact Android device is authorized. The current
+  default Windows UI remains account-only; physical HTTPS admission,
+  independently authenticated two-replica publication and messaging still need
+  device verification and composition. No GitHub Release or `latest` was made.
