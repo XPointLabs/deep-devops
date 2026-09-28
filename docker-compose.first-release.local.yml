@@ -45,6 +45,7 @@ x-xnode-environment: &xnode-environment
   Node__ManagedIngressH2ListenUrl: http://0.0.0.0:8082
   Node__PrivacyPeerH2ListenUrl: http://0.0.0.0:8083
   Node__ManagedIngressTrustedProxyAddresses__0: 172.31.93.5
+  Node__PrivacyPeerTrustedProxyAddresses__0: 172.31.93.5
   Node__DataDirectory: /state
   Node__Network: local
   Node__IsRelay: "true"

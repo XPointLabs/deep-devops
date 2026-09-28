@@ -80,6 +80,8 @@ x-xnode: &xnode
     Node__PrivacyPeerH2ListenUrl: http://0.0.0.0:8083
     Node__ManagedIngressTrustedProxyAddresses__0: 172.30.82.7
     Node__ManagedIngressTrustedProxyAddresses__1: 172.30.82.8
+    Node__PrivacyPeerTrustedProxyAddresses__0: 172.30.82.7
+    Node__PrivacyPeerTrustedProxyAddresses__1: 172.30.82.8
     Node__DataDirectory: /state
     Node__Network: local
     Node__PublicPort: "8080"

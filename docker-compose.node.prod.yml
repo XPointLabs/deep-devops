@@ -136,11 +136,15 @@ services:
         max-size: ${DEEP_DOCKER_LOG_MAX_SIZE:-50m}
         max-file: ${DEEP_DOCKER_LOG_MAX_FILE:-5}
     environment:
-      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_ENVIRONMENT: ${DEEP_NODE_RUNTIME_ENVIRONMENT:-Production}
       ASPNETCORE_URLS: http://127.0.0.1:8080;http://127.0.0.1:8081;http://172.31.241.10:8080;http://172.31.241.10:8081
 
       Node__ApiListenUrl: http://172.31.241.10:8080
       Node__PeerRpcListenUrl: http://172.31.241.10:8081
+      Node__ManagedIngressH2ListenUrl: http://172.31.241.10:8082
+      Node__PrivacyPeerH2ListenUrl: http://172.31.241.10:8083
+      Node__ManagedIngressTrustedProxyAddresses__0: 172.31.241.2
+      Node__PrivacyPeerTrustedProxyAddresses__0: 172.31.241.2
       Node__DataDirectory: /var/lib/xnode
       Node__RouterId: ${DEEP_NODE_ED25519_PUBLIC_KEY:?set DEEP_NODE_ED25519_PUBLIC_KEY}
       Node__Ed25519PrivateKeyPath: /run/secrets/node-ed25519-private-key
@@ -154,10 +158,10 @@ services:
       PrivacyRouting__Enabled: "true"
       PrivacyRouting__X25519PrivateKeyPath: /run/secrets/node-x25519-private-key
       PrivacyRouting__StateProtectionKeyPath: /run/secrets/node-onion-state-protection
-      PrivacyRouting__ReplayStateRelativePath: privacy-routing/replay.state
-      PrivacyRouting__EntropyStateRelativePath: privacy-routing/entropy.state
-      PrivacyRouting__KeyVaultDirectoryRelativePath: privacy-routing/key-vault
-      PrivacyRouting__PublicPeerBaseUrl: https://${DEEP_NODE_PUBLIC_HOST:?set DEEP_NODE_PUBLIC_HOST}/
+      PrivacyRouting__ReplayStateRelativePath: did2-onion-replay.state
+      PrivacyRouting__EntropyStateRelativePath: did2-onion-entropy.state
+      PrivacyRouting__KeyVaultDirectoryRelativePath: did2-onion-key-vault
+      PrivacyRouting__PublicPeerBaseUrl: ${DEEP_DID2_ORIGIN:?set DEEP_DID2_ORIGIN}
       PrivacyRouting__MaximumConcurrentRequests: ${DEEP_PRIVACY_MAXIMUM_CONCURRENT_REQUESTS:-64}
       PrivacyRouting__RequestsPerMinute: ${DEEP_PRIVACY_REQUESTS_PER_MINUTE:-600}
       PrivacyRouting__RequestTimeoutSeconds: ${DEEP_PRIVACY_REQUEST_TIMEOUT_SECONDS:-30}
@@ -174,27 +178,15 @@ services:
       PrivacyRouting__Peers__1__CurrentSpkiSha256: ${DEEP_PRIVACY_PEER_2_CURRENT_SPKI_SHA256:?set DEEP_PRIVACY_PEER_2_CURRENT_SPKI_SHA256}
       PrivacyRouting__Peers__1__NextSpkiSha256: ${DEEP_PRIVACY_PEER_2_NEXT_SPKI_SHA256:?set DEEP_PRIVACY_PEER_2_NEXT_SPKI_SHA256}
 
-      ContactService__RuntimeActivation: "true"
-      ContactService__MapReplicaEndpoint: "true"
+      ContactService__RuntimeActivation: "false"
+      ContactService__MapReplicaEndpoint: "false"
       ContactService__ReplicaTimeoutSeconds: ${DEEP_CONTACT_REPLICA_TIMEOUT_SECONDS:-5}
       ContactService__ReplayCapacity: ${DEEP_CONTACT_REPLAY_CAPACITY:-100000}
       ContactService__ReplayTtlSeconds: ${DEEP_CONTACT_REPLAY_TTL_SECONDS:-300}
-      ContactAuthority__Enabled: "true"
-      ContactAuthority__RegistryOrigin: ${DEEP_REGISTRY_URL:?set DEEP_REGISTRY_URL}
-      ContactAuthority__NetworkIdHex: ${DEEP_XPOINT_NETWORK_ID_HEX:?set DEEP_XPOINT_NETWORK_ID_HEX}
-      ContactAuthority__XPointNetworkGenesisPinHex: ${DEEP_XPOINT_GENESIS_PIN_HEX:?set DEEP_XPOINT_GENESIS_PIN_HEX}
-      ContactAuthority__DirectoryLeafKeyHex: ${DEEP_XPOINT_DIRECTORY_LEAF_KEY_HEX:?set DEEP_XPOINT_DIRECTORY_LEAF_KEY_HEX}
-      ContactAuthority__StateRelativePath: contact-authority/snapshot.state
-      ContactAuthority__SupportedDirectoryReader: "1"
-      ContactAuthority__MaximumResponseBytes: "71565312"
-      ContactAuthority__MaximumProtectedStateBytes: "83886080"
-      ContactAuthority__RequestTimeoutSeconds: ${DEEP_CONTACT_AUTHORITY_TIMEOUT_SECONDS:-30}
-      ContactRouteClosure__Enabled: "true"
-      ContactRouteClosure__RegistryOrigin: ${DEEP_REGISTRY_URL:?set DEEP_REGISTRY_URL}
-      ContactRouteClosure__StateRelativePath: contact-authority/route-closure.state
-      ContactRouteClosure__MaximumProtectedStateBytes: "4194304"
-      ContactRouteClosure__RequestTimeoutSeconds: ${DEEP_CONTACT_AUTHORITY_TIMEOUT_SECONDS:-30}
-      RequiredTerminals__Contact: "true"
+      ContactAuthority__Enabled: "false"
+      GroupControlService__RuntimeActivation: "false"
+      GroupControlAuthority__Enabled: "false"
+      RequiredTerminals__Contact: "false"
       RequiredTerminals__GroupControl: "false"
       StorageRpc__BaseUrl: http://172.31.241.20:8080
 
@@ -243,9 +235,13 @@ services:
       - "${DEEP_NODE_VLESS_CONTAINER_PORT:-443}"
       - "8080"
       - "8081"
+      - "8082"
+      - "8083"
     volumes:
       - xnode-state:/var/lib/xnode
       - xnode-config:/etc/xnode
+      - ${DEEP_DID2_CONFIG_FILE:?set DEEP_DID2_CONFIG_FILE}:/app/appsettings.${DEEP_NODE_RUNTIME_ENVIRONMENT:-Production}.json:ro
+      - ${DEEP_DID2_PUBLIC_DIR:?set DEEP_DID2_PUBLIC_DIR}:/run/did2-network:ro
     secrets:
       - source: node-ed25519-private-key
         target: node-ed25519-private-key

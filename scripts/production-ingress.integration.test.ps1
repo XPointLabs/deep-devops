@@ -15,6 +15,22 @@ $override = Join-Path $root 'docker-compose.production-ingress.lab.yml'
 $envFile = Join-Path $secretRoot 'lab.env'
 $summary = $null
 
+function Assert-LabCleanupTarget {
+    $parent = [IO.Path]::GetFullPath((Join-Path $root '.secrets/production-ingress-lab'))
+    $target = [IO.Path]::GetFullPath($secretRoot)
+    if ($target -ne (Join-Path $parent $runId) -or $runId -notmatch '^[a-f0-9]{32}$' -or
+        -not $target.StartsWith($parent + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Refusing cleanup outside the exact isolated lab directory.'
+    }
+    for ($item = $target; $item; $item = Split-Path -Parent $item) {
+        if ((Test-Path -LiteralPath $item) -and
+            ((Get-Item -LiteralPath $item -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw 'Refusing a redirected lab directory.'
+        }
+        if ($item -eq [IO.Path]::GetPathRoot($item)) { break }
+    }
+}
+
 function Invoke-Docker([string[]]$Arguments) {
     $preference = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
@@ -45,6 +61,7 @@ function Protect-Key([string]$Path) {
     if ($LASTEXITCODE -ne 0) { throw 'Could not protect a lab private key.' }
 }
 
+Assert-LabCleanupTarget
 New-Item -ItemType Directory -Force -Path $secretRoot, $evidenceRoot | Out-Null
 Protect-Directory $secretRoot
 
@@ -69,11 +86,16 @@ try {
     [IO.File]::WriteAllText((Join-Path $secretRoot 'node-bls'), 'lab-only', [Text.UTF8Encoding]::new($false))
     [IO.File]::WriteAllText((Join-Path $secretRoot 'vless-client-id'), '00000000-0000-4000-8000-000000000001', [Text.UTF8Encoding]::new($false))
     [IO.File]::WriteAllText((Join-Path $secretRoot 'reality-private-key'), ('A' * 43), [Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllBytes((Join-Path $secretRoot 'onion-state-protection.key'), [byte[]](1..32))
+    # The backend is deliberately a protocol-echo fixture, not an XNode authority.
+    [IO.File]::WriteAllText((Join-Path $secretRoot 'appsettings.Production.json'), '{}', [Text.UTF8Encoding]::new($false))
+    New-Item -ItemType Directory -Path (Join-Path $secretRoot 'public') | Out-Null
     Protect-Key (Join-Path $secretRoot 'node-ed25519')
     Protect-Key (Join-Path $secretRoot 'node-x25519')
     Protect-Key (Join-Path $secretRoot 'node-bls')
     Protect-Key (Join-Path $secretRoot 'vless-client-id')
     Protect-Key (Join-Path $secretRoot 'reality-private-key')
+    Protect-Key (Join-Path $secretRoot 'onion-state-protection.key')
 
     $helper = Join-Path $PSScriptRoot 'production-ingress-spki.mjs'
     $baseHelper = @($helper, '--profile', 'operator-managed', '--host', 'node.deep.test',
@@ -109,6 +131,8 @@ try {
         'DEEP_REGISTRY_URL=https://registry.deep.test', 'DEEP_STORAGE_RPC_URL=http://storage-service:8080',
         'DEEP_NODE_ED25519_PUBLIC_KEY=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', "DEEP_NODE_ED25519_PRIVATE_KEY_FILE=$secretPath/node-ed25519",
         "DEEP_NODE_X25519_PRIVATE_KEY_FILE=$secretPath/node-x25519",
+        "DEEP_NODE_ONION_STATE_PROTECTION_FILE=$secretPath/onion-state-protection.key",
+        "DEEP_DID2_CONFIG_FILE=$secretPath/appsettings.Production.json", "DEEP_DID2_PUBLIC_DIR=$secretPath/public", 'DEEP_DID2_ORIGIN=https://node.deep.test/',
         'DEEP_PRIVACY_PEER_1_ROUTER_ID=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', 'DEEP_PRIVACY_PEER_1_BASE_URL=https://peer-1.deep.test/', 'DEEP_PRIVACY_PEER_1_CURRENT_SPKI_SHA256=1111111111111111111111111111111111111111111111111111111111111111', 'DEEP_PRIVACY_PEER_1_NEXT_SPKI_SHA256=2222222222222222222222222222222222222222222222222222222222222222',
         'DEEP_PRIVACY_PEER_2_ROUTER_ID=cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc', 'DEEP_PRIVACY_PEER_2_BASE_URL=https://peer-2.deep.test/', 'DEEP_PRIVACY_PEER_2_CURRENT_SPKI_SHA256=3333333333333333333333333333333333333333333333333333333333333333', 'DEEP_PRIVACY_PEER_2_NEXT_SPKI_SHA256=4444444444444444444444444444444444444444444444444444444444444444',
         'DEEP_PRIVACY_PEER_3_ROUTER_ID=dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd', 'DEEP_PRIVACY_PEER_3_BASE_URL=https://peer-3.deep.test/', 'DEEP_PRIVACY_PEER_3_CURRENT_SPKI_SHA256=5555555555555555555555555555555555555555555555555555555555555555', 'DEEP_PRIVACY_PEER_3_NEXT_SPKI_SHA256=6666666666666666666666666666666666666666666666666666666666666666',
@@ -128,6 +152,17 @@ try {
     $allowed = & curl.exe -fsS --ssl-no-revoke --cacert $ca --resolve "node.deep.test:${port}:127.0.0.1" -H 'X-Forwarded-For: attacker' "https://node.deep.test:${port}/api/bootstrap/client"
     $allowedJson = $allowed | ConvertFrom-Json
     if (-not $allowedJson.ok -or $allowedJson.port -ne 8080 -or $allowedJson.forwardedForPresent -or $allowedJson.forwardedProto -ne 'https') { throw 'Allowed HTTPS route or forwarding-header sanitation failed.' }
+    $managed = & curl.exe -fsS --ssl-no-revoke --cacert $ca --resolve "node.deep.test:${port}:127.0.0.1" -H 'X-Forwarded-Proto: http' "https://node.deep.test:${port}/api/ingress/v1/capabilities"
+    if ($LASTEXITCODE -ne 0) { throw 'Managed HTTP2 backend route failed.' }
+    $managedJson = $managed | ConvertFrom-Json
+    if ($managedJson.port -ne 8082 -or $managedJson.protocol -ne '2.0' -or $managedJson.forwardedProto -ne 'https' -or $null -ne $managedJson.forwardedHost) { throw 'Managed ingress did not preserve the dedicated HTTP2/TLS proxy boundary.' }
+    foreach ($route in @('/api/ingress/v1/frame', '/api/peer/privacy/v1/frame', '/api/peer/contact-replica/v1/execute')) {
+        $expectedPort = if ($route -eq '/api/ingress/v1/frame') { 8082 } else { 8083 }
+        $result = & curl.exe -fsS --ssl-no-revoke --cacert $ca --resolve "node.deep.test:${port}:127.0.0.1" -H 'content-type: application/octet-stream' -H 'X-Forwarded-For: attacker' -H 'X-Forwarded-Proto: http' -d '{}' "https://node.deep.test:${port}$route"
+        if ($LASTEXITCODE -ne 0) { throw 'Dedicated HTTP2 POST backend route failed.' }
+        $json = $result | ConvertFrom-Json
+        if ($json.port -ne $expectedPort -or $json.protocol -ne '2.0' -or $json.forwardedForPresent -or $json.forwardedProto -ne 'https' -or $null -ne $json.forwardedHost) { throw 'HTTP2 POST routing or forwarding-header sanitation failed.' }
+    }
     $statusCode = & curl.exe -sS -o NUL -w '%{http_code}' --ssl-no-revoke --cacert $ca --resolve "node.deep.test:${port}:127.0.0.1" "https://node.deep.test:${port}/status"
     if ($statusCode -ne '404') { throw 'A forbidden status endpoint became public.' }
     $quorumStatus = & curl.exe -sS -o NUL -w '%{http_code}' --ssl-no-revoke --cacert $ca --resolve "node.deep.test:${port}:127.0.0.1" -H 'content-type: application/json' -d '{}' "https://node.deep.test:${port}/api/staking/quorum/sign"
@@ -154,6 +189,8 @@ try {
         backendHostPorts = 0; spkiPreflight = (($preflight | Out-String | ConvertFrom-Json).status); servedSpkiMatchesProtectedCurrent = $true
         mismatchedSpkiRejected = $true; broadQuorumCidrRejected = $true; unsafeTimeoutRejected = $true; cnFallbackRejected = $true
         staleAttestationRejected = $true; refreshedAttestationAccepted = $true; secretsIncluded = $false
+        managedBackendHttp2 = $true; privacyPeerBackendHttp2 = $true; did2ReplicaBackendHttp2 = $true
+        applicationAuthorityVerified = $false; deviceDeliveryVerified = $false
     }
 }
 finally {
@@ -167,6 +204,7 @@ finally {
     $leftovers = @(& docker ps -aq --filter "label=com.docker.compose.project=$project") + @(& docker network ls -q --filter "label=com.docker.compose.project=$project") + @(& docker volume ls -q --filter "label=com.docker.compose.project=$project")
     if (@($leftovers | Where-Object { $_ }).Count -ne 0) { $cleanupFailure = 'Docker project resources remain after cleanup.' }
     if ($cleanupFailure) { throw "$cleanupFailure Protected lab secrets were retained at $secretRoot." }
+    Assert-LabCleanupTarget
     if (Test-Path -LiteralPath $secretRoot) { Remove-Item -LiteralPath $secretRoot -Recurse -Force }
     if (Test-Path -LiteralPath $secretRoot) { throw 'Protected lab secret cleanup could not be verified.' }
 }

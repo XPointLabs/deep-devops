@@ -28,7 +28,9 @@ function fixture(run) {
     fs.writeFileSync(path.join(assets, 'genesis.adh1'), head);
     fs.writeFileSync(path.join(assets, 'observer.did2'), observer);
     const config = {
-      DeepIdV2DirectoryProof: { Enabled: true, ExactAuthorityPaths: [mount + 'xna1.0000.bin'],
+      DeepIdV2DirectoryProof: { Enabled: true, NetworkIdHex: '11'.repeat(16),
+        GenesisAuthorityCoreHashHex: '22'.repeat(32), RegistryOrigin: 'https://registry.example/',
+        ExactAuthorityPaths: [mount + 'xna1.0000.bin'],
         ExactTimePolicyPaths: [mount + 'dts1.0000.bin'], GenesisHeadPath: mount + 'genesis.adh1' },
       DeepIdV2NetworkPlacement: { Enabled: true, ExactPolicyPaths: [mount + 'xvp1.0000.bin'],
         ExactViewPaths: [mount + 'xnv1.0000.bin'], ExactHeadPaths: [mount + 'xnh1.0000.bin'],
@@ -46,10 +48,18 @@ function fixture(run) {
     const openssl = process.platform === 'win32' ? 'C:\\Program Files\\Git\\usr\\bin\\openssl.exe' : 'openssl';
     const cert = path.join(root, 'origin.crt'), key = path.join(root, 'origin.key');
     const issued = spawnSync(openssl, ['req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:P-256',
-      '-nodes', '-keyout', key, '-out', cert, '-days', '1', '-subj', '/CN=synthetic.invalid'], { encoding: 'utf8' });
+      '-nodes', '-keyout', key, '-out', cert, '-days', '2', '-subj', '/CN=synthetic.invalid',
+      '-addext', 'subjectAltName=IP:8.8.8.1,IP:8.8.8.2,IP:8.8.8.3'], { encoding: 'utf8' });
     assert.equal(issued.status, 0, 'Synthetic test certificate generation must succeed.');
-    const certificate = fs.readFileSync(cert), privateKey = fs.readFileSync(key);
+    const certificate = fs.readFileSync(cert), keyBytes = fs.readFileSync(key);
     const pin = sha(new crypto.X509Certificate(certificate).publicKey.export({ format: 'der', type: 'spki' })).toLowerCase();
+    const nextCert = path.join(root, 'next.crt'), nextKey = path.join(root, 'next.key');
+    const nextIssued = spawnSync(openssl, ['req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:P-256',
+      '-nodes', '-keyout', nextKey, '-out', nextCert, '-days', '2', '-subj', '/CN=synthetic.invalid',
+      '-addext', 'subjectAltName=IP:8.8.8.1,IP:8.8.8.2,IP:8.8.8.3'], { encoding: 'utf8' });
+    assert.equal(nextIssued.status, 0);
+    const nextCertificate = fs.readFileSync(nextCert), nextPrivate = fs.readFileSync(nextKey);
+    const nextPin = sha(new crypto.X509Certificate(nextCertificate).publicKey.export({ format: 'der', type: 'spki' })).toLowerCase();
     for (const [index, name] of ['seed1', 'seed2', 'seed3'].entries()) {
       input[name] = path.join(root, name); fs.mkdirSync(input[name]);
       const secrets = path.join(input[name], 'secrets'); fs.mkdirSync(secrets);
@@ -63,15 +73,18 @@ function fixture(run) {
       fs.writeFileSync(path.join(secrets, 'onion-state-protection.key'), Buffer.alloc(32, 42));
       const rolled = path.join(rollover, name); fs.mkdirSync(rolled);
       fs.writeFileSync(path.join(rolled, 'current-origin.cer'), certificate);
-      fs.writeFileSync(path.join(rolled, 'current-origin.key'), privateKey);
+      fs.writeFileSync(path.join(rolled, 'current-origin.key'), keyBytes);
       fs.writeFileSync(path.join(rolled, 'current-origin.spki-sha256'), pin + '\n');
-      fs.writeFileSync(path.join(rolled, 'next-origin.spki-sha256'), sha(Buffer.from(name)) + '\n');
+      fs.writeFileSync(path.join(rolled, 'next-origin.cer'), nextCertificate);
+      fs.writeFileSync(path.join(rolled, 'next-origin.key'), nextPrivate);
+      fs.writeFileSync(path.join(rolled, 'next-origin.spki-sha256'), nextPin + '\n');
       fs.writeFileSync(path.join(rolled, 'current.x25519.seed'), Buffer.alloc(32, index + 20));
     }
     run(input);
   } finally { fs.rmSync(root, { recursive: true }); }
 }
 
+if (require.main === module) {
 test('prepares independent UAT custody without rewriting identities or claiming a carrier', () => fixture(input => {
   const source = fs.readFileSync(path.join(input.seed1, 'secrets', 'key_ed25519'));
   const summary = prepare(input);
@@ -85,6 +98,8 @@ test('prepares independent UAT custody without rewriting identities or claiming 
   assert.equal(config.Node.PrivacyPeerH2ListenUrl, '');
   assert.equal(fs.readFileSync(path.join(input.output, 'secrets', 'key_x25519')).length, 65);
   assert.deepEqual(fs.readdirSync(path.join(input.output, 'state')), []);
+  assert.equal(fs.existsSync(path.join(input.output, 'public', 'xnode.did2.json')), true);
+  assert.equal(fs.existsSync(path.join(input.output, 'secrets', 'next-origin.key')), true);
   assert.throws(() => prepare(input));
 }));
 
@@ -116,3 +131,5 @@ test('rejects substituted identity, duplicate peer and hostile private seed leng
     assert.throws(() => prepare(input)); assert.equal(fs.existsSync(input.output), false);
   });
 });
+}
+module.exports = { fixture };

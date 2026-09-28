@@ -55,7 +55,6 @@ frontend deep_https
   http-request del-header CF-Connecting-IP
   http-request del-header Client-IP
   http-request set-header X-Forwarded-Proto https
-  http-request set-header X-Forwarded-Host ${DEEP_INGRESS_HOST}
 
   acl get_method method GET
   acl post_method method POST
@@ -67,15 +66,17 @@ frontend deep_https
   http-request deny deny_status 413 if post_method content_length_too_large
   http-request deny deny_status 400 if get_method { req.body_size gt 0 }
   acl public_get path /api/bootstrap/client /api/network/privacy-contact /api/network/membership-route-catalog
+  acl managed_get path /api/ingress/v1/capabilities
   acl public_post path /api/ingress/v1/frame
-  acl peer_post path /api/peer/privacy/v1/frame /api/peer/mailbox/v2/store /api/peer/mailbox/v2/tombstone
+  acl peer_post path /api/peer/privacy/v1/frame /api/peer/contact-replica/v1/execute /api/peer/mailbox/v2/store /api/peer/mailbox/v2/tombstone /api/peer/mailbox-authority/v1/store /api/peer/mailbox-authority/v1/retrieve /api/peer/mailbox-authority/v1/acknowledge
   acl quorum_post path /api/staking/quorum/sign
   acl quorum_source src ${DEEP_QUORUM_COORDINATOR_CIDR}
   http-request set-var(txn.is_public_post) bool(true) if post_method public_post
-  http-request deny deny_status 404 unless get_method public_get or post_method public_post or post_method peer_post or post_method quorum_post quorum_source
+  http-request deny deny_status 404 unless get_method public_get or get_method managed_get or post_method public_post or post_method peer_post or post_method quorum_post quorum_source
   use_backend xnode_api if get_method public_get
-  use_backend xnode_api if post_method public_post
-  use_backend xnode_peer if post_method peer_post
+  use_backend xnode_managed_h2 if get_method managed_get
+  use_backend xnode_managed_h2 if post_method public_post
+  use_backend xnode_privacy_h2 if post_method peer_post
   use_backend xnode_peer if post_method quorum_post quorum_source
   http-response del-header Date if { var(txn.is_public_post) -m bool }
   http-response del-header Server if { var(txn.is_public_post) -m bool }
@@ -92,3 +93,13 @@ backend xnode_peer
   option httpchk GET /health/ready
   http-check expect status 200
   server xnode 172.31.241.10:8081 check
+
+backend xnode_managed_h2
+  mode http
+  option tcp-check
+  server xnode 172.31.241.10:8082 proto h2 check
+
+backend xnode_privacy_h2
+  mode http
+  option tcp-check
+  server xnode 172.31.241.10:8083 proto h2 check

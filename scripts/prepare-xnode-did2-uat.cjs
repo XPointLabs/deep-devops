@@ -92,6 +92,7 @@ function prepare(input) {
   const configurationBytes = read(path.join(input.assets, 'xnode.did2.json'));
   if (hash(configurationBytes) !== manifest.configurationSha256) fail();
   const config = JSON.parse(configurationBytes.toString('utf8'));
+  publicFiles.set('xnode.did2.json', configurationBytes);
   if (Object.keys(config).sort().join(',') !== 'DeepIdV2DirectoryProof,DeepIdV2NetworkPlacement,DeepIdV2ReplicaStage' ||
       config.DeepIdV2DirectoryProof.Enabled !== true || config.DeepIdV2NetworkPlacement.Enabled !== true ||
       config.DeepIdV2ReplicaStage.Enabled !== true) fail();
@@ -137,13 +138,17 @@ function prepare(input) {
     const protection = read(path.join(input[input.node], 'secrets', 'onion-state-protection.key'), 32);
     if (protection.length !== 32 || protection.every(value => value === 0)) { protection.fill(0); fail(); }
     secretFiles.set('onion-state-protection.key', protection);
-    const certificate = read(path.join(input.rollover, input.node, 'current-origin.cer'), 8192);
-    const key = read(path.join(input.rollover, input.node, 'current-origin.key'), 8192);
-    secretFiles.set('origin.key', key);
-    const parsed = new crypto.X509Certificate(certificate);
-    if (!parsed.checkPrivateKey(crypto.createPrivateKey(key)) ||
-        hash(parsed.publicKey.export({ format: 'der', type: 'spki' })).toLowerCase() !== selected.current) fail();
-    publicFiles.set('origin.crt', certificate);
+    for (const epoch of ['current', 'next']) {
+      const certificate = read(path.join(input.rollover, input.node, epoch + '-origin.cer'), 8192);
+      const key = read(path.join(input.rollover, input.node, epoch + '-origin.key'), 8192);
+      const prefix = epoch === 'current' ? 'origin' : 'next-origin';
+      secretFiles.set(prefix + '.key', key);
+      const parsed = new crypto.X509Certificate(certificate);
+      if (!parsed.checkPrivateKey(crypto.createPrivateKey(key)) ||
+          hash(parsed.publicKey.export({ format: 'der', type: 'spki' })).toLowerCase() !== selected[epoch]) fail();
+      publicFiles.set(prefix + '.crt', certificate);
+      publicFiles.set(prefix + '.spki-sha256', Buffer.from(selected[epoch] + '\n', 'ascii'));
+    }
     Object.assign(config, {
       Logging: { LogLevel: { Default: 'Warning', 'Microsoft.AspNetCore': 'Warning' } },
       Node: { DataDirectory: '/var/lib/xnode', RouterId: selected.id,

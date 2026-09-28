@@ -1,11 +1,16 @@
 # Production Node TLS Ingress
 
-Status: **pre-cutover operational evidence**. PMA1/PMT1 commands below match the
-current stack; DR-0004 requires PMA2/PMT2 and signed XCB1 bindings before public
-release. Do not carry these authority bytes forward as compatibility fallback.
+Status: **DID2 pre-release node topology, not device/release approval**.
+Network authority and restart semantics belong to
+[XPoint Network](../../docs/architecture/XPOINT-NETWORK-V1.md) and
+[DR-0012](../../docs/survival-program/decisions/DR-0012-protected-network-history.md).
+Registry and seed1–seed3 are production infrastructure; `UAT` is the candidate
+software profile, not a remote UAT fleet. Mr. X permits production testing until
+he explicitly reports users exist. No runtime or evidence guard is waived.
 
 `docker-compose.node.prod.yml` has one public listener: the hardened `ingress`
-container publishes TCP `443`. XNode API ports `8080`/`8081`, Xray `443`, and
+container publishes TCP `443`. XNode API ports `8080`/`8081`, dedicated H2
+backends `8082`/`8083`, Xray `443`, and
 storage `8080` are container-only. Cleartext HTTP upstreams exist only on the
 `internal: true` `ingress-upstream` network. Port `80` is not defined and must
 remain closed unless a separately reviewed redirect-only listener is added.
@@ -23,8 +28,9 @@ The HTTPS lane requires an exact `Host`; when SNI is present it must also match
 exactly. For an IPv4 origin, the certificate IP SAN, validity window, and exact
 signed SPKI pin remain mandatory. The lane strips all inbound
 `Forwarded`/`X-Forwarded-*` identity claims, and only exposes the explicit
-bootstrap, contact, membership, Session RPC, MAU2 client, onion-peer, and
-mailbox-peer paths. Health, status, metrics, debug, storage, and admin endpoints
+bootstrap/membership metadata, managed capabilities/frame and authenticated
+privacy-peer, DID2 replica and mailbox-peer paths. Session RPC, direct MAU2
+client, health, status, metrics, debug, storage, and admin endpoints
 are not public. The quorum-signing path is admitted only from the exact public
 unicast IPv4 `DEEP_QUORUM_COORDINATOR_CIDR` with a `/32` prefix. Broad,
 private, loopback, link-local, documentation, benchmark, multicast, and
@@ -42,11 +48,11 @@ Choose exactly one profile in `.env.node.prod`:
   operator-owned domain is a trust prerequisite; the signed PMT2 current/next
   SPKI set is the authority. TLS consumers may ignore only the expected
   self-issued chain error after exact hostname, validity, and SPKI validation.
-- `deep-managed`: Mr. X/Deep operations owns the HTTPS identity and PMT1 pin
+- `deep-managed`: Mr. X/Deep operations owns the HTTPS identity and signed pin
   publication.
 - `operator-managed`: an independent node owner supplies its own publicly
   trusted certificate and publishes its public current/next pins through the
-  approved PMT1 workflow. It does not weaken ingress policy.
+  approved signed network workflow. It does not weaken ingress policy.
 
 All profiles require six files outside Git:
 
@@ -100,6 +106,37 @@ place the JSON output, compose rendering, or logs
 in an artifact if another command has added key content; the supported
 preflight itself never returns key bytes or paths.
 
+## DID2 input custody and backend protocol
+
+Use the supported installer `--did2-runtime-dir DIR` only with the reviewed
+output of `prepare-xnode-did2-uat.cjs`, including both descriptor-bound origin
+certificates/keys, public history manifest and the original node identity and
+state-protection key. The canonical `stage-did2-runtime.cjs` asset is vendored
+byte-identically in the installer. It checks bounded custody, digest/pin/key
+bindings and retained public network pins before selecting an immutable
+owner-only bundle. It never imports the diagnostic state directory or replaces
+the registered Ed25519/BLS/Reality files or persistent node-state volume.
+XNode independently verifies signed authority/history, fresh directory proof,
+local onion public key and protected floors; a structural fixture is not that
+verification.
+
+`DEEP_DID2_CONFIG_FILE` and `DEEP_DID2_PUBLIC_DIR` are required read-only
+mounts. The staged candidate explicitly selects the `UAT` software profile;
+the compose defaults to `Production`, where candidate activation still rejects.
+The profile-specific appsettings mount must match the selected runtime profile.
+Do not change the profile to claim release readiness. V1 contact/group authority
+is disabled, and optional-terminal health does not imply messaging readiness.
+
+The HTTPS terminator uses H2 backends `8082` for client capabilities/frame and
+`8083` for authenticated peer operations. Each h2c listener requires its own
+exact `Node` proxy-address allowlist. Only that source/local-port pair may
+consume one exact `X-Forwarded-Proto: https`; managed trust is not peer trust.
+The proxy strips all inbound forwarding headers and adds only the consumed
+scheme marker, not `X-Forwarded-Host` (the protocol forbids supplemental public
+headers). It preserves the already validated Host. Ordinary API/RPC ports never
+promote forwarded scheme headers. Backend H2 TCP checks are transport checks;
+the XNode health check remains a separate semantic gate.
+
 ## Start and verify
 
 ```powershell
@@ -130,14 +167,14 @@ Docker; no public health endpoint is needed.
 
 1. Generate a new next key/certificate in the protected secret store. Never
    generate or copy it through CI artifacts.
-2. Calculate its SPKI SHA-256, run preflight, and publish it as PMT1 `next` in
+2. Calculate its SPKI SHA-256, run preflight, and publish it as signed `next` in
    an exact successor topology generation.
-3. Wait for that signed PMT1 generation to reach the required client/node
+3. Wait for that signed network generation to reach the required client/node
    population and retain public evidence of the generation and hashes only.
 4. Promote the previously approved next certificate to current, create a new
    distinct next pair, and run preflight with
    `-ExpectedPriorNextSpki <previous-next-hex>`. This gate proves continuity.
-5. Publish the successor PMT1 with the promoted current and new next pin.
+5. Publish the successor network closure with the promoted current and new next pin.
 6. Force-recreate preflight before ingress. A cached completed preflight is
    intentionally rejected after any current secret or ingress policy change:
 
@@ -156,10 +193,10 @@ directory), then recreate ingress.
 ## Rollback
 
 Stop new traffic first. Restore an immutable prior ingress secret version only
-if its SPKI is still an approved current or next pin in the live PMT1. Run the
+if its SPKI is still an approved current or next pin in the live signed closure. Run the
 outer preflight, force-recreate `ingress-preflight`, and then recreate ingress.
 Never decrement or overwrite a committed
-PMA1/PMT1 generation: publish a new exact successor describing the rollback
+network generation: publish a new exact successor describing the rollback
 pin set. If no currently trusted pin can serve, keep ingress stopped and use
 the signed authority/topology recovery ceremony; do not bypass TLS or SPKI.
 
@@ -168,7 +205,13 @@ protected `.secrets/production-ingress-lab`. It writes PASS evidence only after
 teardown proves no project containers, networks, or volumes remain and the
 protected secret directory has been deleted. A cleanup failure retains that
 directory for controlled recovery and fails the gate. The resulting summary
-under `artifacts/test-results` contains no secrets:
+under `artifacts/test-results` contains no secrets.
+
+It exercises real TLS/HAProxy and HTTP2 forwarding to echo fixtures, not
+authenticated publication, claim or physical client delivery. Its summary
+explicitly records those application/device non-claims. Cleanup verifies the
+exact isolated directory before recursive deletion; unrelated Docker resources
+are never removed.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File ./scripts/production-ingress.integration.test.ps1
