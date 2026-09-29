@@ -1,13 +1,17 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('Init','Build','Provision','ProvisionFloor','Up','Status','Stop','Start','Verify','FaultMatrix','HistoryFault','EngineFault','ExpiryFault')][string]$Action,
+    [Parameter(Mandatory)][ValidateSet('Init','Build','Provision','ProvisionFloor','Up','Status','Stop','Start','Verify','FaultMatrix','HistoryFault','StackFault','EngineFault','ExpiryFault')][string]$Action,
     [string]$CustodyRoot = 'C:\Work\DeepSession\secrets\dev\deep-dev',
     [ValidateRange(1,20)][int]$Cycles = 2,
     [ValidateRange(20,7200)][int]$OfflineSeconds = 20,
-    [ValidateRange(10,300)][int]$StableSeconds = 30
+    [ValidateRange(10,300)][int]$StableSeconds = 30,
+    [switch]$ConfirmEngineShutdown
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+if ($Action -eq 'EngineFault' -and -not $ConfirmEngineShutdown) {
+    throw 'EngineFault requires explicit whole-Desktop shutdown approval and -ConfirmEngineShutdown. Use StackFault for routine recovery tests.'
+}
 $devopsRoot = Split-Path $PSScriptRoot -Parent
 $custodyPath = [IO.Path]::GetFullPath($CustodyRoot)
 $allowedRoot = [IO.Path]::GetFullPath('C:\Work\DeepSession\secrets\dev') + [IO.Path]::DirectorySeparatorChar
@@ -82,15 +86,18 @@ function Wait-CurrentCapabilities {
     }
     throw 'Current Registry proof and all three ONION capabilities did not recover. No custody reset was attempted.'
 }
-if ($Action -in @('EngineFault','ExpiryFault')) {
-    # Engine shutdown is global. Refuse a shared/remote engine or an already
-    # stopped dev service instead of silently changing another operator's state.
-    $context = & docker context show
-    if ($LASTEXITCODE -ne 0 -or $context -cne 'desktop-linux') { throw 'EngineFault requires the local Docker Desktop Linux engine.' }
-    $allRunning = @(& docker ps -q)
-    if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect engine scope.' }
+if ($Action -in @('StackFault','EngineFault','ExpiryFault')) {
+    $wholeEngine = $Action -eq 'EngineFault'
+    # Routine faults are project-scoped, including the expired-view case.
+    # Only separately approved EngineFault may affect the whole Desktop.
+    if ($wholeEngine) {
+        $context = & docker context show
+        if ($LASTEXITCODE -ne 0 -or $context -cne 'desktop-linux') { throw 'EngineFault requires the local Docker Desktop Linux engine.' }
+        $allRunning = @(& docker ps -q)
+        if ($LASTEXITCODE -ne 0 -or $allRunning.Count -ne 6) { throw 'EngineFault requires no unrelated running containers.' }
+    }
     $devRunning = @(& docker ps -q --filter 'label=com.docker.compose.project=deep-dev')
-    if ($LASTEXITCODE -ne 0 -or $devRunning.Count -ne 6 -or $allRunning.Count -ne 6) { throw 'EngineFault requires exactly the six running deep-dev services and no unrelated running containers.' }
+    if ($LASTEXITCODE -ne 0 -or $devRunning.Count -ne 6) { throw 'Recovery fault requires exactly the six running deep-dev services.' }
     [void](Wait-CurrentCapabilities)
     $retained = @{}
     foreach ($id in $devRunning) {
@@ -107,8 +114,8 @@ if ($Action -in @('EngineFault','ExpiryFault')) {
     }
     if ($Action -eq 'ExpiryFault') {
         # Finish one protected delegated commit while the normal publisher is
-        # stopped. Its restart=always restores it only when the engine returns,
-        # after this real 180-second view's 200-second offline interval.
+        # stopped. The entire dev stack starts only after this real 180-second
+        # view's 200-second offline interval; Docker Desktop stays running.
         # No root custody, clock manipulation, floor reset or expired extension.
         Run-Native docker ($compose + @('stop','--timeout','10','publisher'))
         $published = $false
@@ -122,23 +129,28 @@ if ($Action -in @('EngineFault','ExpiryFault')) {
     $cases = [Collections.Generic.List[object]]::new()
     foreach ($cycle in 1..$Cycles) {
         try {
-            Invoke-DesktopOperation 'stop' 60
+            if ($wholeEngine) { Invoke-DesktopOperation 'stop' 60 }
+            else { Run-Native docker ($compose + @('stop','--timeout','10')) }
             $offline = [Diagnostics.Stopwatch]::StartNew()
             while ($offline.Elapsed.TotalSeconds -lt $OfflineSeconds) {
                 Start-Sleep -Seconds ([Math]::Min(10,[Math]::Max(1,[Math]::Ceiling($OfflineSeconds - $offline.Elapsed.TotalSeconds))))
             }
         } finally {
-            # No compose start/up here: restart-policy recovery itself is under test.
-            Invoke-DesktopOperation 'start' 120
+            if ($wholeEngine) {
+                # No compose repair: restart-policy recovery itself is under test.
+                Invoke-DesktopOperation 'start' 120
+            } else { Run-Native docker ($compose + @('start')) }
         }
         $recovery = [Diagnostics.Stopwatch]::StartNew()
-        $engineReady = $false
-        while ($recovery.Elapsed.TotalSeconds -lt 120) {
-            $engine = & docker info --format '{{.OSType}}' 2>$null
-            if ($LASTEXITCODE -eq 0 -and $engine -ceq 'linux') { $engineReady = $true; break }
-            Start-Sleep -Seconds 2
+        if ($wholeEngine) {
+            $engineReady = $false
+            while ($recovery.Elapsed.TotalSeconds -lt 120) {
+                $engine = & docker info --format '{{.OSType}}' 2>$null
+                if ($LASTEXITCODE -eq 0 -and $engine -ceq 'linux') { $engineReady = $true; break }
+                Start-Sleep -Seconds 2
+            }
+            if (-not $engineReady) { throw 'Docker Engine did not return after Desktop start.' }
         }
-        if (-not $engineReady) { throw 'Docker Engine did not return after Desktop start.' }
         [void](Wait-CurrentCapabilities)
         $seconds = [Math]::Ceiling($recovery.Elapsed.TotalSeconds)
         $stable = [Diagnostics.Stopwatch]::StartNew()
@@ -148,19 +160,21 @@ if ($Action -in @('EngineFault','ExpiryFault')) {
         }
         foreach ($id in $retained.Keys) {
             $after = (& docker inspect --format '{{json .Mounts}}' $id) | ConvertFrom-Json | ForEach-Object { "$($_.Type)|$($_.Source)|$($_.Destination)|$($_.RW)" } | Sort-Object
-            if ($LASTEXITCODE -ne 0 -or ($after -join "`n") -cne ($retained[$id] -join "`n")) { throw 'Engine restart changed retained containers or custody/state mounts.' }
+            if ($LASTEXITCODE -ne 0 -or ($after -join "`n") -cne ($retained[$id] -join "`n")) { throw 'Recovery changed retained containers or custody/state mounts.' }
         }
         foreach ($service in $custody.Keys) {
             $after = & docker @($compose + @('exec','-T',$service,'sh','-c','sha256sum /run/secrets/*'))
-            if ($LASTEXITCODE -ne 0 -or ($after -join "`n") -cne ($custody[$service] -join "`n")) { throw 'Online custody changed across engine restart.' }
+            if ($LASTEXITCODE -ne 0 -or ($after -join "`n") -cne ($custody[$service] -join "`n")) { throw 'Online custody changed across recovery.' }
         }
         $cases.Add([ordered]@{cycle=$cycle;offlineSeconds=$OfflineSeconds;recovered=$true;recoverySeconds=$seconds;stableSeconds=$StableSeconds})
         # Emit each completed case before starting another, so a later host
         # failure cannot hide earlier results or imply the whole matrix passed.
-        [ordered]@{schema='deep-dev-engine-case.v1';cycle=$cycle;offlineSeconds=$OfflineSeconds;recoverySeconds=$seconds;stableSeconds=$StableSeconds;retainedNodeRegistryCustody=$true;retainedMounts=$true} | ConvertTo-Json -Compress
-        Write-Host "deep-dev engine cycle $cycle passed; retained custody/state; current capabilities stable."
+        $caseSchema = if ($wholeEngine) { 'deep-dev-engine-case.v1' } else { 'deep-dev-stack-case.v1' }
+        [ordered]@{schema=$caseSchema;cycle=$cycle;offlineSeconds=$OfflineSeconds;recoverySeconds=$seconds;stableSeconds=$StableSeconds;retainedNodeRegistryCustody=$true;retainedMounts=$true} | ConvertTo-Json -Compress
+        Write-Host "deep-dev recovery cycle $cycle passed; retained custody/state; current capabilities stable."
     }
-    [ordered]@{schema='deep-dev-engine-fault.v1';cases=$cases.ToArray();automaticContainerStart=$true;unchangedCustody=$true;unchangedStateMounts=$true;expiredOperationalViewEvidence=($Action -eq 'ExpiryFault');soak72h=$false;deviceEvidence=$false;messageDeliveryEvidence=$false} | ConvertTo-Json -Depth 5
+    $faultSchema = if ($wholeEngine) { 'deep-dev-engine-fault.v1' } else { 'deep-dev-stack-fault.v1' }
+    [ordered]@{schema=$faultSchema;cases=$cases.ToArray();automaticContainerStart=$wholeEngine;wholeEngineShutdown=$wholeEngine;unchangedCustody=$true;unchangedStateMounts=$true;expiredOperationalViewEvidence=($Action -eq 'ExpiryFault');soak72h=$false;deviceEvidence=$false;messageDeliveryEvidence=$false} | ConvertTo-Json -Depth 5
     return
 }
 if ($Action -eq 'Verify') {

@@ -46,14 +46,16 @@ test('local builds use reviewed image digests and a prebuilt native asset, not C
 
 test('engine fault tests automatic restart with retained custody and refuse a shared engine', async () => {
   const script = await read('./deep-dev.ps1');
-  const fault = script.split("if ($Action -in @('EngineFault','ExpiryFault'))")[1].split("if ($Action -eq 'Verify')")[0];
+  const fault = script.split("if ($Action -in @('StackFault','EngineFault','ExpiryFault'))")[1].split("if ($Action -eq 'Verify')")[0];
+  assert.match(script, /\$Action -eq 'EngineFault' -and -not \$ConfirmEngineShutdown/);
+  assert.match(fault, /\$wholeEngine = \$Action -eq 'EngineFault'/);
   assert.match(fault, /desktop-linux/);
   assert.match(fault, /\$allRunning.Count -ne 6/);
   assert.match(fault, /\$policy -cne 'always'/);
   assert.match(fault, /Invoke-DesktopOperation 'stop' 60/);
-  assert.match(fault, /finally\s*\{[^}]*Invoke-DesktopOperation 'start' 120/s);
-  const engineLoop = fault.split('foreach ($cycle in 1..$Cycles)')[1];
-  assert.doesNotMatch(engineLoop, /\$compose \+ @\('(start|up|down)'/);
+  assert.match(fault, /finally\s*\{\s*if \(\$wholeEngine\) \{[^}]*Invoke-DesktopOperation 'start' 120/s);
+  assert.match(fault, /if \(\$wholeEngine\) \{ Invoke-DesktopOperation 'stop' 60 \}\s*else \{ Run-Native docker \(\$compose \+ @\('stop','--timeout','10'\)\) \}/);
+  assert.match(fault, /else \{ Run-Native docker \(\$compose \+ @\('start'\)\) \}/);
   assert.match(fault, /post-restart stability window/);
   assert.match(fault, /Online custody changed/);
   assert.match(fault, /unchangedStateMounts=\$true/);
@@ -61,6 +63,8 @@ test('engine fault tests automatic restart with retained custody and refuse a sh
   assert.match(script, /WaitForExit\(\(\$TimeoutSeconds \+ 10\) \* 1000\)/);
   assert.doesNotMatch(script, /\$process.Kill\(\$true\)/);
   assert.match(fault, /deep-dev-engine-case.v1/);
+  assert.match(fault, /deep-dev-stack-case.v1/);
+  assert.match(fault, /automaticContainerStart=\$wholeEngine;wholeEngineShutdown=\$wholeEngine/);
 });
 
 test('expiry fault authors shorter real signed views without clock or trust changes', async () => {

@@ -64,7 +64,7 @@ Run from the DevOps repository:
 ./scripts/deep-dev.ps1 -Action Start
 ./scripts/deep-dev.ps1 -Action FaultMatrix
 ./scripts/deep-dev.ps1 -Action HistoryFault
-./scripts/deep-dev.ps1 -Action EngineFault -Cycles 2 -StableSeconds 60
+./scripts/deep-dev.ps1 -Action StackFault -Cycles 2 -StableSeconds 60
 ./scripts/deep-dev.ps1 -Action ExpiryFault -StableSeconds 60
 ./scripts/test-env.ps1 -Suite smoke -BackendMode deep-dev
 ```
@@ -86,7 +86,13 @@ a service while the engine is running, but engine restart resumes it. For a
 persistent maintenance stop, use this script's `Stop` (sets `unless-stopped`
 before stopping); `Start` restores `always`. `Up` also restores normal policy.
 
-`EngineFault` refuses a remote/shared engine, unrelated running containers or
+Routine recovery tests use `StackFault`: it stops/starts only the six `deep-dev`
+containers, preserves their IDs/mounts and compares Registry/node secret digests
+in memory. Docker Desktop and unrelated projects remain running.
+
+`EngineFault` is not a routine test. It requires separate explicit operator
+approval and `-ConfirmEngineShutdown`; without that switch it rejects before
+any Docker command. It refuses a remote/shared engine, unrelated running containers or
 stopped dev services. It stops/starts the **whole local Docker Desktop**, not
 only Compose, checks a stable current-proof/ONION window and retains exact
 container IDs, canonical mount bindings and online-secret digests. Digests are
@@ -94,8 +100,9 @@ kept only in process memory. No Compose start/up repairs the tested restart.
 Recovery seconds are measured after Desktop's start command completes; Desktop
 startup time is additional. `ExpiryFault` first authors one genuinely signed
 180-second operational view using existing delegated custody and the protected
-publisher journal, then keeps the engine off for 200 seconds. The normal publisher
-must renew that expired view on engine boot. It changes no clock, signature check,
+publisher journal, then stops only the six `deep-dev` containers for 200 seconds.
+Docker Desktop stays running. The normal publisher must renew that expired view
+after the stack starts. It changes no clock, signature check,
 policy expiry, keys or floor and does not represent a one-hour directory-head or
 seven-day root-policy outage. The restored publisher resumes its usual lifetime.
 
@@ -145,11 +152,23 @@ on Windows ARM64 aborted before starting its Linux engine because its own
 quit and one subsequent detached start reproduced that host error. This is not
 Registry/node state corruption. The CLI also waited beyond `--timeout`; the
 fault runner now enforces its own host-process deadline and never kills the
-Desktop/backend process tree. The engine currently cannot serve the stack;
-operator Windows restart is needed before remaining fault verification.
+Desktop/backend process tree. The operator subsequently restored Docker without
+a Windows reboot; the engine and all six services returned. A reboot is no
+longer a prerequisite. Whole-Desktop fault repetition is deferred under the
+operator's instruction to use scoped container stop/start unless specifically needed.
 No Docker factory reset, volume deletion, inference-settings change or custody
-reset was performed. The new `ExpiryFault` is built/contract-tested but its
-Docker run is **NOT-RUN** because the engine failed first. Do not treat one
+reset was performed. Two subsequent `StackFault` cycles passed with 20 seconds
+offline, recovery in 26/16 seconds, 30-second stable current-proof/ONION windows,
+unchanged Registry/node custody and retained IDs/mounts. The scoped `ExpiryFault`
+then passed on the new ARM64 images: one genuinely signed 180-second delegated
+view, 200 seconds with all six containers stopped, recovery in 15 seconds and
+a 60-second stable current-proof/three-ONION window, unchanged Registry/node
+custody, IDs and mounts. Docker Desktop stayed running throughout both tests.
+Recovery seconds for scoped tests are measured after Compose start returns.
+The earlier startup CryptographicException burst was not reproduced by these
+scoped cases; closed safe reason codes now distinguish head/authority/epoch/
+proof-lifetime coverage on recurrence. This is not proof of every long-outage
+failure path. Do not treat one
 successful cycle as the complete restart/TTL/soak gate. Related upstream reports:
 [stale socket startup failure](https://github.com/docker/desktop-feedback/issues/554),
 [disabled inference listener still bound](https://github.com/docker/desktop-feedback/issues/448).

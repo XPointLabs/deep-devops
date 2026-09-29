@@ -17,9 +17,21 @@ engine cycle passed with retained custody and 60 seconds of current capability
 readiness. A second cycle was blocked by Docker Desktop's own inaccessible
 `dockerInference` socket startup crash, before Linux/Registry/nodes could run.
 The [local runbook](DEEP_DEV.md#evidence-boundary) records that failed host
-case and the not-run expiry probe. It must not be counted as service recovery
+case and the scoped expiry probe. The operator subsequently restored
+Docker without reboot; routine tests now stop only `deep-dev`. Two scoped cycles
+passed (26/16 seconds recovery, 30-second stability windows); whole-Desktop
+faults require separate explicit approval plus the script guard switch.
+Scoped expiry passed too: a real delegated 180-second view expired during a
+200-second all-container outage, then recovered in 15 seconds and stayed ready
+for 60 seconds with retained Registry/node custody and container/mount bindings.
+This does not cover a one-hour head or seven-day root-policy outage.
+The host crash must not be counted as service recovery
 evidence. Registry transient-unready logging is separated from cryptographic
 errors; enabled node privacy readiness now fails closed in Development too.
+The renewal worker retries known transient NTS/floor startup loss with bounded
+5/10/20/40-second backoff capped by its maintenance interval; crypto/custody
+failures are neither accelerated nor downgraded. Closed safe reason codes retain
+diagnostic separation without exposing exception messages or private material.
 
 The observations below describe the predecessor, not the current candidate.
 [DEEP_DEV.md](DEEP_DEV.md) is the local runbook: only `deep-dev` remains, using
