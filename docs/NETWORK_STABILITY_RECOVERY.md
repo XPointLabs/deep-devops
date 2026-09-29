@@ -59,6 +59,14 @@ but enabling it alone does not prove the exact DTS1 SPKI/source-family binding
 or durable witness interval required here. This is an integration constraint,
 not a deployed provider or an accepted alternate time source.
 
+On 2026-09-29 a read-only TLS probe of the two endpoints in
+`tools/production-authority-bootstrap/Program.cs` succeeded with normal platform
+certificate validation, TLS 1.3 and negotiated `ntske/1`. Both leaf SPKI SHA-256
+values matched that tool's pinned values (`time.cloudflare.com` and
+`nts.netnod.se`). This observation validates only those public endpoint/pin inputs
+at probe time. It neither audits a deployed DTS1 nor completes NTS-KE records,
+authenticates an NTP response, measures a trusted interval or renews CRT1.
+
 Do not start/declare the 72-hour gate on the current legacy local stack or before
 automatic trusted-time acquisition, operational view/key renewal and bounded
 history catch-up exist in the current DID2 services. A healthy idle process is
