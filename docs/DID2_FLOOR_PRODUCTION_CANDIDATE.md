@@ -1,6 +1,34 @@
 # DID2 latest-head floor production candidate
 
-## Current production observation (2026-09-28, 19:01 UTC)
+## Current production observation (2026-09-29, 05:14 UTC)
+
+After independently observing UTC, synchronized host time and the unchanged
+boot, ordinary protected-time CAS renewed the existing anchor with unchanged
+four-second uncertainty. The previous state was privately backed up and its
+hash checked before renewal. No refinement, new genesis or floor reset was
+performed. The existing Registry image, thirteen mounts and listener remain
+unchanged. Content-preserving head refresh continued to generation 28/tree 10.
+Authenticated ADA2 export and the separately observed PostgreSQL floor agree
+on core hash
+`0C4C551421425EA368C5CD03C831F51081BFF39B7C60970B19A853870252E16B`.
+
+Registry directory readiness and staking returned HTTP 200, but the subsequent
+Windows proof request failed closed. A bounded Registry diagnostic identified
+the exact proof-author error: the signed XNV1 does not cover the complete issued
+interval. Seed2 privacy readiness also remains unavailable, while ingress,
+storage and the independent floor service are healthy. Directory readiness
+currently checks the durable genesis authority, not the full proof issuer;
+its HTTP 200 must not be treated as current network or device readiness.
+
+Next restore the complete operational closure through the existing monotonic
+successor ceremony, retained predecessor and installed-key checks, then repeat
+nonce-fresh device verification. Never substitute a new generation-zero chain,
+erase a protected floor or stretch verifier lifetimes. Automatic operational
+time/head/checkpoint lifecycle and proof-aware readiness remain release gates;
+client DNH2 local implementation/evidence is owned by
+[DR-0012](../../docs/survival-program/decisions/DR-0012-protected-network-history.md).
+
+## Earlier production observation (2026-09-28, 19:01 UTC)
 
 Registry and seed1–seed3 are the authorized pre-user production test contour;
 historical `UAT` container/configuration names do not denote a separate remote
