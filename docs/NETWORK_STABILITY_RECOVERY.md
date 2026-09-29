@@ -49,6 +49,16 @@ publish only sanitized counts/digests allowed by the evidence schema.
 
 ## Execution boundary
 
+NTS integration must authenticate both key establishment and NTP packets, not
+just read an HTTPS `Date` header or sample the OS clock. The two protocol
+parts and TLS exporter binding are defined in
+[RFC 8915, sections 4–5](https://www.rfc-editor.org/rfc/rfc8915.html).
+A candidate such as chrony has explicit
+[NTS trust-set configuration](https://chrony-project.org/doc/4.8/chrony.conf.html#ntstrustedcerts),
+but enabling it alone does not prove the exact DTS1 SPKI/source-family binding
+or durable witness interval required here. This is an integration constraint,
+not a deployed provider or an accepted alternate time source.
+
 Do not start/declare the 72-hour gate on the current legacy local stack or before
 automatic trusted-time acquisition, operational view/key renewal and bounded
 history catch-up exist in the current DID2 services. A healthy idle process is
