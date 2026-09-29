@@ -39,6 +39,13 @@ this does **not** yet implement indefinite generation/staging of new traffic
 keys or unattended TLS certificate rotation. A new offline policy ceremony is
 required before the delegation expires.
 
+Provider anycast sets can contain unreachable members and UDP datagrams can be
+lost. The observer therefore races staggered NTS-KE dials over at most eight
+addresses within the same 4 second bound and retries one lost NTP datagram on
+the same session; TLS 1.3, hostname validation, the exact SPKI pin, NTS
+authentication and the signed 10 second sample-age bound are unchanged. Any
+other failure still discards the session and backs off.
+
 The observer and directory-exercise accounts are disposable DEV fixtures,
 not recoverable user accounts. The development mailbox issuer is not a
 configured shipping MSG authority. File/call/push/bridge/message services must

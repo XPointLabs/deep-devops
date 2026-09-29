@@ -29,6 +29,21 @@ These are not Docker-engine restart, 20-cycle, beyond-TTL, arbitrary key/TLS
 rotation, physical message delivery or 72-hour soak evidence. Mr. X runs soak;
 the separate device agent owns local Windows/Android device E2E, not CI.
 
+Observed 2026-09-29 (evening): Registry briefly reported `scope-or-quorum` and
+DID2 unready for 10-15 seconds at a time. An instrumented observer showed two
+causes: an NTS-KE dial to the multi-address `nts.netnod.se` set exceeded its
+4 second serial deadline, and one lost NTP datagram (`i/o timeout`) discarded a
+healthy session into the 10 second backoff, longer than the signed 10 second
+sample age. The observer now races staggered KE dials (at most eight addresses,
+same 4 second bound) and retries one lost NTP datagram on the same session;
+TLS 1.3, hostname validation, the exact SPKI pin, NTS authentication and the
+sample-age bound are unchanged, and other failures still back off. After the
+change: 178/178 readiness probes over 13 minutes with no NTS warning, and
+two full six-container stop/start cycles on the final build recovered in
+15 and 24 seconds without touching custody or volumes. This is a component
+result, not the
+Docker-engine restart, 20-cycle, long-TTL or 72-hour evidence.
+
 ## Predecessor reproducible causes
 
 | Observation | Exact implementation boundary | Consequence |

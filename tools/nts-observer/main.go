@@ -4,6 +4,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"crypto/tls"
@@ -50,6 +51,85 @@ type peer struct {
 }
 
 var dnsLabel = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
+
+const (
+	keTimeout     = 4 * time.Second
+	keStagger     = 400 * time.Millisecond
+	keMaxAddr     = 8
+	queryTimeout  = 2 * time.Second
+	queryAttempts = 2 // KE 4s + 2 x 2s stays inside the 10s signed sample-age bound
+)
+
+func isTimeout(err error) bool {
+	var network net.Error
+	return err != nil && (errors.Is(err, os.ErrDeadlineExceeded) || errors.As(err, &network) && network.Timeout())
+}
+
+// raceDial starts one attempt per address, staggered, and returns the first success.
+// A provider's anycast set can contain unreachable members; the stock dialer divides
+// one deadline serially across them and can time out although a member would answer.
+func raceDial[T io.Closer](ctx context.Context, count int, stagger time.Duration,
+	dial func(context.Context, int) (T, error)) (out T, err error) {
+	type result struct {
+		value T
+		err   error
+	}
+	if count < 1 {
+		return out, errors.New("no addresses")
+	}
+	results := make(chan result, count)
+	for i := 0; i < count; i++ {
+		go func(i int) {
+			select {
+			case <-time.After(time.Duration(i) * stagger):
+			case <-ctx.Done():
+				results <- result{err: ctx.Err()}
+				return
+			}
+			v, e := dial(ctx, i)
+			results <- result{v, e}
+		}(i)
+	}
+	for received := 0; received < count; received++ {
+		r := <-results
+		if r.err == nil {
+			go func(remaining int) { // a late winner must not leak its connection
+				for ; remaining > 0; remaining-- {
+					if late := <-results; late.err == nil {
+						late.value.Close()
+					}
+				}
+			}(count - received - 1)
+			return r.value, nil
+		}
+		err = r.err
+	}
+	return out, err
+}
+
+// keDialer keeps the caller's TLS config (hostname, TLS 1.3, exact SPKI pin) unchanged.
+func keDialer(network, addr string, config *tls.Config) (*tls.Conn, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), keTimeout)
+	defer cancel()
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	if len(ips) > keMaxAddr {
+		ips = ips[:keMaxAddr]
+	}
+	return raceDial(ctx, len(ips), keStagger, func(ctx context.Context, i int) (*tls.Conn, error) {
+		conn, err := (&tls.Dialer{Config: config}).DialContext(ctx, network, net.JoinHostPort(ips[i].String(), port))
+		if err != nil {
+			return nil, err
+		}
+		return conn.(*tls.Conn), nil
+	})
+}
 
 func validSource(s source) bool {
 	id, a := hex.DecodeString(s.ID)
@@ -138,7 +218,8 @@ func (p *peer) observe(s source) (o observation, err error) {
 	if p.session == nil {
 		pin, _ := hex.DecodeString(s.Pin)
 		p.session, err = nts.NewSessionWithOptions(net.JoinHostPort(s.Host, itoaPort(s.Port)), &nts.SessionOptions{
-			Timeout: 4 * time.Second,
+			Timeout: keTimeout,
+			Dialer:  keDialer,
 			TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13, ServerName: s.Host,
 				VerifyConnection: func(state tls.ConnectionState) error {
 					if state.NegotiatedProtocol != "ntske/1" || len(state.VerifiedChains) == 0 || len(state.PeerCertificates) == 0 {
@@ -156,9 +237,20 @@ func (p *peer) observe(s source) (o observation, err error) {
 			return o, err
 		}
 	}
-	start := time.Now() // elapsed measurements use Go's monotonic component
-	r, err := p.session.QueryWithOptions(&ntp.QueryOptions{Version: 4, Timeout: 4 * time.Second, Extensions: []ntp.Extension{guardedExtension{}}})
-	elapsed := time.Since(start)
+	// A lost UDP datagram is not a key-exchange failure: retry once on the same
+	// session (fresh nonce/UID and cookie) instead of discarding it into backoff.
+	var (
+		r       *ntp.Response
+		elapsed time.Duration
+	)
+	for attempt := 0; attempt < queryAttempts; attempt++ {
+		start := time.Now() // elapsed measurements use Go's monotonic component
+		r, err = p.session.QueryWithOptions(&ntp.QueryOptions{Version: 4, Timeout: queryTimeout, Extensions: []ntp.Extension{guardedExtension{}}})
+		elapsed = time.Since(start) // only the successful exchange bounds the delay
+		if !isTimeout(err) {
+			break
+		}
+	}
 	if err == nil {
 		err = r.Validate()
 	} // includes NTS authentication result
