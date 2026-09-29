@@ -1,4 +1,5 @@
 using System.Net;
+using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Deep.Protocol.AccountDirectoryV1;
@@ -54,7 +55,8 @@ internal static class OfflineAuthoringTests
                 B(32, 0xf1), H("xcc"), H("xcb"), H("pma"),
                 PublicKeyAuth.GenerateKeyPair(B(32, 0x31)).PublicKey,
                 PublicKeyAuth.GenerateKeyPair(B(32, 0x32)).PublicKey,
-                990, 1_000, 1_500, B(32, 0xf2), B(16, 0xf3), 100, 101, 102, 1_100, 5));
+                990, 1_000, 1_500, B(32, 0xf2), B(16, 0xf3), 100, 101, 102, 1_100, 5,
+                rootPolicyExpiresAtUnixSeconds: 9_000));
         genesis.VerifiedNetwork.EnsureCurrent();
         await TestCheckpointAuditAsync(directory, bootstrap, genesis);
         var rollovers = nodes.Select((node, index) => new XPointNetworkOperationalNodeRollover(
@@ -78,6 +80,7 @@ internal static class OfflineAuthoringTests
             bootstrap.Authority, 990, 1_500,
             witnesses.Select(value => (IAccountDirectoryAdh1WitnessSigner)new AdhWitness(value)).ToArray());
         TestPublicNetworkExport(directory, bootstrap, genesis, successor, did2Genesis);
+        await TestDelegatedRenewalAsync(bootstrap, genesis, nodes, witnesses, adhReference);
 
         FileSigner Signer(string name, byte id, byte seedValue, byte domain, bool isRoot)
         {
@@ -95,6 +98,76 @@ internal static class OfflineAuthoringTests
 
     private static byte[] B(int length, byte value) => Enumerable.Repeat(value, length).ToArray();
     private static byte[] H(string value) => SHA256.HashData(System.Text.Encoding.ASCII.GetBytes(value));
+
+    private static async Task TestDelegatedRenewalAsync(VerifiedXPointNetworkBootstrap bootstrap,
+        AuthoredXPointNetworkOperationalGenesis genesis, XPointNetworkOperationalNode[] nodes,
+        FileSigner[] witnesses, byte[] adhReference)
+    {
+        var counters = nodes.Select(node => new CountingSigner(node.IdentitySigner)).ToArray();
+        var rollovers = nodes.Select((node,index) => new XPointNetworkOperationalNodeRollover(
+            counters[index], node.NextOriginSpkiSha256.Span, H($"delegated-next-{index}"),
+            node.NextOnionX25519PublicKey.Span, ScalarMult.Base(B(32,(byte)(0x80+index))))).ToArray();
+        XPointNetworkOperationalSuccessorRequest Request(ulong from = 2_000, ulong until = 2_200,
+            ReadOnlyMemory<byte>? policy = null, ReadOnlyMemory<byte>? head = null,
+            IReadOnlyList<XPointNetworkOperationalNodeRollover>? keys = null) => new(
+                H("delegated"), bootstrap, [], witnesses, keys ?? rollovers,
+                policy ?? genesis.ExactXvp1, genesis.ExactXnd1, [genesis.ExactXnv1],
+                head ?? genesis.ExactXnh1, genesis.ExactPma2, genesis.ExactPmt2,
+                XPointNetworkOperationalSuccessorAuthor.ComputeXnh1CoreHash(genesis.ExactXnh1.Span),
+                ContactCodec.Decode("PMT2",genesis.ExactPmt2.Span).ArtifactHash.Span,
+                adhReference,from,from,until);
+        var delegated = await XPointNetworkOperationalSuccessorAuthor.AuthorDelegatedAsync(Request());
+        if (!delegated.ExactXvp1.Span.SequenceEqual(genesis.ExactXvp1.Span) ||
+            !delegated.ExactPma2.Span.SequenceEqual(genesis.ExactPma2.Span) ||
+            BinaryPrimitives.ReadUInt64BigEndian(ContactCodec.Decode("PMT2",delegated.ExactPmt2.Span).Field(2).Span) != 1 ||
+            delegated.ExactXnd1.Any(exact => ReadU64Field(exact.Span,21) != 2))
+            throw new Exception("Delegated renewal changed offline policy or skipped announced key epoch.");
+        var calls = counters.Sum(signer => signer.Calls);
+        await Reject(Request(9_001,9_100));
+        var badPolicy = genesis.ExactXvp1.ToArray(); badPolicy[^1] ^= 1;
+        await Reject(Request(policy:badPolicy));
+        var badHead = genesis.ExactXnh1.ToArray(); badHead[^1] ^= 1;
+        await Reject(Request(head:badHead));
+        var wrongKeys = nodes.Select((node,index) => new XPointNetworkOperationalNodeRollover(
+            counters[index],H($"unannounced-current-{index}"),H($"unannounced-next-{index}"),
+            ScalarMult.Base(B(32,(byte)(0x30+index))),ScalarMult.Base(B(32,(byte)(0x80+index))))).ToArray();
+        await Reject(Request(keys:wrongKeys));
+        if (counters.Sum(signer => signer.Calls) != calls)
+            throw new Exception("Rejected delegated predecessor reached a node signer callback.");
+
+        static async Task Reject(XPointNetworkOperationalSuccessorRequest request)
+        {
+            try { await XPointNetworkOperationalSuccessorAuthor.AuthorDelegatedAsync(request); }
+            catch (Exception exception) when (exception is CryptographicException or
+                Deep.Protocol.DeepExtension.PrivacyRouting.OnionBoundaryException) { return; }
+            throw new Exception("Hostile delegated renewal accepted.");
+        }
+        static ulong ReadU64Field(ReadOnlySpan<byte> exact, ushort tag)
+        {
+            for (var offset = 12; offset < exact.Length;)
+            {
+                var fieldTag = BinaryPrimitives.ReadUInt16BigEndian(exact[offset..]);
+                var length = checked((int)BinaryPrimitives.ReadUInt32BigEndian(exact[(offset+4)..]));
+                if (fieldTag == tag) return BinaryPrimitives.ReadUInt64BigEndian(exact[(offset+8)..]);
+                offset += 8 + length;
+            }
+            throw new Exception("Missing epoch field in authored test record.");
+        }
+    }
+
+    private sealed class CountingSigner(IXPointNetworkOperationalSigner inner) : IXPointNetworkOperationalSigner
+    {
+        internal int Calls;
+        public ReadOnlyMemory<byte> SignerId => inner.SignerId;
+        public ulong KeyGeneration => inner.KeyGeneration;
+        public ReadOnlyMemory<byte> Ed25519PublicKey => inner.Ed25519PublicKey;
+        public ValueTask<int> SignAsync(XPointNetworkOperationalSigningRequest request,
+            Memory<byte> signature64,CancellationToken cancellationToken)
+        {
+            Calls++;
+            return inner.SignAsync(request,signature64,cancellationToken);
+        }
+    }
 
     private sealed class AdhWitness(FileSigner signer) : IAccountDirectoryAdh1WitnessSigner
     {

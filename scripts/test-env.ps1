@@ -2,8 +2,8 @@
     [ValidateSet("smoke", "full")]
     [string] $Suite = $(if ($env:E2E_SUITE) { $env:E2E_SUITE } else { "smoke" }),
 
-    [ValidateSet("compat", "external")]
-    [string] $BackendMode = $(if ($env:DEEP_BACKEND_MODE) { $env:DEEP_BACKEND_MODE } else { "compat" }),
+    [ValidateSet("deep-dev", "compat", "external")]
+    [string] $BackendMode = $(if ($env:DEEP_BACKEND_MODE) { $env:DEEP_BACKEND_MODE } else { "deep-dev" }),
 
     [string] $ManagedExternalProfile = $(if ($env:DEEP_EXTERNAL_PROFILE) { $env:DEEP_EXTERNAL_PROFILE } else { "" }),
 
@@ -17,6 +17,14 @@
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $DevopsDir = Resolve-Path (Join-Path $ScriptDir "..")
+if ($BackendMode -eq 'deep-dev') {
+    if ($Suite -ne 'smoke' -or $RequireRouterNoMock -or $RequirePushProviderCanary -or $ManagedExternalProfile) {
+        throw 'deep-dev currently supports only the real proof/ONION smoke check; it is not full carrier, push, device or release evidence.'
+    }
+    & (Join-Path $ScriptDir 'deep-dev.ps1') -Action Verify
+    if (-not $?) { throw 'deep-dev verified capability smoke failed.' }
+    return
+}
 $WorkspaceRoot = Resolve-Path (Join-Path $DevopsDir "..")
 $ComposeFile = Join-Path $DevopsDir "docker-compose.yml"
 $ArtifactDir = Join-Path $DevopsDir "artifacts"

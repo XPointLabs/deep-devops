@@ -7,7 +7,29 @@ belong to [the architecture specification](../../docs/architecture/ACCOUNT-DIREC
 [DR-0012](../../docs/survival-program/decisions/DR-0012-protected-network-history.md)
 and [DR-0013](../../docs/survival-program/decisions/DR-0013-readonly-directory-issuance-readiness.md).
 
-## Reproducible causes
+## Current candidate increment (2026-09-29)
+
+The observations below describe the predecessor, not the current candidate.
+[DEEP_DEV.md](DEEP_DEV.md) is the local runbook: only `deep-dev` remains, using
+native ARM64, Registry, a real TLS PostgreSQL floor, three nodes and a delegated
+publisher. Production was not modified. The owned NTS helper now authenticates
+both pinned source families; Registry persists a lower rollback floor and
+reacquires fresh bounded time after boot. Historical recovery follows
+[DR-0014](../../docs/survival-program/decisions/DR-0014-directory-historical-catchup.md),
+and bounded delegated view renewal follows
+[DR-0015](../../docs/survival-program/decisions/DR-0015-delegated-operational-renewal.md).
+Neither expired historical heads nor stored time restore live authority.
+
+Actual six-service stop/start cases passed (3–27 seconds). A real DEV run with
+130 disposable account admissions while all three nodes were offline passed:
+all three verified ONION capabilities recovered in 46 seconds, without reset.
+Its first attempt timed out on repeated prefix replay; single-pass journal/map
+validation fixed that product defect, and the retained journal was reused.
+These are not Docker-engine restart, 20-cycle, beyond-TTL, arbitrary key/TLS
+rotation, physical message delivery or 72-hour soak evidence. Mr. X runs soak;
+the separate device agent owns local Windows/Android device E2E, not CI.
+
+## Predecessor reproducible causes
 
 | Observation | Exact implementation boundary | Consequence |
 | --- | --- | --- |

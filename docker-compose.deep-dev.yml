@@ -1,0 +1,133 @@
+name: deep-dev
+x-runtime: &runtime
+  # Native ARM64 development lane, with the exact CI-produced ML-DSA asset.
+  # This is candidate functional evidence, not release approval.
+  platform: linux/arm64
+  restart: unless-stopped
+  init: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  pids_limit: 160
+  mem_limit: 768m
+  cpus: 1.0
+  ulimits:
+    core: {soft: 0, hard: 0}
+  environment:
+    ASPNETCORE_ENVIRONMENT: Development
+  logging:
+    driver: json-file
+    options: {max-size: 1m, max-file: "1"}
+services:
+  publisher:
+    <<: *runtime
+    image: deep-dev/publisher:candidate
+    build:
+      context: ..
+      dockerfile: deep-devops/docker/deep-dev.Dockerfile
+      args: {PROJECT: deep-devops/tools/deep-dev/Deep.Dev.csproj}
+    command: [Deep.Dev.dll, publish, /run/deep-public, /run/deep-operator, /usr/local/bin/deep-nts-observer]
+    volumes:
+      - ${DEEP_DEV_ROOT}/public:/run/deep-public
+      - ${DEEP_DEV_ROOT}/operator:/run/deep-operator:ro
+      - publisher-state:/var/lib/deep-publisher
+    networks: {dev: {ipv4_address: 172.31.240.4}}
+    healthcheck:
+      test: [CMD, test, -f, /tmp/deep-publisher-ready]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+  floor:
+    image: postgres@sha256:dc17045ccfd343b49600570ea734b9c4991cf1c3f3302e67df51e3b402dd55c4
+    restart: unless-stopped
+    init: true
+    environment:
+      POSTGRES_DB: deep_dev
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/password
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256 --data-checksums
+    command: [postgres, -c, ssl=on, -c, ssl_cert_file=/run/secrets/server.crt, -c, ssl_key_file=/run/secrets/server.key, -c, password_encryption=scram-sha-256]
+    volumes:
+      - floor-data:/var/lib/postgresql/data
+      - floor-secrets:/run/secrets:ro
+    networks: {dev: {ipv4_address: 172.31.240.3}}
+    healthcheck:
+      test: [CMD-SHELL, "gosu postgres psql -qAt -h /var/run/postgresql -U postgres -d deep_dev -c 'SELECT 1' | grep -qx 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+  registry:
+    <<: *runtime
+    image: deep-dev/registry:candidate
+    build:
+      context: ..
+      dockerfile: deep-devops/docker/deep-dev.Dockerfile
+      args: {PROJECT: deep-registry-api/src/Deep.Registry.Api/Deep.Registry.Api.csproj}
+    command: [Deep.Registry.Api.dll]
+    ports: ["127.0.0.1:28443:443"]
+    volumes:
+      - ${DEEP_DEV_ROOT:?set the private dev custody root}/registry/appsettings.Development.json:/app/appsettings.Development.json:ro
+      - ${DEEP_DEV_ROOT}/public:/run/deep-public:ro
+      - registry-secrets:/run/secrets:ro
+      - registry-state:/var/lib/registry
+    networks: {dev: {ipv4_address: 172.31.240.2}}
+    healthcheck:
+      test: [CMD, curl, --fail, --silent, --max-time, "5", --cacert, /run/deep-public/dev-ca.crt, https://localhost/health/did2/ready]
+      interval: 10s
+      timeout: 6s
+      retries: 6
+      start_period: 30s
+  node-1: &node
+    <<: *runtime
+    image: deep-dev/xnode:candidate
+    build:
+      context: ..
+      dockerfile: deep-devops/docker/deep-dev.Dockerfile
+      args: {PROJECT: xnode/src/XNode/XNode.csproj}
+    command: [XNode.dll]
+    ports: ["127.0.0.1:28191:8080", "127.0.0.1:28194:443"]
+    volumes:
+      - ${DEEP_DEV_ROOT}/node-1/appsettings.Development.json:/app/appsettings.Development.json:ro
+      - ${DEEP_DEV_ROOT}/public:/run/deep-public:ro
+      - node-1-secrets:/run/secrets:ro
+      - node-1-state:/var/lib/xnode
+    networks: {dev: {ipv4_address: 172.31.240.11}}
+    healthcheck:
+      # Development process health is not signed ONION readiness.
+      test: [CMD-SHELL, "curl --fail --silent --max-time 5 http://localhost:8080/health/ready | grep -Fq '\"privacyRouting\":\"ready\"'"]
+      interval: 10s
+      timeout: 6s
+      retries: 6
+      start_period: 30s
+  node-2:
+    <<: *node
+    ports: ["127.0.0.1:28192:8080", "127.0.0.1:28195:443"]
+    volumes:
+      - ${DEEP_DEV_ROOT}/node-2/appsettings.Development.json:/app/appsettings.Development.json:ro
+      - ${DEEP_DEV_ROOT}/public:/run/deep-public:ro
+      - node-2-secrets:/run/secrets:ro
+      - node-2-state:/var/lib/xnode
+    networks: {dev: {ipv4_address: 172.31.240.12}}
+  node-3:
+    <<: *node
+    ports: ["127.0.0.1:28193:8080", "127.0.0.1:28196:443"]
+    volumes:
+      - ${DEEP_DEV_ROOT}/node-3/appsettings.Development.json:/app/appsettings.Development.json:ro
+      - ${DEEP_DEV_ROOT}/public:/run/deep-public:ro
+      - node-3-secrets:/run/secrets:ro
+      - node-3-state:/var/lib/xnode
+    networks: {dev: {ipv4_address: 172.31.240.13}}
+networks:
+  dev: {ipam: {config: [{subnet: 172.31.240.0/24}]}}
+volumes:
+  publisher-state:
+  floor-data:
+  floor-secrets: {external: true, name: deep-dev_floor-secrets}
+  registry-secrets: {external: true, name: deep-dev_registry-secrets}
+  registry-state:
+  node-1-secrets: {external: true, name: deep-dev_node-1-secrets}
+  node-2-secrets: {external: true, name: deep-dev_node-2-secrets}
+  node-3-secrets: {external: true, name: deep-dev_node-3-secrets}
+  node-1-state:
+  node-2-state:
+  node-3-state:

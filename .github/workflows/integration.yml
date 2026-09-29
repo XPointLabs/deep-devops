@@ -64,9 +64,12 @@ jobs:
         with:
           node-version: 24
 
-      - name: Run e2e smoke
+      - name: Check retained deep-dev topology contracts (no device evidence)
+        run: node --test deep-devops/scripts/deep-dev.test.mjs
+
+      - name: Run legacy compatibility smoke (not DID2 release evidence)
         shell: pwsh
-        run: ./deep-devops/scripts/test-env.ps1 -Suite smoke
+        run: ./deep-devops/scripts/test-env.ps1 -Suite smoke -BackendMode compat
 
       - name: Run backend-external no-mock smoke
         shell: pwsh
