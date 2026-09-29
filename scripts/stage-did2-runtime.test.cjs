@@ -3,6 +3,7 @@ const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const {prepare} = require('./prepare-xnode-did2-uat.cjs');
 const {fixture} = require('./prepare-xnode-did2-uat.test.cjs');
 const {stage} = require('./stage-did2-runtime.cjs');
@@ -44,6 +45,50 @@ test('rejects substituted node/protection custody and changed public config befo
       assert.equal(fs.existsSync(path.join(input.seed1,'config','did2-runtime')),false);
     });
 });
+test('growing successor history stages a new immutable bundle without demanding new files in its predecessor',()=>scenario((input,envFile)=> {
+  const prior=stage(input.output,input.seed1);
+  fs.appendFileSync(envFile,Object.entries(prior.updates).map(([k,v])=>k+'='+v).join('\n')+'\n');
+  const priorRoot=path.dirname(path.join(input.seed1,prior.updates.DEEP_DID2_CONFIG_FILE));
+  const priorConfig=fs.readFileSync(path.join(priorRoot,'appsettings.Production.json'));
+  const originalEnv=fs.readFileSync(envFile);
+  const originalEd=fs.readFileSync(path.join(input.seed1,'secrets','key_ed25519'));
+  const originalBls=fs.readFileSync(path.join(input.seed1,'secrets','key_bls'));
+  const publicRoot=path.join(input.output,'public');
+  const manifest=JSON.parse(fs.readFileSync(path.join(publicRoot,'public-assets.v2.json')));
+  const config=JSON.parse(fs.readFileSync(path.join(publicRoot,'xnode.did2.json')));
+  const sha=bytes=>crypto.createHash('sha256').update(bytes).digest('hex').toUpperCase();
+  for(const [role,field] of [['xvp1','ExactPolicyPaths'],['xnv1','ExactViewPaths'],
+    ['xnh1','ExactHeadPaths'],['pmt2','ExactMailboxProjectionPaths']]) {
+    const name=role+'.0001.bin'; const bytes=Buffer.from(role+'-synthetic-successor');
+    fs.writeFileSync(path.join(publicRoot,name),bytes);
+    manifest.artifacts.push({Role:role,Ordinal:1,FileName:name,Length:bytes.length,Sha256Hex:sha(bytes)});
+    config.DeepIdV2NetworkPlacement[field].push('/run/did2-network/'+name);
+    assert.equal(fs.existsSync(path.join(priorRoot,'public',name)),false);
+  }
+  const configuration=Buffer.from(JSON.stringify(config));
+  fs.writeFileSync(path.join(publicRoot,'xnode.did2.json'),configuration);
+  manifest.configurationSha256=sha(configuration);
+  fs.writeFileSync(path.join(publicRoot,'public-assets.v2.json'),JSON.stringify(manifest));
+  const diagnostic=JSON.parse(fs.readFileSync(path.join(input.output,'appsettings.UAT.json')));
+  Object.assign(diagnostic,config);
+  fs.writeFileSync(path.join(input.output,'appsettings.UAT.json'),JSON.stringify(diagnostic));
+  const next=stage(input.output,input.seed1);
+  assert.equal(next.records,11);
+  assert.notEqual(next.updates.DEEP_DID2_CONFIG_FILE,prior.updates.DEEP_DID2_CONFIG_FILE);
+  assert.deepEqual(fs.readFileSync(path.join(priorRoot,'appsettings.Production.json')),priorConfig);
+  assert.deepEqual(fs.readFileSync(envFile),originalEnv,'staging must not select or replace the old installation');
+  assert.deepEqual(fs.readFileSync(path.join(input.seed1,'secrets','key_ed25519')),originalEd);
+  assert.deepEqual(fs.readFileSync(path.join(input.seed1,'secrets','key_bls')),originalBls);
+  assert.equal(fs.readdirSync(path.join(input.seed1,'config','did2-runtime')).length,2);
+}));
+test('an exact-rerun configuration with a missing retained public record still fails closed',()=>scenario((input,envFile)=> {
+  const prior=stage(input.output,input.seed1);
+  fs.appendFileSync(envFile,Object.entries(prior.updates).map(([k,v])=>k+'='+v).join('\n')+'\n');
+  const priorRoot=path.dirname(path.join(input.seed1,prior.updates.DEEP_DID2_CONFIG_FILE));
+  fs.unlinkSync(path.join(priorRoot,'public','xnv1.0000.bin'));
+  assert.throws(()=>stage(input.output,input.seed1));
+  assert.equal(fs.readdirSync(path.join(input.seed1,'config','did2-runtime')).length,1);
+}));
 test('rejects unexpected network, peer origin, certificate key, and original env duplicates',()=>{
   scenario((input,envFile)=>{
     fs.appendFileSync(envFile,'DEEP_NODE_PUBLIC_PORT=443\n');

@@ -161,8 +161,14 @@ function stage(source, installation) {
       if (!/^\.\/config\/did2-runtime\/bundle-[A-Za-z0-9_-]+\/appsettings\.Production\.json$/.test(current)) reject();
       const retained = path.dirname(path.join(installation,current));
       let same = read(path.join(retained,'appsettings.Production.json')).equals(Buffer.from(JSON.stringify(config,null,2)));
-      for (const [name,bytes] of publicFiles) same = read(path.join(retained,'public',name)).equals(bytes) && same;
-      for (const [name,bytes] of privateFiles) {
+      // A successor adds signed-history paths. Once configuration differs it
+      // cannot be an exact rerun; do not require those new files in the old
+      // immutable bundle. New inputs and retained identity/state custody have
+      // already been checked above. The runtime still verifies the predecessor.
+      if (same) for (const [name,bytes] of publicFiles) {
+        if (!read(path.join(retained,'public',name)).equals(bytes)) { same = false; break; }
+      }
+      if (same) for (const [name,bytes] of privateFiles) {
         const old = read(path.join(retained,'secrets',name));
         try { same = old.equals(bytes) && same; } finally { old.fill(0); }
       }

@@ -71,6 +71,18 @@ before any network cutover. The source artifact directory alone is never an
 independent protected pin; the three expected hashes must be obtained from
 their separately protected current-state authorities.
 
+For an already initialized XNode, the supported
+[offline network-floor audit](../../xnode/docs/operator.md#offline-accepted-network-checkpoint-audit)
+authenticates a read-only snapshot of its floor, independent anchor and matching
+existing Data Protection key ring. It exports the exact unchanged DNH2; it neither
+creates a writer lease nor renews keys. Its scope uses the reader's **directory
+genesis ADH1** pin and registered node ID, not the network-genesis XNA1 hash.
+Capture both protected records consistently and retain the copies inside operator
+custody. An export is historical local-custody evidence, not fresh authority or a
+global anti-rollback floor. Review the retained head reference and exact PMT against
+the complete signed predecessor, and keep full NCP2 history for the successor.
+Never substitute candidate-manifest hashes for this independently accepted state.
+
 Before that ceremony, `--prepare-rollover true` with `--authority-root`,
 `--observed-unix`, and the three `--seedN-root` inputs creates a new
 `private/rollover-<observed-unix>` directory inside existing protected custody.
@@ -153,6 +165,12 @@ configuration flags prove current authority, two-replica publication or device E
 The host must acquire its own nonce-fresh proof and verify its installed onion key
 before releasing receive capability; see
 [DR-0012](../../docs/survival-program/decisions/DR-0012-protected-network-history.md).
+
+The installer stager treats a changed signed-history path list as a new immutable
+bundle, not an exact rerun. It does not demand successor-only files in the previous
+bundle. All new inputs and retained node/state custody are still validated before
+staging; only runtime Protocol verification can advance an existing network floor.
+An unchanged configuration with missing retained public files still rejects.
 
 `scripts/prepare-xnode-did2-uat.cjs` prepares one separate canary bundle from
 `--assets <export-directory>`, all three existing `--seed1/--seed2/--seed3
