@@ -1,6 +1,54 @@
 # DID2 latest-head floor production candidate
 
-## Current production observation (2026-09-29, 05:14 UTC)
+## Current production observation (2026-09-29, 07:12 UTC)
+
+The monotonic operational successor and supported installer rollout completed
+on all three registered nodes. The new complete NCP2 retains all three signed
+views and predecessor policy/PMT history; its 14,449-byte SHA-256 is
+`F7E26C51A46CA60D02BD2DAFE3FC7B8FE12CD0BCC15C26DA3CE983D44C2A8BC5`.
+Certificate-validated public HTTPS distribution matched that exact export and
+passed all four negative transport checks. This is distribution evidence,
+not current client authority or message delivery.
+
+Before authoring, each node's independent floor/anchor/key-ring snapshot was
+authenticated with the [read-only operator audit](../../xnode/docs/operator.md#offline-accepted-network-checkpoint-audit).
+All three retained the same revision-one DNH2. Existing root/node custody and
+the independently observed directory head 29/tree 10 bound the successor;
+only rotating traffic keys and their self-issued TLS pairs were renewed.
+Registered Ed25519/BLS bytes matched their original backups after rollout.
+No directory/network floor, genesis, certbot or staking configuration was reset.
+
+The first activation failed its health gate: the earlier directory checkpoint
+chain did not cover the nodes' retained heads. Installer rollback ran, but the
+already staged successor remained selected; it was not a restoration to the
+previous operational generation. The complete authenticated covered-head export
+and independent floor agreed on head 29. A generation-three ADF1 successor
+covers heads 25–28 and targets that head. Its public artifact SHA-256 is
+`0699144DB8B9D69F474A7CB000EC3C542D6F7ECC0E17DC5AE3B7230145917844`.
+Only that signed public file was imported; root private custody stayed local.
+
+The same Registry image was recomposed with all thirteen existing mounts,
+the same loopback listener and independent floor, and the four-entry append-only
+checkpoint chain. Its environment preflight passed. Host Node was too old for
+the helper; an official digest-pinned Node 24 executable was extracted privately,
+without replacing system packages. All three nodes recovered; a subsequent
+supported installer run passed on every node. The selected XNode image is the
+immutable index `sha256:c54cafd4737274326e2e3583da6be9081e2188dc09c02742489875da4882aa0d`
+from the owner CI run recorded in the sprint history, not a mutable latest tag.
+
+Post-rollout read-only snapshots authenticated revision two on every node,
+with identical 1,765-byte DNH2 SHA-256
+`7DD5843D1C4D731AE0C4239D66D3E8349FC60A7C8C4A249730C5D3962C5AC829`
+and view generation two. Registry readiness, all three XNode health checks
+and staking succeeded. The protected-time CAS used the unchanged four-second
+uncertainty and same-host UTC observation immediately before execution; an
+earlier stale-observation attempt rejected without changing its file.
+
+Physical clients still need current-history/restart and message-path evidence;
+automatic operational lifecycle and proof-aware readiness remain open gates.
+No GitHub Release, main merge or production-cutover attestation was performed.
+
+## Earlier production observation (2026-09-29, 05:14 UTC)
 
 After independently observing UTC, synchronized host time and the unchanged
 boot, ordinary protected-time CAS renewed the existing anchor with unchanged
