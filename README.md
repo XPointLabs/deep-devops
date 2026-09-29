@@ -29,6 +29,11 @@ reuse UAT keys, certificates, volumes or state in production.
 
 ## Local development and UAT
 
+For the DID2 restart/outage investigation and required stability fault matrix,
+read [NETWORK_STABILITY_RECOVERY.md](docs/NETWORK_STABILITY_RECOVERY.md).
+Component host/DI and installer tests do not close the live network or 72-hour
+soak gate; the retired survival graph is not DID2 release evidence.
+
 For the clean first-release lane (Registry plus exactly three XNodes, direct
 development without HAProxy and an optional TLS profile), use
 `docs/FIRST_RELEASE_LOCAL_STACK.md`. It has its own Docker project, ports,
