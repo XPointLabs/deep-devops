@@ -3,7 +3,10 @@ x-runtime: &runtime
   # Native ARM64 development lane, with the exact CI-produced ML-DSA asset.
   # This is candidate functional evidence, not release approval.
   platform: linux/arm64
-  restart: unless-stopped
+  # Docker Desktop's full shutdown explicitly stops containers. `always`
+  # restores this retained development network when the engine returns;
+  # a manual service stop still remains stopped while the engine is running.
+  restart: always
   init: true
   cap_drop: [ALL]
   security_opt: [no-new-privileges:true]
@@ -14,6 +17,8 @@ x-runtime: &runtime
     core: {soft: 0, hard: 0}
   environment:
     ASPNETCORE_ENVIRONMENT: Development
+    # Explicit Kestrel listeners own the ports; disable the base image default.
+    ASPNETCORE_HTTP_PORTS: ""
   logging:
     driver: json-file
     options: {max-size: 1m, max-file: "1"}
@@ -39,7 +44,7 @@ services:
       start_period: 30s
   floor:
     image: postgres@sha256:dc17045ccfd343b49600570ea734b9c4991cf1c3f3302e67df51e3b402dd55c4
-    restart: unless-stopped
+    restart: always
     init: true
     environment:
       POSTGRES_DB: deep_dev

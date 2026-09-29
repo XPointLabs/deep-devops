@@ -10,7 +10,8 @@ test('deep-dev keeps exactly six scoped native ARM64 services and durable custod
   assert.deepEqual([...services.matchAll(/^  ([\w-]+):/gm)].map(m => m[1]),
     ['publisher', 'floor', 'registry', 'node-1', 'node-2', 'node-3']);
   assert.match(compose, /platform: linux\/arm64/);
-  assert.match(compose, /restart: unless-stopped/);
+  assert.equal([...compose.matchAll(/restart: always/g)].length, 2);
+  assert.doesNotMatch(compose, /restart: unless-stopped/);
   assert.match(compose, /privacyRouting/);
   assert.match(compose, /registry-state:\/var\/lib\/registry/);
   for (const n of [1, 2, 3]) {
@@ -41,4 +42,35 @@ test('local builds use reviewed image digests and a prebuilt native asset, not C
   assert.doesNotMatch(dockerfile, /cmake|g\+\+|clang|build-essential/);
   const testEnv = await read('./test-env.ps1');
   assert.match(testEnv, /\$BackendMode = .*else \{ "deep-dev" \}/);
+});
+
+test('engine fault tests automatic restart with retained custody and refuse a shared engine', async () => {
+  const script = await read('./deep-dev.ps1');
+  const fault = script.split("if ($Action -in @('EngineFault','ExpiryFault'))")[1].split("if ($Action -eq 'Verify')")[0];
+  assert.match(fault, /desktop-linux/);
+  assert.match(fault, /\$allRunning.Count -ne 6/);
+  assert.match(fault, /\$policy -cne 'always'/);
+  assert.match(fault, /Invoke-DesktopOperation 'stop' 60/);
+  assert.match(fault, /finally\s*\{[^}]*Invoke-DesktopOperation 'start' 120/s);
+  const engineLoop = fault.split('foreach ($cycle in 1..$Cycles)')[1];
+  assert.doesNotMatch(engineLoop, /\$compose \+ @\('(start|up|down)'/);
+  assert.match(fault, /post-restart stability window/);
+  assert.match(fault, /Online custody changed/);
+  assert.match(fault, /unchangedStateMounts=\$true/);
+  assert.match(fault, /messageDeliveryEvidence=\$false/);
+  assert.match(script, /WaitForExit\(\(\$TimeoutSeconds \+ 10\) \* 1000\)/);
+  assert.doesNotMatch(script, /\$process.Kill\(\$true\)/);
+  assert.match(fault, /deep-dev-engine-case.v1/);
+});
+
+test('expiry fault authors shorter real signed views without clock or trust changes', async () => {
+  const script = await read('./deep-dev.ps1');
+  assert.match(script, /publish-short-view/);
+  assert.match(script, /\$OfflineSeconds = 200/);
+  const publisher = await read('../tools/deep-dev/DevPublisher.cs');
+  assert.match(publisher, /operationalLifetimeSeconds is < 180 or > 3_600/);
+  assert.match(publisher, /AuthorDelegatedAsync/);
+  assert.match(publisher, /checked\(observed\+operationalLifetimeSeconds-30\)/);
+  assert.match(publisher, /if \(singlePublication\) return/);
+  assert.doesNotMatch(script, /Set-Date|hwclock|timedatectl/);
 });

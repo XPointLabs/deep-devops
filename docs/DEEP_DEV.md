@@ -64,6 +64,8 @@ Run from the DevOps repository:
 ./scripts/deep-dev.ps1 -Action Start
 ./scripts/deep-dev.ps1 -Action FaultMatrix
 ./scripts/deep-dev.ps1 -Action HistoryFault
+./scripts/deep-dev.ps1 -Action EngineFault -Cycles 2 -StableSeconds 60
+./scripts/deep-dev.ps1 -Action ExpiryFault -StableSeconds 60
 ./scripts/test-env.ps1 -Suite smoke -BackendMode deep-dev
 ```
 
@@ -75,6 +77,34 @@ adds 130 real disposable DID2 accounts to **this DEV directory**, with all
 three nodes offline, then requires independently verified node recovery.
 It is not read-only and must never be pointed at production. The probe mounts
 public bootstrap only, not any retained signer, node key or protected floor.
+
+Normal services use `restart: always`: full Docker Desktop shutdown explicitly
+stops containers, so `unless-stopped` left the entire network off when the engine
+returned. Starting Docker now resumes the six retained services automatically,
+without a Compose command or custody repair. A direct `docker stop` still stops
+a service while the engine is running, but engine restart resumes it. For a
+persistent maintenance stop, use this script's `Stop` (sets `unless-stopped`
+before stopping); `Start` restores `always`. `Up` also restores normal policy.
+
+`EngineFault` refuses a remote/shared engine, unrelated running containers or
+stopped dev services. It stops/starts the **whole local Docker Desktop**, not
+only Compose, checks a stable current-proof/ONION window and retains exact
+container IDs, canonical mount bindings and online-secret digests. Digests are
+kept only in process memory. No Compose start/up repairs the tested restart.
+Recovery seconds are measured after Desktop's start command completes; Desktop
+startup time is additional. `ExpiryFault` first authors one genuinely signed
+180-second operational view using existing delegated custody and the protected
+publisher journal, then keeps the engine off for 200 seconds. The normal publisher
+must renew that expired view on engine boot. It changes no clock, signature check,
+policy expiry, keys or floor and does not represent a one-hour directory-head or
+seven-day root-policy outage. The restored publisher resumes its usual lifetime.
+
+Enabled privacy now returns readiness 503 while its verified capability is absent
+even in Development; only explicitly disabled privacy retains the development
+exemption. Initial authenticated-time/dependency loss is a visible warning;
+cryptographic/custody/configuration failure remains an error, never a fallback.
+Explicit management HTTP/1.1 and TLS privacy HTTP/2 listeners no longer advertise
+an impossible mixed HTTP/2 mode over cleartext. TLS/encryption are unchanged.
 
 `Init` is first-time only and refuses existing custody. `Provision` and
 `ProvisionFloor` are explicit first-time operations and refuse existing
@@ -101,6 +131,28 @@ custody were retained; unrelated local database containers were not removed.
 Never run a global Docker prune or `down --volumes` as network repair.
 
 ## Evidence boundary
+
+2026-09-30: full Docker Desktop stop/start reproduced an auto-start defect:
+`unless-stopped` left all six services exited. With `always`, one complete
+engine fault case passed with a 60-second stable verified-capability window,
+the same container/mount bindings and unchanged online-secret digests. An
+earlier raw JSON mount comparison was order-sensitive; canonical binding
+comparison fixes the harness without weakening its custody check.
+
+The second engine cycle was **BLOCKED**, not passed: Docker Desktop 4.45.0
+on Windows ARM64 aborted before starting its Linux engine because its own
+`dockerInference` AF_UNIX runtime endpoint could not be removed. A clean force
+quit and one subsequent detached start reproduced that host error. This is not
+Registry/node state corruption. The CLI also waited beyond `--timeout`; the
+fault runner now enforces its own host-process deadline and never kills the
+Desktop/backend process tree. The engine currently cannot serve the stack;
+operator Windows restart is needed before remaining fault verification.
+No Docker factory reset, volume deletion, inference-settings change or custody
+reset was performed. The new `ExpiryFault` is built/contract-tested but its
+Docker run is **NOT-RUN** because the engine failed first. Do not treat one
+successful cycle as the complete restart/TTL/soak gate. Related upstream reports:
+[stale socket startup failure](https://github.com/docker/desktop-feedback/issues/554),
+[disabled inference listener still bound](https://github.com/docker/desktop-feedback/issues/448).
 
 Native ARM64 exact-asset managed/native checks passed 7/7 on 2026-09-29.
 The real stop/start matrix passed for each node, Registry, the floor, publisher,

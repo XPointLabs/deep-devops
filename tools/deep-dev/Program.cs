@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Data.Common;
 using System.Net;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
@@ -15,6 +16,7 @@ using Sodium;
 try {
     if (args.Length == 2 && args[0] == "configure") ConfigureAtomicBundle(args[1]);
     else if (args.Length == 4 && args[0] == "publish") await DevPublisher.RunAsync(args[1], args[2], args[3], ReadNtsAsync);
+    else if (args.Length == 4 && args[0] == "publish-short-view") await DevPublisher.RunAsync(args[1], args[2], args[3], ReadNtsAsync, operationalLifetimeSeconds:180, singlePublication:true);
     else if (args.Length == 2 && args[0] == "exercise-directory") await DevDirectoryExercise.RunAsync(args[1]);
     else await InitializeAsync(args);
 }
@@ -183,12 +185,18 @@ try
         Write("registry/secrets/" + name + ".key", RandomNumberGenerator.GetBytes(32));
     Write("floor/secrets/password", Encoding.ASCII.GetBytes(Convert.ToHexString(RandomNumberGenerator.GetBytes(32))));
     var password = File.ReadAllText(Path.Combine(root, "floor/secrets/password"));
+    var floorConnection = new DbConnectionStringBuilder {
+        ["Host"] = "floor", ["Database"] = "deep_dev", ["Username"] = "postgres",
+        ["Password"] = password, ["SSL Mode"] = "VerifyFull",
+        ["Root Certificate"] = "/run/deep-public/dev-ca.crt",
+        ["Timeout"] = 5, ["Command Timeout"] = 5,
+    };
     var directory = new Dictionary<string, object> {
         ["Enabled"] = true, ["NetworkIdHex"] = Convert.ToHexString(network), ["GenesisAuthorityCoreHashHex"] = Convert.ToHexString(bootstrap.GenesisPin.AuthorityCoreHash.Span),
         ["ExactAuthorityPaths"] = new[] { "/run/deep-public/genesis.xna1" }, ["ExactTimePolicyPaths"] = new[] { "/run/deep-public/genesis.dts1" },
         ["GenesisHeadPath"] = "/run/deep-public/genesis.adh1", ["GenesisHeadCoreHashHex"] = Convert.ToHexString(adh.CoreHash.Span),
         ["StatePath"] = "/var/lib/registry/authority.ada2", ["IntegrityKeyPath"] = "/run/secrets/directory-integrity.key",
-        ["LatestHeadFloorPostgreSqlConnectionString"] = $"Host=floor;Database=deep_dev;Username=postgres;Password={password};SSL Mode=VerifyFull;Root Certificate=/run/deep-public/dev-ca.crt;Timeout=5;Command Timeout=5",
+        ["LatestHeadFloorPostgreSqlConnectionString"] = floorConnection.ConnectionString,
         ["ProofEnabled"] = true, ["CurrentXnv1Path"] = "/run/deep-public/current.xnv1", ["ProofRequestLedgerRootPath"] = "/var/lib/registry/proof-ledger",
         ["ProofRequestLedgerIntegrityKeyPath"] = "/run/secrets/proof-ledger-integrity.key", ["HeadRenewalEnabled"] = true,
         ["HeadValiditySeconds"] = 3_600, ["HeadRenewalLeadSeconds"] = 300, ["HeadRenewalIntervalSeconds"] = 60

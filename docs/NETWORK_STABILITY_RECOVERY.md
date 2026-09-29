@@ -1,6 +1,6 @@
 # DID2 network recovery: baseline and fault matrix
 
-Observed: 2026-09-29. This is an operational investigation/runbook, not release
+Observed: 2026-09-30. This is an operational investigation/runbook, not release
 approval. Unfinished work has one owner:
 [NEXT-SPRINT.md](../../docs/NEXT-SPRINT.md). Protocol/time/history requirements
 belong to [the architecture specification](../../docs/architecture/ACCOUNT-DIRECTORY-TRANSPARENCY-V1.md),
@@ -8,6 +8,18 @@ belong to [the architecture specification](../../docs/architecture/ACCOUNT-DIREC
 and [DR-0013](../../docs/survival-program/decisions/DR-0013-readonly-directory-issuance-readiness.md).
 
 ## Current candidate increment (2026-09-29)
+
+2026-09-30 follow-up: the unpushed NTS commit `8c6eeb8` was reviewed and
+preserved. Real Desktop shutdown exposed the separate `unless-stopped`
+auto-start defect. `deep-dev` now resumes automatically on engine boot;
+scripted maintenance Stop remains persistent until Start/Up. One complete
+engine cycle passed with retained custody and 60 seconds of current capability
+readiness. A second cycle was blocked by Docker Desktop's own inaccessible
+`dockerInference` socket startup crash, before Linux/Registry/nodes could run.
+The [local runbook](DEEP_DEV.md#evidence-boundary) records that failed host
+case and the not-run expiry probe. It must not be counted as service recovery
+evidence. Registry transient-unready logging is separated from cryptographic
+errors; enabled node privacy readiness now fails closed in Development too.
 
 The observations below describe the predecessor, not the current candidate.
 [DEEP_DEV.md](DEEP_DEV.md) is the local runbook: only `deep-dev` remains, using

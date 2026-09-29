@@ -1,7 +1,10 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('Init','Build','Provision','ProvisionFloor','Up','Status','Stop','Start','Verify','FaultMatrix','HistoryFault')][string]$Action,
-    [string]$CustodyRoot = 'C:\Work\DeepSession\secrets\dev\deep-dev'
+    [Parameter(Mandatory)][ValidateSet('Init','Build','Provision','ProvisionFloor','Up','Status','Stop','Start','Verify','FaultMatrix','HistoryFault','EngineFault','ExpiryFault')][string]$Action,
+    [string]$CustodyRoot = 'C:\Work\DeepSession\secrets\dev\deep-dev',
+    [ValidateRange(1,20)][int]$Cycles = 2,
+    [ValidateRange(20,7200)][int]$OfflineSeconds = 20,
+    [ValidateRange(10,300)][int]$StableSeconds = 30
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -17,6 +20,31 @@ for ($pathCheck = $custodyPath; $pathCheck; $pathCheck = [IO.Path]::GetDirectory
 function Run-Native([string]$File, [string[]]$Arguments) {
     & $File @Arguments
     if ($LASTEXITCODE -ne 0) { throw "deep-dev command failed: $File (exit $LASTEXITCODE). No state reset was performed." }
+}
+function Invoke-DesktopOperation([ValidateSet('start','stop')][string]$Operation, [int]$TimeoutSeconds) {
+    # Docker Desktop CLI v0.2 can hang beyond its own --timeout when the backend
+    # crashes (for example, an inaccessible stale Windows inference socket).
+    # Enforce an independent host-process bound; never reset Docker to repair it.
+    $start = [Diagnostics.ProcessStartInfo]::new((Get-Command docker -CommandType Application).Source)
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    # Fixed validated arguments also work in Windows PowerShell 5.1.
+    $start.Arguments = "desktop $Operation --timeout $TimeoutSeconds"
+    $process = [Diagnostics.Process]::Start($start)
+    try {
+        if (-not $process.WaitForExit(($TimeoutSeconds + 10) * 1000)) {
+            # The CLI starts Desktop as a descendant. Never kill its whole
+            # process tree: only the CLI and its directly owned CLI plugin.
+            if ($env:OS -ceq 'Windows_NT') {
+                Get-CimInstance Win32_Process -Filter "ParentProcessId=$($process.Id)" |
+                    Where-Object { $_.Name -ceq 'docker-desktop.exe' } |
+                    ForEach-Object { Stop-Process -Id $_.ProcessId -ErrorAction SilentlyContinue }
+            }
+            if (-not $process.HasExited) { $process.Kill() }
+            throw 'Docker Desktop CLI exceeded its host deadline; inspect Desktop backend diagnostics. No state reset was attempted.'
+        }
+        if ($process.ExitCode -ne 0) { throw 'Docker Desktop operation failed; inspect host diagnostics. Retained volumes/custody were not reset.' }
+    } finally { $process.Dispose() }
 }
 $env:DEEP_DEV_ROOT = $custodyPath.Replace('\','/')
 $compose = @('compose','--project-name','deep-dev','--file',(Join-Path $devopsRoot 'docker-compose.deep-dev.yml'))
@@ -53,6 +81,87 @@ function Wait-CurrentCapabilities {
         Start-Sleep -Seconds 2
     }
     throw 'Current Registry proof and all three ONION capabilities did not recover. No custody reset was attempted.'
+}
+if ($Action -in @('EngineFault','ExpiryFault')) {
+    # Engine shutdown is global. Refuse a shared/remote engine or an already
+    # stopped dev service instead of silently changing another operator's state.
+    $context = & docker context show
+    if ($LASTEXITCODE -ne 0 -or $context -cne 'desktop-linux') { throw 'EngineFault requires the local Docker Desktop Linux engine.' }
+    $allRunning = @(& docker ps -q)
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect engine scope.' }
+    $devRunning = @(& docker ps -q --filter 'label=com.docker.compose.project=deep-dev')
+    if ($LASTEXITCODE -ne 0 -or $devRunning.Count -ne 6 -or $allRunning.Count -ne 6) { throw 'EngineFault requires exactly the six running deep-dev services and no unrelated running containers.' }
+    [void](Wait-CurrentCapabilities)
+    $retained = @{}
+    foreach ($id in $devRunning) {
+        $policy = & docker inspect --format '{{.HostConfig.RestartPolicy.Name}}' $id
+        if ($LASTEXITCODE -ne 0 -or $policy -cne 'always') { throw 'Apply Up first: full Desktop shutdown requires restart=always.' }
+        $retained[$id] = (& docker inspect --format '{{json .Mounts}}' $id) | ConvertFrom-Json | ForEach-Object { "$($_.Type)|$($_.Source)|$($_.Destination)|$($_.RW)" } | Sort-Object
+        if ($LASTEXITCODE -ne 0) { throw 'Cannot snapshot retained dev mounts.' }
+    }
+    # Digests stay in process memory and never enter the public evidence object.
+    $custody = @{}
+    foreach ($service in @('registry','node-1','node-2','node-3')) {
+        $custody[$service] = & docker @($compose + @('exec','-T',$service,'sh','-c','sha256sum /run/secrets/*'))
+        if ($LASTEXITCODE -ne 0 -or -not $custody[$service]) { throw 'Cannot snapshot retained online custody.' }
+    }
+    if ($Action -eq 'ExpiryFault') {
+        # Finish one protected delegated commit while the normal publisher is
+        # stopped. Its restart=always restores it only when the engine returns,
+        # after this real 180-second view's 200-second offline interval.
+        # No root custody, clock manipulation, floor reset or expired extension.
+        Run-Native docker ($compose + @('stop','--timeout','10','publisher'))
+        $published = $false
+        try {
+            Run-Native docker ($compose + @('run','--rm','--no-deps','publisher','Deep.Dev.dll','publish-short-view','/run/deep-public','/run/deep-operator','/usr/local/bin/deep-nts-observer'))
+            $published = $true
+        } finally { if (-not $published) { Run-Native docker ($compose + @('start','publisher')) } }
+        $Cycles = 1
+        $OfflineSeconds = 200
+    }
+    $cases = [Collections.Generic.List[object]]::new()
+    foreach ($cycle in 1..$Cycles) {
+        try {
+            Invoke-DesktopOperation 'stop' 60
+            $offline = [Diagnostics.Stopwatch]::StartNew()
+            while ($offline.Elapsed.TotalSeconds -lt $OfflineSeconds) {
+                Start-Sleep -Seconds ([Math]::Min(10,[Math]::Max(1,[Math]::Ceiling($OfflineSeconds - $offline.Elapsed.TotalSeconds))))
+            }
+        } finally {
+            # No compose start/up here: restart-policy recovery itself is under test.
+            Invoke-DesktopOperation 'start' 120
+        }
+        $recovery = [Diagnostics.Stopwatch]::StartNew()
+        $engineReady = $false
+        while ($recovery.Elapsed.TotalSeconds -lt 120) {
+            $engine = & docker info --format '{{.OSType}}' 2>$null
+            if ($LASTEXITCODE -eq 0 -and $engine -ceq 'linux') { $engineReady = $true; break }
+            Start-Sleep -Seconds 2
+        }
+        if (-not $engineReady) { throw 'Docker Engine did not return after Desktop start.' }
+        [void](Wait-CurrentCapabilities)
+        $seconds = [Math]::Ceiling($recovery.Elapsed.TotalSeconds)
+        $stable = [Diagnostics.Stopwatch]::StartNew()
+        while ($stable.Elapsed.TotalSeconds -lt $StableSeconds) {
+            if (-not (Test-CurrentCapabilities)) { throw 'A current proof/ONION capability was lost during the post-restart stability window.' }
+            Start-Sleep -Seconds 2
+        }
+        foreach ($id in $retained.Keys) {
+            $after = (& docker inspect --format '{{json .Mounts}}' $id) | ConvertFrom-Json | ForEach-Object { "$($_.Type)|$($_.Source)|$($_.Destination)|$($_.RW)" } | Sort-Object
+            if ($LASTEXITCODE -ne 0 -or ($after -join "`n") -cne ($retained[$id] -join "`n")) { throw 'Engine restart changed retained containers or custody/state mounts.' }
+        }
+        foreach ($service in $custody.Keys) {
+            $after = & docker @($compose + @('exec','-T',$service,'sh','-c','sha256sum /run/secrets/*'))
+            if ($LASTEXITCODE -ne 0 -or ($after -join "`n") -cne ($custody[$service] -join "`n")) { throw 'Online custody changed across engine restart.' }
+        }
+        $cases.Add([ordered]@{cycle=$cycle;offlineSeconds=$OfflineSeconds;recovered=$true;recoverySeconds=$seconds;stableSeconds=$StableSeconds})
+        # Emit each completed case before starting another, so a later host
+        # failure cannot hide earlier results or imply the whole matrix passed.
+        [ordered]@{schema='deep-dev-engine-case.v1';cycle=$cycle;offlineSeconds=$OfflineSeconds;recoverySeconds=$seconds;stableSeconds=$StableSeconds;retainedNodeRegistryCustody=$true;retainedMounts=$true} | ConvertTo-Json -Compress
+        Write-Host "deep-dev engine cycle $cycle passed; retained custody/state; current capabilities stable."
+    }
+    [ordered]@{schema='deep-dev-engine-fault.v1';cases=$cases.ToArray();automaticContainerStart=$true;unchangedCustody=$true;unchangedStateMounts=$true;expiredOperationalViewEvidence=($Action -eq 'ExpiryFault');soak72h=$false;deviceEvidence=$false;messageDeliveryEvidence=$false} | ConvertTo-Json -Depth 5
+    return
 }
 if ($Action -eq 'Verify') {
     $seconds = Wait-CurrentCapabilities
@@ -146,6 +255,18 @@ if ($Action -in @('Provision','ProvisionFloor')) {
 switch ($Action) {
     'Up' { Run-Native docker ($compose + @('up','-d','floor','publisher','registry','node-1','node-2','node-3')) }
     'Status' { Run-Native docker ($compose + @('ps','--all')) }
-    'Stop' { Run-Native docker ($compose + @('stop')) }
-    'Start' { Run-Native docker ($compose + @('start')) }
+    'Stop' {
+        # Explicit maintenance stop stays stopped across engine boots. This is
+        # distinct from Desktop shutdown of the normally auto-starting network.
+        $ids = @(& docker @($compose + @('ps','--all','--quiet')))
+        if ($LASTEXITCODE -ne 0 -or $ids.Count -ne 6) { throw 'Cannot resolve exactly six retained dev services.' }
+        Run-Native docker (@('update','--restart','unless-stopped') + $ids)
+        Run-Native docker ($compose + @('stop'))
+    }
+    'Start' {
+        $ids = @(& docker @($compose + @('ps','--all','--quiet')))
+        if ($LASTEXITCODE -ne 0 -or $ids.Count -ne 6) { throw 'Cannot resolve exactly six retained dev services; use Up for initial creation.' }
+        Run-Native docker (@('update','--restart','always') + $ids)
+        Run-Native docker ($compose + @('start'))
+    }
 }

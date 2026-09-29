@@ -43,8 +43,10 @@ internal static class DevPublisher
     }
 
     internal static async Task RunAsync(string publicRoot, string operatorRoot, string executable,
-        Func<string,AccountDirectoryDts1Source[],Task<ulong>> observe)
+        Func<string,AccountDirectoryDts1Source[],Task<ulong>> observe,
+        uint operationalLifetimeSeconds = 3_600, bool singlePublication = false)
     {
+        if (operationalLifetimeSeconds is < 180 or > 3_600) throw new ArgumentOutOfRangeException(nameof(operationalLifetimeSeconds));
         if (OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Run the dev publisher as its scoped Docker service.");
         publicRoot = Path.GetFullPath(publicRoot); operatorRoot = Path.GetFullPath(operatorRoot);
         if (publicRoot != "/run/deep-public" || operatorRoot != "/run/deep-operator") throw new ArgumentException("Wrong dev publisher scope.");
@@ -69,6 +71,9 @@ internal static class DevPublisher
         var witnesses = Enumerable.Range(1,3).Select(i => Signer.Load(Path.Combine(operatorRoot,$"witness-{i}.seed"))).ToArray();
         var nodes = Enumerable.Range(1,3).Select(i => Signer.Load(Path.Combine(operatorRoot,$"node-{i}.seed"),true)).ToArray();
         using var stopping = new CancellationTokenSource();
+        // The expiry fault lane has bounded acquisition and produces real
+        // shorter-lived signed successors; it never edits a verifier's clock.
+        if (singlePublication) stopping.CancelAfter(TimeSpan.FromMinutes(2));
         Console.CancelKeyPress += (_,e) => { e.Cancel = true; stopping.Cancel(); };
         try {
             // A protected pending commit is authoritative distribution state;
@@ -97,7 +102,7 @@ internal static class DevPublisher
                         closure.ExactHeadChain[^1],pma,closure.ExactPlacementTopologyChain[^1],
                         XPointNetworkOperationalSuccessorAuthor.ComputeXnh1CoreHash(closure.ExactHeadChain[^1].Span),
                         SHA256.HashData(closure.ExactPlacementTopologyChain[^1].Span),adhReference,
-                        observed-30,observed-30,observed+3_570),stopping.Token);
+                        observed-30,observed-30,checked(observed+operationalLifetimeSeconds-30)),stopping.Token);
                     var bundle = XPointNetworkClosureWireCodec.EncodeResponse(network,closure.ExactAuthorityChain,
                         closure.ExactTimePolicyChain,closure.ExactNetworkPolicyChain,[.. closure.ExactViewChain,next.ExactXnv1],
                         [.. closure.ExactHeadChain,next.ExactXnh1],next.ExactXnd1,[.. closure.ExactPlacementTopologyChain,next.ExactPmt2]);
@@ -108,6 +113,7 @@ internal static class DevPublisher
                     Publish(committed,file,publicRoot);
                     Atomic("/tmp/deep-publisher-ready","ready"u8.ToArray());
                     Console.WriteLine($"Development operational view renewed (generation {committed.Generation}); offline policy retained.");
+                    if (singlePublication) return;
                     await Task.Delay(TimeSpan.FromMinutes(15),stopping.Token);
                 }
                 catch (OperationCanceledException) when (stopping.IsCancellationRequested) { break; }
@@ -118,6 +124,7 @@ internal static class DevPublisher
                     if (cursor is not null) Publish(cursor,file,publicRoot);
                 }
             }
+            if (singlePublication) throw new TimeoutException("Short development view was not published within the acquisition bound.");
         } finally { foreach (var signer in nodes.Concat(witnesses)) signer.Dispose(); CryptographicOperations.ZeroMemory(integrity); }
     }
 
