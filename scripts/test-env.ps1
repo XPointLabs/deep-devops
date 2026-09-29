@@ -9,7 +9,9 @@
 
     [switch] $RequireRouterNoMock,
 
-    [switch] $RequirePushProviderCanary
+    [switch] $RequirePushProviderCanary,
+
+    [string] $RunArtifactDirectory = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -18,6 +20,30 @@ $DevopsDir = Resolve-Path (Join-Path $ScriptDir "..")
 $WorkspaceRoot = Resolve-Path (Join-Path $DevopsDir "..")
 $ComposeFile = Join-Path $DevopsDir "docker-compose.yml"
 $ArtifactDir = Join-Path $DevopsDir "artifacts"
+if (-not [string]::IsNullOrWhiteSpace($RunArtifactDirectory)) {
+    # A fresh per-run evidence set, not an exclusion from the secret scanner.
+    # Validate before secret allocation, Docker calls or directory creation.
+    if (-not [IO.Path]::IsPathFullyQualified($RunArtifactDirectory)) {
+        throw 'RunArtifactDirectory must be an absolute fresh path under artifacts.'
+    }
+    $runPath = [IO.Path]::GetFullPath($RunArtifactDirectory)
+    $artifactPrefix = [IO.Path]::GetFullPath($ArtifactDir).TrimEnd(
+        [IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+    $pathComparison = if ($IsWindows) { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
+    if (-not $runPath.StartsWith($artifactPrefix, $pathComparison) -or
+        (Test-Path -LiteralPath $runPath)) {
+        throw 'RunArtifactDirectory must be a new child of artifacts, never the shared root or an existing run.'
+    }
+    for ($cursor = [IO.Path]::GetDirectoryName($runPath); $cursor;
+        $cursor = [IO.Path]::GetDirectoryName($cursor)) {
+        if ((Test-Path -LiteralPath $cursor) -and
+            ((Get-Item -LiteralPath $cursor -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw 'RunArtifactDirectory must not traverse a link.'
+        }
+        if ([IO.Path]::GetDirectoryName($cursor) -ceq $cursor) { break }
+    }
+    $ArtifactDir = $runPath
+}
 
 $env:DEEP_ROOT = $WorkspaceRoot.Path
 $env:DEEP_DEVOPS_DIR = $DevopsDir.Path
@@ -25,6 +51,7 @@ $env:DEEP_TESTS_DIR = (Resolve-Path (Join-Path $WorkspaceRoot "deep-tests-e2e"))
 $env:DEEP_COMPOSE_FILE = $ComposeFile
 $env:E2E_SUITE = $Suite
 $env:DEEP_BACKEND_MODE = $BackendMode
+[Environment]::SetEnvironmentVariable('DEEP_TEST_ENV_ARTIFACT_ROOT', $ArtifactDir, 'Process')
 . (Join-Path $ScriptDir "ephemeral-compose-secrets.ps1")
 $generatedComposeSecretNames = @(Initialize-DeepEphemeralComposeSecrets -ScriptDirectory $ScriptDir)
 
@@ -37,6 +64,7 @@ if (-not $RequirePushProviderCanary -and ($env:DEEP_REQUIRE_PUSH_PROVIDER_CANARY
 }
 
 New-Item -ItemType Directory -Force $ArtifactDir | Out-Null
+Write-Output "Test environment evidence directory: $ArtifactDir"
 
 $SuiteCompletedSuccessfully = $false
 $managedExternalServices = @()

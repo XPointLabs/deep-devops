@@ -479,7 +479,7 @@ services:
     working_dir: /tests
     volumes:
       - ${DEEP_TESTS_DIR:-../deep-tests-e2e}:/tests:ro
-      - ${DEEP_DEVOPS_DIR:-.}/artifacts:/artifacts
+      - ${DEEP_TEST_ENV_ARTIFACT_ROOT:-${DEEP_DEVOPS_DIR:-.}/artifacts}:/artifacts
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:

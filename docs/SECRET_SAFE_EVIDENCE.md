@@ -96,6 +96,16 @@ Backups must be encrypted and managed by the same secret owner.
 
 ## Evidence allowlist
 
+For local `test-env.ps1` rehearsals, use `-RunArtifactDirectory` with a new
+absolute child under `artifacts/rehearsals/smoke/<run-id>`. The script rejects
+the shared root, existing runs, paths outside artifacts and linked parents
+before creating secrets or calling Docker. It binds the test output, runtime
+snapshot, collector and unchanged fail-closed secret scan to that run. This
+avoids mixing evidence with retained build/source/rollback artifacts; it does
+not approve those historical artifacts for upload or weaken their scan.
+CI callers that omit the option retain their existing artifact-root contract.
+Only the selected immutable manifest may be uploaded, never the parent tree.
+
 `scripts/collect-artifacts.ps1` may collect only:
 
 - `compose.topology.redacted.json`, containing service/name/state/health and
