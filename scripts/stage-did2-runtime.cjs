@@ -56,6 +56,29 @@ function registryOrigin(value) {
       uri.pathname !== '/' || !uri.hostname) reject();
   return uri.href;
 }
+function contactRuntime(diagnostic, registry) {
+  const names = ['ContactCoordination', 'DeepIdV2ContactResolver', 'DeepIdV2PreKeyClaim'];
+  const present = names.filter(name => Object.hasOwn(diagnostic, name));
+  if (!present.length) return {};
+  if (present.length !== names.length) reject();
+  const expected = {
+    ContactCoordination: { Enabled: true, BackendOrigin: registry },
+    DeepIdV2ContactResolver: { Enabled: true },
+    DeepIdV2PreKeyClaim: { Enabled: true }
+  };
+  for (const name of names) {
+    const supplied = diagnostic[name];
+    if (!supplied || typeof supplied !== 'object' || Array.isArray(supplied) ||
+        Object.keys(supplied).sort().join(',') !== Object.keys(expected[name]).sort().join(',') ||
+        Object.keys(expected[name]).some(field => supplied[field] !== expected[name][field])) reject();
+  }
+  if (diagnostic.ContactService?.RuntimeActivation !== false ||
+      diagnostic.ContactService?.MapReplicaEndpoint !== false ||
+      diagnostic.PrivacyRouting?.Enabled !== true) reject();
+  // Copy only this closed composition, not arbitrary diagnostic flags, state,
+  // legacy authority or mailbox grants. Runtime still verifies fresh authority.
+  return expected;
+}
 function stage(source, installation) {
   source = path.resolve(source); installation = path.resolve(installation);
   noLinks(source); noLinks(installation);
@@ -116,6 +139,7 @@ function stage(source, installation) {
         new Set(paths.flat()).size !== placementFiles.size ||
         paths.flat().some(file=>!file.startsWith('/run/did2-network/') || !placementFiles.has(file.slice(18)))) reject();
     const diagnostic = JSON.parse(read(path.join(source,'appsettings.UAT.json')).toString('utf8'));
+    Object.assign(config, contactRuntime(diagnostic, config.DeepIdV2DirectoryProof.RegistryOrigin));
     const origin = publicOrigin(diagnostic.PrivacyRouting.PublicPeerBaseUrl);
     if (origin.hostname !== env.get('DEEP_NODE_PUBLIC_IP') || env.get('DEEP_NODE_PUBLIC_PORT') !== '443' ||
         diagnostic.Node.RouterId !== env.get('DEEP_NODE_ED25519_PUBLIC_KEY')) reject();

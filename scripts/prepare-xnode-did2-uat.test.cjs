@@ -107,6 +107,55 @@ test('prepares independent UAT custody without rewriting identities or claiming 
   assert.throws(() => prepare(input));
 }));
 
+test('explicit contact runtime composes only current DID2 services under the existing Registry origin', () => fixture(input => {
+  input.contactRuntime = true;
+  const original = fs.readFileSync(path.join(input.assets, 'xnode.did2.json'));
+  prepare(input);
+  const config = JSON.parse(fs.readFileSync(path.join(input.output, 'appsettings.UAT.json')));
+  assert.deepEqual(config.ContactCoordination, { Enabled: true, BackendOrigin: 'https://registry.example/' });
+  assert.deepEqual(config.DeepIdV2ContactResolver, { Enabled: true });
+  assert.deepEqual(config.DeepIdV2PreKeyClaim, { Enabled: true });
+  assert.equal(config.ContactService.RuntimeActivation, false);
+  assert.equal(config.ContactService.MapReplicaEndpoint, false);
+  assert.equal(config.GroupControlService.RuntimeActivation, false);
+  assert.equal(Object.hasOwn(config, 'DeepIdV2MailboxGrantAuthority'), false);
+  assert.deepEqual(fs.readFileSync(path.join(input.output, 'public', 'xnode.did2.json')), original);
+  assert.deepEqual(fs.readdirSync(path.join(input.output, 'state')), []);
+}));
+
+test('contact runtime rejects nonboolean mode and a substituted backend before creating output', () => {
+  fixture(input => {
+    input.contactRuntime = 'true';
+    assert.throws(() => prepare(input));
+    assert.equal(fs.existsSync(input.output), false);
+  });
+  for (const origin of ['http://registry.example/', 'https://user@registry.example/',
+    'https://registry.example/api', 'https://registry.example/?query=1']) fixture(input => {
+    input.contactRuntime = true;
+    const file = path.join(input.assets, 'xnode.did2.json');
+    const config = JSON.parse(fs.readFileSync(file)); config.DeepIdV2DirectoryProof.RegistryOrigin = origin;
+    const bytes = Buffer.from(JSON.stringify(config)); fs.writeFileSync(file, bytes);
+    const manifestFile = path.join(input.assets, 'public-assets.v2.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestFile)); manifest.configurationSha256 = sha(bytes);
+    fs.writeFileSync(manifestFile, JSON.stringify(manifest));
+    assert.throws(() => prepare(input));
+    assert.equal(fs.existsSync(input.output), false);
+  });
+});
+
+test('CLI accepts only one explicit trailing contact-runtime switch', () => fixture(input => {
+  const args = Object.entries(input).flatMap(([name, value]) => ['--' + name, value]);
+  const script = path.join(__dirname, 'prepare-xnode-did2-uat.cjs');
+  const result = spawnSync(process.execPath, [script, ...args, '--contact-runtime'], { encoding: 'utf8' });
+  assert.equal(result.status, 0);
+  const config = JSON.parse(fs.readFileSync(path.join(input.output, 'appsettings.UAT.json')));
+  assert.equal(config.DeepIdV2ContactResolver.Enabled, true);
+  const duplicate = spawnSync(process.execPath, [script, ...args, '--contact-runtime', '--contact-runtime'], { encoding: 'utf8' });
+  assert.equal(duplicate.status, 1);
+  const misplaced = spawnSync(process.execPath, [script, '--contact-runtime', ...args], { encoding: 'utf8' });
+  assert.equal(misplaced.status, 1);
+}));
+
 test('rejects changed public records, observer, config and traversal before any output', () => {
   for (const file of ['xnd1.0000.bin', 'pma2.0000.bin', 'observer.did2', 'xnode.did2.json']) fixture(input => {
     const selected = path.join(input.assets, file);

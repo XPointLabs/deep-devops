@@ -63,7 +63,8 @@ function environment(file) {
 }
 
 function prepare(input) {
-  if (!names.includes(input.node) || !path.isAbsolute(input.output)) fail();
+  if (!names.includes(input.node) || !path.isAbsolute(input.output) ||
+      (input.contactRuntime !== undefined && typeof input.contactRuntime !== 'boolean')) fail();
   const output = path.resolve(input.output);
   noLinks(output);
   if (fs.existsSync(output) || !fs.statSync(path.dirname(output)).isDirectory()) fail();
@@ -102,6 +103,11 @@ function prepare(input) {
   if (Object.keys(config).sort().join(',') !== 'DeepIdV2DirectoryProof,DeepIdV2NetworkPlacement,DeepIdV2ReplicaStage' ||
       config.DeepIdV2DirectoryProof.Enabled !== true || config.DeepIdV2NetworkPlacement.Enabled !== true ||
       config.DeepIdV2ReplicaStage.Enabled !== true) fail();
+  if (input.contactRuntime) {
+    const origin = new URL(config.DeepIdV2DirectoryProof.RegistryOrigin);
+    if (origin.protocol !== 'https:' || origin.href !== config.DeepIdV2DirectoryProof.RegistryOrigin ||
+        origin.pathname !== '/' || origin.username || origin.password || origin.search || origin.hash) fail();
+  }
   const publicPaths = [config.DeepIdV2DirectoryProof.ExactAuthorityPaths,
     config.DeepIdV2DirectoryProof.ExactTimePolicyPaths,
     config.DeepIdV2NetworkPlacement.ExactPolicyPaths, config.DeepIdV2NetworkPlacement.ExactViewPaths,
@@ -175,6 +181,14 @@ function prepare(input) {
         Peers: candidates.filter(value => value !== selected).map(value => ({ RouterId: value.id,
           BaseUrl: value.origin, CurrentSpkiSha256: value.current, NextSpkiSha256: value.next })) }
     });
+    if (input.contactRuntime) Object.assign(config, {
+      // Private coordination derives its only backend from the existing
+      // configured Registry origin. This does not provision issuer custody,
+      // journals, node access or mailbox grants on Registry.
+      ContactCoordination: { Enabled: true, BackendOrigin: config.DeepIdV2DirectoryProof.RegistryOrigin },
+      DeepIdV2ContactResolver: { Enabled: true },
+      DeepIdV2PreKeyClaim: { Enabled: true }
+    });
     const staging = output + '.staging-' + crypto.randomUUID();
     fs.mkdirSync(staging, { mode: 0o700 });
     try {
@@ -194,7 +208,11 @@ if (require.main === module) {
   try {
     const allowed = new Set(['assets', 'seed1', 'seed2', 'seed3', 'rollover', 'node', 'output']);
     const input = {};
-    const argv = process.argv.slice(2);
+    let argv = process.argv.slice(2);
+    if (argv.at(-1) === '--contact-runtime') {
+      input.contactRuntime = true;
+      argv = argv.slice(0, -1);
+    }
     if (argv.length !== allowed.size * 2) fail();
     for (let index = 0; index < argv.length; index += 2) {
       const name = argv[index].slice(2);

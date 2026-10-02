@@ -7,7 +7,8 @@ const crypto = require('node:crypto');
 const {prepare} = require('./prepare-xnode-did2-uat.cjs');
 const {fixture} = require('./prepare-xnode-did2-uat.test.cjs');
 const {stage} = require('./stage-did2-runtime.cjs');
-function scenario(run) { fixture(input=> {
+function scenario(run, contactRuntime = false) { fixture(input=> {
+  input.contactRuntime = contactRuntime;
   prepare(input);
   const envFile=path.join(input.seed1,'.env.node.prod');
   fs.appendFileSync(envFile,'DEEP_XPOINT_NETWORK_ID_HEX='+ '11'.repeat(16)+'\n'+
@@ -16,6 +17,67 @@ function scenario(run) { fixture(input=> {
   fs.writeFileSync(path.join(input.seed1,'secrets','key_bls'),'untouched-synthetic-BLS');
   run(input,envFile);
 }); }
+
+test('explicit DID2 contact profile survives immutable installer staging and exact rerun',()=>scenario((input,envFile)=> {
+  const originalEnv=fs.readFileSync(envFile);
+  const originalEd=fs.readFileSync(path.join(input.seed1,'secrets','key_ed25519'));
+  const originalBls=fs.readFileSync(path.join(input.seed1,'secrets','key_bls'));
+  const result=stage(input.output,input.seed1);
+  const root=path.dirname(path.join(input.seed1,result.updates.DEEP_DID2_CONFIG_FILE));
+  const config=JSON.parse(fs.readFileSync(path.join(root,'appsettings.Production.json')));
+  assert.deepEqual(config.ContactCoordination,{Enabled:true,BackendOrigin:'https://registry.example/'});
+  assert.deepEqual(config.DeepIdV2ContactResolver,{Enabled:true});
+  assert.deepEqual(config.DeepIdV2PreKeyClaim,{Enabled:true});
+  assert.deepEqual(Object.keys(config).sort(),['ContactCoordination','DeepIdV2ContactResolver',
+    'DeepIdV2DirectoryProof','DeepIdV2NetworkPlacement','DeepIdV2PreKeyClaim','DeepIdV2ReplicaStage']);
+  assert.deepEqual(fs.readFileSync(envFile),originalEnv);
+  assert.deepEqual(fs.readFileSync(path.join(input.seed1,'secrets','key_ed25519')),originalEd);
+  assert.deepEqual(fs.readFileSync(path.join(input.seed1,'secrets','key_bls')),originalBls);
+  fs.appendFileSync(envFile,Object.entries(result.updates).map(([k,v])=>k+'='+v).join('\n')+'\n');
+  assert.deepEqual(stage(input.output,input.seed1),result);
+  assert.equal(fs.readdirSync(path.join(input.seed1,'config','did2-runtime')).length,1);
+},true));
+
+test('rejects partial, disabled, substituted or extended contact profiles before staging',()=> {
+  const mutations=[
+    config=>{delete config.DeepIdV2PreKeyClaim;},
+    config=>{config.DeepIdV2ContactResolver.Enabled=false;},
+    config=>{config.ContactCoordination.BackendOrigin='https://other.example/';},
+    config=>{config.ContactCoordination.SkipAuthentication=true;},
+    config=>{config.DeepIdV2ContactResolver.MailboxGrantEnabled=true;},
+    config=>{config.DeepIdV2ContactResolver=[];},
+    config=>{config.ContactService.RuntimeActivation=true;},
+    config=>{config.PrivacyRouting.Enabled=false;}
+  ];
+  for(const mutate of mutations) scenario((input,envFile)=> {
+    const originalEnv=fs.readFileSync(envFile);
+    const file=path.join(input.output,'appsettings.UAT.json');
+    const config=JSON.parse(fs.readFileSync(file)); mutate(config);
+    fs.writeFileSync(file,JSON.stringify(config));
+    assert.throws(()=>stage(input.output,input.seed1));
+    assert.deepEqual(fs.readFileSync(envFile),originalEnv);
+    assert.equal(fs.existsSync(path.join(input.seed1,'config','did2-runtime')),false);
+  },true);
+});
+
+test('contact activation selects a new immutable bundle without changing the retained prekey-only bundle',()=>scenario((input,envFile)=> {
+  const previous=stage(input.output,input.seed1);
+  const previousRoot=path.dirname(path.join(input.seed1,previous.updates.DEEP_DID2_CONFIG_FILE));
+  const previousConfig=fs.readFileSync(path.join(previousRoot,'appsettings.Production.json'));
+  fs.appendFileSync(envFile,Object.entries(previous.updates).map(([k,v])=>k+'='+v).join('\n')+'\n');
+  const originalEnv=fs.readFileSync(envFile);
+  const file=path.join(input.output,'appsettings.UAT.json');
+  const diagnostic=JSON.parse(fs.readFileSync(file));
+  diagnostic.ContactCoordination={Enabled:true,BackendOrigin:'https://registry.example/'};
+  diagnostic.DeepIdV2ContactResolver={Enabled:true};
+  diagnostic.DeepIdV2PreKeyClaim={Enabled:true};
+  fs.writeFileSync(file,JSON.stringify(diagnostic));
+  const current=stage(input.output,input.seed1);
+  assert.notEqual(current.updates.DEEP_DID2_CONFIG_FILE,previous.updates.DEEP_DID2_CONFIG_FILE);
+  assert.deepEqual(fs.readFileSync(path.join(previousRoot,'appsettings.Production.json')),previousConfig);
+  assert.deepEqual(fs.readFileSync(envFile),originalEnv);
+  assert.equal(fs.readdirSync(path.join(input.seed1,'config','did2-runtime')).length,2);
+}));
 test('stages closed production inputs, reuses exact rerun and never imports diagnostic state',()=>scenario((input,envFile)=> {
   fs.writeFileSync(path.join(input.output,'state','must-not-import.state'),'synthetic-old-state');
   const originalEd=fs.readFileSync(path.join(input.seed1,'secrets','key_ed25519'));

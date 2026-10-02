@@ -120,6 +120,22 @@ XNode independently verifies signed authority/history, fresh directory proof,
 local onion public key and protected floors; a structural fixture is not that
 verification.
 
+For the current DID2 contact candidate, append `--contact-runtime` to the
+preparation command. It composes coordination, permanent publication/resolve
+and prekey claim together; the backend origin is derived from the existing
+Registry origin, not a second caller-selected endpoint. Installer staging
+retains only that closed three-section profile. Partial/disabled sections,
+extra fields, mailbox-grant activation or a different backend reject before
+bundle selection. The default preparation stays prekey-publication-only.
+This option does not provision Registry route/publication issuers, their
+durable PostgreSQL journals or the DR48 registered-node access list; those
+must be independently ready before activation. Retired ContactService runtime
+activation remains disabled. No contact/message/device readiness follows
+from staging these inputs; see the normative
+[DR48](../../docs/survival-program/decisions/DR-0048-private-contact-coordination-peer-authentication.md),
+[DR49](../../docs/survival-program/decisions/DR-0049-did2-three-hop-coordination-carrier.md)
+and [DR50](../../docs/survival-program/decisions/DR-0050-did2-contact-service-composition.md).
+
 `DEEP_DID2_CONFIG_FILE` and `DEEP_DID2_PUBLIC_DIR` are required read-only
 mounts. The staged candidate explicitly selects the `UAT` software profile;
 the compose defaults to `Production`, where candidate activation still rejects.
