@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { prepareTimeUpgrade: prepare, parseObservation } = require('./upgrade-did2-registry-time.cjs');
+const { prepareTimeUpgrade: prepare, prepareDid2TimeUpgrade, parseObservation } = require('./upgrade-did2-registry-time.cjs');
 const expected = { sourceImage: 'sha256:' + '1'.repeat(64) };
 function source() {
   return { Image: expected.sourceImage, State: { Running: true },
@@ -31,6 +31,30 @@ test('retained explicit floor is reused, never selected afresh on automatic comp
     'ContactResolveProductionAuthority__NtsLowerFloorPath=/state/retained.state');
   assert.ok(prepare(old, expected).entries.includes('ContactResolveProductionAuthority__NtsLowerFloorPath=/state/retained.state'));
   old.Config.Env.pop(); assert.throws(() => prepare(old, expected));
+});
+
+test('explicit DID2 source mode removes only disabled retired sections and preserves custody verbatim', () => {
+  const old = source();
+  old.Config.Env.push('AccountDirectoryAuthority__Enabled=false',
+    'AccountDirectoryAuthority__StatePath=/private/retired-state',
+    'ContactResolveDirectoryArtifacts__Enabled=false',
+    'TargetedCurrentValueDirectoryPackages__Enabled=false');
+  const before = structuredClone(old);
+  const prepared = prepareDid2TimeUpgrade(old, expected);
+  assert.deepEqual(old, before);
+  assert.deepEqual(prepared.mounts, prepare(old, expected).mounts);
+  assert.deepEqual(prepared.entries, prepare(source(), expected).entries);
+  assert.ok(prepare(old, expected).entries.includes('AccountDirectoryAuthority__Enabled=false'));
+});
+
+test('active or ambiguous retired directory sections reject before changing inputs or disclosing values', () => {
+  for (const entry of ['AccountDirectoryAuthority__Enabled=true',
+    'ContactResolveDirectoryArtifacts__StatePath=/private/synthetic-secret',
+    'TargetedCurrentValueDirectoryPackages__Enabled=FALSE']) {
+    const old = source(); old.Config.Env.push(entry); const before = structuredClone(old);
+    assert.throws(() => prepareDid2TimeUpgrade(old, expected), error => !error.message.includes('synthetic-secret'));
+    assert.deepEqual(old, before);
+  }
 });
 test('source CAS, stopped source, disabled scope and foreign network reject without mutation', () => {
   for (const mutate of [s => s.Image = 'sha256:' + '3'.repeat(64), s => s.State.Running = false,

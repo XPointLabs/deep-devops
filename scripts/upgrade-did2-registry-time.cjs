@@ -63,6 +63,24 @@ function prepareTimeUpgrade(source, expected) {
     network: source.HostConfig.NetworkMode };
 }
 
+// Explicit source-cutover operator mode only. Remove disabled retired sections,
+// never translate their keys or touch their retained files. Active/ambiguous
+// legacy composition is not silently converted into a DID2 runtime.
+function prepareDid2TimeUpgrade(source, expected) {
+  const prepared = prepareTimeUpgrade(source, expected);
+  const retired = ['accountdirectoryauthority__', 'contactresolvedirectoryartifacts__',
+    'targetedcurrentvaluedirectorypackages__'];
+  for (const prefix of retired) {
+    const entries = prepared.entries.filter(entry => entry.toLowerCase().startsWith(prefix));
+    if (entries.length && !entries.some(entry =>
+      entry.slice(0, entry.indexOf('=')).toLowerCase() === prefix + 'enabled' &&
+      entry.slice(entry.indexOf('=') + 1) === 'false'))
+      throw new Error('Retired directory authority is not explicitly disabled.');
+  }
+  return { ...prepared, entries: prepared.entries.filter(entry =>
+    !retired.some(prefix => entry.toLowerCase().startsWith(prefix))) };
+}
+
 function docker(args, timeout = 15000) {
   const result = spawnSync('docker', args, { encoding: 'utf8', timeout, maxBuffer: 4 * 1024 * 1024 });
   if (result.error || result.status !== 0) throw new Error('Scoped Registry time Docker operation rejected.');
@@ -101,12 +119,13 @@ function parseObservation(output) {
 function main(args) {
   const names = ['--mode', '--container', '--source-image', '--image', '--revision', '--manual-sha256'];
   if (args.length !== 12 || names.some((name, i) => args[i * 2] !== name) ||
-      !['provision', 'observe', 'renew'].includes(args[1]) || !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(args[3]) ||
+      !['provision', 'observe', 'renew', 'observe-did2', 'renew-did2'].includes(args[1]) || !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(args[3]) ||
       !digest(args[5]) || !digest(args[7]) || !/^[0-9a-f]{40}$/.test(args[9]) || !/^[0-9a-f]{64}$/.test(args[11]))
     throw new Error('Exact Registry time operator arguments required.');
   const source = JSON.parse(docker(['inspect', '--type', 'container', args[3]]));
   if (source.length !== 1) throw new Error('Registry source cardinality rejected.');
-  const prepared = prepareTimeUpgrade(source[0], { sourceImage: args[5] });
+  const did2Cutover = args[1] === 'observe-did2' || args[1] === 'renew-did2';
+  const prepared = (did2Cutover ? prepareDid2TimeUpgrade : prepareTimeUpgrade)(source[0], { sourceImage: args[5] });
   const image = JSON.parse(docker(['image', 'inspect', args[7]]));
   if (image.length !== 1 || image[0].Id !== args[7] || image[0].Architecture !== 'amd64' || image[0].Os !== 'linux' ||
       !image[0].Config || !image[0].Config.Labels || image[0].Config.Labels['org.opencontainers.image.revision'] !== args[9])
@@ -123,7 +142,7 @@ function main(args) {
         throw new Error('Registry time provisioning report rejected.');
       process.stdout.write(JSON.stringify({ schema: 'deep.registry.time-upgrade.v1',
         floorProvisioned: true, currentTimeEvidence: false, activeContainerChanged: false }) + '\n');
-    } else if (args[1] === 'observe') {
+    } else if (args[1] === 'observe' || args[1] === 'observe-did2') {
       const report = parseObservation(output);
       process.stdout.write(JSON.stringify(report) + '\n');
     } else {
@@ -160,4 +179,4 @@ if (require.main === module) {
     process.exitCode = 1;
   }
 }
-module.exports = { prepareTimeUpgrade, parseObservation };
+module.exports = { prepareTimeUpgrade, prepareDid2TimeUpgrade, parseObservation };

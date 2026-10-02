@@ -30,6 +30,15 @@ time settings, all bind mounts and their read/write flags. Provisioning has no
 network; observation has the retained Docker network but no published ports.
 Neither command grants application readiness or reusable freshness evidence.
 
+For the DR-0069 DID2-only source image, use `--mode observe-did2` or
+`--mode renew-did2`. These explicit modes omit only the three retired directory
+configuration sections, and only when each present section is explicitly
+disabled. Active or ambiguous old authority configuration rejects. No legacy
+value is translated, no retained file is deleted, and every current DID2
+credential, independent floor, ledger, mount and network setting is preserved.
+The ordinary modes remain unchanged for the preceding diagnostic image.
+This prepares a disposable operator only; it still does not promote Registry.
+
 The floor uses the existing explicit path, or a new separate sibling of ADA2
 named `nts-lower-floor.state` for a manual-only composition. Scope, duplicate
 keys, mount aliases, source-image CAS and candidate revision are checked before
