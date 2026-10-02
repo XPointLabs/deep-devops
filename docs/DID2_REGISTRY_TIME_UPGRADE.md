@@ -135,3 +135,15 @@ after replacement, then reloads nginx. An ambiguous snippet or changed input
 rejects. Certbot, TLS policy and unrelated virtual hosts are not rewritten.
 Verify with `node --test scripts/add-did2-registry-history-route.test.cjs`;
 actual HTTPS/history recovery and device delivery remain separate gates.
+
+After independent provisioning of the permanent DID2 route/publication journals
+and the DR48 existing-node access list, use
+`scripts/add-did2-registry-contact-routes.cjs` with the same `preflight`/`apply`
+argument set. Its source is exactly the five-route snippet after history was
+added. It adds only the two V2 coordination paths, preserving the listener,
+security include and other virtual hosts; already-updated, partial or foreign
+snippets reject. Run both route test files together. An unauthenticated empty
+401 proves access gating only, not witness issuance or device contact delivery.
+Runtime dependencies and database provisioning belong to the
+[Registry runbook](../../deep-registry-api/docs/DID2_DIRECTORY_CANDIDATE.md#private-did2-contact-coordination-deployment),
+not a second DevOps protocol specification.

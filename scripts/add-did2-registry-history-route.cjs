@@ -25,7 +25,7 @@ function nginx(args) {
   const result = spawnSync('nginx', args, { encoding: 'utf8', timeout: 15000, maxBuffer: 65536 });
   if (result.error || result.status !== 0) throw new Error('Scoped nginx operation rejected.');
 }
-function main(args) {
+function main(args, transform = addHistory, schema = 'deep.registry.history-route.v1') {
   const keys=['--mode','--sha256','--loopback-port','--backup'];
   if(args.length!==8 || keys.some((k,i)=>args[i*2]!==k) || !['preflight','apply'].includes(args[1]) ||
       !/^[0-9a-f]{64}$/.test(args[3]) || !/^[1-9][0-9]{3,4}$/.test(args[5]) ||
@@ -33,7 +33,7 @@ function main(args) {
     throw new Error('Exact route arguments required.');
   const info=regular(target); const original=fs.readFileSync(target);
   if(hash(original)!==args[3]) throw new Error('Route source CAS rejected.');
-  const updated=Buffer.from(addHistory(original.toString('utf8'),Number(args[5])));
+  const updated=Buffer.from(transform(original.toString('utf8'),Number(args[5])));
   nginx(['-t']);
   let applied=false;
   if(args[1]==='apply') {
@@ -56,8 +56,8 @@ function main(args) {
       nginx(['-s','reload']); applied=true;
     } finally { if(fs.existsSync(temporary)) fs.unlinkSync(temporary); }
   }
-  console.log(JSON.stringify({schema:'deep.registry.history-route.v1',applied,
+  console.log(JSON.stringify({schema,applied,
     snippetSha256:hash(applied?updated:original),otherConfigurationChanged:false,deviceDeliveryVerified:false}));
 }
 if(require.main===module) { try{main(process.argv.slice(2));}catch{console.error('DID2 history route failed closed; retained private backup and authority floors were not reset.');process.exitCode=1;} }
-module.exports={addHistory};
+module.exports={addHistory,main};
