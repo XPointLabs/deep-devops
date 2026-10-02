@@ -50,3 +50,34 @@ manual hash, never repaired by deleting its fence or re-provisioning ADA2.
 
 Verify script changes with `node --test scripts/upgrade-did2-registry-time.test.cjs`.
 Synthetic script tests do not prove NTS, production activation or physical E2E.
+
+## Existing-state readiness canary
+
+`scripts/start-did2-registry-canary.cjs` supports `preflight` and `start`:
+
+```text
+node scripts/start-did2-registry-canary.cjs --mode preflight --container <exact-running-container> --source-image sha256:<source-id> --image sha256:<candidate-id> --revision <40-hex-commit> --canary deep-did2-registry-canary-<unique-suffix>
+```
+
+After preflight succeeds, repeat with `start`. This diagnostic retains the
+same custody, independent PostgreSQL floor, mounts and Docker network. It
+enables NTS but explicitly disables head renewal; NTS may advance its protected
+time floor. It rejects an already active renewal worker and host networking.
+It does not publish ports, attach ingress aliases, stop the source container,
+provision state or disable catalog writes to hide incomplete DID2 inputs.
+Only disabled retired configuration is omitted. A failed or colliding canary
+is never removed automatically. The private mode-0600 environment is removed;
+the diagnostic container and mounted state remain for scoped inspection.
+
+Verify with `node --test scripts/start-did2-registry-canary.test.cjs`.
+This canary is not deployment, current proof evidence or device E2E. Before
+enabling any head-renewal worker separately, retain a fresh ADA2 backup and
+independently observed floor, as required above.
+
+When the retained source view has expired, append `--view-file <absolute-public-XNV1>`
+and `--view-sha256 <independent-file-digest>` for a distinctly named diagnostic
+canary. The file must come from the validated native operational-successor
+export. Only that canary's current-view input changes through one read-only
+mount; Registry still verifies its signed authority and issuance interval.
+This is not network-bundle publication or node/TLS-key activation. Do not
+route clients to a proof-only canary while nodes retain an older closure.
