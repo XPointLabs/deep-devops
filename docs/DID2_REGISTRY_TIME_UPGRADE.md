@@ -123,3 +123,15 @@ internal health is not device evidence. If activation fails after either stop,
 inspect the retained containers and bounded private diagnostics before recovery.
 Never restore an earlier ADA2 file over an advanced independent floor. Verify
 the promotion helper with `node --test scripts/promote-did2-registry-canary.test.cjs`.
+
+The public DID2 route set must include `/api/v2/account-directory/history`
+alongside admissions, proofs and network closure. A client or node recovering a
+protected earlier head needs this endpoint; successful readiness cannot prove
+that proxy route exists. `scripts/add-did2-registry-history-route.cjs` supports
+`preflight`/`apply` for the exact retained four-route snippet, its independent
+SHA-256, retained loopback port and an exclusive private backup file. It adds
+only history with the same upstream/security include, tests nginx before and
+after replacement, then reloads nginx. An ambiguous snippet or changed input
+rejects. Certbot, TLS policy and unrelated virtual hosts are not rewritten.
+Verify with `node --test scripts/add-did2-registry-history-route.test.cjs`;
+actual HTTPS/history recovery and device delivery remain separate gates.
