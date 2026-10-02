@@ -34,6 +34,11 @@ read [NETWORK_STABILITY_RECOVERY.md](docs/NETWORK_STABILITY_RECOVERY.md).
 Component host/DI and installer tests do not close the live network or 72-hour
 soak gate; the retired survival graph is not DID2 release evidence.
 
+For an already initialized manual-time DID2 Registry, use the scoped
+[automatic-time upgrade runbook](docs/DID2_REGISTRY_TIME_UPGRADE.md).
+Its disposable operator commands preserve existing custody; they do not
+promote Registry or establish physical contact/message delivery.
+
 Current DID2 preparation and installer staging require all eight public record
 roles exported by Protocol, including PMA2. PMA2 is copied byte-identically but
 is not substituted into placement paths or treated as freshness/grant authority.
