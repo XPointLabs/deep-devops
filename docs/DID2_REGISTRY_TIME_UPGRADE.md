@@ -81,3 +81,9 @@ export. Only that canary's current-view input changes through one read-only
 mount; Registry still verifies its signed authority and issuance interval.
 This is not network-bundle publication or node/TLS-key activation. Do not
 route clients to a proof-only canary while nodes retain an older closure.
+
+For the companion node rollout, regenerate the current canonical node compose
+and use the installer runtime stager. Retired `ContactAuthority` and
+`GroupControlAuthority` sections must be absent, not set to false: the DID2-only
+node rejects both. The diagnostic preparation helper also omits these sections;
+it does not import state or grant application readiness by preparing files.

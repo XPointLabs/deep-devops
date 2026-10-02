@@ -183,9 +183,7 @@ services:
       ContactService__ReplicaTimeoutSeconds: ${DEEP_CONTACT_REPLICA_TIMEOUT_SECONDS:-5}
       ContactService__ReplayCapacity: ${DEEP_CONTACT_REPLAY_CAPACITY:-100000}
       ContactService__ReplayTtlSeconds: ${DEEP_CONTACT_REPLAY_TTL_SECONDS:-300}
-      ContactAuthority__Enabled: "false"
       GroupControlService__RuntimeActivation: "false"
-      GroupControlAuthority__Enabled: "false"
       RequiredTerminals__Contact: "false"
       RequiredTerminals__GroupControl: "false"
       StorageRpc__BaseUrl: http://172.31.241.20:8080

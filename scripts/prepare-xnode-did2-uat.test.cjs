@@ -94,7 +94,9 @@ test('prepares independent UAT custody without rewriting identities or claiming 
   assert.deepEqual(fs.readFileSync(path.join(input.seed1, 'secrets', 'key_ed25519')), source);
   const config = JSON.parse(fs.readFileSync(path.join(input.output, 'appsettings.UAT.json')));
   assert.equal(config.Vless.Enabled, false); assert.equal(config.Vless.MockProcess, false);
-  assert.equal(config.ContactAuthority.Enabled, false); assert.equal(config.PrivacyRouting.Peers.length, 2);
+  assert.equal(Object.hasOwn(config, 'ContactAuthority'), false);
+  assert.equal(Object.hasOwn(config, 'GroupControlAuthority'), false);
+  assert.equal(config.PrivacyRouting.Peers.length, 2);
   assert.equal(config.PrivacyRouting.AllowInsecureHttpPeerTransport, false);
   assert.equal(config.Node.ManagedIngressH2ListenUrl, '');
   assert.equal(config.Node.PrivacyPeerH2ListenUrl, '');
