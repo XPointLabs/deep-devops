@@ -1,8 +1,9 @@
 'use strict';
-const fs = require('node:fs');
-const path = require('node:path');
-const net = require('node:net');
-const { spawnSync } = require('node:child_process');
+const fs = require('fs');
+const path = require('path');
+const net = require('net');
+const http = require('http');
+const { spawnSync } = require('child_process');
 const { prepareCanary, verifyImage, createArguments, sameSource, withCurrentView, withRenewalAndBundle } = require('./start-did2-registry-canary.cjs');
 const { writePrivateEnvironment } = require('./prepare-did2-forward-probe-env.cjs');
 let phase = 'preflight';
@@ -11,13 +12,13 @@ function preparePromotion(source, worker, prepared, expected, port) {
   if (!Number.isInteger(port) || port < 1024 || port > 65535 ||
       JSON.stringify(source.HostConfig.PortBindings) !== JSON.stringify({
         '8080/tcp': [{ HostIp: '127.0.0.1', HostPort: String(port) }] }) ||
-      source.HostConfig.RestartPolicy?.Name !== 'unless-stopped' ||
+      !source.HostConfig.RestartPolicy || source.HostConfig.RestartPolicy.Name !== 'unless-stopped' ||
       source.HostConfig.RestartPolicy.MaximumRetryCount !== 0 ||
-      !worker.State?.Running || worker.Image !== expected.image ||
-      worker.HostConfig?.NetworkMode !== prepared.network ||
+      !worker.State || !worker.State.Running || worker.Image !== expected.image ||
+      !worker.HostConfig || worker.HostConfig.NetworkMode !== prepared.network ||
       worker.HostConfig.Privileged || !worker.HostConfig.ReadonlyRootfs ||
       Object.keys(worker.HostConfig.PortBindings || {}).length ||
-      !Array.isArray(worker.Config?.Env) || !Array.isArray(worker.Mounts))
+      !worker.Config || !Array.isArray(worker.Config.Env) || !Array.isArray(worker.Mounts))
     throw new Error('Promotion scope rejected.');
   const mounts = worker.Mounts.map(mount => {
     if (mount.Type !== 'bind' || typeof mount.RW !== 'boolean')
@@ -53,23 +54,35 @@ async function requireReady(worker) {
     throw new Error('Promotion diagnostic address rejected.');
   // Existing canary HTTP health only, not TLS, proof freshness or device evidence.
   for (const endpoint of ['/health/ready', '/health/did2/ready']) {
-    const response = await fetch(`http://${networks[0].IPAddress}:8080${endpoint}`,
-      { redirect: 'error', signal: AbortSignal.timeout(10000) });
-    const reader = response.body?.getReader();
-    if (!reader || response.status !== 200) throw new Error('Promotion health rejected.');
-    const parts = []; let length = 0;
-    try {
-      while (true) {
-        const item = await reader.read();
-        if (item.done) break;
-        length += item.value.length;
-        if (length > 4096) throw new Error('Promotion health bound rejected.');
-        parts.push(Buffer.from(item.value));
-      }
-    } finally { await reader.cancel(); }
-    if (JSON.parse(Buffer.concat(parts).toString('utf8')).ok !== true)
+    const body = await readHealth(networks[0].IPAddress, endpoint);
+    if (JSON.parse(body).ok !== true)
       throw new Error('Promotion canary is not ready.');
   }
+}
+
+function readHealth(address, endpoint) {
+  // Native bounded GET: no redirects, cookies, proxy environment, wall-clock
+  // authority or dependency on a newer global fetch runtime on the operator host.
+  return new Promise((resolve, reject) => {
+    const request = http.get({ hostname: address, port: 8080, path: endpoint, agent: false }, response => {
+      const parts = []; let length = 0;
+      if (response.statusCode !== 200) {
+        response.destroy(); request.destroy(new Error('Promotion health rejected.')); return;
+      }
+      response.on('error', reject);
+      response.on('data', bytes => {
+        length += bytes.length;
+        if (length > 4096) {
+          response.destroy(); request.destroy(new Error('Promotion health bound rejected.')); return;
+        }
+        parts.push(bytes);
+      });
+      response.on('end', () => resolve(Buffer.concat(parts).toString('utf8')));
+    });
+    const deadline = setTimeout(() => request.destroy(new Error('Promotion health deadline exceeded.')), 10000);
+    request.on('error', reject);
+    request.on('close', () => clearTimeout(deadline));
+  });
 }
 
 async function main(args) {
