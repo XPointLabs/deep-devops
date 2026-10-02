@@ -106,3 +106,20 @@ No public ports, ingress aliases, source stop or production promotion occur.
 Verify actual proof readiness and byte-identical distribution, then perform a
 separately scoped matched Registry/node promotion. Enabling the worker is not
 proof of a completed renewal/recovery cycle or physical delivery.
+
+`scripts/promote-did2-registry-canary.cjs` is the separately authorized promotion
+step. Use `preflight` then `promote`, supplying the exact source image/revision,
+worker, unique `deep-did2-registry-canary-promoted-<suffix>` replacement, retained
+loopback port and the same independently hashed view/bundle/ADA2 inputs. It
+requires an exact worker environment/mount match and both actual health checks.
+It creates the replacement before stopping either process, stops the diagnostic
+worker to retain a single renewal owner, and reuses only the existing loopback
+listener with the original restart policy. The public reverse proxy, other
+services, keys, account content and protected floors are not rewritten.
+
+Coordinate this transition with the already staged three-node runtime. Validate
+the public HTTPS closure bytes and current proof readiness after activation;
+internal health is not device evidence. If activation fails after either stop,
+inspect the retained containers and bounded private diagnostics before recovery.
+Never restore an earlier ADA2 file over an advanced independent floor. Verify
+the promotion helper with `node --test scripts/promote-did2-registry-canary.test.cjs`.
