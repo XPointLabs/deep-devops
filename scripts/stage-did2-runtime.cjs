@@ -71,10 +71,11 @@ function stage(source, installation) {
     const manifest = JSON.parse(read(path.join(source,'public','public-assets.v2.json')).toString('utf8'));
     if (manifest.schema !== 'deep-xnode-did2-public-assets.v2' || manifest.authorityOwner !== 'Mr. X' ||
         manifest.currentTimeEvidence !== false || manifest.deploymentEvidence !== false ||
-        !Array.isArray(manifest.artifacts) || manifest.artifacts.length < 7 || manifest.artifacts.length > 4096) reject();
+        !Array.isArray(manifest.artifacts) || manifest.artifacts.length < 8 || manifest.artifacts.length > 4096) reject();
     let total = 0;
+    const roles = ['xna1','dts1','xvp1','xnv1','xnh1','xnd1','pmt2','pma2'];
     for (const item of manifest.artifacts) {
-      if (!['xna1','dts1','xvp1','xnv1','xnh1','xnd1','pmt2'].includes(item.Role) ||
+      if (!roles.includes(item.Role) ||
           !Number.isSafeInteger(item.Ordinal) || item.Ordinal < 0 || item.Ordinal > 4095 ||
           item.FileName !== item.Role+'.'+String(item.Ordinal).padStart(4,'0')+'.bin' || publicFiles.has(item.FileName)) reject();
       const bytes = read(path.join(source,'public',item.FileName),65535);
@@ -82,6 +83,11 @@ function stage(source, installation) {
       total += bytes.length;
       if (total > 32*1024*1024) reject();
       publicFiles.set(item.FileName,bytes);
+    }
+    for (const role of roles) {
+      const ordinals = manifest.artifacts.filter(item=>item.Role===role)
+        .map(item=>item.Ordinal).sort((a,b)=>a-b);
+      if (!ordinals.length || ordinals.some((ordinal,index)=>ordinal!==index)) reject();
     }
     for (const [name,pin] of [['genesis.adh1',manifest.genesisHeadSha256],
       ['observer.did2',manifest.observerDid2Sha256],['xnode.did2.json',manifest.configurationSha256]]) {
@@ -104,9 +110,11 @@ function stage(source, installation) {
       config.DeepIdV2NetworkPlacement.ExactPolicyPaths,config.DeepIdV2NetworkPlacement.ExactViewPaths,
       config.DeepIdV2NetworkPlacement.ExactHeadPaths,config.DeepIdV2NetworkPlacement.ExactActiveNodePaths,
       config.DeepIdV2NetworkPlacement.ExactMailboxProjectionPaths];
-    if (paths.some(group=>!Array.isArray(group)||!group.length) || paths.flat().length !== manifest.artifacts.length ||
-        new Set(paths.flat()).size !== manifest.artifacts.length ||
-        paths.flat().some(file=>!file.startsWith('/run/did2-network/') || !publicFiles.has(file.slice(18)))) reject();
+    // Retain PMA2 public records without promoting them to placement paths.
+    const placementFiles = new Set(manifest.artifacts.filter(item=>item.Role!=='pma2').map(item=>item.FileName));
+    if (paths.some(group=>!Array.isArray(group)||!group.length) || paths.flat().length !== placementFiles.size ||
+        new Set(paths.flat()).size !== placementFiles.size ||
+        paths.flat().some(file=>!file.startsWith('/run/did2-network/') || !placementFiles.has(file.slice(18)))) reject();
     const diagnostic = JSON.parse(read(path.join(source,'appsettings.UAT.json')).toString('utf8'));
     const origin = publicOrigin(diagnostic.PrivacyRouting.PublicPeerBaseUrl);
     if (origin.hostname !== env.get('DEEP_NODE_PUBLIC_IP') || env.get('DEEP_NODE_PUBLIC_PORT') !== '443' ||

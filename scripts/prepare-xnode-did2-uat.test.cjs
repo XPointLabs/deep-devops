@@ -17,7 +17,7 @@ function fixture(run) {
     const rollover = path.join(root, 'rollover');
     fs.mkdirSync(assets); fs.mkdirSync(rollover);
     const artifacts = [];
-    for (const role of ['xna1', 'dts1', 'xvp1', 'xnv1', 'xnh1', 'xnd1', 'pmt2']) {
+    for (const role of ['xna1', 'dts1', 'xvp1', 'xnv1', 'xnh1', 'xnd1', 'pmt2', 'pma2']) {
       const bytes = Buffer.from(role + '-synthetic-structural-input');
       const file = role + '.0000.bin';
       fs.writeFileSync(path.join(assets, file), bytes);
@@ -88,7 +88,9 @@ if (require.main === module) {
 test('prepares independent UAT custody without rewriting identities or claiming a carrier', () => fixture(input => {
   const source = fs.readFileSync(path.join(input.seed1, 'secrets', 'key_ed25519'));
   const summary = prepare(input);
-  assert.deepEqual(summary, { publicRecords: 7, peers: 2, carrierEnabled: false, deploymentEvidence: false });
+  assert.deepEqual(summary, { publicRecords: 8, peers: 2, carrierEnabled: false, deploymentEvidence: false });
+  assert.deepEqual(fs.readFileSync(path.join(input.output, 'public', 'pma2.0000.bin')),
+    fs.readFileSync(path.join(input.assets, 'pma2.0000.bin')));
   assert.deepEqual(fs.readFileSync(path.join(input.seed1, 'secrets', 'key_ed25519')), source);
   const config = JSON.parse(fs.readFileSync(path.join(input.output, 'appsettings.UAT.json')));
   assert.equal(config.Vless.Enabled, false); assert.equal(config.Vless.MockProcess, false);
@@ -104,7 +106,7 @@ test('prepares independent UAT custody without rewriting identities or claiming 
 }));
 
 test('rejects changed public records, observer, config and traversal before any output', () => {
-  for (const file of ['xnd1.0000.bin', 'observer.did2', 'xnode.did2.json']) fixture(input => {
+  for (const file of ['xnd1.0000.bin', 'pma2.0000.bin', 'observer.did2', 'xnode.did2.json']) fixture(input => {
     const selected = path.join(input.assets, file);
     const bytes = fs.readFileSync(selected); bytes[bytes.length - 1] ^= 1; fs.writeFileSync(selected, bytes);
     assert.throws(() => prepare(input)); assert.equal(fs.existsSync(input.output), false);
@@ -129,6 +131,30 @@ test('rejects substituted identity, duplicate peer and hostile private seed leng
   for (const bytes of [Buffer.alloc(32), Buffer.alloc(33, 1)]) fixture(input => {
     fs.writeFileSync(path.join(input.rollover, 'seed1', 'current.x25519.seed'), bytes);
     assert.throws(() => prepare(input)); assert.equal(fs.existsSync(input.output), false);
+  });
+});
+
+test('rejects missing or noncontiguous PMA2 and never substitutes it for placement', () => {
+  for (const mode of ['missing', 'gap', 'duplicate', 'placement']) fixture(input => {
+    const file = path.join(input.assets, 'public-assets.v2.json');
+    const manifest = JSON.parse(fs.readFileSync(file));
+    const pma = manifest.artifacts.find(entry => entry.Role === 'pma2');
+    if (mode === 'missing') manifest.artifacts = manifest.artifacts.filter(entry => entry !== pma);
+    if (mode === 'gap') {
+      fs.copyFileSync(path.join(input.assets, pma.FileName), path.join(input.assets, 'pma2.0001.bin'));
+      pma.Ordinal = 1; pma.FileName = 'pma2.0001.bin';
+    }
+    if (mode === 'duplicate') manifest.artifacts.push({ ...pma });
+    if (mode === 'placement') {
+      const configFile = path.join(input.assets, 'xnode.did2.json');
+      const config = JSON.parse(fs.readFileSync(configFile));
+      config.DeepIdV2NetworkPlacement.ExactMailboxProjectionPaths = [mount + pma.FileName];
+      const bytes = Buffer.from(JSON.stringify(config));
+      fs.writeFileSync(configFile, bytes); manifest.configurationSha256 = sha(bytes);
+    }
+    fs.writeFileSync(file, JSON.stringify(manifest));
+    assert.throws(() => prepare(input));
+    assert.equal(fs.existsSync(input.output), false);
   });
 });
 }

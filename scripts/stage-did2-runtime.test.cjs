@@ -21,7 +21,7 @@ test('stages closed production inputs, reuses exact rerun and never imports diag
   const originalEd=fs.readFileSync(path.join(input.seed1,'secrets','key_ed25519'));
   const originalEnv=fs.readFileSync(envFile);
   const result=stage(input.output,input.seed1);
-  assert.equal(result.records,7);
+  assert.equal(result.records,8);
   assert.equal(result.updates.DEEP_DID2_ORIGIN,'https://8.8.8.1/');
   assert.equal(result.updates.DEEP_NODE_RUNTIME_ENVIRONMENT,'UAT');
   assert.equal(Object.keys(result.updates).length,22);
@@ -31,6 +31,8 @@ test('stages closed production inputs, reuses exact rerun and never imports diag
   assert.equal(fs.readFileSync(path.join(input.seed1,'secrets','key_bls'),'utf8'),'untouched-synthetic-BLS');
   assert.deepEqual(fs.readFileSync(path.join(input.seed1,'secrets','key_ed25519')),originalEd);
   const config=JSON.parse(fs.readFileSync(path.join(root,'appsettings.Production.json')));
+  assert.deepEqual(fs.readFileSync(path.join(root,'public','pma2.0000.bin')),
+    fs.readFileSync(path.join(input.assets,'pma2.0000.bin')));
   assert.deepEqual(Object.keys(config).sort(),['DeepIdV2DirectoryProof','DeepIdV2NetworkPlacement','DeepIdV2ReplicaStage']);
   fs.appendFileSync(envFile,Object.entries(result.updates).map(([k,v])=>k+'='+v).join('\n')+'\n');
   assert.deepEqual(stage(input.output,input.seed1),result);
@@ -73,7 +75,7 @@ test('growing successor history stages a new immutable bundle without demanding 
   Object.assign(diagnostic,config);
   fs.writeFileSync(path.join(input.output,'appsettings.UAT.json'),JSON.stringify(diagnostic));
   const next=stage(input.output,input.seed1);
-  assert.equal(next.records,11);
+  assert.equal(next.records,12);
   assert.notEqual(next.updates.DEEP_DID2_CONFIG_FILE,prior.updates.DEEP_DID2_CONFIG_FILE);
   assert.deepEqual(fs.readFileSync(path.join(priorRoot,'appsettings.Production.json')),priorConfig);
   assert.deepEqual(fs.readFileSync(envFile),originalEnv,'staging must not select or replace the old installation');
@@ -114,10 +116,36 @@ test('standalone installer asset is byte-identical to canonical DevOps stager',(
   assert.deepEqual(fs.readFileSync(path.join(__dirname,'../.env.node.prod.example')),
     fs.readFileSync(path.join(__dirname,'../../xpoint-node-installer/assets/.env.node.prod.example')));
 });
+test('staging rejects absent or noncontiguous PMA2 before selecting any installation',()=>{
+  for(const mode of ['missing','gap','duplicate','placement']) scenario((input,envFile)=>{
+    const originalEnv=fs.readFileSync(envFile);
+    const publicRoot=path.join(input.output,'public');
+    const file=path.join(publicRoot,'public-assets.v2.json');
+    const manifest=JSON.parse(fs.readFileSync(file));
+    const pma=manifest.artifacts.find(item=>item.Role==='pma2');
+    if(mode==='missing') manifest.artifacts=manifest.artifacts.filter(item=>item!==pma);
+    if(mode==='gap') {
+      fs.copyFileSync(path.join(publicRoot,pma.FileName),path.join(publicRoot,'pma2.0001.bin'));
+      pma.Ordinal=1; pma.FileName='pma2.0001.bin';
+    }
+    if(mode==='duplicate') manifest.artifacts.push({...pma});
+    if(mode==='placement') {
+      const configFile=path.join(publicRoot,'xnode.did2.json');
+      const config=JSON.parse(fs.readFileSync(configFile));
+      config.DeepIdV2NetworkPlacement.ExactMailboxProjectionPaths=['/run/did2-network/'+pma.FileName];
+      const bytes=Buffer.from(JSON.stringify(config)); fs.writeFileSync(configFile,bytes);
+      manifest.configurationSha256=crypto.createHash('sha256').update(bytes).digest('hex').toUpperCase();
+    }
+    fs.writeFileSync(file,JSON.stringify(manifest));
+    assert.throws(()=>stage(input.output,input.seed1));
+    assert.deepEqual(fs.readFileSync(envFile),originalEnv);
+    assert.equal(fs.existsSync(path.join(input.seed1,'config','did2-runtime')),false);
+  });
+});
 test('normalizes one optional Registry origin slash and rejects paths or insecure origins',()=>{
   scenario((input,envFile)=>{
     fs.writeFileSync(envFile,fs.readFileSync(envFile,'utf8').replace('https://registry.example\n','https://registry.example/\n'));
-    assert.equal(stage(input.output,input.seed1).records,7);
+    assert.equal(stage(input.output,input.seed1).records,8);
   });
   for(const origin of ['http://registry.example','https://registry.example/api','https://user@registry.example','https://registry.example/?query=1'])
     scenario((input,envFile)=>{

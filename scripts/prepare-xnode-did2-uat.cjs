@@ -70,16 +70,22 @@ function prepare(input) {
   const manifest = JSON.parse(read(path.join(input.assets, 'public-assets.v2.json')).toString('utf8'));
   if (manifest.schema !== 'deep-xnode-did2-public-assets.v2' || manifest.authorityOwner !== 'Mr. X' ||
       manifest.currentTimeEvidence !== false || manifest.deploymentEvidence !== false ||
-      !Array.isArray(manifest.artifacts) || manifest.artifacts.length < 7 || manifest.artifacts.length > 4096) fail();
+      !Array.isArray(manifest.artifacts) || manifest.artifacts.length < 8 || manifest.artifacts.length > 4096) fail();
   const publicFiles = new Map();
+  const roles = ['xna1', 'dts1', 'xvp1', 'xnv1', 'xnh1', 'xnd1', 'pmt2', 'pma2'];
   for (const entry of manifest.artifacts) {
-    if (!['xna1', 'dts1', 'xvp1', 'xnv1', 'xnh1', 'xnd1', 'pmt2'].includes(entry.Role) ||
+    if (!roles.includes(entry.Role) ||
         !Number.isSafeInteger(entry.Ordinal) || entry.Ordinal < 0 || entry.Ordinal > 4095 ||
         entry.FileName !== entry.Role + '.' + String(entry.Ordinal).padStart(4, '0') + '.bin' ||
         publicFiles.has(entry.FileName)) fail();
     const bytes = read(path.join(input.assets, entry.FileName));
     if (bytes.length !== entry.Length || hash(bytes) !== entry.Sha256Hex) fail();
     publicFiles.set(entry.FileName, bytes);
+  }
+  for (const role of roles) {
+    const ordinals = manifest.artifacts.filter(entry => entry.Role === role)
+      .map(entry => entry.Ordinal).sort((a, b) => a - b);
+    if (!ordinals.length || ordinals.some((ordinal, index) => ordinal !== index)) fail();
   }
   const head = read(path.join(input.assets, 'genesis.adh1'));
   if (hash(head) !== manifest.genesisHeadSha256) fail();
@@ -101,11 +107,14 @@ function prepare(input) {
     config.DeepIdV2NetworkPlacement.ExactPolicyPaths, config.DeepIdV2NetworkPlacement.ExactViewPaths,
     config.DeepIdV2NetworkPlacement.ExactHeadPaths, config.DeepIdV2NetworkPlacement.ExactActiveNodePaths,
     config.DeepIdV2NetworkPlacement.ExactMailboxProjectionPaths];
+  // PMA2 is retained public distribution, not a placement/receive authority
+  // path. The Protocol exporter deliberately omits it from this host config.
+  const placementFiles = new Set(manifest.artifacts.filter(entry => entry.Role !== 'pma2').map(entry => entry.FileName));
   if (publicPaths.some(group => !Array.isArray(group) || group.length < 1) ||
-      publicPaths.flat().length !== manifest.artifacts.length ||
-      new Set(publicPaths.flat()).size !== manifest.artifacts.length ||
+      publicPaths.flat().length !== placementFiles.size ||
+      new Set(publicPaths.flat()).size !== placementFiles.size ||
       publicPaths.flat().some(value => !value.startsWith('/run/did2-network/') ||
-        !publicFiles.has(value.slice('/run/did2-network/'.length))) ||
+        !placementFiles.has(value.slice('/run/did2-network/'.length))) ||
       config.DeepIdV2DirectoryProof.GenesisHeadPath !== '/run/did2-network/genesis.adh1' ||
       config.DeepIdV2NetworkPlacement.PublicObservationDid2Path !== '/run/did2-network/observer.did2') fail();
   const candidates = names.map(name => {

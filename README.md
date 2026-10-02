@@ -34,6 +34,12 @@ read [NETWORK_STABILITY_RECOVERY.md](docs/NETWORK_STABILITY_RECOVERY.md).
 Component host/DI and installer tests do not close the live network or 72-hour
 soak gate; the retired survival graph is not DID2 release evidence.
 
+Current DID2 preparation and installer staging require all eight public record
+roles exported by Protocol, including PMA2. PMA2 is copied byte-identically but
+is not substituted into placement paths or treated as freshness/grant authority.
+Run `node --test scripts/prepare-xnode-did2-uat.test.cjs scripts/stage-did2-runtime.test.cjs`
+for this isolated custody/installation slice; it does not prove live transport.
+
 For the clean first-release lane (Registry plus exactly three XNodes, direct
 development without HAProxy and an optional TLS profile), use
 `docs/FIRST_RELEASE_LOCAL_STACK.md`. It has its own Docker project, ports,
