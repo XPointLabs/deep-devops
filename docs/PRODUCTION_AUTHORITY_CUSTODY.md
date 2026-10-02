@@ -117,7 +117,8 @@ public path containment, refuse output replacement and open no signer keys.
 These operational export modes require the unchanged single genesis XNA1/DTS1
 pair; a root/time-policy rotation requires a separately supported complete
 authority-history export and is rejected here, never truncated to genesis.
-The output contains only the Protocol-owned seven public chains, not historical
+The output contains only the Protocol-owned eight public chains, including
+the exact root-signed mailbox issuer policy, not historical
 account proof/time snapshots from the source directory. This is distribution,
 not live verification, floor advancement or permission to deploy. Clients still
 require their own nonce-fresh DID2 proof and complete network verification.
@@ -149,7 +150,7 @@ public DID2 in hexadecimal. Its commitment must match; only the public DID2
 is exported, never the descriptor/read capability, account/device keys or phrase.
 No signer keys are opened. Inputs are bounded and reject ancestor links.
 
-The complete seven NCP2 chains, separately pinned reader-V2 genesis head,
+The complete eight NCP2 chains, separately pinned reader-V2 genesis head,
 public observer and `xnode.did2.json` fragment are installed as one new directory.
 An existing output is never replaced. Mount this directory read-only at
 `/run/did2-network`; configure only a closed UAT host, disable its V1 contact

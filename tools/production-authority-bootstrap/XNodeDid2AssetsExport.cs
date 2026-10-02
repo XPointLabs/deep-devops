@@ -69,6 +69,7 @@ internal static class XNodeDid2AssetsExport
             var heads = Export("xnh1", bundle.ExactHeadChain);
             var nodes = Export("xnd1", bundle.ExactActiveNodeDescriptors);
             var projections = Export("pmt2", bundle.ExactPlacementTopologyChain);
+            _ = Export("pma2", bundle.ExactMailboxAuthorityChain);
             WriteNew(Path.Combine(staging, "genesis.adh1"), head);
             WriteNew(Path.Combine(staging, "observer.did2"), observer);
             var configuration = new

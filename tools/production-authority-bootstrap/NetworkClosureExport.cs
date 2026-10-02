@@ -27,7 +27,7 @@ internal static class NetworkClosureExport
                 Single(source.One("xna1")), Single(source.One("dts1")),
                 Single(source.One("xvp1")), Single(source.One("xnv1")),
                 Single(source.One("xnh1")), Memories(source.Many("xnd1")),
-                Single(source.One("pmt2")));
+                Single(source.One("pmt2")), Single(source.One("pma2")));
         }
         else
         {
@@ -95,7 +95,8 @@ internal static class NetworkClosureExport
             previousAuthority, previousTime,
             Append(prior.ExactNetworkPolicyChain, source.One("xvp1")), Memories(views),
             Append(prior.ExactHeadChain, source.One("xnh1")), Memories(source.Many("xnd1")),
-            Append(prior.ExactPlacementTopologyChain, source.One("pmt2")));
+            Append(prior.ExactPlacementTopologyChain, source.One("pmt2")),
+            Append(prior.ExactMailboxAuthorityChain, source.One("pma2")));
     }
 
     private static IReadOnlyList<ReadOnlyMemory<byte>> Append(

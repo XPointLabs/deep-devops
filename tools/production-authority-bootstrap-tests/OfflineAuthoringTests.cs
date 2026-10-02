@@ -205,6 +205,8 @@ internal static class OfflineAuthoringTests
         if (decoded.ExactViewChain.Count != 2 || decoded.ExactHeadChain.Count != 2 ||
             decoded.ExactNetworkPolicyChain.Count != 2 || decoded.ExactPlacementTopologyChain.Count != 2 ||
             decoded.ExactActiveNodeDescriptors.Count != 3 ||
+            decoded.ExactMailboxAuthorityChain.Count != 1 ||
+            !decoded.ExactMailboxAuthorityChain[0].Span.SequenceEqual(genesis.ExactPma2.Span) ||
             !decoded.ExactHeadChain[0].Span.SequenceEqual(genesis.ExactXnh1.Span) ||
             !decoded.ExactHeadChain[1].Span.SequenceEqual(successor.ExactXnh1.Span) ||
             !decoded.ExactPlacementTopologyChain[0].Span.SequenceEqual(genesis.ExactPmt2.Span) ||
@@ -258,6 +260,7 @@ internal static class OfflineAuthoringTests
                 ("xnv1", views), ("xnh1", [isSuccessor ? successor.ExactXnh1 : genesis.ExactXnh1]),
                 ("xnd1", isSuccessor ? successor.ExactXnd1 : genesis.ExactXnd1),
                 ("pmt2", [isSuccessor ? successor.ExactPmt2 : genesis.ExactPmt2]),
+                ("pma2", [genesis.ExactPma2]),
             };
             var entries = new List<ArtifactEntry>();
             foreach (var role in roles)
@@ -306,6 +309,9 @@ internal static class OfflineAuthoringTests
         if (!File.ReadAllBytes(Path.Combine(target, "observer.did2")).AsSpan()
                 .SequenceEqual(did2.CanonicalBytes.Span))
             throw new Exception("Observer credential changed during public export.");
+        if (!File.ReadAllBytes(Path.Combine(target, "pma2.0000.bin")).AsSpan().SequenceEqual(
+                XPointNetworkClosureWireCodec.DecodeResponse(File.ReadAllBytes(bundle)).ExactMailboxAuthorityChain[0].Span))
+            throw new Exception("Host assets lost exact public mailbox issuer authority.");
         using var config = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(target, "xnode.did2.json")));
         var placement = config.RootElement.GetProperty("DeepIdV2NetworkPlacement");
         if (placement.GetProperty("ExactViewPaths").GetArrayLength() != 2 ||
