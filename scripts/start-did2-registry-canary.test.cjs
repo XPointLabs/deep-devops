@@ -3,7 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs'); const os = require('node:os'); const path = require('node:path');
 const { createHash } = require('node:crypto');
-const { prepareCanary, verifyImage, createArguments, sameSource, withCurrentView } = require('./start-did2-registry-canary.cjs');
+const { prepareCanary, verifyImage, createArguments, sameSource, withCurrentView, withRenewalAndBundle } = require('./start-did2-registry-canary.cjs');
 const expected = { sourceImage: 'sha256:' + '1'.repeat(64), image: 'sha256:' + '3'.repeat(64), revision: '4'.repeat(40) };
 function source() {
   return { Image: expected.sourceImage, State: { Running: true }, HostConfig: { NetworkMode: 'retained_network' },
@@ -82,4 +82,40 @@ test('independently hashed public view overrides only the diagnostic view throug
     // Exactly this test's known file and empty temporary directory, no recursion.
     fs.unlinkSync(file); fs.rmdirSync(temporary);
   }
+});
+test('worker requires current backup digest, scoped enabled distribution and bounded renewal without public ports', () => {
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'deep-canary-worker-test-'));
+  const linuxPath = file => process.platform === 'win32' ? file.slice(2).replaceAll('\\', '/') : file;
+  const state = path.join(temporary, 'directory.ada2'); const bundle = path.join(temporary, 'current.ncp2');
+  const sha = bytes => createHash('sha256').update(bytes).digest('hex');
+  try {
+    const stateBytes = Buffer.alloc(64, 2); const bundleBytes = Buffer.alloc(64, 3); bundleBytes.write('NCP2');
+    fs.writeFileSync(state, stateBytes); fs.writeFileSync(bundle, bundleBytes);
+    const old = source(); old.Mounts[0].Source = linuxPath(temporary);
+    old.Config.Env.push('XPointNetworkClosureDistribution__Enabled=true',
+      'XPointNetworkClosureDistribution__NetworkIdHex=' + '2'.repeat(32),
+      'XPointNetworkClosureDistribution__BundlePath=/retained/old.ncp2');
+    const original = prepareCanary(old, expected);
+    const prepared = withRenewalAndBundle(original, old, linuxPath(bundle), sha(bundleBytes), sha(stateBytes));
+    assert.equal(prepared.headRenewalEnabled, true);
+    assert.ok(prepared.entries.includes('DeepIdV2DirectoryAuthority__HeadRenewalEnabled=true'));
+    assert.ok(prepared.entries.includes('XPointNetworkClosureDistribution__BundlePath=/run/did2-canary-closure/current.ncp2'));
+    assert.ok(!prepared.entries.includes('XPointNetworkClosureDistribution__BundlePath=/retained/old.ncp2'));
+    for (const entry of old.Config.Env.filter(entry => !entry.startsWith('XPointNetworkClosureDistribution__BundlePath=')))
+      assert.ok(prepared.entries.includes(entry));
+    const args = createArguments(prepared, expected.image, 'deep-did2-registry-canary-worker-test', '/var/tmp/private/worker.env');
+    assert.ok(!args.includes('--publish')); assert.ok(!args.includes('--network-alias'));
+    assert.throws(() => withRenewalAndBundle(original, old, linuxPath(bundle), sha(bundleBytes), 'f'.repeat(64)));
+    assert.throws(() => withRenewalAndBundle(original, old, linuxPath(bundle), 'f'.repeat(64), sha(stateBytes)));
+    for (const extra of ['DeepIdV2DirectoryAuthority__HeadRenewalIntervalSeconds=200',
+      'DeepIdV2DirectoryAuthority__HeadRenewalLeadSeconds=3600',
+      'DeepIdV2DirectoryAuthority__HeadValiditySeconds=not-an-integer']) {
+      const changed = structuredClone(old); changed.Config.Env.push(extra);
+      assert.throws(() => withRenewalAndBundle(prepareCanary(changed, expected), changed, linuxPath(bundle), sha(bundleBytes), sha(stateBytes)));
+    }
+    const changed = structuredClone(old);
+    changed.Config.Env = changed.Config.Env.map(entry => entry.replace('XPointNetworkClosureDistribution__Enabled=true',
+      'XPointNetworkClosureDistribution__Enabled=false'));
+    assert.throws(() => withRenewalAndBundle(prepareCanary(changed, expected), changed, linuxPath(bundle), sha(bundleBytes), sha(stateBytes)));
+  } finally { fs.unlinkSync(state); fs.unlinkSync(bundle); fs.rmdirSync(temporary); }
 });

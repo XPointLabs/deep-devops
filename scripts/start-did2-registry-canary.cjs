@@ -7,8 +7,9 @@ const { prepareDid2TimeUpgrade } = require('./upgrade-did2-registry-time.cjs');
 const { writePrivateEnvironment } = require('./prepare-did2-forward-probe-env.cjs');
 let phase = 'preflight';
 
-// Existing-state diagnostic only: no head renewal, ingress, aliases, ports,
-// key rotation or provisioning. NTS may advance its retained protected floor.
+// Existing-state diagnostic: no ingress, aliases, ports, key rotation or
+// provisioning. Readiness mode disables renewal; explicit worker mode requires
+// a fresh retained-state digest. NTS may advance its protected floor in both.
 function prepareCanary(source, expected) {
   const prepared = prepareDid2TimeUpgrade(source, expected);
   if (prepared.network === 'host' || prepared.network === 'none' ||
@@ -69,7 +70,7 @@ function sameSource(source, current, expected) {
     JSON.stringify([...retained.mounts].sort()) === JSON.stringify([...original.mounts].sort());
 }
 
-function withCurrentView(prepared, file, expectedHash) {
+function readHashedInput(file, expectedHash, maximum, magic) {
   if (!/^\/[A-Za-z0-9_./-]+$/.test(file || '') || path.posix.normalize(file) !== file ||
       !/^[0-9a-f]{64}$/.test(expectedHash || ''))
     throw new Error('Current view input scope rejected.');
@@ -79,7 +80,7 @@ function withCurrentView(prepared, file, expectedHash) {
   let exact;
   try {
     const info = fs.fstatSync(fd);
-    if (!info.isFile() || info.size < 32 || info.size > 65535)
+    if (!info.isFile() || info.size < 32 || info.size > maximum)
       throw new Error('Current view input bound rejected.');
     exact = Buffer.alloc(info.size);
     let offset = 0;
@@ -89,10 +90,15 @@ function withCurrentView(prepared, file, expectedHash) {
       offset += count;
     }
     if (fs.readSync(fd, Buffer.alloc(1), 0, 1, null) ||
-        exact.subarray(0, 4).toString('ascii') !== 'XNV1' ||
+        magic && exact.subarray(0, 4).toString('ascii') !== magic ||
         createHash('sha256').update(exact).digest('hex') !== expectedHash)
       throw new Error('Current view independent digest rejected.');
   } finally { fs.closeSync(fd); }
+  return exact;
+}
+
+function withCurrentView(prepared, file, expectedHash) {
+  readHashedInput(file, expectedHash, 65535, 'XNV1');
   const destination = '/run/did2-canary-view/current.xnv1';
   if (prepared.mounts.some(mount => mount.includes('dst=/run/did2-canary-view')) ||
       prepared.entries.some(entry => entry.slice(entry.indexOf('=') + 1).startsWith('/run/did2-canary-view')))
@@ -103,6 +109,47 @@ function withCurrentView(prepared, file, expectedHash) {
   // actual signed-view verifier independently decides proof readiness.
   return { ...prepared, entries: [...remaining, key + '=' + destination],
     mounts: [...prepared.mounts, 'type=bind,src=' + file + ',dst=' + destination + ',readonly'] };
+}
+
+function withRenewalAndBundle(prepared, source, bundleFile, bundleHash, retainedStateHash) {
+  const entries = new Map(prepared.entries.map(entry => {
+    const split = entry.indexOf('='); return [entry.slice(0, split).toLowerCase(), entry.slice(split + 1)];
+  }));
+  const value = key => entries.get(key.toLowerCase());
+  const prefix = 'DeepIdV2DirectoryAuthority__';
+  const integer = (key, fallback) => {
+    const input = value(prefix + key);
+    if (input !== undefined && !/^[0-9]{1,8}$/.test(input)) throw new Error('Renewal bound rejected.');
+    return input === undefined ? fallback : Number(input);
+  };
+  const validity = integer('HeadValiditySeconds', 3600);
+  const lead = integer('HeadRenewalLeadSeconds', 300);
+  const interval = integer('HeadRenewalIntervalSeconds', 60);
+  if (validity < 300 || validity > 86400 || lead < 60 || lead > 3600 || lead >= validity ||
+      interval < 10 || interval > 300 || interval * 2 >= lead ||
+      value('XPointNetworkClosureDistribution__Enabled') !== 'true' ||
+      value('XPointNetworkClosureDistribution__NetworkIdHex') !== value(prefix + 'NetworkIdHex'))
+    throw new Error('Current renewal/distribution scope rejected.');
+  const state = value(prefix + 'StatePath');
+  const parents = source.Mounts.filter(mount => state.startsWith(mount.Destination + '/'))
+    .sort((a, b) => b.Destination.length - a.Destination.length);
+  if (!parents.length || parents[0].Type !== 'bind' || !parents[0].RW)
+    throw new Error('Renewal retained-state scope rejected.');
+  const stateFile = path.posix.join(parents[0].Source, state.slice(parents[0].Destination.length));
+  // Require the exact newly retained backup snapshot before starting a worker.
+  // The native Registry separately verifies ADA2 and the independent floor.
+  const snapshot = readHashedInput(stateFile, retainedStateHash, 68 * 1024 * 1024);
+  snapshot.fill(0);
+  readHashedInput(bundleFile, bundleHash, 68 * 1024 * 1024, 'NCP2');
+  const destination = '/run/did2-canary-closure/current.ncp2';
+  if (prepared.mounts.some(mount => mount.includes('dst=/run/did2-canary-closure')) ||
+      prepared.entries.some(entry => entry.slice(entry.indexOf('=') + 1).startsWith('/run/did2-canary-closure')))
+    throw new Error('Current closure aliases retained inputs.');
+  const overrides = new Map([[ (prefix + 'HeadRenewalEnabled').toLowerCase(), prefix + 'HeadRenewalEnabled=true' ],
+    ['xpointnetworkclosuredistribution__bundlepath', 'XPointNetworkClosureDistribution__BundlePath=' + destination]]);
+  const remaining = prepared.entries.filter(entry => !overrides.has(entry.slice(0, entry.indexOf('=')).toLowerCase()));
+  return { ...prepared, entries: [...remaining, ...overrides.values()], headRenewalEnabled: true,
+    mounts: [...prepared.mounts, 'type=bind,src=' + bundleFile + ',dst=' + destination + ',readonly'] };
 }
 
 function docker(args) {
@@ -119,9 +166,11 @@ function docker(args) {
 
 function main(args) {
   const keys = ['--mode', '--container', '--source-image', '--image', '--revision', '--canary'];
-  if (![12, 16].includes(args.length) || keys.some((key, index) => args[index * 2] !== key) ||
-      args.length === 16 && (args[12] !== '--view-file' || args[14] !== '--view-sha256') ||
-      !['preflight', 'start'].includes(args[1]) ||
+  const worker = ['worker-preflight', 'worker-start'].includes(args[1]);
+  if (!(worker ? args.length === 22 : [12, 16].includes(args.length)) || keys.some((key, index) => args[index * 2] !== key) ||
+      args.length >= 16 && (args[12] !== '--view-file' || args[14] !== '--view-sha256') ||
+      worker && (args[16] !== '--bundle-file' || args[18] !== '--bundle-sha256' || args[20] !== '--retained-ada2-sha256') ||
+      !['preflight', 'start', 'worker-preflight', 'worker-start'].includes(args[1]) ||
       !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(args[3]) ||
       !/^deep-did2-registry-canary-[a-z0-9-]{1,48}$/.test(args[11]))
     throw new Error('Exact canary arguments required.');
@@ -129,10 +178,11 @@ function main(args) {
   const source = JSON.parse(docker(['inspect', '--type', 'container', args[3]]));
   if (!Array.isArray(source) || source.length !== 1) throw new Error('Canary source cardinality rejected.');
   let prepared = prepareCanary(source[0], expected);
-  if (args.length === 16) prepared = withCurrentView(prepared, args[13], args[15]);
+  if (args.length >= 16) prepared = withCurrentView(prepared, args[13], args[15]);
+  if (worker) prepared = withRenewalAndBundle(prepared, source[0], args[17], args[19], args[21]);
   verifyImage(JSON.parse(docker(['image', 'inspect', expected.image])), expected);
   let started = false;
-  if (args[1] === 'start') {
+  if (args[1] === 'start' || args[1] === 'worker-start') {
     process.umask(0o077);
     const temporary = fs.mkdtempSync('/var/tmp/deep-did2-canary-');
     const environment = path.join(temporary, 'canary.env');
@@ -145,6 +195,8 @@ function main(args) {
       const current = JSON.parse(docker(['inspect', '--type', 'container', args[3]]));
       if (!Array.isArray(current) || current.length !== 1 || !sameSource(source[0], current[0], expected))
         throw new Error('Canary source changed before create.');
+      if (worker) withRenewalAndBundle(withCurrentView(prepareCanary(current[0], expected), args[13], args[15]),
+        current[0], args[17], args[19], args[21]);
       phase = 'create';
       docker(createArguments(prepared, expected.image, args[11], environment));
       phase = 'start';
@@ -157,7 +209,7 @@ function main(args) {
   }
   process.stdout.write(JSON.stringify({ schema: 'deep.registry.readiness-canary.v1',
     started, publicPortsPublished: false, ingressChanged: false,
-    activeContainerChanged: false, headRenewalEnabled: false,
+    activeContainerChanged: false, headRenewalEnabled: prepared.headRenewalEnabled,
     catalogWritesEnabled: prepared.catalogWritesEnabled,
     currentTimeOrDeviceEvidence: false }) + '\n');
 }
@@ -166,4 +218,4 @@ if (require.main === module) {
   catch (error) { process.stderr.write('DID2 readiness canary failed closed (' + phase + '/' +
     (error.closedReason || 'scope-or-filesystem') + '); retained state was not reset.\n'); process.exitCode = 1; }
 }
-module.exports = { prepareCanary, verifyImage, createArguments, sameSource, withCurrentView };
+module.exports = { prepareCanary, verifyImage, createArguments, sameSource, withCurrentView, withRenewalAndBundle };

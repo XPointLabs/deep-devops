@@ -87,3 +87,22 @@ and use the installer runtime stager. Retired `ContactAuthority` and
 `GroupControlAuthority` sections must be absent, not set to false: the DID2-only
 node rejects both. The diagnostic preparation helper also omits these sections;
 it does not import state or grant application readiness by preparing files.
+
+## Existing-state worker canary
+
+After retaining the current ADA2 and independently observed PostgreSQL floor,
+select `worker-preflight` followed by `worker-start` with the same arguments as
+the current-view canary plus `--bundle-file <native-exported-public-NCP2>`,
+`--bundle-sha256 <independent-bundle-digest>` and
+`--retained-ada2-sha256 <fresh-protected-backup-digest>`. The state digest must
+still match immediately before create. The worker enables bounded native head
+renewal and retains the exact existing floor, keys and account content. It may
+advance the signed head and independent floor, never reset them.
+
+This mode also selects the current full public bundle through a read-only
+mount, without modifying the retained old bundle. It requires already enabled,
+network-scoped distribution and valid renewal lead/interval/window options.
+No public ports, ingress aliases, source stop or production promotion occur.
+Verify actual proof readiness and byte-identical distribution, then perform a
+separately scoped matched Registry/node promotion. Enabling the worker is not
+proof of a completed renewal/recovery cycle or physical delivery.
