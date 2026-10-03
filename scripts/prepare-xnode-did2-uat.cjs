@@ -112,10 +112,11 @@ function prepare(input) {
     config.DeepIdV2DirectoryProof.ExactTimePolicyPaths,
     config.DeepIdV2NetworkPlacement.ExactPolicyPaths, config.DeepIdV2NetworkPlacement.ExactViewPaths,
     config.DeepIdV2NetworkPlacement.ExactHeadPaths, config.DeepIdV2NetworkPlacement.ExactActiveNodePaths,
-    config.DeepIdV2NetworkPlacement.ExactMailboxProjectionPaths];
-  // PMA2 is retained public distribution, not a placement/receive authority
-  // path. The Protocol exporter deliberately omits it from this host config.
-  const placementFiles = new Set(manifest.artifacts.filter(entry => entry.Role !== 'pma2').map(entry => entry.FileName));
+    config.DeepIdV2NetworkPlacement.ExactMailboxProjectionPaths,
+    config.DeepIdV2NetworkPlacement.ExactMailboxAuthorityPaths];
+  // Keep the exact public issuer chain. Runtime independently verifies its
+  // current PMT2 reference, root signatures and authenticated interval.
+  const placementFiles = new Set(manifest.artifacts.map(entry => entry.FileName));
   if (publicPaths.some(group => !Array.isArray(group) || group.length < 1) ||
       publicPaths.flat().length !== placementFiles.size ||
       new Set(publicPaths.flat()).size !== placementFiles.size ||

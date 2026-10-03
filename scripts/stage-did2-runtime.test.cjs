@@ -195,7 +195,7 @@ test('standalone installer asset is byte-identical to canonical DevOps stager',(
     fs.readFileSync(path.join(__dirname,'../../xpoint-node-installer/assets/.env.node.prod.example')));
 });
 test('staging rejects absent or noncontiguous PMA2 before selecting any installation',()=>{
-  for(const mode of ['missing','gap','duplicate','placement']) scenario((input,envFile)=>{
+  for(const mode of ['missing','gap','duplicate','placement','missing-path']) scenario((input,envFile)=>{
     const originalEnv=fs.readFileSync(envFile);
     const publicRoot=path.join(input.output,'public');
     const file=path.join(publicRoot,'public-assets.v2.json');
@@ -207,10 +207,11 @@ test('staging rejects absent or noncontiguous PMA2 before selecting any installa
       pma.Ordinal=1; pma.FileName='pma2.0001.bin';
     }
     if(mode==='duplicate') manifest.artifacts.push({...pma});
-    if(mode==='placement') {
+    if(mode==='placement'||mode==='missing-path') {
       const configFile=path.join(publicRoot,'xnode.did2.json');
       const config=JSON.parse(fs.readFileSync(configFile));
-      config.DeepIdV2NetworkPlacement.ExactMailboxProjectionPaths=['/run/did2-network/'+pma.FileName];
+      if(mode==='placement') config.DeepIdV2NetworkPlacement.ExactMailboxProjectionPaths=['/run/did2-network/'+pma.FileName];
+      else delete config.DeepIdV2NetworkPlacement.ExactMailboxAuthorityPaths;
       const bytes=Buffer.from(JSON.stringify(config)); fs.writeFileSync(configFile,bytes);
       manifest.configurationSha256=crypto.createHash('sha256').update(bytes).digest('hex').toUpperCase();
     }

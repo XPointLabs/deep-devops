@@ -132,9 +132,10 @@ function stage(source, installation) {
     const paths = [config.DeepIdV2DirectoryProof.ExactAuthorityPaths,config.DeepIdV2DirectoryProof.ExactTimePolicyPaths,
       config.DeepIdV2NetworkPlacement.ExactPolicyPaths,config.DeepIdV2NetworkPlacement.ExactViewPaths,
       config.DeepIdV2NetworkPlacement.ExactHeadPaths,config.DeepIdV2NetworkPlacement.ExactActiveNodePaths,
-      config.DeepIdV2NetworkPlacement.ExactMailboxProjectionPaths];
-    // Retain PMA2 public records without promoting them to placement paths.
-    const placementFiles = new Set(manifest.artifacts.filter(item=>item.Role!=='pma2').map(item=>item.FileName));
+      config.DeepIdV2NetworkPlacement.ExactMailboxProjectionPaths,
+      config.DeepIdV2NetworkPlacement.ExactMailboxAuthorityPaths];
+    // Runtime, not this file stager, authenticates the exact PMA2 issuer.
+    const placementFiles = new Set(manifest.artifacts.map(item=>item.FileName));
     if (paths.some(group=>!Array.isArray(group)||!group.length) || paths.flat().length !== placementFiles.size ||
         new Set(paths.flat()).size !== placementFiles.size ||
         paths.flat().some(file=>!file.startsWith('/run/did2-network/') || !placementFiles.has(file.slice(18)))) reject();

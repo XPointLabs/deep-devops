@@ -7,6 +7,16 @@ remain production infrastructure with Mr. X's pre-user testing authorization.
 
 ## Implemented boundary
 
+Current preparation/staging now requires all eight role chains in public host
+configuration, including `DeepIdV2NetworkPlacement:ExactMailboxAuthorityPaths`.
+The exporter retains those paths; atomic development composition removes them
+with the other file paths. Older path-omitting configurations require matched
+public re-export/re-preparation, not an optional runtime reader. XNode performs
+the independent root/current-projection/time verification described in
+[its operator contract](../../xnode/docs/operator.md#current-did2-mailbox-issuer-input).
+Structural staging does not authenticate the issuer or activate message delivery.
+This source change has not replaced the production diagnostic images/bundles.
+
 For current contact-enabled candidates, binary upgrades must retain the reviewed
 `--contact-runtime` preparation bundle. The canonical stager and its standalone
 installer copy now reject an installed contact-to-prekey-only profile downgrade

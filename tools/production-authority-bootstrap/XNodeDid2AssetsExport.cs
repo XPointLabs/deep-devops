@@ -69,7 +69,7 @@ internal static class XNodeDid2AssetsExport
             var heads = Export("xnh1", bundle.ExactHeadChain);
             var nodes = Export("xnd1", bundle.ExactActiveNodeDescriptors);
             var projections = Export("pmt2", bundle.ExactPlacementTopologyChain);
-            _ = Export("pma2", bundle.ExactMailboxAuthorityChain);
+            var mailboxAuthorities = Export("pma2", bundle.ExactMailboxAuthorityChain);
             WriteNew(Path.Combine(staging, "genesis.adh1"), head);
             WriteNew(Path.Combine(staging, "observer.did2"), observer);
             var configuration = new
@@ -91,6 +91,7 @@ internal static class XNodeDid2AssetsExport
                     Enabled = true, ExactPolicyPaths = policies, ExactViewPaths = views,
                     ExactHeadPaths = heads, ExactActiveNodePaths = nodes,
                     ExactMailboxProjectionPaths = projections,
+                    ExactMailboxAuthorityPaths = mailboxAuthorities,
                     PublicObservationDid2Path = Mount + "observer.did2",
                 },
                 DeepIdV2ReplicaStage = new { Enabled = true },

@@ -38,7 +38,7 @@ static void ConfigureAtomicBundle(string custodyRoot)
         if (config["DeepIdV2DirectoryProof"]!["NetworkIdHex"]!.GetValue<string>() != manifest.RootElement.GetProperty("networkIdHex").GetString())
             throw new InvalidDataException("Node configuration has a different development identity.");
         var placement = config["DeepIdV2NetworkPlacement"]!.AsObject();
-        foreach (var field in new[] { "ExactPolicyPaths", "ExactViewPaths", "ExactHeadPaths", "ExactActiveNodePaths", "ExactMailboxProjectionPaths" }) placement.Remove(field);
+        foreach (var field in new[] { "ExactPolicyPaths", "ExactViewPaths", "ExactHeadPaths", "ExactActiveNodePaths", "ExactMailboxProjectionPaths", "ExactMailboxAuthorityPaths" }) placement.Remove(field);
         config["PrivacyRouting"]!["NextX25519PrivateKeyPath"] = "/run/secrets/key_x25519_next";
         placement["PublicBundlePath"] = "/run/deep-public/network.ncp2";
         foreach (var peer in config["PrivacyRouting"]!["Peers"]!.AsArray()) {

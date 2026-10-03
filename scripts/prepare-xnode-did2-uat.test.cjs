@@ -35,6 +35,7 @@ function fixture(run) {
       DeepIdV2NetworkPlacement: { Enabled: true, ExactPolicyPaths: [mount + 'xvp1.0000.bin'],
         ExactViewPaths: [mount + 'xnv1.0000.bin'], ExactHeadPaths: [mount + 'xnh1.0000.bin'],
         ExactActiveNodePaths: [mount + 'xnd1.0000.bin'], ExactMailboxProjectionPaths: [mount + 'pmt2.0000.bin'],
+        ExactMailboxAuthorityPaths: [mount + 'pma2.0000.bin'],
         PublicObservationDid2Path: mount + 'observer.did2' }, DeepIdV2ReplicaStage: { Enabled: true }
     };
     const configuration = Buffer.from(JSON.stringify(config));
@@ -186,7 +187,7 @@ test('rejects substituted identity, duplicate peer and hostile private seed leng
 });
 
 test('rejects missing or noncontiguous PMA2 and never substitutes it for placement', () => {
-  for (const mode of ['missing', 'gap', 'duplicate', 'placement']) fixture(input => {
+  for (const mode of ['missing', 'gap', 'duplicate', 'placement', 'missing-path']) fixture(input => {
     const file = path.join(input.assets, 'public-assets.v2.json');
     const manifest = JSON.parse(fs.readFileSync(file));
     const pma = manifest.artifacts.find(entry => entry.Role === 'pma2');
@@ -196,10 +197,11 @@ test('rejects missing or noncontiguous PMA2 and never substitutes it for placeme
       pma.Ordinal = 1; pma.FileName = 'pma2.0001.bin';
     }
     if (mode === 'duplicate') manifest.artifacts.push({ ...pma });
-    if (mode === 'placement') {
+    if (mode === 'placement' || mode === 'missing-path') {
       const configFile = path.join(input.assets, 'xnode.did2.json');
       const config = JSON.parse(fs.readFileSync(configFile));
-      config.DeepIdV2NetworkPlacement.ExactMailboxProjectionPaths = [mount + pma.FileName];
+      if (mode === 'placement') config.DeepIdV2NetworkPlacement.ExactMailboxProjectionPaths = [mount + pma.FileName];
+      else delete config.DeepIdV2NetworkPlacement.ExactMailboxAuthorityPaths;
       const bytes = Buffer.from(JSON.stringify(config));
       fs.writeFileSync(configFile, bytes); manifest.configurationSha256 = sha(bytes);
     }
