@@ -50,7 +50,17 @@ as generation zero, which cannot advance an already protected operational
 head. A live network must use a separately verified, strictly monotonic
 successor ceremony; do not run genesis again to repair an expired view. The
 bootstrap binds the distinct mailbox deposit and retrieve public keys from
-the custody manifest when constructing PMA2.
+the custody manifest when constructing PMA2. The clean-break mode additionally
+requires `--requested-did2-path` containing one exact public 2052-byte DID2
+credential. It first signs a non-authoritative network candidate, then separately
+authors the exact V2 empty directory genesis and nonce-bound absence proof for
+that credential, independently verifies them, and completes network authoring
+under [DR-0070](../../docs/survival-program/decisions/DR-0070-did2-operational-genesis-proof-order.md).
+The resulting inventory requires reader 2; neither an arbitrary bootstrap leaf
+nor a V1 proof is accepted. The supplied observed-time snapshot is offline
+ceremony evidence, not NTS acquisition, live readiness, account admission or
+permission to overwrite existing floors. The historical checkpoint audit also
+requires this exact DID2 input and rejects retired reader-1 inventories.
 
 For a strictly monotonic operational successor, the same tool accepts
 `--successor-from` together with an exact source artifact directory, the

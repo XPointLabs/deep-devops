@@ -43,7 +43,7 @@ static void TestArguments()
     Reject<ArgumentException>(() => Arguments.Parse(nonExplicit));
     var audit = new[] { "--audit-genesis-source", "synthetic",
         "--network-id-hex", "synthetic", "--genesis-core-hash", "synthetic",
-        "--expected-xnv1-artifact-hash", "synthetic", "--output", "synthetic" };
+        "--expected-xnv1-artifact-hash", "synthetic", "--requested-did2-path", "synthetic", "--output", "synthetic" };
     var selectedAudit = Arguments.Parse(audit);
     if (!selectedAudit.IsCheckpointAudit || selectedAudit.IsSuccessor || selectedAudit.IsRolloverPreparation)
         throw new Exception("Audit mode was not exclusively selected.");

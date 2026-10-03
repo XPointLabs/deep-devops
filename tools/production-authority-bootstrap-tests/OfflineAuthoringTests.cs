@@ -50,15 +50,19 @@ internal static class OfflineAuthoringTests
                 Enumerable.Range(0, 5).Select(role => (ReadOnlyMemory<byte>)
                     PublicKeyAuth.GenerateKeyPair(B(32, (byte)(0x10 + index * 5 + role))).PublicKey).ToArray());
         }).ToArray();
-        var genesis = await XPointNetworkOperationalGenesisAuthor.AuthorAsync(
+        var pending = await XPointNetworkOperationalGenesisAuthor.AuthorNetworkCandidateAsync(
             new XPointNetworkOperationalGenesisRequest(B(32, 0x12), bootstrap, [root], witnesses, nodes,
-                B(32, 0xf1), H("xcc"), H("xcb"), H("pma"),
+                H("xcc"), H("xcb"), H("pma"),
                 PublicKeyAuth.GenerateKeyPair(B(32, 0x31)).PublicKey,
                 PublicKeyAuth.GenerateKeyPair(B(32, 0x32)).PublicKey,
-                990, 1_000, 1_500, B(32, 0xf2), B(16, 0xf3), 100, 101, 102, 1_100, 5,
+                990, 1_000, 1_500,
                 rootPolicyExpiresAtUnixSeconds: 9_000));
+        using var phrase = DeepRecoveryV1.Generate();
+        var did2 = DeepIdV2Root.DeriveDid2(phrase);
+        var genesis = await OfflineDid2GenesisAuthor.CompleteAsync(pending, bootstrap, did2, witnesses,
+            1_000, 1_500, B(32, 0xf2), B(16, 0xf3), 100, 101, 102, 1_100);
         genesis.VerifiedNetwork.EnsureCurrent();
-        await TestCheckpointAuditAsync(directory, bootstrap, genesis);
+        await TestCheckpointAuditAsync(directory, bootstrap, genesis, did2);
         var rollovers = nodes.Select((node, index) => new XPointNetworkOperationalNodeRollover(
             node.IdentitySigner, H($"current-{index}"), H($"next-{index}"),
             ScalarMult.Base(B(32, (byte)(0x30 + index))), ScalarMult.Base(B(32, (byte)(0x80 + index))))).ToArray();
@@ -357,7 +361,7 @@ internal static class OfflineAuthoringTests
     }
 
     private static async Task TestCheckpointAuditAsync(string directory,
-        VerifiedXPointNetworkBootstrap bootstrap, AuthoredXPointNetworkOperationalGenesis genesis)
+        VerifiedXPointNetworkBootstrap bootstrap, AuthoredXPointNetworkOperationalGenesis genesis, ParsedDid2 did2)
     {
         var source = Path.Combine(directory, "checkpoint");
         var artifactDirectory = Path.Combine(source, "bootstrap");
@@ -385,16 +389,20 @@ internal static class OfflineAuthoringTests
         }
         var networkHex = Convert.ToHexString(B(16, 0x11));
         var genesisHex = Convert.ToHexString(bootstrap.GenesisPin.AuthorityCoreHash.Span);
-        var leafHex = Convert.ToHexString(B(32, 0xf1));
+        var leafHex = Convert.ToHexString(DeepIdV2AccountDirectoryCodec.ComputeDirectoryLeafKey(
+            bootstrap.Authority.NetworkId.Span, did2));
         WriteManifest();
         File.WriteAllBytes(Path.Combine(artifactDirectory, "inventory.json"),
             JsonSerializer.SerializeToUtf8Bytes(new ArtifactInventory("deep-contact-resolve-readonly-v2",
-                networkHex, genesisHex, 1, Convert.ToHexString(B(32, 0xf2)), leafHex,
+                networkHex, genesisHex, 2, Convert.ToHexString(B(32, 0xf2)), leafHex,
                 Convert.ToHexString(B(16, 0xf3)), 100, 101, 102, entries)));
         var output = Path.Combine(directory, "audit.json");
+        var did2Path = Path.Combine(directory, "requested-did2.bin");
+        File.WriteAllBytes(did2Path, did2.CanonicalBytes.ToArray());
         var args = new[] { "--audit-genesis-source", source, "--network-id-hex", networkHex,
             "--genesis-core-hash", genesisHex, "--expected-xnv1-artifact-hash",
-            Convert.ToHexString(SHA256.HashData(genesis.ExactXnv1.Span)), "--output", output };
+            Convert.ToHexString(SHA256.HashData(genesis.ExactXnv1.Span)), "--output", output,
+            "--requested-did2-path", did2Path };
         await CheckpointAudit.RunAsync(Arguments.Parse(args));
         using (var report = JsonDocument.Parse(File.ReadAllBytes(output)))
         {
@@ -407,6 +415,27 @@ internal static class OfflineAuthoringTests
         args[7] = new string('1', 64);
         await RejectAsync<CryptographicException>(args);
         args[7] = Convert.ToHexString(SHA256.HashData(genesis.ExactXnv1.Span));
+        using (var differentPhrase = DeepRecoveryV1.Generate())
+        {
+            File.WriteAllBytes(did2Path, DeepIdV2Root.DeriveDid2(differentPhrase).CanonicalBytes.ToArray());
+            await RejectAsync<CryptographicException>(args);
+        }
+        File.WriteAllBytes(did2Path, did2.CanonicalBytes.ToArray());
+        foreach (var length in new[] { DeepIdV2Codec.Did2Length - 1, DeepIdV2Codec.Did2Length + 1 })
+        {
+            File.WriteAllBytes(did2Path, new byte[length]);
+            await RejectAsync<InvalidDataException>(args);
+        }
+        File.WriteAllBytes(did2Path, did2.CanonicalBytes.ToArray());
+        File.WriteAllBytes(Path.Combine(artifactDirectory, "inventory.json"),
+            JsonSerializer.SerializeToUtf8Bytes(new ArtifactInventory("deep-contact-resolve-readonly-v2",
+                networkHex, genesisHex, 1, Convert.ToHexString(B(32, 0xf2)), leafHex,
+                Convert.ToHexString(B(16, 0xf3)), 100, 101, 102, entries)));
+        await RejectAsync<CryptographicException>(args);
+        File.WriteAllBytes(Path.Combine(artifactDirectory, "inventory.json"),
+            JsonSerializer.SerializeToUtf8Bytes(new ArtifactInventory("deep-contact-resolve-readonly-v2",
+                networkHex, genesisHex, 2, Convert.ToHexString(B(32, 0xf2)), leafHex,
+                Convert.ToHexString(B(16, 0xf3)), 100, 101, 102, entries)));
         var pma = genesis.ExactPma2.ToArray();
         pma[^1] ^= 1;
         File.WriteAllBytes(Path.Combine(artifactDirectory, "pma2.0000.bin"), pma);

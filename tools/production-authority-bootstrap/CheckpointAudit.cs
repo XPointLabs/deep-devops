@@ -1,6 +1,8 @@
 using System.Security.Cryptography;
 using System.Text.Json;
 using Deep.Protocol.AccountDirectoryV1;
+using Deep.Protocol.ApplicationCore;
+using Deep.Protocol.Identity;
 using Deep.Protocol.ContactV1;
 using Deep.Protocol.DeepExtension.PrivacyRouting;
 using Deep.Protocol.XPointNetworkV1;
@@ -35,7 +37,7 @@ internal static class CheckpointAudit
             throw new InvalidDataException("The historical snapshot inventory exceeds its bound.");
         var inventory = JsonSerializer.Deserialize<ArtifactInventory>(File.ReadAllBytes(inventoryPath))
                         ?? throw new InvalidDataException("The historical snapshot inventory is empty.");
-        if (inventory.Format != "deep-contact-resolve-readonly-v2" ||
+        if (inventory.Format != "deep-contact-resolve-readonly-v2" || inventory.SupportedReader != 2 ||
             !string.Equals(inventory.NetworkIdHex, source.Manifest.NetworkIdHex, StringComparison.OrdinalIgnoreCase) ||
             !string.Equals(inventory.GenesisAuthorityCoreHashHex, source.Manifest.GenesisAuthorityCoreHashHex, StringComparison.OrdinalIgnoreCase) ||
             !string.Equals(inventory.SnapshotQueryLeafHex, source.Manifest.DirectoryLeafKeyHex, StringComparison.OrdinalIgnoreCase))
@@ -43,13 +45,24 @@ internal static class CheckpointAudit
         var authority = XPointNetworkBootstrapAuthor.VerifyExistingGenesis(
             source.One("xna1"), source.One("dts1"), new XPointNetworkGenesisPin(network, genesis)).Authority;
         var boot = Hex(inventory.SnapshotBootIdHex, 16, "snapshot boot ID");
-        var freshness = AccountDirectoryCurrentProofVerifier.Verify(
+        var did2 = OfflineDid2GenesisAuthor.ReadRequestedCredential(arguments.Required("--requested-did2-path"));
+        var exactHead = source.One("adh1");
+        var genesisHead = DeepIdV2DirectoryBootstrapVerifier.RestoreGenesis(authority, exactHead,
+            XPointNetworkOperationalSuccessorAuthor.ComputeAdh1CoreHash(exactHead));
+        var lookup = DeepIdV2AccountDirectoryLookupCodec.Author(did2, network,
+            genesisHead.LogGeneration, genesisHead.CoreHash.Span, 1, new byte[38], new byte[32]);
+        var query = VerifiedDeepIdV2DirectoryQuery.VerifyDid2(lookup, did2);
+        if (!CryptographicOperations.FixedTimeEquals(query.DirectoryLeafKey.Span,
+                Hex(inventory.SnapshotQueryLeafHex, 32, "snapshot query leaf")))
+            throw new CryptographicException("The requested DID2 does not match the exact snapshot query.");
+        using var pq = DeepMlDsa65CandidateVerifierFactory.OpenForCurrentProcess();
+        var freshness = DeepIdV2DirectoryCurrentProofVerifier.VerifyRequestedDid2(
             authority, source.One("adh1"), source.One("snapshot-dtt1"), source.One("snapshot-adp1"),
             Hex(inventory.SnapshotNonceHex, 32, "snapshot nonce"),
-            Hex(inventory.SnapshotQueryLeafHex, 32, "snapshot query leaf"),
+            query,
             new AccountDirectoryMonotonicRequestWindow(boot, inventory.SnapshotNonceCreatedAt,
                 inventory.SnapshotResponseReceivedAt, inventory.SnapshotCurrentSample),
-            protectedLkg: null, currentCheckpoint: null, inventory.SupportedReader);
+            genesisHead, 1, inventory.SupportedReader, pq);
         _ = MailboxAuthorityV2Verifier.Verify(authority, source.One("pma2"),
             freshness.TrustedLowerUnixSeconds, freshness.TrustedUpperUnixSeconds);
         var verified = await OnionNetworkContextVerifier.VerifyAsync(authority, freshness,

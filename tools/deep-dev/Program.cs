@@ -10,6 +10,7 @@ using Deep.Client.Shared.Persistence;
 using Deep.Client.Shared.Services;
 using Deep.Protocol.AccountDirectoryV1;
 using Deep.Protocol.ApplicationCore;
+using Deep.Protocol.DeepExtension.PrivacyRouting;
 using Deep.Protocol.XPointNetworkV1;
 using Sodium;
 
@@ -154,23 +155,44 @@ try
             roleKeys);
         CryptographicOperations.ZeroMemory(next);
     }
-    var queryLeaf = DeepIdV2AccountDirectoryCodec.ComputeDirectoryLeafKey(network,
-        Deep.Protocol.ApplicationCore.DeepIdV2Codec.DecodeDid2(parsedObserver.Admission.ExactDid2.Span));
-    var operational = await XPointNetworkOperationalGenesisAuthor.AuthorAsync(new(
+    var did2 = DeepIdV2Codec.DecodeDid2(parsedObserver.Admission.ExactDid2.Span);
+    var pending = await XPointNetworkOperationalGenesisAuthor.AuthorNetworkCandidateAsync(new(
         RandomNumberGenerator.GetBytes(32), bootstrap, [signer], witnesses, nodeModels,
-        queryLeaf, Hash("deep-dev-carrier-candidate"), Hash("deep-dev-carrier-set-candidate"), Hash("deep-dev-mailbox"),
+        Hash("deep-dev-carrier-candidate"), Hash("deep-dev-carrier-set-candidate"), Hash("deep-dev-mailbox"),
         PublicKeyAuth.GenerateKeyPair(RandomNumberGenerator.GetBytes(32)).PublicKey,
         PublicKeyAuth.GenerateKeyPair(RandomNumberGenerator.GetBytes(32)).PublicKey,
-        before, before, observed + 3_600, RandomNumberGenerator.GetBytes(32), RandomNumberGenerator.GetBytes(16),
-        1, 1, 1, observed, 5, rootPolicyExpiresAtUnixSeconds: expiry));
+        before, before, observed + 3_600, rootPolicyExpiresAtUnixSeconds: expiry));
     var adh = await DeepIdV2DirectoryHeadAuthor.AuthorGenesisAsync(bootstrap.Authority, before, observed + 3_600,
         witnesses.Select(w => (IAccountDirectoryAdh1WitnessSigner)w).ToArray());
+    var lookup = DeepIdV2AccountDirectoryLookupCodec.Author(did2, network,
+        adh.ProtectedHead.LogGeneration, adh.CoreHash.Span, 1, new byte[38], new byte[32]);
+    var query = VerifiedDeepIdV2DirectoryQuery.VerifyDid2(lookup, did2);
+    var material = DeepIdV2DirectoryProofMaterialAuthor.Create(adh.ProtectedHead, [], [],
+        query.DirectoryLeafKey.Span, adh.ProtectedHead);
+    var nonce = RandomNumberGenerator.GetBytes(32);
+    var clock = new DevGenesisMonotonicClock();
+    var sent = await clock.ReadAsync(default);
+    var proofRequest = new AccountDirectoryProofAuthoringRequest(network, nonce, sent.BootId.Span,
+        sent.SampleSeconds, adh.ExactAdh1.Span, pending.ExactXnv1.Span, observed, 5,
+        observed, checked(observed + 30),
+        AccountDirectoryDtt1IssuanceEpoch.Derive(bootstrap.Authority, observed, 5), 2);
+    using var pq = DeepMlDsa65CandidateVerifierFactory.OpenForCurrentProcess();
+    var proof = await DeepIdV2DirectoryProofAuthor.IssueGenesisAsync(bootstrap.Authority,
+        proofRequest, material, witnesses, 1, pq);
+    var received = await clock.ReadAsync(default);
+    var freshness = DeepIdV2DirectoryCurrentProofVerifier.VerifyRequestedDid2(bootstrap.Authority,
+        proof.ExactAdh1, proof.ExactDtt1, proof.ExactAdp1V2, nonce, query,
+        new(sent.BootId.Span, sent.SampleSeconds, received.SampleSeconds, received.SampleSeconds),
+        adh.ProtectedHead, 1, 2, pq);
+    var operational = await XPointNetworkOperationalGenesisAuthor.CompleteDid2Async(
+        pending, freshness, new OnionTrustedTimeAuthority(clock));
     Write("public/genesis.adh1", adh.ExactAdh1.Span);
     Write("public/genesis.xna1", bootstrap.ExactXna1.Span); Write("public/genesis.dts1", bootstrap.ExactDts1.Span);
     Write("public/current.xnv1", operational.ExactXnv1.Span);
     Write("public/pma2.bin", operational.ExactPma2.Span);
     Write("public/network.ncp2", XPointNetworkClosureWireCodec.EncodeResponse(network, [bootstrap.ExactXna1], [bootstrap.ExactDts1],
-        [operational.ExactXvp1], [operational.ExactXnv1], [operational.ExactXnh1], operational.ExactXnd1, [operational.ExactPmt2]));
+        [operational.ExactXvp1], [operational.ExactXnv1], [operational.ExactXnh1], operational.ExactXnd1,
+        [operational.ExactPmt2], [operational.ExactPma2]));
     var artifactPaths = new Dictionary<string, string[]>();
     foreach (var (role, values) in new (string, IReadOnlyList<ReadOnlyMemory<byte>>)[] {
         ("xvp1", [operational.ExactXvp1]), ("xnv1", [operational.ExactXnv1]), ("xnh1", [operational.ExactXnh1]),
@@ -311,6 +333,18 @@ static async Task<ulong> ReadNtsAsync(string executable, AccountDirectoryDts1Sou
         return lower + (upper - lower) / 2;
     }
     finally { if (!process.HasExited) process.Kill(entireProcessTree: true); await process.WaitForExitAsync(); }
+}
+
+sealed class DevGenesisMonotonicClock : IOnionMonotonicClock
+{
+    private readonly byte[] boot = RandomNumberGenerator.GetBytes(16);
+    private readonly long started = Stopwatch.GetTimestamp();
+    public ValueTask<OnionMonotonicReading> ReadAsync(CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        return ValueTask.FromResult(new OnionMonotonicReading(boot,
+            checked(1 + (ulong)Stopwatch.GetElapsedTime(started).TotalSeconds)));
+    }
 }
 
 sealed class Signer : IXPointNetworkBootstrapRootSigner, IXPointNetworkWitnessSigner, IAccountDirectoryAdh1WitnessSigner, IDisposable

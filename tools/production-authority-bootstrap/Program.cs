@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Deep.Protocol.AccountDirectoryV1;
+using Deep.Protocol.ApplicationCore;
 using Deep.Protocol.XPointNetworkV1;
 using Sodium;
 using static BootstrapIo;
@@ -89,9 +90,8 @@ var timeSources = new[]
     TimeSource("time.cloudflare.com", "cloudflare", "48f93d4f1ecaf8e2323bc2e5be015b331d65cb8e40a1b28be50eb4ba9230e789"),
     TimeSource("nts.netnod.se", "netnod", "bd44c55cfd57e38da3a6aea80bf65f9c441b63fbd8667e057b0f112fc3211efa"),
 }.OrderBy(static value => value.SourceId.ToArray(), ByteArrayComparer.Instance).ToArray();
-var queryLeaf = HashDomain(
-    "Deep/XPoint/V1/contact-authority-bootstrap-leaf",
-    manifest.Role("contact-xpk").PublicKey());
+var requestedDid2 = OfflineDid2GenesisAuthor.ReadRequestedCredential(arguments.Required("--requested-did2-path"));
+var queryLeaf = DeepIdV2AccountDirectoryCodec.ComputeDirectoryLeafKey(network, requestedDid2);
 var bootstrapRequest = new XPointNetworkGenesisAuthoringRequest(
     ceremony,
     network,
@@ -125,7 +125,6 @@ try
         [root],
         witnesses,
         nodeRecords,
-        queryLeaf,
         HashDomain("Deep/XPoint/V1/XCC1/first-release-profile", network),
         HashDomain("Deep/XPoint/V1/XCB1/first-release-carrier-set", network),
         HashDomain("Deep/XPoint/V1/PMA2/first-release-placement", network),
@@ -133,16 +132,10 @@ try
         manifest.Role("mailbox-retrieve-issuer").PublicKey(),
         notBefore,
         notBefore,
-        operationalExpires,
-        snapshotNonce,
-        bootId,
-        nonceCreated,
-        responseReceived,
-        currentSample,
-        observedUnix,
-        5,
-        1);
-    var authored = await XPointNetworkOperationalGenesisAuthor.AuthorAsync(operationalRequest);
+        operationalExpires);
+    var pending = await XPointNetworkOperationalGenesisAuthor.AuthorNetworkCandidateAsync(operationalRequest);
+    var authored = await OfflineDid2GenesisAuthor.CompleteAsync(pending, bootstrap, requestedDid2, witnesses,
+        notBefore, operationalExpires, snapshotNonce, bootId, nonceCreated, responseReceived, currentSample, observedUnix);
     Directory.CreateDirectory(outputRoot);
     var bootstrapDirectory = Path.Combine(outputRoot, "bootstrap");
     Directory.CreateDirectory(bootstrapDirectory);
@@ -166,7 +159,7 @@ try
         "deep-contact-resolve-readonly-v2",
         Convert.ToHexString(network).ToLowerInvariant(),
         Convert.ToHexString(bootstrap.GenesisPin.AuthorityCoreHash.Span).ToLowerInvariant(),
-        1,
+        2,
         Convert.ToHexString(snapshotNonce).ToLowerInvariant(),
         Convert.ToHexString(queryLeaf).ToLowerInvariant(),
         Convert.ToHexString(bootId).ToLowerInvariant(),
@@ -187,7 +180,7 @@ try
         entries);
     WriteNew(Path.Combine(outputRoot, "public-manifest.v1.json"),
         JsonSerializer.SerializeToUtf8Bytes(publicManifest, new JsonSerializerOptions { WriteIndented = true }));
-    Console.WriteLine("Production authority bootstrap authored and independently verified.");
+    Console.WriteLine("Offline DID2 genesis snapshot authored and independently verified; this is not current readiness evidence.");
     Console.WriteLine($"Genesis authority core hash: {publicManifest.GenesisAuthorityCoreHashHex}");
     Console.WriteLine($"Directory bootstrap leaf key: {publicManifest.DirectoryLeafKeyHex}");
 }
@@ -271,7 +264,7 @@ sealed class Arguments
         var allowed = new HashSet<string>(StringComparer.Ordinal)
         {
             "--authority-root", "--seed1-root", "--seed2-root", "--seed3-root", "--output",
-            "--observed-unix", "--boot-id", "--nonce-created", "--response-received", "--current-sample",
+            "--observed-unix", "--boot-id", "--nonce-created", "--response-received", "--current-sample", "--requested-did2-path",
             "--successor-from", "--rollover-root", "--protected-head-core-hash",
             "--protected-pmt-artifact-hash", "--current-adh1-path", "--current-adh1-core-hash",
             "--prepare-rollover", "--reissue-rollover-certificates",
@@ -314,7 +307,7 @@ sealed class Arguments
                 "--network-id-hex", "--genesis-core-hash", "--output" }
             : audit
             ? new[] { "--audit-genesis-source", "--network-id-hex", "--genesis-core-hash",
-                "--expected-xnv1-artifact-hash", "--output" }
+                "--expected-xnv1-artifact-hash", "--requested-did2-path", "--output" }
             : reissue
             ? new[] { "--reissue-rollover-certificates", "--authority-root", "--rollover-root",
                 "--seed1-root", "--seed2-root", "--seed3-root", "--output" }
@@ -326,7 +319,7 @@ sealed class Arguments
                 "--observed-unix", "--successor-from", "--rollover-root", "--protected-head-core-hash",
                 "--protected-pmt-artifact-hash", "--current-adh1-path", "--current-adh1-core-hash" }
             : new[] { "--authority-root", "--seed1-root", "--seed2-root", "--seed3-root", "--output",
-                "--observed-unix", "--boot-id", "--nonce-created", "--response-received", "--current-sample" };
+                "--observed-unix", "--boot-id", "--nonce-created", "--response-received", "--current-sample", "--requested-did2-path" };
         if (required.Any(value => !values.ContainsKey(value)) || values.Count != required.Length)
             throw new ArgumentException("The authority bootstrap argument set is incomplete.");
         return new Arguments(values);
@@ -388,6 +381,7 @@ sealed record CustodyManifest(
 sealed class FileSigner :
     IXPointNetworkBootstrapRootSigner,
     IXPointNetworkWitnessSigner,
+    IAccountDirectoryAdh1WitnessSigner,
     IDisposable
 {
     private readonly byte[] id;
@@ -465,7 +459,6 @@ sealed class FileSigner :
             request.KeyGeneration != KeyGeneration ||
             request.Purpose is not (XPointNetworkOperationalSignaturePurpose.NetworkView or
                 XPointNetworkOperationalSignaturePurpose.NetworkHead or
-                XPointNetworkOperationalSignaturePurpose.DirectoryHead or
                 XPointNetworkOperationalSignaturePurpose.MailboxTopology))
             throw new CryptographicException("The Registry witness rejected an out-of-policy signing request.");
         return Sign(request.SigningInput, signature64);
@@ -477,6 +470,15 @@ sealed class FileSigner :
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (root) throw new CryptographicException("The offline root cannot sign DTT1.");
+        return ValueTask.FromResult<ReadOnlyMemory<byte>>(
+            PublicKeyAuth.SignDetached(signingInput.ToArray(), signingKeyBytes));
+    }
+
+    public ValueTask<ReadOnlyMemory<byte>> SignAdh1Async(
+        ReadOnlyMemory<byte> signingInput, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (root) throw new CryptographicException("The offline root cannot sign ADH1.");
         return ValueTask.FromResult<ReadOnlyMemory<byte>>(
             PublicKeyAuth.SignDetached(signingInput.ToArray(), signingKeyBytes));
     }

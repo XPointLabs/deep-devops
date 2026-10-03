@@ -105,7 +105,8 @@ internal static class DevPublisher
                         observed-30,observed-30,checked(observed+operationalLifetimeSeconds-30)),stopping.Token);
                     var bundle = XPointNetworkClosureWireCodec.EncodeResponse(network,closure.ExactAuthorityChain,
                         closure.ExactTimePolicyChain,closure.ExactNetworkPolicyChain,[.. closure.ExactViewChain,next.ExactXnv1],
-                        [.. closure.ExactHeadChain,next.ExactXnh1],next.ExactXnd1,[.. closure.ExactPlacementTopologyChain,next.ExactPmt2]);
+                        [.. closure.ExactHeadChain,next.ExactXnh1],next.ExactXnd1,[.. closure.ExactPlacementTopologyChain,next.ExactPmt2],
+                        closure.ExactMailboxAuthorityChain);
                     var committed = new Journal("deep-dev-renewal.v1",Convert.ToHexStringLower(network),
                         checked((cursor?.Generation ?? 0)+1),observed,Convert.ToHexStringLower(SHA256.HashData(prior)),bundle);
                     WriteJournal(state,committed,integrity); // Durable before either public file.
