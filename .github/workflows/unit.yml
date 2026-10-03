@@ -90,6 +90,9 @@ jobs:
         with:
           node-version: 24
 
+      - name: Disposable Registry lane guard tests
+        run: node --test deep-devops/scripts/test-registry-postgres.test.mjs
+
       - name: Unit tests
         shell: pwsh
         run: |

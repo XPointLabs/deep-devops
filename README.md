@@ -29,6 +29,10 @@ reuse UAT keys, certificates, volumes or state in production.
 
 ## Local development and UAT
 
+For a fresh Registry source baseline without external/production database inputs,
+use the [disposable PostgreSQL test lane](docs/S00_REGISTRY_POSTGRES.md).
+It owns its loopback-only tmpfs container and cleanup; it is not TLS/UAT evidence.
+
 For the DID2 restart/outage investigation and required stability fault matrix,
 read [NETWORK_STABILITY_RECOVERY.md](docs/NETWORK_STABILITY_RECOVERY.md).
 Component host/DI and installer tests do not close the live network or 72-hour
