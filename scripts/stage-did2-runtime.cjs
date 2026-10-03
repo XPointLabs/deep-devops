@@ -139,7 +139,17 @@ function stage(source, installation) {
         new Set(paths.flat()).size !== placementFiles.size ||
         paths.flat().some(file=>!file.startsWith('/run/did2-network/') || !placementFiles.has(file.slice(18)))) reject();
     const diagnostic = JSON.parse(read(path.join(source,'appsettings.UAT.json')).toString('utf8'));
-    Object.assign(config, contactRuntime(diagnostic, config.DeepIdV2DirectoryProof.RegistryOrigin));
+    const contact = contactRuntime(diagnostic, config.DeepIdV2DirectoryProof.RegistryOrigin);
+    const retainedConfiguration = env.get('DEEP_DID2_CONFIG_FILE');
+    if (retainedConfiguration) {
+      if (!/^\.\/config\/did2-runtime\/bundle-[A-Za-z0-9_-]+\/appsettings\.Production\.json$/.test(retainedConfiguration)) reject();
+      const previous = JSON.parse(read(path.join(installation,retainedConfiguration)).toString('utf8'));
+      if (['ContactCoordination','DeepIdV2ContactResolver','DeepIdV2PreKeyClaim']
+        .some(name=>Object.hasOwn(previous,name)) && !Object.keys(contact).length) reject();
+    }
+    // A binary upgrade must not silently replace an enabled contact profile
+    // with an older prekey-only input bundle. This guard conveys no authority.
+    Object.assign(config, contact);
     const origin = publicOrigin(diagnostic.PrivacyRouting.PublicPeerBaseUrl);
     if (origin.hostname !== env.get('DEEP_NODE_PUBLIC_IP') || env.get('DEEP_NODE_PUBLIC_PORT') !== '443' ||
         diagnostic.Node.RouterId !== env.get('DEEP_NODE_ED25519_PUBLIC_KEY')) reject();

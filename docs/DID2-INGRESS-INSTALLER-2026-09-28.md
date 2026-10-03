@@ -7,6 +7,13 @@ remain production infrastructure with Mr. X's pre-user testing authorization.
 
 ## Implemented boundary
 
+For current contact-enabled candidates, binary upgrades must retain the reviewed
+`--contact-runtime` preparation bundle. The canonical stager and its standalone
+installer copy now reject an installed contact-to-prekey-only profile downgrade
+before creating/selecting another bundle. This prevents a healthy image upgrade
+from silently disabling coordination/resolver/claim. The staging contract does
+not mint authority, activate mailbox grants or replace physical device evidence.
+
 - XNode has independent exact-IP proxy trust for managed ingress and h2c
   privacy-peer listeners. Missing/invalid scheme headers reject before dispatch;
   managed proxy trust cannot authorize peer ingress. Ordinary API/RPC listeners

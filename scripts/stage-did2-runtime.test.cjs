@@ -78,6 +78,22 @@ test('contact activation selects a new immutable bundle without changing the ret
   assert.deepEqual(fs.readFileSync(envFile),originalEnv);
   assert.equal(fs.readdirSync(path.join(input.seed1,'config','did2-runtime')).length,2);
 }));
+test('binary upgrades reject contact-to-prekey-only profile downgrade before creating another bundle',()=>scenario((input,envFile)=> {
+  const previous=stage(input.output,input.seed1);
+  fs.appendFileSync(envFile,Object.entries(previous.updates).map(([k,v])=>k+'='+v).join('\n')+'\n');
+  const previousRoot=path.dirname(path.join(input.seed1,previous.updates.DEEP_DID2_CONFIG_FILE));
+  const previousConfig=fs.readFileSync(path.join(previousRoot,'appsettings.Production.json'));
+  const previousEnv=fs.readFileSync(envFile);
+  const file=path.join(input.output,'appsettings.UAT.json');
+  const diagnostic=JSON.parse(fs.readFileSync(file));
+  for(const name of ['ContactCoordination','DeepIdV2ContactResolver','DeepIdV2PreKeyClaim']) delete diagnostic[name];
+  fs.writeFileSync(file,JSON.stringify(diagnostic));
+  assert.throws(()=>stage(input.output,input.seed1));
+  assert.deepEqual(fs.readFileSync(envFile),previousEnv);
+  assert.deepEqual(fs.readFileSync(path.join(previousRoot,'appsettings.Production.json')),previousConfig);
+  assert.equal(fs.readdirSync(path.join(input.seed1,'config','did2-runtime')).length,1);
+},true));
+
 test('stages closed production inputs, reuses exact rerun and never imports diagnostic state',()=>scenario((input,envFile)=> {
   fs.writeFileSync(path.join(input.output,'state','must-not-import.state'),'synthetic-old-state');
   const originalEd=fs.readFileSync(path.join(input.seed1,'secrets','key_ed25519'));
