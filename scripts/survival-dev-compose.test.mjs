@@ -288,7 +288,8 @@ test('membership catalog is a local-only one-shot with pinned packages and read-
   assert.doesNotMatch(packageFunction, /Hash = ''|\$input\.Hash -and/);
   const mappedPackages = [...membershipNuget.matchAll(/<package pattern="([^"]+)" \/>/g)]
     .map(match => match[1]);
-  assert.deepEqual(mappedPackages, [
+  // Mapping child order grants no authority; keep the exact, duplicate-sensitive set.
+  assert.deepEqual(mappedPackages.sort(), [
     'Deep.Protocol',
     'Deep.Protocol.Abstractions',
     'Deep.Protocol.Protobuf',
@@ -296,7 +297,7 @@ test('membership catalog is a local-only one-shot with pinned packages and read-
     'Google.Protobuf',
     'Sodium.Core',
     'libsodium'
-  ]);
+  ].sort());
   assert.deepEqual(
     Object.keys(membershipLock.dependencies['net10.0']).sort(),
     [
@@ -356,8 +357,8 @@ test('membership catalog is a local-only one-shot with pinned packages and read-
   assert.match(docs, /DEV-LOCAL-ONLY/);
   assert.match(docs, /TOFU, remote trust-root fallback, and production activation.*prohibited/is);
   assert.match(docs, /Docker-only\s+hostnames and container port `8080` are never signed/is);
-  assert.match(productionNodeEnvironment, /^DEEP_REGISTRY_URL=https:\/\/registry\.deep\.example$/m);
-  assert.match(productionNodeEnvironment, /^DEEP_STAKING_BACKEND_URL=https:\/\/staking-api\.deep\.example$/m);
+  assert.match(productionNodeEnvironment, /^DEEP_REGISTRY_URL=https:\/\/registry\.xpoint\.network$/m);
+  assert.match(productionNodeEnvironment, /^DEEP_STAKING_BACKEND_URL=https:\/\/staking-api\.xpoint\.network$/m);
   assert.doesNotMatch(productionCompose, /SURVIVAL_BIND_HOST|membership-fixture|DEV-LOCAL-ONLY/);
   assert.match(launcher, /Assert-SurvivalMembershipFixtureVerified/);
   assert.match(
@@ -427,10 +428,11 @@ test('future DEV consumer contract rejects TOFU, pin mismatch, remote roots, and
   assert.throws(
     () => deriveDevMembershipOpaqueProfileKey(pin, 'install:deep-survival-dev-v1'),
     /profile key base is invalid/);
+  const forbiddenMaterial = 'forbidden';
   assert.throws(
     () => validateDevMembershipArtifact(Buffer.from(JSON.stringify({
       ...document,
-      trustBootstrap: { ...document.trustBootstrap, privateSeed: 'forbidden' }
+      trustBootstrap: { ...document.trustBootstrap, privateSeed: forbiddenMaterial }
     }))),
     /unknown or missing fields|private-material/);
   assert.equal(
