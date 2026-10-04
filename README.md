@@ -29,6 +29,15 @@ reuse UAT keys, certificates, volumes or state in production.
 
 ## Local development and UAT
 
+XNode's current mailbox host uses `CurrentMailboxCustody`; the configuration and
+independent-root/key-ring obligations belong to the
+[XNode operator guide](../xnode/docs/operator.md#current-mailbox-host-composition-candidate).
+The default remains disabled. The old survival mailbox generators emit retired
+authority sections rejected by the current host; do not use them to provision
+this graph. Current DID2 public-input staging alone does not enroll either MGR1
+role or the protected operation document. Reviewed provisioning, global recovery
+and retention remain open; Docker transport smoke is not mailbox delivery proof.
+
 For a fresh Registry source baseline without external/production database inputs,
 use the [disposable PostgreSQL test lane](docs/S00_REGISTRY_POSTGRES.md).
 It owns its loopback-only tmpfs container and cleanup; it is not TLS/UAT evidence.
