@@ -69,7 +69,7 @@ const directRules = [
   }
 ];
 const assignmentRegex = new RegExp(
-  `(?:^|[,\\{;])[\t ]*(?:export[\t ]+)?["']?(${assignmentName})["']?[\t ]*(?:=|:|=>)[\t ]*(?:["'\`])?(\\$\\{\\{[^\\r\\n]+?\\}\\}|\\$\\{[^}\\r\\n]+\\}|[^\\r\\n"',};#]+)`,
+  `(?:^|[,\\{;])[\t ]*(?:export[\t ]+)?["']?(${assignmentName})["']?[\t ]*(?:=|:|=>)[\t ]*(["'\`])?(\\$\\{\\{[^\\r\\n]+?\\}\\}|\\$\\{[^}\\r\\n]+\\}|[^\\r\\n"',};#]+)`,
   'gim'
 );
 const sensitiveFilenameRegex = new RegExp(`${assignmentName}\\s*(?:=|:|=>)\\s*[^/\\\\:]+`, 'i');
@@ -155,12 +155,13 @@ function isPlaceholder(value) {
     || /^https?:\/\/example\.invalid(?:\/[^\s]*)?$/i.test(normalized);
 }
 
-function looksLikeLiteralSecret(value, logicalName = '') {
+function looksLikeLiteralSecret(value, logicalName = '', quoted = false) {
   const normalized = String(value).trim().replace(/^["'`]|["'`]$/g, '').trim();
   if (isPlaceholder(normalized)) return false;
   if (/^(?:true|false|null|undefined|env|stdin)$/i.test(normalized)) return false;
-  if (/\.(?:cs|js|mjs|ps1|ts)$/i.test(logicalName)
+  if (!quoted && /\.(?:cs|js|mjs|ps1|ts)$/i.test(logicalName)
     && (/^[A-Za-z_$][\w$]*$/.test(normalized)
+      || /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$/.test(normalized)
       || /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)?[\t ]*\(/.test(normalized))) {
     return false;
   }
@@ -467,7 +468,7 @@ function tarEntries(buffer) {
 function inspectText(content, logicalName, findings) {
   assignmentRegex.lastIndex = 0;
   for (let match = assignmentRegex.exec(content); match; match = assignmentRegex.exec(content)) {
-    if (looksLikeLiteralSecret(match[2], logicalName)) {
+    if (looksLikeLiteralSecret(match[3], logicalName, Boolean(match[2]))) {
       findings.push(finding('sensitive-assignment', logicalName, lineNumberAt(content, match.index)));
     }
     if (match[0].length === 0) assignmentRegex.lastIndex += 1;

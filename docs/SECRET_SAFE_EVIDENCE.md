@@ -7,6 +7,14 @@ Mr. X is the accountable human owner for credential rotation, UAT reactivation,
 and evidence upload approval. Automation must fail closed and must never print,
 hash into a report, archive, or upload a secret value.
 
+The scanner distinguishes unquoted compiler identifier/member references in
+source files from embedded literal credentials. Quoted source assignments are
+still inspected as literals, including strings that look like member references.
+JSON, YAML, environment files and evidence receive no source-expression exemption.
+Private-key blocks, provider tokens, mnemonic and private-scalar detection remain
+independent checks. This classification is not an allow-list for secret files
+or permission to include credential values in evidence.
+
 ## Mandatory irreversible UAT rotation
 
 The previously tracked UAT mnemonic, three Ed25519 private seeds, and three BLS

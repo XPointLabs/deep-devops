@@ -88,6 +88,32 @@ test('fails closed for an oversized text artifact', async () => {
   }
 });
 
+test('source member references are not literals but quoted references and credentials still reject', async () => {
+  const root = await fixture();
+  try {
+    const source = path.join(root, 'references.cs');
+    await writeFile(source, 'privateKey = keyPair.PrivateKey;\nsecret = owner.Current.Secret;\n');
+    let result = await scan({ root, includeTracked: false, artifactRoots: [], paths: [source] });
+    assert.equal(result.status, 'ok');
+    for (const value of ['keyPair.PrivateKey', 'LiteralCanary123', 'CanaryIdentifier123']) {
+      await writeFile(source, `privateKey = "${value}";\n`);
+      result = await scan({ root, includeTracked: false, artifactRoots: [], paths: [source] });
+      assert.equal(result.status, 'failed');
+      assert.ok(result.findings.some(item => item.ruleId === 'sensitive-assignment'));
+      assert.ok(!JSON.stringify(result).includes(value));
+    }
+    // Source-expression classification never exempts configuration/evidence.
+    const config = path.join(root, 'artifacts', 'reference.json');
+    const referencedMember = ['keyPair', 'PrivateKey'].join('.');
+    await writeFile(config, JSON.stringify({ privateKey: referencedMember }));
+    result = await scan({ root, includeTracked: false, artifactRoots: [path.join(root, 'artifacts')] });
+    assert.equal(result.status, 'failed');
+    assert.ok(result.findings.some(item => item.ruleId === 'sensitive-assignment'));
+  } finally {
+    await remove(root);
+  }
+});
+
 test('top-level evidence volume does not consume the nested archive expansion budget', async () => {
   const root = await fixture();
   try {
