@@ -3,7 +3,10 @@ param(
     [string]$RegistryRoot = (Join-Path $PSScriptRoot '../../deep-registry-api'),
     [ValidatePattern('^[a-z0-9][a-z0-9-]{0,47}$')]
     [string]$Lane = 'registry-postgres',
-    [string]$Filter = ''
+    [string]$Filter = '',
+    [string[]]$GateReferencePaths = @(),
+    [string]$GateRunDirectory = '',
+    [string[]]$GateAllowedSkippedCases = @()
 )
 
 # Local provider-integration lane, not TLS/UAT/physical release evidence.
@@ -15,10 +18,17 @@ function Test-LocalDockerEndpoint([string]$Endpoint) {
     return $Endpoint -match '^unix:///[^/]' -or $Endpoint -match '^npipe:/{2,4}\./pipe/[^/]'
 }
 $registryPath = (Resolve-Path -LiteralPath $RegistryRoot).Path
+if (!$Filter -and !$GateReferencePaths.Count) {
+    throw 'A full Registry run requires predeclared references for the canonical repository test gate.'
+}
+if ($Filter -and $GateReferencePaths.Count) {
+    throw 'A filtered diagnostic cannot be passed off as the canonical full gate.'
+}
 if (!(Test-Path -LiteralPath (Join-Path $registryPath 'Deep.Registry.Api.slnx'))) {
     throw 'RegistryRoot must identify the Registry checkout.'
 }
-$dockerEndpoint = & docker context inspect --format '{{.Endpoints.docker.Host}}'
+$context = @(& docker context inspect | ConvertFrom-Json)
+$dockerEndpoint = $context[0].Endpoints.docker.Host
 if ($LASTEXITCODE -ne 0 -or !(Test-LocalDockerEndpoint $dockerEndpoint)) {
     throw 'This disposable lane requires a local Docker engine; remote contexts are rejected.'
 }
@@ -55,14 +65,16 @@ try {
     }
     $deadline = [DateTime]::UtcNow.AddSeconds(60)
     do {
-        $health = & docker inspect --format '{{.State.Health.Status}}' $containerId
+        $inspection = @(& docker inspect $containerId | ConvertFrom-Json)
+        $health = $inspection[0].State.Health.Status
         if ($LASTEXITCODE -ne 0) { throw 'Disposable PostgreSQL container disappeared.' }
         if ($health -eq 'healthy') { break }
         if ($health -eq 'unhealthy') { throw 'Disposable PostgreSQL failed readiness.' }
         Start-Sleep -Milliseconds 250
     } while ([DateTime]::UtcNow -lt $deadline)
     if ($health -ne 'healthy') { throw 'Disposable PostgreSQL readiness timed out.' }
-    $port = & docker inspect --format '{{(index (index .NetworkSettings.Ports "5432/tcp") 0).HostPort}}' $containerId
+    $inspection = @(& docker inspect $containerId | ConvertFrom-Json)
+    $port = $inspection[0].NetworkSettings.Ports.'5432/tcp'[0].HostPort
     if ($LASTEXITCODE -ne 0 -or $port -notmatch '^\d{1,5}$') { throw 'Invalid loopback test port.' }
     $connection = "Host=127.0.0.1;Port=$port;Database=deep_s00;Username=deep_s00;Pooling=false;Timeout=5"
     foreach ($name in @('DEEP_TEST_DID2_FLOOR_POSTGRES', 'DEEP_TEST_DID2_ROUTE_POSTGRES', 'DEEP_TEST_DID2_GRANT_POSTGRES')) {
@@ -71,19 +83,29 @@ try {
     }
     Write-Host "Disposable PostgreSQL ready; invocation=$invocation; external test origins disabled."
     Write-Host 'DB uses loopback-only trust for ephemeral synthetic data; this is not production TLS evidence.'
-    $testArguments = @('test', (Join-Path $registryPath 'Deep.Registry.Api.slnx'),
-        '-c', 'Release', '-p:DeepProtocolLocalCutover=true', '-p:DeepProtocolSourceCutover=true',
-        '--logger', 'trx', '--results-directory', $resultsPath, '--verbosity', 'quiet')
-    if ($Filter) { $testArguments += @('--filter', $Filter) }
-    & dotnet @testArguments
-    $testExitCode = $LASTEXITCODE
+    if ($GateReferencePaths.Count) {
+        if (!$GateRunDirectory) { $GateRunDirectory = $resultsPath }
+        $gate = Join-Path $registryPath '..\scripts\Invoke-RepositoryTestGate.ps1'
+        Import-Module (Join-Path $registryPath '..\scripts\TestGate.psm1') -Force
+        Assert-TestGateInterpreter WindowsPowerShell51
+        & $gate -Repository deep-registry-api -RunDirectory $GateRunDirectory `
+            -ReferencePaths $GateReferencePaths -AllowedSkippedCases $GateAllowedSkippedCases
+        $testExitCode = $LASTEXITCODE
+    } else {
+        $testArguments = @('test', (Join-Path $registryPath 'Deep.Registry.Api.slnx'),
+            '-c', 'Release', '-p:DeepProtocolLocalCutover=true', '-p:DeepProtocolSourceCutover=true',
+            '--logger', 'trx', '--results-directory', $resultsPath, '--verbosity', 'quiet', '--filter', $Filter)
+        & dotnet @testArguments
+        $testExitCode = $LASTEXITCODE
+    }
 }
 finally {
     foreach ($name in $savedEnvironment.Keys) {
         [Environment]::SetEnvironmentVariable($name, $savedEnvironment[$name], 'Process')
     }
     if ($containerId -match '^[a-f0-9]{64}$') {
-        $owner = & docker inspect --format '{{index .Config.Labels "deep.test.invocation"}}' $containerId
+        $inspection = @(& docker inspect $containerId | ConvertFrom-Json)
+        $owner = $inspection[0].Config.Labels.'deep.test.invocation'
         if ($LASTEXITCODE -ne 0 -or $owner -ne $invocation) {
             throw 'Cleanup refused: disposable container ownership could not be verified.'
         }

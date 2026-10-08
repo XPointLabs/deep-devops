@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,10 +11,40 @@ const quote = value => `'${value.replaceAll("'", "''")}'`;
 
 // Execute the real orchestration with process-local command doubles. No Docker,
 // database, network, source-text snapshots or real environment credentials.
-async function run(mode = 'success', testExit = 0) {
+async function run(mode = 'success', testExit = 0, selection = 'filtered') {
   const fixture = await mkdtemp(path.join(os.tmpdir(), 'deep-s00-pg-contract-'));
   try {
-    await writeFile(path.join(fixture, 'Deep.Registry.Api.slnx'), '<Solution />');
+    const registry = path.join(fixture, 'registry');
+    const scripts = path.join(fixture, 'scripts');
+    await mkdir(registry);
+    await mkdir(scripts);
+    await writeFile(path.join(registry, 'Deep.Registry.Api.slnx'), '<Solution />');
+    await writeFile(path.join(scripts, 'TestGate.psm1'), `
+function Assert-TestGateInterpreter {
+  param([string]$Interpreter)
+  if ($Interpreter -ne 'WindowsPowerShell51') { throw 'Wrong full interpreter selection.' }
+}
+Export-ModuleMember -Function Assert-TestGateInterpreter
+`);
+    await writeFile(path.join(scripts, 'Invoke-RepositoryTestGate.ps1'), `
+param([string]$Repository, [string]$RunDirectory, [string[]]$ReferencePaths, [string[]]$AllowedSkippedCases)
+if ($Repository -ne 'deep-registry-api' -or
+    $RunDirectory -ne ${quote(path.join(registry, 'artifacts', 'contract'))} -or
+    $ReferencePaths.Count -ne 2 -or $ReferencePaths[0] -ne 'prior.trx' -or
+    $ReferencePaths[1] -ne 'focused.trx' -or $AllowedSkippedCases.Count -ne 2 -or
+    $AllowedSkippedCases[0] -ne 'Example.SkipOne' -or $AllowedSkippedCases[1] -ne 'Example.SkipTwo') {
+  throw 'Canonical gate arguments or arrays were lost.'
+}
+Assert-IsolatedInputs
+Write-Host 'EVENT:GATE'
+exit ${testExit}
+`);
+    const argumentsBySelection = {
+      filtered: "-Filter 'FullyQualifiedName~FocusedCase'",
+      'missing-references': '',
+      'mixed-references': "-Filter 'FullyQualifiedName~FocusedCase' -GateReferencePaths @('prior.trx')",
+      full: `-GateReferencePaths @('prior.trx', 'focused.trx') -GateRunDirectory ${quote(path.join(registry, 'artifacts', 'contract'))} -GateAllowedSkippedCases @('Example.SkipOne', 'Example.SkipTwo')`
+    };
     const wrapper = `
 $global:mode = ${quote(mode)}
 $global:owner = ''
@@ -22,9 +52,10 @@ function global:docker {
   $global:LASTEXITCODE = 0
   switch ($args[0]) {
     'context' {
-      if ($global:mode -eq 'remote-context') { return 'ssh://not-local.invalid' }
-      if ($global:mode -eq 'remote-pipe') { return 'npipe:////not-local.invalid/pipe/docker_engine' }
-      return 'unix:///var/run/docker.sock'
+      $endpoint = 'unix:///var/run/docker.sock'
+      if ($global:mode -eq 'remote-context') { $endpoint = 'ssh://not-local.invalid' }
+      if ($global:mode -eq 'remote-pipe') { $endpoint = 'npipe:////not-local.invalid/pipe/docker_engine' }
+      return (ConvertTo-Json -InputObject @(@{ Endpoints = @{ docker = @{ Host = $endpoint } } }) -Depth 4 -Compress)
     }
     'run' {
       if ($args -contains '--volume' -or $args -contains '-v' -or $args -contains '--mount') {
@@ -44,19 +75,15 @@ function global:docker {
     }
     'inspect' {
       if ($args[-1] -ne ('a' * 64)) { throw 'Wrong inspected container.' }
-      if ($args[2] -like '*State.Health*') {
-        if ($global:mode -eq 'unhealthy') { return 'unhealthy' }
-        return 'healthy'
-      }
-      if ($args[2] -like '*NetworkSettings*') {
-        if ($global:mode -eq 'invalid-port') { return 'hostile-port' }
-        return '12345'
-      }
-      if ($args[2] -like '*Config.Labels*') {
-        if ($global:mode -eq 'wrong-owner') { return 'another-invocation' }
-        return $global:owner
-      }
-      throw 'Unexpected inspect command.'
+      $health = 'healthy'; $port = '12345'; $owner = $global:owner
+      if ($global:mode -eq 'unhealthy') { $health = 'unhealthy' }
+      if ($global:mode -eq 'invalid-port') { $port = 'hostile-port' }
+      if ($global:mode -eq 'wrong-owner') { $owner = 'another-invocation' }
+      return (ConvertTo-Json -InputObject @(@{
+        State = @{ Health = @{ Status = $health } }
+        NetworkSettings = @{ Ports = @{ '5432/tcp' = @(@{ HostPort = $port }) } }
+        Config = @{ Labels = @{ 'deep.test.invocation' = $owner } }
+      }) -Depth 6 -Compress)
     }
     'stop' {
       if ($args[-1] -ne ('a' * 64)) { throw 'Wrong cleanup target.' }
@@ -66,7 +93,7 @@ function global:docker {
     default { throw 'Unexpected Docker command.' }
   }
 }
-function global:dotnet {
+function global:Assert-IsolatedInputs {
   foreach ($name in @('DEEP_TEST_DID2_FLOOR_POSTGRES', 'DEEP_TEST_DID2_ROUTE_POSTGRES', 'DEEP_TEST_DID2_GRANT_POSTGRES')) {
     if ([Environment]::GetEnvironmentVariable($name) -ne
         'Host=127.0.0.1;Port=12345;Database=deep_s00;Username=deep_s00;Pooling=false;Timeout=5') {
@@ -76,13 +103,16 @@ function global:dotnet {
   if ($env:DEEP_TEST_DID2_EXTERNAL_ORIGIN -or $env:ConnectionStrings__External -or $env:POSTGRES_PASSWORD) {
     throw 'Ambient external inputs leaked into tests.'
   }
+}
+function global:dotnet {
+  Assert-IsolatedInputs
   if ($args[0] -ne 'test' -or $args -notcontains '-p:DeepProtocolLocalCutover=true' -or
       $args -notcontains '-p:DeepProtocolSourceCutover=true' -or $args -notcontains '--filter' -or
       $args[-1] -ne 'FullyQualifiedName~FocusedCase') { throw 'Wrong test command.' }
   Write-Host 'EVENT:TEST'
   $global:LASTEXITCODE = ${testExit}
 }
-& ${quote(script)} -RegistryRoot ${quote(fixture)} -Lane contract -Filter 'FullyQualifiedName~FocusedCase'
+& ${quote(script)} -RegistryRoot ${quote(registry)} -Lane contract ${argumentsBySelection[selection]}
 $laneExit = $LASTEXITCODE
 if ($global:mode -eq 'success') {
   foreach ($name in @('DEEP_TEST_DID2_EXTERNAL_ORIGIN', 'DEEP_TEST_DID2_FLOOR_POSTGRES',
@@ -94,7 +124,7 @@ if ($global:mode -eq 'success') {
 }
 exit $laneExit
 `;
-    const result = spawnSync(process.env.DEEP_PWSH ?? 'pwsh', ['-NoProfile', '-Command', wrapper], {
+    const result = spawnSync(process.env.DEEP_PWSH ?? (process.platform === 'win32' ? 'powershell.exe' : 'pwsh'), ['-NoProfile', '-Command', wrapper], {
       windowsHide: true, encoding: 'utf8', timeout: 15000,
       env: {
         ...process.env,
@@ -143,3 +173,21 @@ test('mismatched ownership refuses cleanup instead of stopping another container
   assert.match(result.stderr, /ownership could not be verified/);
   assert.doesNotMatch(result.stdout, /EVENT:STOP/);
 });
+
+for (const selection of ['missing-references', 'mixed-references']) {
+  test(`${selection} rejects before any provider operation`, async () => {
+    const result = await run('success', 0, selection);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /predeclared references|filtered diagnostic/);
+    assert.doesNotMatch(result.stdout, /EVENT:/);
+  });
+}
+
+for (const exit of [0, 7]) {
+  test(`full delegation preserves reference/skip arrays, cleanup and native exit ${exit}`, async () => {
+    const result = await run('success', exit, 'full');
+    assert.equal(result.status, exit, result.stderr);
+    assert.match(result.stdout, /EVENT:RUN[\s\S]*EVENT:GATE[\s\S]*EVENT:STOP/);
+    assert.doesNotMatch(result.stdout, /EVENT:TEST/);
+  });
+}

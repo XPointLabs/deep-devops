@@ -37,3 +37,11 @@ node ./scripts/production-readiness-status.mjs
 
 Run focused `node --test` files for changed scripts/tools and the relevant managed-external,
 TLS, chaos or production-ingress lane when runtime topology changes.
+
+The local Registry PostgreSQL wrapper delegates full runs to the root canonical
+test gate when supplied `-GateReferencePaths` and `-GateRunDirectory`; a full
+run without references rejects before creating a database. Filtered diagnostics
+retain their own explicit lane. Use Windows PowerShell5.1 for local provider
+gates. Docker inspection uses JSON, not shell-sensitive quoted Go templates.
+Do not copy full/qualification implementations into artifacts or treat lost
+native handles, platform skips or infrastructure smoke as release acceptance.

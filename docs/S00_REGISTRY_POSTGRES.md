@@ -8,13 +8,18 @@ owns the baseline acceptance requirement.
 
 ## Run
 
-Requires PowerShell 7, a **local** Docker engine, .NET 10 and sibling checkouts
-of Registry, Protocol, Shared and XNode. From Deep DevOps:
+Full local gates require Windows PowerShell5.1 explicitly, a **local** Docker
+engine, SDK10.0.301 and sibling checkouts of Registry, Protocol, Shared and
+XNode plus the root canonical scripts. Restore dependencies first. From Deep
+DevOps, declare actual existing full/focused receipts and exact platform skips:
 
 ```powershell
-./scripts/test-registry-postgres.ps1 -Lane s00
-./scripts/test-registry-postgres.ps1 -Lane focused -Filter 'FullyQualifiedName~DeepIdV2RouteThresholdJournalTests'
-node --test ./scripts/test-registry-postgres.test.mjs
+& .\scripts\test-registry-postgres.ps1 -Lane s00 `
+  -GateReferencePaths @($PriorFullTrx, $NewFocusedTrx) `
+  -GateRunDirectory $FreshRegistryArtifactsDirectory `
+  -GateAllowedSkippedCases $ExactWindowsSkippedCaseNames
+& .\scripts\test-registry-postgres.ps1 -Lane focused -Filter 'FullyQualifiedName~DeepIdV2RouteThresholdJournalTests'
+node --test .\scripts\test-registry-postgres.test.mjs
 ```
 
 `-RegistryRoot` selects a Registry checkout containing its solution. `-Lane`
@@ -22,7 +27,12 @@ is a short lowercase artifact label, not an environment selection. Every run
 gets a fresh invocation UUID and a separate ignored `artifacts/s00/<lane>-<id>`
 directory in Registry. Both Protocol local/source-cutover flags are set;
 the default test project remains complete unless an explicit filter is supplied.
-The script returns dotnet's exit code after cleanup. A failed test is not a
+Full without references rejects before creating the provider. Full delegates
+build/capture/actual DB+ML-DSA preflight/unfiltered test/qualification to the
+single [root mechanism](../../AGENTS.md#canonical-local-test-invocation);
+filtered diagnostics cannot also supply full references. Pass arrays inside
+PowerShell, not through external `-File` argument serialization.
+The script returns the actual diagnostic/canonical gate exit after cleanup. A failed test is not a
 successful baseline; inspect the TRX locally without committing machine paths.
 
 ## Scope and cleanup
@@ -53,10 +63,11 @@ sanitized case names/counts/hashes as in the
 
 ## What is proved
 
-The eight executable orchestration guard tests run the real PowerShell script
+The twelve executable orchestration guard tests run the real PowerShell script
 with process-local Docker/dotnet doubles: remote context/override/UNC rejection,
 pinned tmpfs/loopback scope, isolation and restoration of ambient inputs,
-test exit propagation, failed readiness/port cleanup and wrong-owner refusal.
+test exit propagation, failed readiness/port cleanup, wrong-owner refusal,
+missing/mixed reference rejection and canonical reference/skip-array delegation.
 They are harness evidence, not actual provider integration. Actual full
 Registry runs separately exercise the real disposable PostgreSQL provider.
 Linux Unix-socket signer cases require the Registry Dockerfile target
