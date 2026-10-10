@@ -102,6 +102,17 @@ These checks are evidence contracts, not a production deployment command.
 Production publication, deployment and rollout always require separate
 authorization.
 
+The S01 operational-successor caller now accepts the current verified authority
+under [DR-0108](../docs/survival-program/decisions/DR-0108-current-authority-operational-successor.md),
+not a bootstrap compatibility overload. The offline FileSigner accepts the
+closed `AuthorityRenewal` purpose; Protocol still validates the complete pinned
+chain and every returned signature. Windows PowerShell5.1/Desktop/SDK10.0.301
+Release builds of `ProductionAuthority.Bootstrap.Tests` and `Deep.Dev` pass with
+zero warnings/errors (3.26s/9.47s). The bootstrap console suite passes all five
+scenarios, including a real FileSigner same-key renewal/current-authority
+successor, on synthetic temporary custody only. This is not production
+provisioning, current network readiness, transport smoke or device evidence.
+
 Key operator references:
 
 - `docs/UAT_DEPLOYMENT.md`

@@ -443,7 +443,8 @@ sealed class FileSigner :
             request.Purpose is not (XPointNetworkRootSignaturePurpose.GenesisAuthority or
                 XPointNetworkRootSignaturePurpose.DirectoryTimeSourcePolicy or
                 XPointNetworkRootSignaturePurpose.NetworkPolicy or
-                XPointNetworkRootSignaturePurpose.MailboxAuthority))
+                XPointNetworkRootSignaturePurpose.MailboxAuthority or
+                XPointNetworkRootSignaturePurpose.AuthorityRenewal))
             throw new CryptographicException("The offline root rejected an out-of-policy signing request.");
         return Sign(request.SigningInput, signature64);
     }

@@ -85,7 +85,7 @@ internal static class SuccessorCeremony
                 var ceremony = HashDomain("Deep/XPoint/V1/operational-successor-ceremony",
                     Join(network, expectedHeadHash, expectedPmtHash, U64(observedUnix)));
                 var request = new XPointNetworkOperationalSuccessorRequest(
-                    ceremony, bootstrap, [root], [witness1, witness2, witness3],
+                    ceremony, bootstrap.Authority, [root], [witness1, witness2, witness3],
                     [seed1.Rollover, seed2.Rollover, seed3.Rollover],
                     source.One("xvp1"),
                     source.Many("xnd1").Select(static value => (ReadOnlyMemory<byte>)value).ToArray(),

@@ -97,7 +97,7 @@ internal static class DevPublisher
                     // Renew installed current/announced-next slots. New private
                     // keys are never generated online or substituted into custody.
                     var next = await XPointNetworkOperationalSuccessorAuthor.AuthorDelegatedAsync(new(
-                        RandomNumberGenerator.GetBytes(32),bootstrap,[],witnesses,rollovers,
+                        RandomNumberGenerator.GetBytes(32),bootstrap.Authority,[],witnesses,rollovers,
                         closure.ExactNetworkPolicyChain[^1],closure.ExactActiveNodeDescriptors,closure.ExactViewChain,
                         closure.ExactHeadChain[^1],pma,closure.ExactPlacementTopologyChain[^1],
                         XPointNetworkOperationalSuccessorAuthor.ComputeXnh1CoreHash(closure.ExactHeadChain[^1].Span),

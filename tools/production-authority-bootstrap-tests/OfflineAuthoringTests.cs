@@ -72,7 +72,7 @@ internal static class OfflineAuthoringTests
         XPointNetworkOperationalSuccessorAuthor.ComputeAdh1CoreHash(genesis.ExactAdh1.Span)
             .CopyTo(adhReference, 6);
         var successor = await XPointNetworkOperationalSuccessorAuthor.AuthorAsync(
-            new XPointNetworkOperationalSuccessorRequest(H("successor"), bootstrap, [root], witnesses, rollovers,
+            new XPointNetworkOperationalSuccessorRequest(H("successor"), bootstrap.Authority, [root], witnesses, rollovers,
                 genesis.ExactXvp1, genesis.ExactXnd1, [genesis.ExactXnv1], genesis.ExactXnh1,
                 genesis.ExactPma2, genesis.ExactPmt2,
                 XPointNetworkOperationalSuccessorAuthor.ComputeXnh1CoreHash(genesis.ExactXnh1.Span),
@@ -85,6 +85,21 @@ internal static class OfflineAuthoringTests
             witnesses.Select(value => (IAccountDirectoryAdh1WitnessSigner)new AdhWitness(value)).ToArray());
         TestPublicNetworkExport(directory, bootstrap, genesis, successor, did2Genesis);
         await TestDelegatedRenewalAsync(bootstrap, genesis, nodes, witnesses, adhReference);
+        var renewal = await XPointNetworkBootstrapAuthor.AuthorSameKeyRenewalAsync(H("authority-renewal"), bootstrap.Authority,
+            [bootstrap.ExactDts1], 8_500, 8_500, 30_000, 8_500, 20_000, [root]);
+        var renewedAuthority = XPointNetworkAuthorityVerifier.Verify(bootstrap.GenesisPin,
+            [bootstrap.ExactXna1, renewal.ExactXna1], [bootstrap.ExactDts1, renewal.ExactDts1]);
+        if (renewedAuthority.AuthorityGeneration != 1 || renewedAuthority.Dts1PolicyGeneration != 1 ||
+            !renewedAuthority.RootKeys[0].Ed25519PublicKey.Span.SequenceEqual(root.Ed25519PublicKey.Span))
+            throw new Exception("The real offline signer did not preserve the pinned authority/key lineage.");
+        var currentSuccessor = await XPointNetworkOperationalSuccessorAuthor.AuthorAsync(new(
+            H("current-authority-successor"), renewedAuthority, [root], witnesses, rollovers,
+            genesis.ExactXvp1, genesis.ExactXnd1, [genesis.ExactXnv1], genesis.ExactXnh1,
+            genesis.ExactPma2, genesis.ExactPmt2,
+            XPointNetworkOperationalSuccessorAuthor.ComputeXnh1CoreHash(genesis.ExactXnh1.Span),
+            ContactCodec.Decode("PMT2", genesis.ExactPmt2.Span).ArtifactHash.Span,
+            adhReference, 8_500, 8_510, 8_900));
+        _ = MailboxAuthorityV2Verifier.Verify(renewedAuthority, currentSuccessor.ExactPma2.Span, 8_520, 8_521);
 
         FileSigner Signer(string name, byte id, byte seedValue, byte domain, bool isRoot)
         {
@@ -114,7 +129,7 @@ internal static class OfflineAuthoringTests
         XPointNetworkOperationalSuccessorRequest Request(ulong from = 2_000, ulong until = 2_200,
             ReadOnlyMemory<byte>? policy = null, ReadOnlyMemory<byte>? head = null,
             IReadOnlyList<XPointNetworkOperationalNodeRollover>? keys = null) => new(
-                H("delegated"), bootstrap, [], witnesses, keys ?? rollovers,
+                H("delegated"), bootstrap.Authority, [], witnesses, keys ?? rollovers,
                 policy ?? genesis.ExactXvp1, genesis.ExactXnd1, [genesis.ExactXnv1],
                 head ?? genesis.ExactXnh1, genesis.ExactPma2, genesis.ExactPmt2,
                 XPointNetworkOperationalSuccessorAuthor.ComputeXnh1CoreHash(genesis.ExactXnh1.Span),
