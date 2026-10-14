@@ -19,6 +19,7 @@ try {
     else if (args.Length == 4 && args[0] == "publish") await DevPublisher.RunAsync(args[1], args[2], args[3], ReadNtsAsync);
     else if (args.Length == 4 && args[0] == "publish-short-view") await DevPublisher.RunAsync(args[1], args[2], args[3], ReadNtsAsync, operationalLifetimeSeconds:180, singlePublication:true);
     else if (args.Length == 2 && args[0] == "exercise-directory") await DevDirectoryExercise.RunAsync(args[1]);
+    else if (args.Length == 3 && args[0] == "admit-observer") await DevObserverAdmission.RunAsync(args[1], args[2]);
     else if (args.Length == 3 && args[0] == "prepare-authority") {
         _ = await DevOfflineAuthorityRenewal.PrepareAsync(args[1], args[2], ReadNtsAsync);
         Console.WriteLine("Development paired authority renewal prepared offline; no runtime, journal, key or floor was changed.");
@@ -37,11 +38,28 @@ static void ConfigureAtomicBundle(string custodyRoot)
     using var manifest = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(root, "public/deep-dev.json")));
     if (manifest.RootElement.GetProperty("schema").GetString() != "deep-dev.v1" || manifest.RootElement.GetProperty("nodeCount").GetInt32() != 3)
         throw new InvalidDataException("Not the owned three-node development environment.");
+    var topology = DevTopology.ForProject(manifest.RootElement.GetProperty("projectName").GetString()!);
+    if (manifest.RootElement.GetProperty("containerIpv4Prefix").GetString() != topology.Ipv4Prefix)
+        throw new InvalidDataException("Development topology differs from its owned manifest.");
+    var closureFile = Path.Combine(root, "public/network.ncp2");
+    using (var source = new FileStream(closureFile, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete)) {
+        if (source.Length is < 1 || source.Length > XPointNetworkClosureWireCodec.MaximumResponseLength)
+            throw new InvalidDataException("Development public closure is unbounded.");
+        var bytes = new byte[checked((int)source.Length)]; source.ReadExactly(bytes);
+        var closure = XPointNetworkClosureWireCodec.DecodeResponse(bytes);
+        var pin = new XPointNetworkGenesisPin(
+            Convert.FromHexString(manifest.RootElement.GetProperty("networkIdHex").GetString()!),
+            Convert.FromHexString(manifest.RootElement.GetProperty("genesisAuthorityCoreHashHex").GetString()!));
+        if (!closure.NetworkId.Span.SequenceEqual(pin.NetworkId.Span)) throw new InvalidDataException("Development network differs.");
+        _ = XPointNetworkAuthorityVerifier.Verify(pin, closure.ExactAuthorityChain, closure.ExactTimePolicyChain);
+    }
     for (var i = 1; i <= 3; i++) {
         var file = Path.Combine(root, $"node-{i}/appsettings.Development.json");
         var config = JsonNode.Parse(File.ReadAllText(file))!.AsObject();
         if (config["DeepIdV2DirectoryProof"]!["NetworkIdHex"]!.GetValue<string>() != manifest.RootElement.GetProperty("networkIdHex").GetString())
             throw new InvalidDataException("Node configuration has a different development identity.");
+        config.Remove("ContactAuthority");
+        config.Remove("GroupControlAuthority");
         var placement = config["DeepIdV2NetworkPlacement"]!.AsObject();
         foreach (var field in new[] { "ExactPolicyPaths", "ExactViewPaths", "ExactHeadPaths", "ExactActiveNodePaths", "ExactMailboxProjectionPaths", "ExactMailboxAuthorityPaths" }) placement.Remove(field);
         config["PrivacyRouting"]!["NextX25519PrivateKeyPath"] = "/run/secrets/key_x25519_next";
@@ -78,7 +96,8 @@ static void ConfigureAtomicBundle(string custodyRoot)
 static async Task InitializeAsync(string[] args)
 {
 // Private dev operator inputs never share production custody or offline root mounts.
-if (args.Length != 3 || args[0] != "init") throw new ArgumentException("Expected init DEV_ROOT NTS_OBSERVER.");
+if (args.Length != 4 || args[0] != "init") throw new ArgumentException("Expected init DEV_ROOT NTS_OBSERVER PROJECT_NAME.");
+var topology = DevTopology.ForProject(args[3]);
 var root = Path.GetFullPath(args[1]);
 var requiredParent = Path.GetFullPath("C:/Work/DeepSession/secrets/dev");
 if (OperatingSystem.IsWindows() && !root.StartsWith(requiredParent + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
@@ -97,6 +116,10 @@ var offlineRoot = Dir("offline-root");
 using var signer = Signer.Create(Path.Combine(offlineRoot, "root.seed"), rootSigner: true);
 var witnesses = Enumerable.Range(1, 3).Select(i => Signer.Create(Path.Combine(operatorRoot, $"witness-{i}.seed"))).ToArray();
 var nodes = Enumerable.Range(1, 3).Select(i => Signer.Create(Path.Combine(operatorRoot, $"node-{i}.seed"), nodeSigner: true)).ToArray();
+// Keep independent role custody. A public key whose seed was discarded can
+// never become an operational mailbox signer after bootstrap.
+using var depositIssuer = Signer.Create(Path.Combine(registrySecrets, "mailbox-deposit.seed"));
+using var retrieveIssuer = Signer.Create(Path.Combine(registrySecrets, "mailbox-retrieve.seed"));
 try
 {
     // Real native PQ provider and account persistence, not a synthetic public credential.
@@ -138,7 +161,7 @@ try
     {
         var name = $"node-{i+1}";
         var nodeDirectory = Dir(name + "/secrets");
-        var address = IPAddress.Parse($"172.31.240.{11+i}");
+        var address = IPAddress.Parse($"{topology.Ipv4Prefix}.{11+i}");
         var currentPin = Certificate(name, name, address, ca);
         var nextPin = Certificate(name + "-next", name, address, ca);
         onion[i] = RandomNumberGenerator.GetBytes(32);
@@ -163,8 +186,8 @@ try
     var pending = await XPointNetworkOperationalGenesisAuthor.AuthorNetworkCandidateAsync(new(
         RandomNumberGenerator.GetBytes(32), bootstrap, [signer], witnesses, nodeModels,
         Hash("deep-dev-carrier-candidate"), Hash("deep-dev-carrier-set-candidate"), Hash("deep-dev-mailbox"),
-        PublicKeyAuth.GenerateKeyPair(RandomNumberGenerator.GetBytes(32)).PublicKey,
-        PublicKeyAuth.GenerateKeyPair(RandomNumberGenerator.GetBytes(32)).PublicKey,
+        depositIssuer.Ed25519PublicKey.Span,
+        retrieveIssuer.Ed25519PublicKey.Span,
         before, before, observed + 3_600, rootPolicyExpiresAtUnixSeconds: expiry));
     var adh = await DeepIdV2DirectoryHeadAuthor.AuthorGenesisAsync(bootstrap.Authority, before, observed + 3_600,
         witnesses.Select(w => (IAccountDirectoryAdh1WitnessSigner)w).ToArray());
@@ -249,8 +272,8 @@ try
             ["Node"] = new { RouterId = Convert.ToHexString(model.IdentitySigner.Ed25519PublicKey.Span), Ed25519PrivateKeyPath = "/run/secrets/key_ed25519",
                 DataDirectory = "/var/lib/xnode", IsRelay = true, ApiListenUrl = "http://0.0.0.0:8080", PeerRpcListenUrl = "http://0.0.0.0:8081", PrivacyPeerH2ListenUrl = "https://0.0.0.0:443" },
             ["Vless"] = new { Enabled = false, MockProcess = false }, ["RegistryHeartbeat"] = new { Enabled = false },
-            ["ContactService"] = new { RuntimeActivation = false, MapReplicaEndpoint = false }, ["ContactAuthority"] = new { Enabled = false },
-            ["GroupControlService"] = new { RuntimeActivation = false, MapReplicaEndpoint = false }, ["GroupControlAuthority"] = new { Enabled = false },
+            ["ContactService"] = new { RuntimeActivation = false, MapReplicaEndpoint = false },
+            ["GroupControlService"] = new { RuntimeActivation = false, MapReplicaEndpoint = false },
             ["RequiredTerminals"] = new { Contact = false, GroupControl = false },
             ["DeepIdV2DirectoryProof"] = new { Enabled = true, RegistryOrigin = "https://registry/", NetworkIdHex = Convert.ToHexString(network),
                 GenesisAuthorityCoreHashHex = Convert.ToHexString(bootstrap.GenesisPin.AuthorityCoreHash.Span), ExactAuthorityPaths = new[] { "/run/deep-public/genesis.xna1" },
@@ -258,7 +281,7 @@ try
                 StateRelativeDirectory = "did2-proof-state", DataProtectionKeysRelativeDirectory = "did2-proof-keys", DeploymentProfileId = 1, RequestTimeoutSeconds = 10 },
             ["DeepIdV2NetworkPlacement"] = new { Enabled = true, PublicBundlePath = "/run/deep-public/network.ncp2", PublicObservationDid2Path = "/run/deep-public/observer.did2" },
             ["DeepIdV2ReplicaStage"] = new { Enabled = true },
-            ["PrivacyRouting"] = new { Enabled = true, X25519PrivateKeyPath = "/run/secrets/key_x25519", PublicPeerBaseUrl = $"https://172.31.240.{11+i}/",
+            ["PrivacyRouting"] = new { Enabled = true, X25519PrivateKeyPath = "/run/secrets/key_x25519", PublicPeerBaseUrl = $"https://{topology.Ipv4Prefix}.{11+i}/",
                 StateProtectionKeyPath = "/run/secrets/onion-state-protection.key", ReplayStateRelativePath = "did2-onion-replay.state", EntropyStateRelativePath = "did2-onion-entropy.state",
                 KeyVaultDirectoryRelativePath = "did2-onion-key-vault", AllowInsecureHttpPeerTransport = false,
                 Peers = nodeModels.Where(m => m != model).Select(m => new { RouterId = Convert.ToHexString(m.IdentitySigner.Ed25519PublicKey.Span),
@@ -266,7 +289,8 @@ try
                     NextSpkiSha256 = Convert.ToHexStringLower(m.NextOriginSpkiSha256.Span) }).ToArray() }
         });
     }
-    Json("public/deep-dev.json", new { schema = "deep-dev.v1", authorityOwner = "Mr. X", networkIdHex = Convert.ToHexString(network),
+    Json("public/deep-dev.json", new { schema = "deep-dev.v1", authorityOwner = "Mr. X", projectName = topology.ProjectName,
+        containerIpv4Prefix = topology.Ipv4Prefix, networkIdHex = Convert.ToHexString(network),
         genesisAuthorityCoreHashHex = Convert.ToHexString(bootstrap.GenesisPin.AuthorityCoreHash.Span), genesisHeadCoreHashHex = Convert.ToHexString(adh.CoreHash.Span),
         nodeCount = 3, operatorModel = "single-operator-local", deviceEvidence = false, carrierEvidence = false });
     Directory.Move(root, target);

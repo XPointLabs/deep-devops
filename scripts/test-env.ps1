@@ -4,6 +4,8 @@
 
     [ValidateSet("deep-dev", "compat", "external")]
     [string] $BackendMode = $(if ($env:DEEP_BACKEND_MODE) { $env:DEEP_BACKEND_MODE } else { "deep-dev" }),
+    [ValidateSet("deep-dev", "deep-dev-current")]
+    [string] $DeepDevProjectName = "deep-dev",
 
     [string] $ManagedExternalProfile = $(if ($env:DEEP_EXTERNAL_PROFILE) { $env:DEEP_EXTERNAL_PROFILE } else { "" }),
 
@@ -21,7 +23,7 @@ if ($BackendMode -eq 'deep-dev') {
     if ($Suite -ne 'smoke' -or $RequireRouterNoMock -or $RequirePushProviderCanary -or $ManagedExternalProfile) {
         throw 'deep-dev currently supports only the real proof/ONION smoke check; it is not full carrier, push, device or release evidence.'
     }
-    & (Join-Path $ScriptDir 'deep-dev.ps1') -Action Verify
+    & (Join-Path $ScriptDir 'deep-dev.ps1') -Action Verify -ProjectName $DeepDevProjectName
     if (-not $?) { throw 'deep-dev verified capability smoke failed.' }
     return
 }

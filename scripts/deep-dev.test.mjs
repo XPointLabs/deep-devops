@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 const read = p => readFile(new URL(p, import.meta.url), 'utf8');
 
@@ -23,7 +25,8 @@ test('deep-dev keeps exactly six scoped native ARM64 services and durable custod
 
 test('recovery scripts do not reset custody and historical probe receives public inputs only', async () => {
   const script = await read('./deep-dev.ps1');
-  assert.match(script, /--project-name','deep-dev'/);
+  assert.match(script, /ValidateSet\('deep-dev','deep-dev-current'\)/);
+  assert.match(script, /--project-name',\$ProjectName/);
   assert.match(script, /secrets\\dev/);
   assert.doesNotMatch(script, /'down'.*'--volumes'|'volume','rm'|'system','prune'|Remove-Item/);
   const fault = script.split("if ($Action -eq 'HistoryFault')")[1].split("if ($Action -in")[0];
@@ -31,6 +34,34 @@ test('recovery scripts do not reset custody and historical probe receives public
   assert.match(fault, /target=\/run\/deep-public,readonly/);
   assert.doesNotMatch(fault, /target=\/run\/(secrets|deep-operator)|target=\/var\/lib/);
   assert.match(fault, /messageDeliveryEvidence=\$false/);
+});
+
+test('actual Compose rendering isolates current and retained project state, subnets and ports', () => {
+  const composePath = fileURLToPath(new URL('../docker-compose.deep-dev.yml', import.meta.url));
+  const configurations = ['deep-dev', 'deep-dev-current'].map((project, index) => {
+    const prefix = `172.31.${240 + index}`;
+    const document = JSON.parse(execFileSync('docker', ['compose', '--project-name', project, '--file', composePath,
+      'config', '--format', 'json'], { encoding: 'utf8', env: { ...process.env,
+        DEEP_DEV_ROOT: `C:/Work/DeepSession/secrets/dev/${project}`, DEEP_DEV_PROJECT: project,
+        DEEP_DEV_IPV4_PREFIX: prefix, DEEP_DEV_PORT_PREFIX: String(281 + index),
+        DEEP_DEV_REGISTRY_PORT: String(28443 + index * 100) } }));
+    assert.equal(document.name, project);
+    assert.equal(Object.keys(document.services).length, 6);
+    assert.equal(document.networks.dev.name, `${project}_dev`);
+    assert.equal(document.networks.dev.ipam.config[0].subnet, `${prefix}.0/24`);
+    for (const service of ['floor', 'registry', 'node-1', 'node-2', 'node-3'])
+      assert.equal(document.volumes[`${service}-secrets`].name, `${project}_${service}-secrets`);
+    for (const volume of Object.values(document.volumes)) assert.ok(volume.name.startsWith(`${project}_`));
+    for (const service of Object.values(document.services)) {
+      for (const binding of service.ports ?? []) assert.equal(binding.host_ip, '127.0.0.1');
+      for (const binding of service.volumes ?? [])
+        if (binding.type === 'bind') assert.ok(binding.source.replaceAll('\\', '/').includes(`/secrets/dev/${project}/`));
+    }
+    return document;
+  });
+  const ports = document => Object.values(document.services).flatMap(s => (s.ports ?? []).map(p => String(p.published)));
+  assert.equal(ports(configurations[0]).filter(p => ports(configurations[1]).includes(p)).length, 0);
+  assert.notEqual(configurations[0].networks.dev.ipam.config[0].subnet, configurations[1].networks.dev.ipam.config[0].subnet);
 });
 
 test('local builds use reviewed image digests and a prebuilt native asset, not C++ compilation', async () => {
@@ -103,4 +134,27 @@ test('offline dev ceremony is explicit and cannot publish root-only renewal as a
   assert.doesNotMatch(source, /EncodeResponse|WriteJournal|FileMode\.Create[,)]|genesis reset/);
   const compose = await read('../docker-compose.deep-dev.yml');
   assert.doesNotMatch(compose, /offline-root/);
+});
+
+test('new dev bootstrap retains independent mailbox issuer seeds and emits no retired authority section', async () => {
+  const source = await read('../tools/deep-dev/Program.cs');
+  assert.match(source, /Signer\.Create\(Path.Combine\(registrySecrets, "mailbox-deposit.seed"\)\)/);
+  assert.match(source, /Signer\.Create\(Path.Combine\(registrySecrets, "mailbox-retrieve.seed"\)\)/);
+  assert.match(source, /depositIssuer.Ed25519PublicKey.Span/);
+  assert.match(source, /retrieveIssuer.Ed25519PublicKey.Span/);
+  assert.doesNotMatch(source, /\["ContactAuthority"\] =|\["GroupControlAuthority"\] =/);
+  assert.match(source, /XPointNetworkClosureWireCodec.DecodeResponse\(bytes\)/);
+});
+
+test('observer admission sends the retained exact request over normal TLS without custody mounts or currentness substitution', async () => {
+  const script = await read('./deep-dev.ps1');
+  const helper = script.split('function Invoke-DevObserverAdmission {')[1].split("if ($Action -eq 'AdmitObserver')")[0];
+  assert.match(helper, /observer\/admission.dga2/);
+  assert.match(helper, /target=\/run\/deep-public,readonly/);
+  assert.match(helper, /target=\/run\/deep-observer\/admission.dga2,readonly/);
+  assert.doesNotMatch(helper, /offline-root|target=\/run\/secrets|target=\/run\/deep-operator|target=\/var\/lib/);
+  const source = await read('../tools/deep-dev/DevObserverAdmission.cs');
+  assert.match(source, /https:\/\/registry\/api\/v2\/account-directory\/genesis-admissions/);
+  assert.match(source, /receipt.OperationId.Span.SequenceEqual\(request.OperationId.Span\)/);
+  assert.doesNotMatch(source, /ServerCertificateCustomValidationCallback|RemoteCertificateValidationCallback|CreateAsync|new SystemClock|EnsureCurrent/);
 });

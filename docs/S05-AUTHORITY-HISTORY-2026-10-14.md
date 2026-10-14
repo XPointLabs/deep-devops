@@ -330,3 +330,61 @@ created, no old decoder/converter was added, and no volume, registered identity,
 genesis or floor was reset. The separate current provisioning clean-break and
 supported retained-journal activation must be resolved before runtime readiness
 can be claimed. Existing infrastructure smoke is not acceptance of this fixture.
+
+## Separate current-only runtime qualification
+
+The supported Compose template now binds either explicit `deep-dev` or
+`deep-dev-current` to disjoint custody, named volumes, network/subnet, loopback
+ports and image tags. Both run the same current-only code. The original
+pre-cutover fixture was not converted, reset or used for current acceptance.
+The separate current fixture was created by first-time Init with actual NTS and
+eight-chain NCP2, then explicitly provisioned and started. Its own subsequent
+checks retain its genesis, keys, publisher journal and independent floors.
+
+Actual startup exposed two provisioning defects, not Docker/TLS failures:
+retired ContactAuthority/GroupControlAuthority declarations caused all nodes to
+reject before startup; after removing those declarations through the owned
+current generator, the observer had no admitted current checkpoint. The new
+supported observer-admission command submits its exact retained DGA2 over normal
+authenticated HTTPS and checks the operation/network receipt binding. It does
+not recreate the account or promote the receipt to freshness. Node verifiers
+independently acquire their own current proofs. Both initial readiness attempts
+returned native1 and remain failed, not accepted recovery cases.
+
+Windows focused source run07:22 checks, build/executable native0 and zero
+warnings/errors, including exact project address separation and unknown-project
+rejection. `artifacts/s05-dev-offline-authority-20261014/07/tests.log` SHA256:
+`0A1AB112929056DBA5E54943054B76C8908C26F9AFC768CCC90B2E9EA7D2AA93`.
+Topology/observer contracts:10/0, including actual Docker Compose rendering of
+both project namespaces. These contracts are not transport delivery tests.
+
+Current Linux ARM64 Registry/XNode/publisher images built successfully. The
+actual current Up, retained observer replay and Verify returned native0:
+Registry proof ready and three independently verified ONION capabilities.
+Runtime receipts: `artifacts/s05-dev-current-runtime-20261014/01/`.
+`Verify.log` SHA256:
+`2A88A767E9485A239D4EEFA76DBDDB047D68C9837E3F03CDDB523984334FBC63`.
+One scoped StackFault passed:20seconds offline,14seconds recovery,30seconds
+stable current-proof/three-ONION window, identical container IDs, canonical
+mount bindings and online-key digests. No whole-engine shutdown or floor reset.
+`StackFault.log` SHA256:
+`59379E93D4EB3469D45B7BDE65DF7D23204419CDA8D5AB3FE3887383A945E017`.
+
+Real HistoryFault then passed with all three current nodes offline during130
+disposable DEV admissions,129 signed head successors, and independent node
+catch-up after restart in10seconds. Native0, custodyReset=false; no mocks or
+fixture clock supplied to Registry/nodes. Receipt:
+`artifacts/s05-dev-current-runtime-20261014/02/HistoryFault.log`, SHA256:
+`56535D4C54AFF2DA7001F459A24C4BCB1014DF85D3D8365ABB73573B2A668D8D`.
+The explicit current-instance test-env proof/ONION smoke also returned native0.
+Real host NTS/offline paired-authority preparation succeeded on this current
+fixture; the prepared pair was not imported or activated as an operational root.
+
+New Init also retains independent mailbox issuer seeds rather than discard
+them. This current fixture was initialized before that fix; its old issuer
+private keys cannot be reconstructed. It needs a properly root-signed role/PMA
+successor and protected external signer/journal provisioning. Readiness above
+does not prove grant issuance, contact/message/group/blob terminals or carrier
+delivery. Root/witness/role/traffic/TLS rotation and protected publisher import
+remain S05 work. Physical contacts/messages/files/groups remain0/4; production,
+main and GitHub Releases were not changed.

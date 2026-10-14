@@ -1,11 +1,49 @@
 # Retained local development network
 
-`deep-dev` is the only supported local Deep compose project. It contains
+`docker-compose.deep-dev.yml` is the supported local Deep topology. It contains
 Registry, an independent TLS PostgreSQL directory floor, three XNode processes
 and a delegated operational-view publisher. It is **not** UAT or a production
 release/device/message-delivery evidence profile. Production servers were not
 changed. Mr. X remains the single development operator; three signer keys are
 not three independent operators.
+
+The wrapper accepts exactly two isolated project names: `deep-dev` and
+`deep-dev-current`. Both use the same current-only code, not different protocol
+readers. `deep-dev-current` permits a new current fixture alongside the preserved
+pre-cutover one: its custody defaults to `secrets/dev/deep-dev-current`, its named
+volumes/network are project-scoped, its subnet is `172.31.241.0/24`, and its host
+Registry/node ports are28543/28291–28296. The original defaults are unchanged.
+The manifest binds the exact project and container prefix; mutating actions
+reject an absent/mismatched binding rather than infer old configuration. Only
+Status/Stop can inspect/stop an older fixture without that binding. Wrapper
+environment overrides are restored even when an operation fails.
+
+First-time creation of the **separate** current fixture uses `Init`, `Build`,
+`Provision`, `Up` with `-ProjectName deep-dev-current`, then `Verify` with the same
+project. `Init` still rejects any existing custody. Never use that sequence on
+the retained pre-cutover project to make a failed recovery appear successful.
+The new genesis is an isolated DEV fixture, not a production root/identity
+replacement or acceptance of old-state recovery. Once created, its lifecycle
+tests must retain its own keys, journal, genesis and floors.
+
+`Up` submits the exact retained observer admission through authenticated Registry
+HTTPS after starting the services. `AdmitObserver` repeats that same operation
+without recreating the account; Registry's existing idempotency rules apply.
+The disposable probe mounts only public bootstrap and the single prepared
+admission file, not root/operator/online signer custody or protected volumes.
+Receipt binding is checked, but receipt bytes are never used as current proof.
+Each node still independently acquires and verifies a fresh DID2 proof.
+Use `test-env.ps1 -Suite smoke -BackendMode deep-dev -DeepDevProjectName
+deep-dev-current` to check that instance explicitly. It does not silently redirect
+a failed older fixture to the new one. The smoke remains proof/ONION readiness,
+not masked carrier delivery or a device test.
+
+New Init retains independent `mailbox-deposit.seed` and `mailbox-retrieve.seed`
+candidates matching its PMA2 public keys, instead of discarding their seeds.
+That alone does not configure the protected external signers, grant/revocation
+journals or mailbox admission. An already initialized fixture with discarded
+issuer keys requires a properly signed policy/role successor; do not create an
+unrelated seed and pretend it matches its old PMA2.
 
 ## Architecture and custody
 
@@ -73,6 +111,7 @@ Run from the DevOps repository:
 ```powershell
 ./scripts/deep-dev.ps1 -Action Status
 ./scripts/deep-dev.ps1 -Action PrepareAuthority
+./scripts/deep-dev.ps1 -Action AdmitObserver
 ./scripts/deep-dev.ps1 -Action Build
 ./scripts/deep-dev.ps1 -Action Up
 ./scripts/deep-dev.ps1 -Action Verify

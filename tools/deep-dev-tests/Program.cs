@@ -13,6 +13,9 @@ var directory = Path.Combine(Path.GetTempPath(), "deep-dev-offline-tests-" + Gui
 Directory.CreateDirectory(directory);
 try
 {
+    Check(DevTopology.ForProject("deep-dev").Ipv4Prefix == "172.31.240" &&
+        DevTopology.ForProject("deep-dev-current").Ipv4Prefix == "172.31.241", "separate current topology addresses");
+    await Reject(() => { _ = DevTopology.ForProject("production"); return Task.CompletedTask; }, "unknown dev project");
     using var root = Signer.Create(Path.Combine(directory, "root.seed"), rootSigner: true);
     using var other = Signer.Create(Path.Combine(directory, "other.seed"), rootSigner: true);
     using var witness1 = Signer.Create(Path.Combine(directory, "witness1.seed"));

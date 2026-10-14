@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('Init','Build','PrepareAuthority','Provision','ProvisionFloor','Up','Status','Stop','Start','Verify','FaultMatrix','HistoryFault','StackFault','EngineFault','ExpiryFault')][string]$Action,
+    [Parameter(Mandatory)][ValidateSet('Init','Build','PrepareAuthority','AdmitObserver','Provision','ProvisionFloor','Up','Status','Stop','Start','Verify','FaultMatrix','HistoryFault','StackFault','EngineFault','ExpiryFault')][string]$Action,
     [string]$CustodyRoot = 'C:\Work\DeepSession\secrets\dev\deep-dev',
+    [ValidateSet('deep-dev','deep-dev-current')][string]$ProjectName = 'deep-dev',
     [ValidateRange(1,20)][int]$Cycles = 2,
     [ValidateRange(20,7200)][int]$OfflineSeconds = 20,
     [ValidateRange(10,300)][int]$StableSeconds = 30,
@@ -13,6 +14,7 @@ if ($Action -eq 'EngineFault' -and -not $ConfirmEngineShutdown) {
     throw 'EngineFault requires explicit whole-Desktop shutdown approval and -ConfirmEngineShutdown. Use StackFault for routine recovery tests.'
 }
 $devopsRoot = Split-Path $PSScriptRoot -Parent
+if (-not $PSBoundParameters.ContainsKey('CustodyRoot')) { $CustodyRoot = Join-Path 'C:\Work\DeepSession\secrets\dev' $ProjectName }
 $custodyPath = [IO.Path]::GetFullPath($CustodyRoot)
 $allowedRoot = [IO.Path]::GetFullPath('C:\Work\DeepSession\secrets\dev') + [IO.Path]::DirectorySeparatorChar
 if (-not $custodyPath.StartsWith($allowedRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'deep-dev custody must remain inside secrets/dev.' }
@@ -50,18 +52,32 @@ function Invoke-DesktopOperation([ValidateSet('start','stop')][string]$Operation
         if ($process.ExitCode -ne 0) { throw 'Docker Desktop operation failed; inspect host diagnostics. Retained volumes/custody were not reset.' }
     } finally { $process.Dispose() }
 }
+$devEnvironmentNames = @('DEEP_DEV_ROOT','DEEP_DEV_PROJECT','DEEP_DEV_IPV4_PREFIX','DEEP_DEV_PORT_PREFIX','DEEP_DEV_REGISTRY_PORT')
+$devPreviousEnvironment = @{}
+foreach ($name in $devEnvironmentNames) { $devPreviousEnvironment[$name] = [Environment]::GetEnvironmentVariable($name,'Process') }
+try {
 $env:DEEP_DEV_ROOT = $custodyPath.Replace('\','/')
-$compose = @('compose','--project-name','deep-dev','--file',(Join-Path $devopsRoot 'docker-compose.deep-dev.yml'))
+$env:DEEP_DEV_PROJECT = $ProjectName
+$env:DEEP_DEV_IPV4_PREFIX = if ($ProjectName -ceq 'deep-dev-current') { '172.31.241' } else { '172.31.240' }
+$env:DEEP_DEV_PORT_PREFIX = if ($ProjectName -ceq 'deep-dev-current') { '282' } else { '281' }
+$env:DEEP_DEV_REGISTRY_PORT = if ($ProjectName -ceq 'deep-dev-current') { '28543' } else { '28443' }
+$compose = @('compose','--project-name',$ProjectName,'--file',(Join-Path $devopsRoot 'docker-compose.deep-dev.yml'))
 if ($Action -eq 'Init') {
     if (Test-Path -LiteralPath $custodyPath) { throw 'Existing dev custody cannot be overwritten; use Provision/Up for reuse.' }
     $ntsSource = Join-Path $devopsRoot 'tools/nts-observer'
     Run-Native docker @('run','--rm','--mount',"type=bind,source=$ntsSource,target=/src",'-w','/src',
         'golang@sha256:8ac98ca534ac3f51e1f420a1dd2c15e74c75cfa0f23f3ad27eb5d7236c349a0c','sh','-c','GOOS=windows GOARCH=amd64 go build -trimpath -o deep-nts-observer.exe .')
     Run-Native dotnet @('run','--project',(Join-Path $devopsRoot 'tools/deep-dev/Deep.Dev.csproj'),'-c','Debug','--',
-        'init',$custodyPath,(Join-Path $ntsSource 'deep-nts-observer.exe'))
+        'init',$custodyPath,(Join-Path $ntsSource 'deep-nts-observer.exe'),$ProjectName)
     return
 }
 if (-not (Test-Path -LiteralPath (Join-Path $custodyPath 'public/deep-dev.json') -PathType Leaf)) { throw 'deep-dev is not provisioned; run Init.' }
+if ($Action -notin @('Status','Stop')) {
+    $devManifest = Get-Content -LiteralPath (Join-Path $custodyPath 'public/deep-dev.json') -Raw | ConvertFrom-Json
+    if ($devManifest.projectName -cne $ProjectName -or $devManifest.containerIpv4Prefix -cne $env:DEEP_DEV_IPV4_PREFIX) {
+        throw 'The current custody manifest does not match this isolated Compose project. No legacy configuration inference is supported.'
+    }
+}
 if ($Action -eq 'PrepareAuthority') {
     $observer = Join-Path $devopsRoot 'tools/nts-observer/deep-nts-observer.exe'
     if (-not (Test-Path -LiteralPath $observer -PathType Leaf)) { throw 'Build the existing pinned NTS observer first; no clock fallback is supported.' }
@@ -69,6 +85,15 @@ if ($Action -eq 'PrepareAuthority') {
         'prepare-authority',$custodyPath,$observer)
     return
 }
+function Invoke-DevObserverAdmission {
+    $admissionFile = Join-Path $custodyPath 'observer/admission.dga2'
+    if (-not (Test-Path -LiteralPath $admissionFile -PathType Leaf)) { throw 'Retained exact observer admission is missing; do not regenerate the observer.' }
+    Run-Native docker @('run','--rm','--label',"deep.project=$ProjectName",'--network',"$($ProjectName)_dev",'--ulimit','core=0',
+        '--mount',"type=bind,source=$custodyPath/public,target=/run/deep-public,readonly",
+        '--mount',"type=bind,source=$admissionFile,target=/run/deep-observer/admission.dga2,readonly",
+        "$ProjectName/publisher:candidate",'Deep.Dev.dll','admit-observer','/run/deep-public','/run/deep-observer/admission.dga2')
+}
+if ($Action -eq 'AdmitObserver') { Invoke-DevObserverAdmission; return }
 if ($Action -eq 'Build') {
     Run-Native dotnet @('run','--project',(Join-Path $devopsRoot 'tools/deep-dev/Deep.Dev.csproj'),'-c','Debug','--','configure',$custodyPath)
     Run-Native docker ($compose + @('build','registry','node-1','publisher')); return
@@ -103,7 +128,7 @@ if ($Action -in @('StackFault','EngineFault','ExpiryFault')) {
         $allRunning = @(& docker ps -q)
         if ($LASTEXITCODE -ne 0 -or $allRunning.Count -ne 6) { throw 'EngineFault requires no unrelated running containers.' }
     }
-    $devRunning = @(& docker ps -q --filter 'label=com.docker.compose.project=deep-dev')
+    $devRunning = @(& docker ps -q --filter "label=com.docker.compose.project=$ProjectName")
     if ($LASTEXITCODE -ne 0 -or $devRunning.Count -ne 6) { throw 'Recovery fault requires exactly the six running deep-dev services.' }
     [void](Wait-CurrentCapabilities)
     $retained = @{}
@@ -226,8 +251,8 @@ if ($Action -eq 'HistoryFault') {
         Run-Native docker ($compose + @('stop','--timeout','10','node-1','node-2','node-3'))
         # A separate --rm process receives PUBLIC bootstrap only. No root signer,
         # node seed, protected floor or publisher journal is mounted into it.
-        Run-Native docker @('run','--rm','--label','deep.project=deep-dev','--network','deep-dev_dev','--ulimit','core=0',
-            '--mount',"type=bind,source=$custodyPath/public,target=/run/deep-public,readonly",'deep-dev/publisher:candidate',
+        Run-Native docker @('run','--rm','--label',"deep.project=$ProjectName",'--network',"$($ProjectName)_dev",'--ulimit','core=0',
+            '--mount',"type=bind,source=$custodyPath/public,target=/run/deep-public,readonly","$ProjectName/publisher:candidate",
             'Deep.Dev.dll','exercise-directory','/run/deep-public')
     } finally { Run-Native docker ($compose + @('start','node-1','node-2','node-3')) }
     [ordered]@{schema='deep-dev-history-fault.v1';offlineNodes=3;admittedFixtures=130;recoveredVerifiedOnionNodes=3;recoverySeconds=(Wait-CurrentCapabilities);custodyReset=$false;deviceEvidence=$false;messageDeliveryEvidence=$false} | ConvertTo-Json
@@ -236,10 +261,10 @@ if ($Action -eq 'HistoryFault') {
 if ($Action -in @('Provision','ProvisionFloor')) {
     # Copy only online service custody. Neither offline-root nor operator is mounted.
     foreach ($service in @('floor','registry','node-1','node-2','node-3')) {
-        $volume = "deep-dev_$service-secrets"
+        $volume = "$($ProjectName)_$service-secrets"
         $present = & docker volume ls --filter "name=^$volume$" --format '{{.Name}}'
         if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect exact dev custody volumes.' }
-        if ($present -cne $volume) { Run-Native docker @('volume','create','--label','deep.environment=dev','--label','deep.project=deep-dev',$volume) }
+        if ($present -cne $volume) { Run-Native docker @('volume','create','--label','deep.environment=dev','--label',"deep.project=$ProjectName",$volume) }
         $source = Join-Path $custodyPath "$service/secrets"
         $owner = if ($service -eq 'floor') { '70:70' } else { '0:0' }
         $copyOrVerify = 'if test -z "$(ls -A /target)"; then cp /source/* /target/; else for sourceFile in /source/*; do cmp -s "$sourceFile" "/target/${sourceFile##*/}" || exit 2; done; test "$(ls -A /source | wc -l)" = "$(ls -A /target | wc -l)" || exit 2; fi; chmod 0700 /target; chmod 0600 /target/*; chown -R ' + $owner + ' /target'
@@ -274,7 +299,10 @@ if ($Action -in @('Provision','ProvisionFloor')) {
     return
 }
 switch ($Action) {
-    'Up' { Run-Native docker ($compose + @('up','-d','floor','publisher','registry','node-1','node-2','node-3')) }
+    'Up' {
+        Run-Native docker ($compose + @('up','-d','floor','publisher','registry','node-1','node-2','node-3'))
+        Invoke-DevObserverAdmission
+    }
     'Status' { Run-Native docker ($compose + @('ps','--all')) }
     'Stop' {
         # Explicit maintenance stop stays stopped across engine boots. This is
@@ -290,4 +318,7 @@ switch ($Action) {
         Run-Native docker (@('update','--restart','always') + $ids)
         Run-Native docker ($compose + @('start'))
     }
+}
+} finally {
+    foreach ($name in $devEnvironmentNames) { [Environment]::SetEnvironmentVariable($name,$devPreviousEnvironment[$name],'Process') }
 }
