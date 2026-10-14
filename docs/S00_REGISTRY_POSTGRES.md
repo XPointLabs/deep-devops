@@ -19,6 +19,8 @@ DevOps, declare actual existing full/focused receipts and exact platform skips:
   -GateRunDirectory $FreshRegistryArtifactsDirectory `
   -GateAllowedSkippedCases $ExactWindowsSkippedCaseNames
 & .\scripts\test-registry-postgres.ps1 -Lane focused -Filter 'FullyQualifiedName~DeepIdV2RouteThresholdJournalTests'
+& .\scripts\test-registry-postgres.ps1 -Lane native-profile -NativePhaseTrace `
+  -Filter 'FullyQualifiedName~ActualPrivateIssuerHttpsForwarderClientVerifierAndConfiguredNativeMailboxCycle'
 node --test .\scripts\test-registry-postgres.test.mjs
 ```
 
@@ -32,6 +34,10 @@ build/capture/actual DB+ML-DSA preflight/unfiltered test/qualification to the
 single [root mechanism](../../AGENTS.md#canonical-local-test-invocation);
 filtered diagnostics cannot also supply full references. Pass arrays inside
 PowerShell, not through external `-File` argument serialization.
+`-NativePhaseTrace` enables the optional whole-process phase listener only in an
+explicit filtered diagnostic. Full qualification rejects the switch before any
+provider operation. Ordinary/full runs clear ambient phase flags; the wrapper
+restores them after cleanup. Isolated timings are not sustained/load acceptance.
 The script returns the actual diagnostic/canonical gate exit after cleanup. A failed test is not a
 successful baseline; inspect the TRX locally without committing machine paths.
 
@@ -47,7 +53,8 @@ successful baseline; inspect the TRX locally without committing machine paths.
 - Process-scoped `DEEP_TEST_*`, `*ConnectionString*` and `*POSTGRES*` inputs
   are saved in memory and temporarily removed, never logged. Only the floor,
   route and grant test DSNs are populated with the disposable loopback DB;
-  opt-in external origins stay disabled. Environment is restored in `finally`.
+  the phase listener flag is set only by the explicit diagnostic switch.
+  Opt-in external origins stay disabled. Environment is restored in `finally`.
 - Readiness is bounded. Normal success/failure cleanup checks the exact
   container ID and invocation label before stopping it; Docker `--rm` removes
   the container and its tmpfs. An ownership mismatch refuses cleanup.
@@ -63,11 +70,12 @@ sanitized case names/counts/hashes as in the
 
 ## What is proved
 
-The twelve executable orchestration guard tests run the real PowerShell script
+The fourteen executable orchestration guard tests run the real PowerShell script
 with process-local Docker/dotnet doubles: remote context/override/UNC rejection,
 pinned tmpfs/loopback scope, isolation and restoration of ambient inputs,
 test exit propagation, failed readiness/port cleanup, wrong-owner refusal,
-missing/mixed reference rejection and canonical reference/skip-array delegation.
+missing/mixed reference rejection, canonical reference/skip-array delegation,
+explicit phase opt-in/restoration and full-profile rejection before provider creation.
 They are harness evidence, not actual provider integration. Actual full
 Registry runs separately exercise the real disposable PostgreSQL provider.
 Linux Unix-socket signer cases require the Registry Dockerfile target

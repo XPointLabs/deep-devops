@@ -41,6 +41,8 @@ exit ${testExit}
 `);
     const argumentsBySelection = {
       filtered: "-Filter 'FullyQualifiedName~FocusedCase'",
+      profile: "-Filter 'FullyQualifiedName~FocusedCase' -NativePhaseTrace",
+      'full-profile': "-GateReferencePaths @('prior.trx') -NativePhaseTrace",
       'missing-references': '',
       'mixed-references': "-Filter 'FullyQualifiedName~FocusedCase' -GateReferencePaths @('prior.trx')",
       full: `-GateReferencePaths @('prior.trx', 'focused.trx') -GateRunDirectory ${quote(path.join(registry, 'artifacts', 'contract'))} -GateAllowedSkippedCases @('Example.SkipOne', 'Example.SkipTwo')`
@@ -94,6 +96,9 @@ function global:docker {
   }
 }
 function global:Assert-IsolatedInputs {
+  if ([string]$env:DEEP_TEST_NATIVE_PHASE_TRACE -ne ${quote(selection === 'profile' ? '1' : '')}) {
+    throw 'Native phase tracing escaped its explicit diagnostic selection.'
+  }
   foreach ($name in @('DEEP_TEST_DID2_FLOOR_POSTGRES', 'DEEP_TEST_DID2_ROUTE_POSTGRES', 'DEEP_TEST_DID2_GRANT_POSTGRES')) {
     if ([Environment]::GetEnvironmentVariable($name) -ne
         'Host=127.0.0.1;Port=12345;Database=deep_s00;Username=deep_s00;Pooling=false;Timeout=5') {
@@ -116,7 +121,7 @@ function global:dotnet {
 $laneExit = $LASTEXITCODE
 if ($global:mode -eq 'success') {
   foreach ($name in @('DEEP_TEST_DID2_EXTERNAL_ORIGIN', 'DEEP_TEST_DID2_FLOOR_POSTGRES',
-      'ConnectionStrings__External', 'POSTGRES_PASSWORD')) {
+      'ConnectionStrings__External', 'POSTGRES_PASSWORD', 'DEEP_TEST_NATIVE_PHASE_TRACE')) {
     if ([Environment]::GetEnvironmentVariable($name) -ne 'synthetic-do-not-log') {
       throw 'Ambient input was not restored after tests.'
     }
@@ -131,6 +136,7 @@ exit $laneExit
         DOCKER_HOST: mode === 'remote-override' ? 'tcp://not-local.invalid:2375' : '',
         DEEP_TEST_DID2_EXTERNAL_ORIGIN: 'synthetic-do-not-log',
         DEEP_TEST_DID2_FLOOR_POSTGRES: 'synthetic-do-not-log',
+        DEEP_TEST_NATIVE_PHASE_TRACE: 'synthetic-do-not-log',
         ConnectionStrings__External: 'synthetic-do-not-log',
         POSTGRES_PASSWORD: 'synthetic-do-not-log'
       }
@@ -157,6 +163,19 @@ for (const exit of [0, 7]) {
     assert.match(result.stdout, /EVENT:RUN[\s\S]*EVENT:TEST[\s\S]*EVENT:STOP/);
   });
 }
+
+test('explicit filtered profiling enables only its process-local phase listener and restores the environment', async () => {
+  const result = await run('success', 0, 'profile');
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /EVENT:RUN[\s\S]*EVENT:TEST[\s\S]*EVENT:STOP/);
+});
+
+test('full qualification rejects phase profiling before any provider operation', async () => {
+  const result = await run('success', 0, 'full-profile');
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /forbidden in full qualification/);
+  assert.doesNotMatch(result.stdout, /EVENT:/);
+});
 
 for (const mode of ['unhealthy', 'invalid-port']) {
   test(`${mode} skips tests and cleans only the invocation's container`, async () => {

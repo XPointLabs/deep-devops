@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using Deep.Protocol.AccountDirectoryV1;
 using Deep.Protocol.ContactV1;
+using Deep.Protocol.ApplicationCore;
 using Deep.Protocol.XPointNetworkV1;
 using Sodium;
 using static BootstrapIo;
@@ -12,6 +13,7 @@ internal static class SuccessorCeremony
 {
     private const string GenesisSchema = "deep-production-authority-bootstrap.v1";
     private const string SuccessorSchema = "deep-production-operational-successor.v1";
+    internal const string PreparedAuthoritySchema = "deep-production-prepared-authority-renewal.v1";
     private static readonly HashSet<string> AllowedSourceRoles = new(StringComparer.Ordinal)
     {
         "xna1", "dts1", "adh1", "snapshot-dtt1", "snapshot-adp1", "response-adp1",
@@ -32,7 +34,8 @@ internal static class SuccessorCeremony
         var expectedHeadHash = Hex(arguments.Required("--protected-head-core-hash"), 32, "protected head core hash");
         var expectedPmtHash = Hex(arguments.Required("--protected-pmt-artifact-hash"), 32, "protected PMT artifact hash");
         var expectedAdhHash = Hex(arguments.Required("--current-adh1-core-hash"), 32, "current ADH1 core hash");
-        var exactAdh = File.ReadAllBytes(ExistingFile(arguments.Required("--current-adh1-path")));
+        var exactAdh = ReadBounded(ExistingFile(arguments.Required("--current-adh1-path")),
+            XPointNetworkClosureWireCodec.MaximumRecordLength);
         try
         {
             var manifest = CustodyManifest.Load(Path.Combine(authorityRoot, "public", "custody-manifest.v1.json"));
@@ -48,20 +51,19 @@ internal static class SuccessorCeremony
                 if (!CryptographicOperations.FixedTimeEquals(network, sourceNetwork) ||
                     !string.Equals(source.Manifest.AuthorityOwner, "Mr. X", StringComparison.Ordinal))
                     throw new CryptographicException("The protected source belongs to another production authority.");
-                var bootstrap = XPointNetworkBootstrapAuthor.VerifyExistingGenesis(
-                    source.One("xna1"), source.One("dts1"),
+                var authority = source.VerifyAuthority(
                     new XPointNetworkGenesisPin(network, genesisHash));
                 var adh = AccountDirectoryAdh1Codec.Decode(exactAdh);
                 var actualAdhHash = XPointNetworkOperationalSuccessorAuthor.ComputeAdh1CoreHash(exactAdh);
                 if (!CryptographicOperations.FixedTimeEquals(actualAdhHash, expectedAdhHash) ||
                     !adh.NetworkId.Span.SequenceEqual(network))
                     throw new CryptographicException("The exact ADH1 does not match the independently supplied current directory head.");
-                var queryLeaf = HashDomain(
-                    "Deep/XPoint/V1/contact-authority-bootstrap-leaf",
-                    manifest.Role("contact-xpk").PublicKey());
+                var requested = OfflineDid2GenesisAuthor.ReadRequestedCredential(
+                    arguments.Required("--requested-did2-path"));
+                var queryLeaf = DeepIdV2AccountDirectoryCodec.ComputeDirectoryLeafKey(network, requested);
                 if (!string.Equals(Convert.ToHexString(queryLeaf),
                         source.Manifest.DirectoryLeafKeyHex, StringComparison.OrdinalIgnoreCase))
-                    throw new CryptographicException("The source directory leaf key differs from current custody.");
+                    throw new CryptographicException("The source directory leaf key differs from the requested DID2 credential.");
 
                 var privateRoot = ExistingDirectory(Path.Combine(authorityRoot, "private"));
                 using var root = FileSigner.Root(
@@ -85,7 +87,7 @@ internal static class SuccessorCeremony
                 var ceremony = HashDomain("Deep/XPoint/V1/operational-successor-ceremony",
                     Join(network, expectedHeadHash, expectedPmtHash, U64(observedUnix)));
                 var request = new XPointNetworkOperationalSuccessorRequest(
-                    ceremony, bootstrap.Authority, [root], [witness1, witness2, witness3],
+                    ceremony, authority, [root], [witness1, witness2, witness3],
                     [seed1.Rollover, seed2.Rollover, seed3.Rollover],
                     source.One("xvp1"),
                     source.Many("xnd1").Select(static value => (ReadOnlyMemory<byte>)value).ToArray(),
@@ -118,7 +120,7 @@ internal static class SuccessorCeremony
     }
 
     internal static SourceArtifacts ReadSource(string sourceRoot,
-        long maximumArtifactBytes = long.MaxValue)
+        long maximumArtifactBytes = XPointNetworkClosureWireCodec.MaximumResponseLength)
     {
         if (maximumArtifactBytes < 1) throw new ArgumentOutOfRangeException(nameof(maximumArtifactBytes));
         var manifestPath = ExistingFile(Path.Combine(sourceRoot, "public-manifest.v1.json"));
@@ -126,7 +128,7 @@ internal static class SuccessorCeremony
                            ReadBounded(manifestPath, 4_194_304),
                            new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
                        ?? throw new InvalidDataException("The prior public artifact manifest is empty.");
-        if (manifest.Schema is not (GenesisSchema or SuccessorSchema) ||
+        if (manifest.Schema is not (GenesisSchema or SuccessorSchema or PreparedAuthoritySchema) ||
             manifest.Artifacts is null || manifest.Artifacts.Count is < 1 or > 8192 ||
             manifest.Artifacts.Any(static entry => entry.Length is < 1 or > 1_048_576) ||
             manifest.Artifacts.Sum(static entry => (long)entry.Length) > maximumArtifactBytes)
@@ -151,7 +153,7 @@ internal static class SuccessorCeremony
         return new SourceArtifacts(manifest, artifacts);
     }
 
-    private static byte[] ReadBounded(string path, int maximum, int? expectedLength = null)
+    internal static byte[] ReadBounded(string path, int maximum, int? expectedLength = null)
     {
         using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
         if (expectedLength is not null && stream.Length != expectedLength)
@@ -165,7 +167,7 @@ internal static class SuccessorCeremony
         return bytes;
     }
 
-    private static void WriteOutput(
+    internal static void WriteOutput(
         string outputRoot,
         SourceArtifacts source,
         AuthoredXPointNetworkOperationalSuccessor authored,
@@ -173,22 +175,38 @@ internal static class SuccessorCeremony
         ulong notBefore,
         ulong expiresAt)
     {
-        Directory.CreateDirectory(outputRoot);
-        var bootstrapDir = Path.Combine(outputRoot, "bootstrap");
-        Directory.CreateDirectory(bootstrapDir);
         var artifacts = new List<(string Role, byte[] Bytes)>
         {
-            ("xna1", source.One("xna1")),
-            ("dts1", source.One("dts1")),
             ("adh1", exactAdh.ToArray()),
             ("xvp1", authored.ExactXvp1.ToArray()),
         };
+        artifacts.AddRange(source.Many("xna1").Select(static value => ("xna1", value.ToArray())));
+        artifacts.AddRange(source.Many("dts1").Select(static value => ("dts1", value.ToArray())));
         artifacts.AddRange(source.Many("xnv1").Select(static value => ("xnv1", value.ToArray())));
         artifacts.Add(("xnv1", authored.ExactXnv1.ToArray()));
         artifacts.Add(("xnh1", authored.ExactXnh1.ToArray()));
         artifacts.AddRange(authored.ExactXnd1.Select(static value => ("xnd1", value.ToArray())));
         artifacts.Add(("pma2", authored.ExactPma2.ToArray()));
         artifacts.Add(("pmt2", authored.ExactPmt2.ToArray()));
+        WritePublicInventory(outputRoot, source, SuccessorSchema, artifacts, notBefore, expiresAt);
+    }
+
+    internal static void WritePublicInventory(string outputRoot, SourceArtifacts source,
+        string schema, IReadOnlyList<(string Role, byte[] Bytes)> artifacts,
+        ulong notBefore, ulong expiresAt)
+    {
+        // Publish one complete immutable public bundle on the same filesystem.
+        // Never expose a partially written named output or replace an existing
+        // directory. Failed staging is retained for explicit operator review;
+        // it contains public signed records only, not copied private custody.
+        outputRoot = NewDirectoryPath(outputRoot);
+        var staging = Path.Combine(Path.GetDirectoryName(outputRoot)!,
+            ".deep-successor-" + Guid.NewGuid().ToString("N"));
+        if (File.Exists(staging) || Directory.Exists(staging))
+            throw new IOException("The public successor staging path already exists.");
+        Directory.CreateDirectory(staging);
+        var bootstrapDir = Path.Combine(staging, "bootstrap");
+        Directory.CreateDirectory(bootstrapDir);
         var entries = new List<ArtifactEntry>();
         foreach (var group in artifacts.GroupBy(static value => value.Role, StringComparer.Ordinal)
                      .OrderBy(static value => RoleOrder(value.Key)))
@@ -203,18 +221,36 @@ internal static class SuccessorCeremony
             }
         }
         var manifest = new PublicBootstrapManifest(
-            SuccessorSchema, "Mr. X", source.Manifest.NetworkIdHex,
+            schema, "Mr. X", source.Manifest.NetworkIdHex,
             source.Manifest.GenesisAuthorityCoreHashHex,
             source.Manifest.DirectoryLeafKeyHex,
             notBefore, expiresAt, entries);
-        WriteNew(Path.Combine(outputRoot, "public-manifest.v1.json"),
+        WriteNew(Path.Combine(staging, "public-manifest.v1.json"),
             JsonSerializer.SerializeToUtf8Bytes(manifest, new JsonSerializerOptions { WriteIndented = true }));
+        for (var attempt = 0; ; attempt++)
+        {
+            try { Directory.Move(staging, outputRoot); break; }
+            catch (IOException error) when (OperatingSystem.IsWindows() && attempt < 5 &&
+                IsRetryablePublicationError(error) && Directory.Exists(staging) &&
+                !Directory.Exists(outputRoot) && !File.Exists(outputRoot))
+            {
+                // Windows may temporarily deny a directory rename immediately
+                // after closed write-through files. Retry the exact same move,
+                // never copy/overwrite. A persistent ACL/IO denial still fails
+                // after at most1550ms of backoff, leaving staging for review.
+                Thread.Sleep(50 << attempt);
+            }
+        }
     }
+
+    internal static bool IsRetryablePublicationError(IOException error) =>
+        (error.HResult & 0xffff) is 5 or 32 or 33;
 
     private static int RoleOrder(string role) => role switch
     {
         "xna1" => 0, "dts1" => 1, "adh1" => 2, "xvp1" => 3,
         "xnv1" => 4, "xnh1" => 5, "xnd1" => 6, "pma2" => 7, "pmt2" => 8,
+        "snapshot-dtt1" => 9, "snapshot-adp1" => 10, "response-adp1" => 11, "caller-adh1" => 12,
         _ => throw new InvalidDataException("The successor artifact role is unknown."),
     };
 
@@ -253,6 +289,18 @@ internal static class SuccessorCeremony
         IReadOnlyDictionary<(string Role, int Ordinal), byte[]> artifacts)
     {
         internal PublicBootstrapManifest Manifest => manifest;
+
+        internal VerifiedXPointNetworkAuthority VerifyAuthority(XPointNetworkGenesisPin pin)
+        {
+            var authorities = Many("xna1");
+            var policies = Many("dts1");
+            if (authorities.Count > XPointNetworkClosureWireCodec.MaximumChainCount ||
+                policies.Count > XPointNetworkClosureWireCodec.MaximumChainCount)
+                throw new InvalidDataException("The source authority history exceeds the distribution bound.");
+            return XPointNetworkAuthorityVerifier.Verify(pin,
+                authorities.Select(static bytes => (ReadOnlyMemory<byte>)bytes).ToArray(),
+                policies.Select(static bytes => (ReadOnlyMemory<byte>)bytes).ToArray());
+        }
 
         internal byte[] One(string role)
         {
@@ -314,17 +362,19 @@ internal static class SuccessorCeremony
                     throw new InvalidDataException("A registered node identity binding is absent or duplicated.");
                 identitySeed = ReadSeed(Path.Combine(nodeRoot, "secrets", "key_ed25519"));
                 var pair = PublicKeyAuth.GenerateKeyPair(identitySeed);
-                identityPrivate = pair.PrivateKey.ToArray();
                 var identityPublic = pair.PublicKey.ToArray();
+                try { identityPrivate = pair.PrivateKey.ToArray(); }
+                finally { CryptographicOperations.ZeroMemory(pair.PrivateKey); }
                 if (!string.Equals(environment[0]["DEEP_NODE_ED25519_PUBLIC_KEY=".Length..],
                         Convert.ToHexString(identityPublic), StringComparison.OrdinalIgnoreCase))
                     throw new CryptographicException("A node identity seed does not match its registered environment binding.");
                 currentOnionSeed = ReadSeed(Path.Combine(rolloverPath, "current.x25519.seed"));
                 nextOnionSeed = ReadSeed(Path.Combine(rolloverPath, "next.x25519.seed"));
+                var origins = RolloverPreparation.ReadOrigins(nodeRoot);
                 var currentSpki = VerifyOriginCertificate(
-                    Path.Combine(rolloverPath, "current-origin.cer"), notBefore, expiresAt);
+                    Path.Combine(rolloverPath, "current-origin.cer"), notBefore, expiresAt, origins);
                 var nextSpki = VerifyOriginCertificate(
-                    Path.Combine(rolloverPath, "next-origin.cer"), notBefore, expiresAt);
+                    Path.Combine(rolloverPath, "next-origin.cer"), notBefore, expiresAt, origins);
                 var rollover = new XPointNetworkOperationalNodeRollover(
                     new NodeSigner(identityPublic, identityPrivate), currentSpki, nextSpki,
                     ScalarMult.Base(currentOnionSeed), ScalarMult.Base(nextOnionSeed));
@@ -350,7 +400,8 @@ internal static class SuccessorCeremony
         }
     }
 
-    internal static byte[] VerifyOriginCertificate(string path, ulong notBefore, ulong expiresAt)
+    internal static byte[] VerifyOriginCertificate(string path, ulong notBefore, ulong expiresAt,
+        IReadOnlyList<string>? origins = null)
     {
         using var certificate = X509Certificate2.CreateFromPemFile(
             ExistingFile(path), ExistingFile(Path.ChangeExtension(path, ".key")));
@@ -360,6 +411,9 @@ internal static class SuccessorCeremony
         var end = DateTimeOffset.FromUnixTimeSeconds(checked((long)expiresAt)).UtcDateTime;
         if (certificate.NotBefore.ToUniversalTime() > start || certificate.NotAfter.ToUniversalTime() < end)
             throw new CryptographicException("A rollover origin certificate does not cover the successor interval.");
+        if (origins is not null && origins.Any(host =>
+                !certificate.MatchesHostname(host, allowWildcards: false, allowCommonName: false)))
+            throw new CryptographicException("A rollover certificate does not match the node's exact configured origins.");
         using var rsa = certificate.GetRSAPublicKey();
         if (rsa is not null) return SHA256.HashData(rsa.ExportSubjectPublicKeyInfo());
         using var ecdsa = certificate.GetECDsaPublicKey();

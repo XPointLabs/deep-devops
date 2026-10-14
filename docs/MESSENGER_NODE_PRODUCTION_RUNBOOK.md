@@ -93,22 +93,32 @@ host env:
 
 ## Release Rehearsal
 
+Use PowerShell7 (`pwsh`) for these Docker lifecycle scripts: they use its platform
+variables and filesystem APIs. Windows source-cutover gates separately require
+Windows PowerShell5.1; do not substitute one interpreter for the other.
+The managed-external smoke currently runs `deep-tests-e2e`'s `ci:smoke`, which
+validates fixture/physical-harness contracts. Its runtime snapshots separately
+check service health/no-mock transport; neither proves current DID2 message
+delivery or real devices. The old `e2e:smoke` file still contains Session-style
+account/storage paths and must not be reactivated as current delivery evidence.
+Current connected and physical acceptance follows the root implementation plan.
+
 1. Run the no-mock external smoke gate:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\deep-devops\scripts\test-env.ps1 -Suite smoke -BackendMode external -ManagedExternalProfile backend-external -RequireRouterNoMock
+pwsh -NoProfile -File .\deep-devops\scripts\test-env.ps1 -Suite smoke -BackendMode external -ManagedExternalProfile backend-external -RequireRouterNoMock
 ```
 
 2. Run the full no-mock external gate:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\deep-devops\scripts\test-env.ps1 -Suite full -BackendMode external -ManagedExternalProfile backend-external -RequireRouterNoMock
+pwsh -NoProfile -File .\deep-devops\scripts\test-env.ps1 -Suite full -BackendMode external -ManagedExternalProfile backend-external -RequireRouterNoMock
 ```
 
 3. Run the three-node no-mock topology rehearsal:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\deep-devops\scripts\multi-node-rehearsal.ps1
+pwsh -NoProfile -File .\deep-devops\scripts\multi-node-rehearsal.ps1
 ```
 
 Startup is isolated under compose project
@@ -128,7 +138,7 @@ rehearsal artifacts.
 4. Run the credentialed provider canary:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\deep-devops\scripts\test-env.ps1 -Suite smoke -BackendMode external -ManagedExternalProfile backend-external -RequirePushProviderCanary
+pwsh -NoProfile -File .\deep-devops\scripts\test-env.ps1 -Suite smoke -BackendMode external -ManagedExternalProfile backend-external -RequirePushProviderCanary
 ```
 
 5. Run the security gate from the workspace root or from `deep-devops`:

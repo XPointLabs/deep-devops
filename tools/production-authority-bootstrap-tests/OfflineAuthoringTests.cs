@@ -9,7 +9,7 @@ using Deep.Protocol.Identity;
 using Deep.Protocol.XPointNetworkV1;
 using Sodium;
 
-internal static class OfflineAuthoringTests
+internal static partial class OfflineAuthoringTests
 {
     internal static void Run()
     {
@@ -83,7 +83,8 @@ internal static class OfflineAuthoringTests
         var did2Genesis = await DeepIdV2DirectoryHeadAuthor.AuthorGenesisAsync(
             bootstrap.Authority, 990, 1_500,
             witnesses.Select(value => (IAccountDirectoryAdh1WitnessSigner)new AdhWitness(value)).ToArray());
-        TestPublicNetworkExport(directory, bootstrap, genesis, successor, did2Genesis);
+        TestPublicNetworkExport(directory, bootstrap, genesis, successor, did2Genesis, did2);
+        await TestOfflineAuthorityRenewalCommandAsync(directory, bootstrap, root, witnesses, nodes, genesis, did2);
         await TestDelegatedRenewalAsync(bootstrap, genesis, nodes, witnesses, adhReference);
         var renewal = await XPointNetworkBootstrapAuthor.AuthorSameKeyRenewalAsync(H("authority-renewal"), bootstrap.Authority,
             [bootstrap.ExactDts1], 8_500, 8_500, 30_000, 8_500, 20_000, [root]);
@@ -100,6 +101,8 @@ internal static class OfflineAuthoringTests
             ContactCodec.Decode("PMT2", genesis.ExactPmt2.Span).ArtifactHash.Span,
             adhReference, 8_500, 8_510, 8_900));
         _ = MailboxAuthorityV2Verifier.Verify(renewedAuthority, currentSuccessor.ExactPma2.Span, 8_520, 8_521);
+        await TestRenewedAuthorityExportAsync(directory, bootstrap, genesis, renewal,
+            renewedAuthority, currentSuccessor, root, witnesses, nodes, adhReference);
 
         FileSigner Signer(string name, byte id, byte seedValue, byte domain, bool isRoot)
         {
@@ -201,7 +204,7 @@ internal static class OfflineAuthoringTests
     private static void TestPublicNetworkExport(string directory,
         VerifiedXPointNetworkBootstrap bootstrap, AuthoredXPointNetworkOperationalGenesis genesis,
         AuthoredXPointNetworkOperationalSuccessor successor,
-        AuthoredAccountDirectoryHeadMutation did2Genesis)
+        AuthoredAccountDirectoryHeadMutation did2Genesis, ParsedDid2 requestedDid2)
     {
         var network = Convert.ToHexString(bootstrap.GenesisPin.NetworkId.Span);
         var pin = Convert.ToHexString(bootstrap.GenesisPin.AuthorityCoreHash.Span);
@@ -294,7 +297,9 @@ internal static class OfflineAuthoringTests
             File.WriteAllBytes(Path.Combine(path, "public-manifest.v1.json"),
                 JsonSerializer.SerializeToUtf8Bytes(new PublicBootstrapManifest(isSuccessor
                     ? "deep-production-operational-successor.v1" : "deep-production-authority-bootstrap.v1",
-                    "Mr. X", network, pin, Convert.ToHexString(B(32, 0xf1)), 990, 1_500, entries)));
+                    "Mr. X", network, pin, Convert.ToHexString(
+                        DeepIdV2AccountDirectoryCodec.ComputeDirectoryLeafKey(bootstrap.GenesisPin.NetworkId.Span, requestedDid2)),
+                    990, 1_500, entries)));
         }
 
         static void Reject<T>(Action action) where T : Exception

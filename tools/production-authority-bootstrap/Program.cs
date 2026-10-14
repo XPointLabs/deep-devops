@@ -9,6 +9,18 @@ using Sodium;
 using static BootstrapIo;
 
 var arguments = Arguments.Parse(args);
+if (arguments.IsAuthorityRenewal)
+{
+    try { await AuthorityRenewalCeremony.RunAsync(arguments); }
+    catch (Exception error) when (error is IOException or CryptographicException or
+        ArgumentException or InvalidOperationException or FormatException or OverflowException or JsonException or
+        UnauthorizedAccessException or XPointNetworkAuthorityVerificationException)
+    {
+        Console.Error.WriteLine($"Offline renewal unavailable ({error.GetType().Name}); no activation or floor advance.");
+        Environment.ExitCode = 1;
+    }
+    return;
+}
 if (arguments.IsXNodeDid2AssetsExport)
 {
     XNodeDid2AssetsExport.Run(arguments);
@@ -43,7 +55,14 @@ if (arguments.IsRolloverCertificateReissue)
 }
 if (arguments.IsSuccessor)
 {
-    await SuccessorCeremony.RunAsync(arguments);
+    try { await SuccessorCeremony.RunAsync(arguments); }
+    catch (Exception error) when (error is IOException or CryptographicException or
+        ArgumentException or InvalidOperationException or FormatException or OverflowException or JsonException or
+        UnauthorizedAccessException or XPointNetworkAuthorityVerificationException)
+    {
+        Console.Error.WriteLine($"Offline operational successor unavailable ({error.GetType().Name}); no activation or floor advance.");
+        Environment.ExitCode = 1;
+    }
     return;
 }
 var authorityRoot = ExistingDirectory(arguments.Required("--authority-root"));
@@ -273,6 +292,8 @@ sealed class Arguments
             "--audit-network-distribution", "--expected-bundle-sha256",
             "--export-xnode-did2-assets", "--genesis-head-path", "--genesis-head-core-hash",
             "--observer-contact-file", "--registry-origin",
+            "--renew-authority-from", "--protected-authority-core-hash", "--protected-dts1-policy-hash",
+            "--authority-expires-unix", "--time-policy-expires-unix",
         };
         var values = new Dictionary<string, string>(StringComparer.Ordinal);
         for (var index = 0; index < args.Length; index += 2)
@@ -287,14 +308,19 @@ sealed class Arguments
         var networkExtension = values.ContainsKey("--extend-network-closure");
         var distribution = values.ContainsKey("--audit-network-distribution");
         var xnodeAssets = values.ContainsKey("--export-xnode-did2-assets");
-        if (new[] { preparation, reissue, successor, audit, networkGenesis, networkExtension, distribution, xnodeAssets }
+        var authorityRenewal = values.ContainsKey("--renew-authority-from");
+        if (new[] { preparation, reissue, successor, audit, networkGenesis, networkExtension, distribution, xnodeAssets, authorityRenewal }
                 .Count(static value => value) > 1)
             throw new ArgumentException("Operator audit, preparation, issuance and public export modes are separate operations.");
         if (preparation && (!string.Equals(values["--prepare-rollover"], "true", StringComparison.Ordinal) || successor))
             throw new ArgumentException("Rollover preparation and successor issuance are separate operations.");
         if (reissue && values["--reissue-rollover-certificates"] != "true")
             throw new ArgumentException("Certificate reissue must be explicitly selected.");
-        var required = xnodeAssets
+        var required = authorityRenewal
+            ? new[] { "--renew-authority-from", "--authority-root", "--network-id-hex", "--genesis-core-hash",
+                "--protected-authority-core-hash", "--protected-dts1-policy-hash", "--observed-unix",
+                "--authority-expires-unix", "--time-policy-expires-unix", "--output" }
+            : xnodeAssets
             ? new[] { "--export-xnode-did2-assets", "--network-id-hex", "--genesis-core-hash",
                 "--expected-bundle-sha256", "--genesis-head-path", "--genesis-head-core-hash",
                 "--observer-contact-file", "--registry-origin", "--output" }
@@ -317,7 +343,7 @@ sealed class Arguments
             : successor
             ? new[] { "--authority-root", "--seed1-root", "--seed2-root", "--seed3-root", "--output",
                 "--observed-unix", "--successor-from", "--rollover-root", "--protected-head-core-hash",
-                "--protected-pmt-artifact-hash", "--current-adh1-path", "--current-adh1-core-hash" }
+                "--protected-pmt-artifact-hash", "--current-adh1-path", "--current-adh1-core-hash", "--requested-did2-path" }
             : new[] { "--authority-root", "--seed1-root", "--seed2-root", "--seed3-root", "--output",
                 "--observed-unix", "--boot-id", "--nonce-created", "--response-received", "--current-sample", "--requested-did2-path" };
         if (required.Any(value => !values.ContainsKey(value)) || values.Count != required.Length)
@@ -326,6 +352,7 @@ sealed class Arguments
     }
 
     internal string Required(string name) => values[name];
+    internal bool IsAuthorityRenewal => values.ContainsKey("--renew-authority-from");
     internal bool IsXNodeDid2AssetsExport => values.ContainsKey("--export-xnode-did2-assets");
     internal bool IsNetworkDistributionAudit => values.ContainsKey("--audit-network-distribution");
     internal bool IsSuccessor => values.ContainsKey("--successor-from");
@@ -361,7 +388,7 @@ sealed record CustodyManifest(
 {
     internal static CustodyManifest Load(string path)
     {
-        var bytes = File.ReadAllBytes(ExistingFile(path));
+        var bytes = SuccessorCeremony.ReadBounded(ExistingFile(path), 1_048_576);
         try
         {
             return JsonSerializer.Deserialize<CustodyManifest>(bytes,
@@ -400,22 +427,32 @@ sealed class FileSigner :
         try
         {
             var pair = PublicKeyAuth.GenerateKeyPair(seed);
-            publicKey = pair.PublicKey.ToArray();
-            signingKeyBytes = pair.PrivateKey.ToArray();
+            try
+            {
+                publicKey = pair.PublicKey.ToArray();
+                signingKeyBytes = pair.PrivateKey.ToArray();
+            }
+            finally { CryptographicOperations.ZeroMemory(pair.PrivateKey); }
         }
         finally
         {
             CryptographicOperations.ZeroMemory(seed);
         }
-        var expected = role.PublicKey();
+        byte[]? expected = null;
         try
         {
+            expected = role.PublicKey();
             if (!CryptographicOperations.FixedTimeEquals(expected, publicKey))
                 throw new CryptographicException("A private signer seed differs from its custody manifest public key.");
         }
+        catch
+        {
+            CryptographicOperations.ZeroMemory(signingKeyBytes);
+            throw;
+        }
         finally
         {
-            CryptographicOperations.ZeroMemory(expected);
+            if (expected is not null) CryptographicOperations.ZeroMemory(expected);
         }
     }
 

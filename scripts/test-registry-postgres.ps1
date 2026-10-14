@@ -6,7 +6,8 @@ param(
     [string]$Filter = '',
     [string[]]$GateReferencePaths = @(),
     [string]$GateRunDirectory = '',
-    [string[]]$GateAllowedSkippedCases = @()
+    [string[]]$GateAllowedSkippedCases = @(),
+    [switch]$NativePhaseTrace
 )
 
 # Local provider-integration lane, not TLS/UAT/physical release evidence.
@@ -18,6 +19,9 @@ function Test-LocalDockerEndpoint([string]$Endpoint) {
     return $Endpoint -match '^unix:///[^/]' -or $Endpoint -match '^npipe:/{2,4}\./pipe/[^/]'
 }
 $registryPath = (Resolve-Path -LiteralPath $RegistryRoot).Path
+if ($NativePhaseTrace -and (!$Filter -or $GateReferencePaths.Count)) {
+    throw 'Native phase tracing requires an isolated filtered diagnostic; it is forbidden in full qualification.'
+}
 if (!$Filter -and !$GateReferencePaths.Count) {
     throw 'A full Registry run requires predeclared references for the canonical repository test gate.'
 }
@@ -81,6 +85,10 @@ try {
         if (!$savedEnvironment.ContainsKey($name)) { $savedEnvironment[$name] = $null }
         [Environment]::SetEnvironmentVariable($name, $connection, 'Process')
     }
+    if ($NativePhaseTrace) {
+        if (!$savedEnvironment.ContainsKey('DEEP_TEST_NATIVE_PHASE_TRACE')) { $savedEnvironment['DEEP_TEST_NATIVE_PHASE_TRACE'] = $null }
+        [Environment]::SetEnvironmentVariable('DEEP_TEST_NATIVE_PHASE_TRACE', '1', 'Process')
+    }
     Write-Host "Disposable PostgreSQL ready; invocation=$invocation; external test origins disabled."
     Write-Host 'DB uses loopback-only trust for ephemeral synthetic data; this is not production TLS evidence.'
     if ($GateReferencePaths.Count) {
@@ -92,8 +100,12 @@ try {
             -ReferencePaths $GateReferencePaths -AllowedSkippedCases $GateAllowedSkippedCases
         $testExitCode = $LASTEXITCODE
     } else {
+        # Source-cutover project references can select different property graphs
+        # for the same dependency output. Match the full runner's serial build
+        # discipline instead of letting diagnostic builds contest those files.
         $testArguments = @('test', (Join-Path $registryPath 'Deep.Registry.Api.slnx'),
             '-c', 'Release', '-p:DeepProtocolLocalCutover=true', '-p:DeepProtocolSourceCutover=true',
+            '-m:1', '-p:UseSharedCompilation=false', '-nodeReuse:false',
             '--logger', 'trx', '--results-directory', $resultsPath, '--verbosity', 'quiet', '--filter', $Filter)
         & dotnet @testArguments
         $testExitCode = $LASTEXITCODE

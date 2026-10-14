@@ -7,6 +7,7 @@ var tests = new (string Name, Action Run)[]
 {
     ("exact mutually exclusive modes", TestArguments),
     ("canonical bounded source inventory", TestSourceInventory),
+    ("closed publication retry error set", TestPublicationRetryErrors),
     ("installable origin key and validity", TestOriginCertificate),
     ("origin SAN repair retains exact keys and validity", TestOriginCertificateReissue),
     ("real operator signers author genesis and successor", OfflineAuthoringTests.Run),
@@ -19,6 +20,24 @@ foreach (var (name, run) in tests)
 
 static void TestArguments()
 {
+    var authorityRenewal = new[] { "--renew-authority-from", "synthetic", "--authority-root", "synthetic",
+        "--network-id-hex", "synthetic", "--genesis-core-hash", "synthetic",
+        "--protected-authority-core-hash", "synthetic", "--protected-dts1-policy-hash", "synthetic",
+        "--observed-unix", "8500", "--authority-expires-unix", "30000",
+        "--time-policy-expires-unix", "20000", "--output", "synthetic" };
+    if (!Arguments.Parse(authorityRenewal).IsAuthorityRenewal || Arguments.Parse(authorityRenewal).IsSuccessor)
+        throw new Exception("Offline authority renewal was not an exclusive prepared operation.");
+    Reject<ArgumentException>(() => Arguments.Parse([.. authorityRenewal, "--successor-from", "synthetic"]));
+    Reject<ArgumentException>(() => Arguments.Parse([.. authorityRenewal, "--extend-network-closure", "synthetic"]));
+    Reject<ArgumentException>(() => Arguments.Parse([.. authorityRenewal, "--seed1-root", "synthetic"]));
+    Reject<ArgumentException>(() => Arguments.Parse(authorityRenewal[..^2]));
+    var successor = new[] { "--successor-from", "synthetic", "--authority-root", "synthetic",
+        "--seed1-root", "synthetic", "--seed2-root", "synthetic", "--seed3-root", "synthetic", "--output", "synthetic",
+        "--observed-unix", "8600", "--rollover-root", "synthetic", "--protected-head-core-hash", "synthetic",
+        "--protected-pmt-artifact-hash", "synthetic", "--current-adh1-path", "synthetic",
+        "--current-adh1-core-hash", "synthetic", "--requested-did2-path", "synthetic" };
+    if (!Arguments.Parse(successor).IsSuccessor) throw new Exception("Current DID2 successor command was not selected.");
+    Reject<ArgumentException>(() => Arguments.Parse(successor[..^2]));
     var preparation = new[] { "--prepare-rollover", "true", "--authority-root", "synthetic",
         "--seed1-root", "synthetic", "--seed2-root", "synthetic", "--seed3-root", "synthetic",
         "--observed-unix", "1000" };
@@ -96,6 +115,11 @@ static void TestSourceInventory()
         Manifest(entry);
         if (!SuccessorCeremony.ReadSource(root).One("xna1").AsSpan().SequenceEqual(bytes))
             throw new Exception("The exact source was changed.");
+        Reject<InvalidDataException>(() => SuccessorCeremony.ReadSource(root, maximumArtifactBytes: 2));
+        Manifest(Enumerable.Range(0, 69).Select(index => new ArtifactEntry("xnd1", index,
+            $"xnd1.{index:D4}.bin", 1_048_576, new string('1', 64))).ToArray());
+        Reject<InvalidDataException>(() => SuccessorCeremony.ReadSource(root));
+        Manifest(entry);
         Reject<InvalidDataException>(() => SuccessorCeremony.ReadSource(root).One("pmt2"));
         Manifest(entry with { Role = "../outside", FileName = "../outside.0000.bin" });
         Reject<InvalidDataException>(() => SuccessorCeremony.ReadSource(root));
@@ -112,7 +136,25 @@ static void TestSourceInventory()
         Manifest(entry with { Ordinal = 1, FileName = "xna1.0001.bin" });
         File.WriteAllBytes(Path.Combine(root, "bootstrap", "xna1.0001.bin"), bytes);
         Reject<InvalidDataException>(() => SuccessorCeremony.ReadSource(root).Many("xna1"));
+        Manifest(entry);
+        var manifestPath = Path.Combine(root, "public-manifest.v1.json");
+        var prepared = JsonSerializer.Deserialize<PublicBootstrapManifest>(File.ReadAllBytes(manifestPath))!;
+        File.WriteAllBytes(manifestPath, JsonSerializer.SerializeToUtf8Bytes(prepared with
+            { Schema = SuccessorCeremony.PreparedAuthoritySchema }));
+        _ = SuccessorCeremony.ReadSource(root);
+        File.WriteAllBytes(manifestPath, JsonSerializer.SerializeToUtf8Bytes(prepared with { Schema = "unknown" }));
+        Reject<InvalidDataException>(() => SuccessorCeremony.ReadSource(root));
     });
+}
+
+static void TestPublicationRetryErrors()
+{
+    foreach (var code in new[] { 5, 32, 33 })
+        if (!SuccessorCeremony.IsRetryablePublicationError(new IOException("synthetic", unchecked((int)0x80070000) | code)))
+            throw new Exception("A bounded Windows publication error was not recognized.");
+    foreach (var code in new[] { 0, 2, 3, 17, 80, 112, 183 })
+        if (SuccessorCeremony.IsRetryablePublicationError(new IOException("synthetic", unchecked((int)0x80070000) | code)))
+            throw new Exception("An unrelated or existing-output failure entered publication retry.");
 }
 
 static void TestOriginCertificate()

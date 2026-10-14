@@ -69,8 +69,7 @@ internal static class NetworkClosureExport
             !Fixed(Hex(source.Manifest.GenesisAuthorityCoreHashHex, 32, "source genesis"),
                 pin.AuthorityCoreHash.Span))
             throw new CryptographicException("The public source differs from the independent genesis scope.");
-        _ = XPointNetworkBootstrapAuthor.VerifyExistingGenesis(source.One("xna1"),
-            source.One("dts1"), pin);
+        _ = source.VerifyAuthority(pin);
         return source;
     }
 
@@ -80,24 +79,34 @@ internal static class NetworkClosureExport
         // Operational successor exports retain the complete XNV1 prefix but
         // only the latest XNH1/XVP1/PMT2. Never manufacture missing history.
         var views = source.Many("xnv1");
+        var authorities = Memories(source.Many("xna1"));
+        var timePolicies = Memories(source.Many("dts1"));
         var previousAuthority = prior.ExactAuthorityChain;
         var previousTime = prior.ExactTimePolicyChain;
         var previousViews = prior.ExactViewChain;
         if (!Fixed(prior.NetworkId.Span, pin.NetworkId.Span) ||
-            previousAuthority.Count != 1 || previousTime.Count != 1 ||
-            !Fixed(previousAuthority[0].Span, source.One("xna1")) ||
-            !Fixed(previousTime[0].Span, source.One("dts1")) ||
+            !HasExactPrefix(authorities, previousAuthority) ||
+            !HasExactPrefix(timePolicies, previousTime) ||
             views.Count != previousViews.Count + 1 ||
             views.Take(previousViews.Count).Where((view, index) =>
                 !Fixed(view, previousViews[index].Span)).Any())
             throw new CryptographicException("The public successor is not an exact one-step extension of retained history.");
+        // Full paired signatures authenticate renewals/rotations from the
+        // original independent genesis. An unsigned inventory cannot replace
+        // a retained authority, time policy or floor with its latest record.
+        _ = source.VerifyAuthority(pin);
         return XPointNetworkClosureWireCodec.EncodeResponse(pin.NetworkId.Span,
-            previousAuthority, previousTime,
+            authorities, timePolicies,
             Append(prior.ExactNetworkPolicyChain, source.One("xvp1")), Memories(views),
             Append(prior.ExactHeadChain, source.One("xnh1")), Memories(source.Many("xnd1")),
             Append(prior.ExactPlacementTopologyChain, source.One("pmt2")),
             Append(prior.ExactMailboxAuthorityChain, source.One("pma2")));
     }
+
+    private static bool HasExactPrefix(IReadOnlyList<ReadOnlyMemory<byte>> candidate,
+        IReadOnlyList<ReadOnlyMemory<byte>> prior) =>
+        candidate.Count >= prior.Count && prior.Count > 0 &&
+        prior.Select((bytes, index) => Fixed(bytes.Span, candidate[index].Span)).All(static equal => equal);
 
     private static IReadOnlyList<ReadOnlyMemory<byte>> Append(
         IReadOnlyList<ReadOnlyMemory<byte>> prior, byte[] current) =>
