@@ -6,8 +6,46 @@ services:
   registry:
     ports: ["${DEEP_DEV_PHYSICAL_ADDRESS:?explicit LAN binding required}:28543:443"]
   node-1:
-    ports: ["${DEEP_DEV_PHYSICAL_ADDRESS:?explicit LAN binding required}:28294:443"]
+    environment: &public_ingress
+      Node__ManagedIngressH2ListenUrl: http://0.0.0.0:8082/
+      Node__ManagedIngressTrustedProxyAddresses__0: "${DEEP_DEV_IPV4_PREFIX:?current-dev prefix required}.40"
   node-2:
-    ports: ["${DEEP_DEV_PHYSICAL_ADDRESS:?explicit LAN binding required}:28295:443"]
+    environment: *public_ingress
   node-3:
-    ports: ["${DEEP_DEV_PHYSICAL_ADDRESS:?explicit LAN binding required}:28296:443"]
+    environment: *public_ingress
+  ingress:
+    image: haproxy:3.2.22-alpine3.24@sha256:79799e8b2977e60802774fa53d29e6b54e045402cdd8a8b9fe43923e7095a047
+    init: true
+    user: "0:0"
+    restart: always
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 128m
+    environment: {DEEP_DEV_PROJECT: "${DEEP_DEV_PROJECT:?current-dev project required}"}
+    entrypoint: [/bin/sh, /usr/local/bin/deep-dev-physical-ingress]
+    depends_on: [node-1, node-2, node-3]
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=4m,mode=0700", "/var/lib/haproxy:rw,noexec,nosuid,nodev,size=1m,mode=0700"]
+    ports:
+      - "${DEEP_DEV_PHYSICAL_ADDRESS:?explicit LAN binding required}:28294:43001"
+      - "${DEEP_DEV_PHYSICAL_ADDRESS:?explicit LAN binding required}:28295:43002"
+      - "${DEEP_DEV_PHYSICAL_ADDRESS:?explicit LAN binding required}:28296:43003"
+    volumes:
+      - ./docker/deep-dev-physical-ingress.sh:/usr/local/bin/deep-dev-physical-ingress:ro
+      - ./config/deep-dev-physical/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+      - ${DEEP_DEV_ROOT}/public/dev-ca.crt:/run/public/dev-ca.crt:ro
+      - ${DEEP_DEV_ROOT}/public/dev-ca.crl:/run/public/dev-ca.crl:ro
+      - ${DEEP_DEV_ROOT}/node-1/secrets/server.crt:/run/node-1/server.crt:ro
+      - ${DEEP_DEV_ROOT}/node-1/secrets/server.key:/run/node-1/server.key:ro
+      - ${DEEP_DEV_ROOT}/node-2/secrets/server.crt:/run/node-2/server.crt:ro
+      - ${DEEP_DEV_ROOT}/node-2/secrets/server.key:/run/node-2/server.key:ro
+      - ${DEEP_DEV_ROOT}/node-3/secrets/server.crt:/run/node-3/server.crt:ro
+      - ${DEEP_DEV_ROOT}/node-3/secrets/server.key:/run/node-3/server.key:ro
+    healthcheck:
+      test: [CMD-SHELL, "test -s /var/lib/haproxy/ready && pidof haproxy >/dev/null"]
+      interval: 5s
+      timeout: 2s
+      retries: 6
+    labels: {deep.environment: dev, deep.project: "${DEEP_DEV_PROJECT:?current-dev project required}"}
+    networks: {dev: {ipv4_address: "${DEEP_DEV_IPV4_PREFIX:?current-dev prefix required}.40"}}

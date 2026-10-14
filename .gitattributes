@@ -4,3 +4,4 @@ scripts/survival-hardhat-entrypoint.sh text eol=lf
 scripts/coturn-entrypoint.sh text eol=lf
 .env.node.prod.example text eol=lf
 scripts/*.cjs text eol=lf
+docker/deep-dev-physical-ingress.sh text eol=lf

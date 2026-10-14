@@ -257,6 +257,10 @@ policy/epoch, native floors and histories remain. Same-key leaf certificates
 retain subject/lifetime/extensions and existing DNS/IP SANs, add the one exact
 LAN SAN and point at the existing publisher's bounded CA-signed CRL listener.
 No application request becomes HTTP and no machine ROOT trust is added.
+After physical installation, `Build` validates the sealed images/current policy
+and rebuilds binaries without rewriting installed configuration. An unrelated or
+predecessor image fails before Docker build; use the supported maintenance
+ceremony rather than editing sealed peer/TLS files.
 
 Apply validates the sealed twelve-file whitelist/current policy, stops all eight
 owners, compare-replaces only server certificates in the five existing secret
@@ -268,11 +272,32 @@ sealed exact result precedes the journal; a complete pending rename resumes,
 while partial/foreign bytes fail closed without re-authoring. The physical
 configuration marker is an untrusted listener setting, never client authority.
 
-The optional physical overlay adds no service. It publishes the Registry's28543,
-the three node TLS ports28294–28296 and signed-CRL HTTP28297 on the explicit LAN
-address; existing loopback mappings and all named volumes stay. It does not
-expose floor, signer sockets, keys or management ports to the LAN. Normal
-Up/Start/fault workflows retain the overlay after successful installation.
+The physical overlay adds one pinned existing HAProxy ingress: nine owners but
+still exactly three nodes. It publishes Registry28543, the three signed TLS
+origins28294–28296 and signed-CRL HTTP28297 on the explicit LAN address. The
+three origins terminate their respective original leaf certificates/keys;
+public H2 goes to exact-proxy-allowlisted internal8082, authenticated peer paths
+go to original TLS443 with required CA/CRL/name verification. This corrects the
+old peer-only443 mapping: a TLS handshake alone did not prove public ingress.
+Only exact frame/capability/authorized-peer paths are routed; management stays
+closed. Incoming forwarded identity/scheme headers are removed; only the trusted
+public backend gets the exact HTTPS scheme. The proxy mounts six leaf files,
+public CA/CRL and config, never whole secret volumes, node identity/BLS keys,
+offline root, operator or application state. Its combined PEM files exist only
+in private tmpfs. Existing loopback mappings and named volumes stay.
+The internal h2c backend explicitly uses HTTP in its pseudo-header while retaining
+the exact original path/query; the allowlisted proxy supplies the authenticated
+external HTTPS scheme. The frontend rejects non-H2 ALPN rather than converting a
+downgraded request into apparently valid H2. Diagnostic stats are read-only on
+the ingress container's loopback only, never a published management endpoint.
+Public responses strip framework Date/Server metadata and set exact no-store,
+matching the strict carrier allowlist; response integrity checks are not relaxed.
+Normal Up/Start/fault workflows retain the overlay after successful installation.
+Up validates the actual proxy configuration/certificate pairs before activation.
+Verify separately probes all three public TLS/H2 capability endpoints through
+the proxy in addition to Registry and node runtime readiness. Neither check is
+a physical message-delivery claim. The base nonphysical dev topology remains
+eight owners with mailbox composition.
 Already-installed Apply verifies the same sealed files/prefix and restarts;
 it never authors a second relocation. A failed partial install remains stopped:
 resume that same candidate, never Init/Provision or a floor reset.
@@ -282,6 +307,14 @@ checks. A successful relocation cannot restage/re-sign an old XPP inventory that
 was bound to a prior placement; such lifecycle failures remain real blockers.
 
 ### Supported Windows owned-client probe commands
+
+After the DR-0121 semantic clean break the fixed current probe uses a separate
+disposable owner. The pre-cutover probe remains untouched as negative evidence;
+its view-bound XPP1 is not rewritten, migrated or dispatched through a fallback.
+Current publication preserves the exact inventory/operation across ordinary
+signed view renewal; epoch/selected-set changes still fail closed pending their
+independent handover contract. Build matching Protocol/Shared/node inputs before
+the connected check. This is an operator probe, not physical device delivery.
 
 ```powershell
 ./scripts/deep-dev.ps1 -Action CacheWindowsDevCrl -ProjectName deep-dev-current

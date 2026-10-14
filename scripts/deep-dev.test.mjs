@@ -6,6 +6,15 @@ import { fileURLToPath } from 'node:url';
 
 const read = p => readFile(new URL(p, import.meta.url), 'utf8');
 
+test('rebuilding installed physical dev validates sealed images without reconfiguring them', async () => {
+  const source = await read('./deep-dev.ps1');
+  const build = source.split("if ($Action -eq 'Build') {")[1].split('function Test-CurrentCapabilities')[0];
+  const physical = build.split('if ($physicalEnabled) {')[1].split('} else {')[0];
+  assert.match(physical, /'validate-physical-ingress'/);
+  assert.doesNotMatch(physical, /'configure'|install-|prepare-|provision/);
+  assert.ok(build.indexOf("'validate-physical-ingress'") < build.indexOf("@('build','registry','node-1','publisher')"));
+});
+
 test('physical current-dev overlay exposes exact LAN listeners without changing service or custody owners', () => {
   const root = fileURLToPath(new URL('../', import.meta.url));
   const overlays = ['', '.mailbox', '.mailbox-nodes', '.contacts', '.coordination', '.pki', '.physical'];
@@ -16,19 +25,53 @@ test('physical current-dev overlay exposes exact LAN listeners without changing 
     DEEP_DEV_CONTACT_NODE1: '33'.repeat(32), DEEP_DEV_CONTACT_NODE2: '44'.repeat(32), DEEP_DEV_CONTACT_NODE3: '55'.repeat(32),
     DEEP_DEV_PHYSICAL_ADDRESS: '192.168.40.20' };
   const c = JSON.parse(execFileSync('docker', args, { encoding: 'utf8', env }));
-  assert.equal(Object.keys(c.services).length, 8);
+  assert.equal(Object.keys(c.services).length, 9);
   for (const [service, port, target] of [['publisher', 28297, 8080], ['registry', 28543, 443],
-    ['node-1', 28294, 443], ['node-2', 28295, 443], ['node-3', 28296, 443]]) {
-    const p = c.services[service].ports.filter(p => p.host_ip === env.DEEP_DEV_PHYSICAL_ADDRESS);
+    ['ingress', 28294, 43001], ['ingress', 28295, 43002], ['ingress', 28296, 43003]]) {
+    const p = c.services[service].ports.filter(p => p.host_ip === env.DEEP_DEV_PHYSICAL_ADDRESS && Number(p.published) === port);
     assert.equal(p.length, 1); assert.equal(Number(p[0].published), port); assert.equal(p[0].target, target);
-    assert.ok(!c.services[service].volumes.some(v => v.type === 'bind' && /offline-root|physical-ingress/.test(v.source)));
+    assert.ok(!c.services[service].volumes.some(v => v.type === 'bind' && /offline-root|[\\/]physical-ingress[\\/]/.test(v.source)));
   }
   for (const n of [1, 2, 3]) {
     const s = c.services[`node-${n}`];
     assert.equal(s.volumes.find(v => v.target === '/var/lib/xnode').source, `node-${n}-state`);
     assert.equal(s.volumes.find(v => v.target === '/var/lib/mailbox-keys').read_only, true);
     assert.ok(s.ports.some(p => p.host_ip === '127.0.0.1' && p.target === 443));
+    assert.ok(!s.ports.some(p => p.host_ip === env.DEEP_DEV_PHYSICAL_ADDRESS));
+    assert.equal(s.environment.Node__ManagedIngressH2ListenUrl, 'http://0.0.0.0:8082/');
+    assert.equal(s.environment.Node__ManagedIngressTrustedProxyAddresses__0, '172.31.241.40');
   }
+  const proxy = c.services.ingress;
+  assert.equal(proxy.read_only, true);
+  assert.deepEqual(proxy.cap_drop, ['ALL']);
+  assert.equal(proxy.networks.dev.ipv4_address, '172.31.241.40');
+  assert.equal(proxy.volumes.filter(v => /\/server\.(crt|key)$/.test(v.target)).length, 6);
+  assert.ok(proxy.volumes.every(v => v.type === 'bind' && v.read_only));
+  assert.ok(!proxy.volumes.some(v => /key_ed25519|key_bls|offline-root|operator|state|mailbox-keys/.test(v.source)));
+});
+
+test('physical ingress separates authenticated peer and public H2 paths without management exposure', async () => {
+  const cfg = await read('../config/deep-dev-physical/haproxy.cfg');
+  for (const n of [1, 2, 3]) {
+    assert.match(cfg, new RegExp(`bind :4300${n} ssl crt /var/lib/haproxy/node-${n}\\.pem alpn h2`));
+    assert.match(cfg, new RegExp(`node-${n}:8082 proto h2 check resolvers docker`));
+    assert.match(cfg, new RegExp(`node-${n}:443 ssl verify required ca-file .* crl-file .* verifyhost node-${n} alpn h2`));
+  }
+  assert.equal((cfg.match(/deny deny_status 404 unless post frame or get capability or post peer/g) || []).length, 3);
+  assert.equal((cfg.match(/deny deny_status 404 unless \{ ssl_fc_alpn -m str h2 \}/g) || []).length, 3);
+  assert.doesNotMatch(cfg, /verify none|api\/staking|api\/admin|health\/ready|option httplog/);
+  assert.deepEqual(cfg.split('\n').filter(line => line.includes('stats socket')).map(line => line.trim()),
+    ['stats socket ipv4@127.0.0.1:19999 level user']);
+  assert.match(cfg, /http-request del-header X-Forwarded-Proto/);
+  assert.match(cfg, /http-request set-header X-Forwarded-Proto https/);
+  assert.equal((cfg.match(/http-request set-uri http:\/\/%\[req.hdr\(host\)\]%\[pathq\]/g) || []).length, 3);
+  assert.equal((cfg.match(/http-response del-header Date/g) || []).length, 3);
+  assert.equal((cfg.match(/http-response del-header Server/g) || []).length, 3);
+  assert.equal((cfg.match(/http-response set-header Cache-Control no-store/g) || []).length, 3);
+  const entry = await read('../docker/deep-dev-physical-ingress.sh');
+  assert.match(entry, /--check/);
+  assert.match(entry, /haproxy -c -f/);
+  assert.doesNotMatch(entry, /set -x|key_ed25519|key_bls|curl|wget/);
 });
 
 test('physical maintenance validates before stop and commits exact publisher bytes before runtime activation', async () => {

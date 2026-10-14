@@ -125,9 +125,11 @@ if ($physicalEnabled) {
         $parsedPhysical.ToString() -cne $physicalConfig.address) { throw 'Invalid physical runtime address configuration.' }
     $env:DEEP_DEV_PHYSICAL_ADDRESS = $physicalConfig.address
     $compose += @('--file',(Join-Path $devopsRoot 'docker-compose.deep-dev.physical.yml'))
+    $devServiceCount++
 }
 $devServices = @('floor','registry','publisher','node-1','node-2','node-3')
 if ($mailboxEnabled) { $devServices += @('deposit-signer','retrieve-signer') }
+if ($physicalEnabled) { $devServices += 'ingress' }
 if ($mailboxEnabled -and $Action -in @('PrepareOperational','ApplyOperational','Provision','ProvisionFloor')) {
     throw 'Mailbox-enabled custody requires coordinated role-volume/journal rollover; these pre-mailbox ceremonies cannot mutate it.'
 }
@@ -417,7 +419,14 @@ if ($Action -eq 'ExerciseOwnedMailbox') {
     return
 }
 if ($Action -eq 'Build') {
-    Run-Native dotnet @('run','--project',(Join-Path $devopsRoot 'tools/deep-dev/Deep.Dev.csproj'),'-c','Debug','--','configure',$custodyPath)
+    if ($physicalEnabled) {
+        # The installed peer/TLS images are sealed. Rebuilding binaries must not
+        # rewrite their JSON representation or invalidate the retained ceremony.
+        Run-Native dotnet @('run','--project',(Join-Path $devopsRoot 'tools/deep-dev/Deep.Dev.csproj'),'-c','Debug','--',
+            'validate-physical-ingress',$custodyPath,(Join-Path $devopsRoot 'tools/nts-observer/deep-nts-observer.exe'))
+    } else {
+        Run-Native dotnet @('run','--project',(Join-Path $devopsRoot 'tools/deep-dev/Deep.Dev.csproj'),'-c','Debug','--','configure',$custodyPath)
+    }
     Run-Native docker ($compose + @('build','registry','node-1','publisher')); return
 }
 function Test-CurrentCapabilities {
@@ -436,6 +445,18 @@ function Test-CurrentCapabilities {
     if ($LASTEXITCODE -ne 0) { Write-Host "Current capability unavailable: Registry readiness HTTP (exit $LASTEXITCODE)."; return $false }
     try { if (($registryResult | ConvertFrom-Json).ok -ne $true) { return $false } } catch { return $false }
     foreach ($devNode in 1..3) {
+        if ($physicalEnabled) {
+            $publicCapability = & docker @($compose + @('exec','-T',"node-$devNode",'curl','--noproxy','*','--http2','--fail','--silent','--max-time','5','--max-filesize','8192',
+                '--cacert','/run/deep-public/dev-ca.crt','--connect-to',"localhost:443:ingress:$(43000 + $devNode)",
+                '--header','Accept: application/vnd.xpoint.deep.ingress-capabilities-v1+json',
+                '--header','User-Agent:',
+                'https://localhost/api/ingress/v1/capabilities')) 2>$null
+            if ($LASTEXITCODE -ne 0) { Write-Host "Current capability unavailable: node-$devNode public TLS/H2 ingress."; $ready = $false }
+            else {
+                try { if (($publicCapability | ConvertFrom-Json).ready -ne $true) { $ready = $false } }
+                catch { $ready = $false }
+            }
+        }
         $nodeResult = & docker @($compose + @('exec','-T',"node-$devNode",'curl','--fail','--silent','--max-time','5','http://localhost:8080/health/ready')) 2>$null
         if ($LASTEXITCODE -ne 0) { Write-Host "Current capability unavailable: node-$devNode health HTTP (exit $LASTEXITCODE)."; $ready = $false; continue }
         try {
@@ -705,6 +726,9 @@ if ($Action -in @('Provision','ProvisionFloor')) {
 }
 switch ($Action) {
     'Up' {
+        if ($physicalEnabled) {
+            Run-Native docker ($compose + @('run','--rm','--no-deps','ingress','--check'))
+        }
         Run-Native docker ($compose + @('up','-d'))
         Invoke-DevObserverAdmission
     }
