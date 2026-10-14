@@ -149,7 +149,11 @@ beneath `offline-root/renewals/operational-*`; do not upload that directory.
 It neither installs secrets/configuration nor publishes/adopts the candidate.
 It requires a running owned publisher and leaves that publisher stopped after
 success so its predecessor cannot advance. Failure restores only the publisher
-this command stopped. Explicit `Start` cancels the preparation by permitting
+this command stopped.
+The pending publisher uses `unless-stopped` so an engine restart cannot silently
+resume it. Failure restores its prior restart policy; explicit `Start` restores
+normal `always` policy and cancels preparation.
+Explicit `Start` cancels the preparation by permitting
 new delegated publication; prepare a new candidate rather than force old import.
 The owner import command has exact generation/hash/prefix checks, root/PMA
 verification and NTS recheck, but coordinated private/configuration activation

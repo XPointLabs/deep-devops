@@ -86,6 +86,9 @@ if ($Action -in @('PrepareAuthority','PrepareOperational')) {
         if ($LASTEXITCODE -ne 0 -or -not $publisherId) { throw 'Operational preparation requires the running owned publisher; operator-stopped services stay stopped.' }
         $publisherState = (& docker inspect $publisherId | ConvertFrom-Json)[0].State
         if ($LASTEXITCODE -ne 0 -or -not $publisherState.Running) { throw 'Operator-stopped publisher cannot be resumed by preparation.' }
+        $publisherPolicy = (& docker inspect $publisherId | ConvertFrom-Json)[0].HostConfig.RestartPolicy.Name
+        if ($LASTEXITCODE -ne 0 -or $publisherPolicy -notin @('always','unless-stopped')) { throw 'Unexpected owned publisher restart policy.' }
+        Run-Native docker @('update','--restart','unless-stopped',$publisherId)
         Run-Native docker ($compose + @('stop','--timeout','10','publisher'))
         $operationalPrepared = $false
         try {
@@ -93,7 +96,10 @@ if ($Action -in @('PrepareAuthority','PrepareOperational')) {
                 'prepare-operational',$custodyPath,$observer)
             $operationalPrepared = $true
             Write-Host 'Operational successor prepared. Publisher remains stopped for exact-predecessor activation; Start explicitly cancels this preparation.'
-        } finally { if (-not $operationalPrepared) { Run-Native docker ($compose + @('start','publisher')) } }
+        } finally { if (-not $operationalPrepared) {
+            Run-Native docker @('update','--restart',$publisherPolicy,$publisherId)
+            Run-Native docker ($compose + @('start','publisher'))
+        } }
     } else {
         Run-Native dotnet @('run','--project',(Join-Path $devopsRoot 'tools/deep-dev/Deep.Dev.csproj'),'-c','Debug','--',
             'prepare-authority',$custodyPath,$observer)

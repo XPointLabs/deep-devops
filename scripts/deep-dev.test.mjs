@@ -163,7 +163,8 @@ test('offline operational preparation freezes the exact publisher predecessor an
   const script = await read('./deep-dev.ps1');
   assert.match(script, /if \(\$Action -eq 'PrepareOperational'\)/);
   assert.match(script, /Operator-stopped publisher cannot be resumed/);
-  assert.match(script, /if \(-not \$operationalPrepared\) \{ Run-Native docker/);
+  assert.match(script, /if \(-not \$operationalPrepared\) \{\s+Run-Native docker @\('update','--restart',\$publisherPolicy,\$publisherId\)/);
+  assert.match(script, /Run-Native docker @\('update','--restart','unless-stopped',\$publisherId\)/);
   const source = await read('../tools/deep-dev/DevOfflineOperationalRenewal.cs');
   assert.match(source, /AuthorPairAsync/);
   assert.match(source, /ComputeNextMailboxGrantFloor/);
