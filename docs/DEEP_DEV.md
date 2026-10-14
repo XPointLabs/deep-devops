@@ -78,8 +78,9 @@ The `mailbox/enabled` marker selects the overlay for normal Up/Start/Stop/Verify
 and retained recovery. A partial activation resumes with normal Up, not another
 first enrollment. Readiness independently verifies current signed journal
 winners; process/socket health alone cannot authorize grants. Node mailbox
-floor enrollment and configured issuance→client verification→node acceptance
-remain separate S05 work, followed by physical device qualification.
+enrollment uses the explicit workflow below. Configured issuance→client
+verification→node acceptance remains separate S05 work, followed by physical
+device qualification.
 
 Pre-mailbox PrepareOperational/ApplyOperational and first floor-provisioning
 commands deliberately reject once enabled: they do not yet atomically update
@@ -88,6 +89,48 @@ rollover. Coordinated role rollover and uncertain first-provision recovery remai
 operator-workflow gates, not claims closed by the successful initial activation.
 Exact runs/failures are recorded in the
 [S05 checkpoint](S05-AUTHORITY-HISTORY-2026-10-14.md#actual-protected-mailbox-issuer-activation).
+
+### Explicit current-dev node mailbox enrollment
+
+After issuer activation, build the matching operator image and prepare the
+public scope once. Provision/enroll each genuinely new native mailbox scope:
+
+```powershell
+./scripts/deep-dev.ps1 -Action PrepareNodeMailbox -ProjectName deep-dev-current
+foreach ($node in 1..3) {
+    ./scripts/deep-dev.ps1 -Action ProvisionNodeMailboxKeys -ProjectName deep-dev-current -NodeNumber $node
+}
+./scripts/deep-dev.ps1 -Action FetchNodeMailboxControl -ProjectName deep-dev-current
+foreach ($node in 1..3) {
+    ./scripts/deep-dev.ps1 -Action EnrollNodeMailbox -ProjectName deep-dev-current -NodeNumber $node
+}
+./scripts/deep-dev.ps1 -Action ActivateNodeMailbox -ProjectName deep-dev-current
+./scripts/deep-dev.ps1 -Action Verify -ProjectName deep-dev-current
+```
+
+Key provisioning runs without a network or identity/root mounts, rejects a
+nonempty key-ring volume and explicitly creates one Data Protection key in a
+0700 directory/0600 file. OS time controls only local protection-key lifetime,
+never protocol freshness. Each node retains its existing identity and data
+volume; its new independent mailbox custody and read-only key ring have
+separate external volumes. Automatic key generation remains disabled.
+
+Control capture fetches bounded exact issuer-signed MGR1 records over ordinary
+validated TLS, with closed media/cache/encoding/framing checks. Public capture
+files and scope bindings are not floors or admission capabilities. They may be
+refetched after transport failure; node enrollment still independently verifies
+current proof/time, signatures, both native floors and durable read-back.
+Enrollment stops the existing node owner and invokes its supported
+`current-mailbox-enroll` command against the same retained identity/data roots.
+A failed or uncertain enrollment must be inspected with retained state intact;
+do not delete its partial floors or key ring and retry as a new scope.
+
+Activation requires all three successful enrollment markers and selects the
+node overlay for subsequent Up/Start/Stop/Verify/fault operations. Verify then
+requires `currentMailboxHost.recovered=true` and state `recovered` on every node;
+`disabled` no longer qualifies. StackFault also compares mailbox-key digests in
+memory alongside retained identity/role custody and mounts. This remains local
+dev infrastructure evidence, not XMC2 issuance, message delivery or device E2E.
 
 ## Architecture and custody
 

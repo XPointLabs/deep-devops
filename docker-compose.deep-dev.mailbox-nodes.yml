@@ -1,0 +1,32 @@
+# Explicit current-dev node enrollment/activation; never auto-enroll at startup.
+services:
+  node-1:
+    environment: &bindings
+      Mailbox__Enabled: "true"
+      CurrentMailboxCustody__NetworkIdHex: ${DEEP_DEV_MAILBOX_NETWORK:?verified node scope required}
+      CurrentMailboxCustody__MailboxAuthorityCoreHashHex: ${DEEP_DEV_MAILBOX_POLICY:?verified policy required}
+      CurrentMailboxCustody__IndependentCustodyDirectory: /var/lib/mailbox-custody
+      CurrentMailboxCustody__DataProtectionKeysDirectory: /var/lib/mailbox-keys
+    volumes:
+      - node-1-mailbox-custody:/var/lib/mailbox-custody
+      - node-1-mailbox-keys:/var/lib/mailbox-keys:ro
+      - ${DEEP_DEV_ROOT}/mailbox/node-control:/run/node-control:ro
+  node-2:
+    environment: *bindings
+    volumes:
+      - node-2-mailbox-custody:/var/lib/mailbox-custody
+      - node-2-mailbox-keys:/var/lib/mailbox-keys:ro
+      - ${DEEP_DEV_ROOT}/mailbox/node-control:/run/node-control:ro
+  node-3:
+    environment: *bindings
+    volumes:
+      - node-3-mailbox-custody:/var/lib/mailbox-custody
+      - node-3-mailbox-keys:/var/lib/mailbox-keys:ro
+      - ${DEEP_DEV_ROOT}/mailbox/node-control:/run/node-control:ro
+volumes:
+  node-1-mailbox-custody: {external: true, name: "${DEEP_DEV_PROJECT}_node-1-mailbox-custody"}
+  node-1-mailbox-keys: {external: true, name: "${DEEP_DEV_PROJECT}_node-1-mailbox-keys"}
+  node-2-mailbox-custody: {external: true, name: "${DEEP_DEV_PROJECT}_node-2-mailbox-custody"}
+  node-2-mailbox-keys: {external: true, name: "${DEEP_DEV_PROJECT}_node-2-mailbox-keys"}
+  node-3-mailbox-custody: {external: true, name: "${DEEP_DEV_PROJECT}_node-3-mailbox-custody"}
+  node-3-mailbox-keys: {external: true, name: "${DEEP_DEV_PROJECT}_node-3-mailbox-keys"}

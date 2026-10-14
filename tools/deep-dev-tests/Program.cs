@@ -17,6 +17,24 @@ try
     Check(DevTopology.ForProject("deep-dev").Ipv4Prefix == "172.31.240" &&
         DevTopology.ForProject("deep-dev-current").Ipv4Prefix == "172.31.241", "separate current topology addresses");
     await Reject(() => { _ = DevTopology.ForProject("production"); return Task.CompletedTask; }, "unknown dev project");
+    using(var control=new HttpResponseMessage(HttpStatusCode.OK)) {
+        control.Content=new ByteArrayContent(new byte[MailboxGrantRevocationV1Codec.MinimumBytes]);
+        control.Content.Headers.ContentType=new("application/vnd.deep.mailbox-grant-revocation.v1+octet-stream");
+        control.Headers.CacheControl=new(){NoStore=true};control.Headers.Add("X-Content-Type-Options","nosniff");
+        Check(DevNodeMailboxProvisioning.ValidateControlFraming(control)==MailboxGrantRevocationV1Codec.MinimumBytes,"closed control transport framing");
+        control.Content.Headers.ContentType.Parameters.Add(new("charset","utf-8"));
+        await Reject(()=>{_ = DevNodeMailboxProvisioning.ValidateControlFraming(control);return Task.CompletedTask;},"control media parameters");
+        control.Content.Headers.ContentType.Parameters.Clear();control.Content.Headers.ContentEncoding.Add("gzip");
+        await Reject(()=>{_ = DevNodeMailboxProvisioning.ValidateControlFraming(control);return Task.CompletedTask;},"control content encoding");
+        control.Content.Headers.ContentEncoding.Clear();control.Headers.CacheControl.NoStore=false;
+        await Reject(()=>{_ = DevNodeMailboxProvisioning.ValidateControlFraming(control);return Task.CompletedTask;},"control cache policy");
+        control.Headers.CacheControl.NoStore=true;control.Headers.Remove("X-Content-Type-Options");
+        await Reject(()=>{_ = DevNodeMailboxProvisioning.ValidateControlFraming(control);return Task.CompletedTask;},"control missing nosniff");
+        control.Headers.Add("X-Content-Type-Options","nosniff");control.Content.Headers.ContentLength=MailboxGrantRevocationV1Codec.MaximumBytes+1;
+        await Reject(()=>{_ = DevNodeMailboxProvisioning.ValidateControlFraming(control);return Task.CompletedTask;},"control hostile length");
+        control.StatusCode=HttpStatusCode.ServiceUnavailable;
+        await Reject(()=>{_ = DevNodeMailboxProvisioning.ValidateControlFraming(control);return Task.CompletedTask;},"control unavailable response");
+    }
     using var root = Signer.Create(Path.Combine(directory, "root.seed"), rootSigner: true);
     using var other = Signer.Create(Path.Combine(directory, "other.seed"), rootSigner: true);
     using var witness1 = Signer.Create(Path.Combine(directory, "witness1.seed"));
@@ -93,11 +111,12 @@ finally
 }
 
 static byte[] B(byte value) => Enumerable.Repeat(value, 32).ToArray();
+static byte[] U64(ulong value) { var bytes=new byte[8];System.Buffers.Binary.BinaryPrimitives.WriteUInt64BigEndian(bytes,value);return bytes; }
 static void Check(bool condition, string name) { if (!condition) throw new Exception(name); Console.WriteLine("PASS " + name); }
 static async Task Reject(Func<Task> run, string name)
 {
     try { await run(); }
-    catch (Exception e) when (e is ArgumentException or FormatException or CryptographicException or OverflowException or IOException)
+    catch (Exception e) when (e is ArgumentException or FormatException or CryptographicException or OverflowException or IOException or InvalidDataException)
     { Console.WriteLine("PASS reject " + name); return; }
     throw new Exception("Hostile fixture accepted: " + name);
 }
@@ -222,6 +241,15 @@ static async Task TestFileCeremonyAsync(VerifiedXPointNetworkBootstrap bootstrap
                 rootsSql.Contains(Convert.ToHexString(retrieve.Ed25519PublicKey.Span),StringComparison.Ordinal) &&
                 !rootsSql.Contains("CONFLICT",StringComparison.Ordinal) && !rootsSql.Contains("DELETE",StringComparison.Ordinal),
                 "explicit new journal roots bind verified policy and both roles without reset/upsert");
+            ReadOnlyMemory<byte>[] mgrFields=[policy.NetworkId,new byte[]{(byte)'P',(byte)'M',(byte)'A',(byte)'2',0,1}.Concat(policy.CoreHash.ToArray()).ToArray(),
+                new byte[]{1},deposit.Ed25519PublicKey,U64(1),new byte[32],U64(1_800_000_010),U64(1_800_000_010),U64(1_800_000_200),new byte[4],Array.Empty<byte>()];
+            var mgrInput=MailboxGrantRevocationV1Codec.CreateSignatureInput(mgrFields);
+            var mgr=MailboxGrantRevocationV1Codec.Encode(mgrFields,(await deposit.SignDtt1Async(mgrInput,default)).Span);
+            DevNodeMailboxProvisioning.ValidateControl(policy,Deep.Protocol.DeepExtension.MailboxCapabilities.MailboxCapabilityDomain.Deposit,mgr);
+            Check(true,"captured canonical MGR signature/scope matches the verified policy without claiming enrollment");
+            await Reject(()=>{DevNodeMailboxProvisioning.ValidateControl(policy,Deep.Protocol.DeepExtension.MailboxCapabilities.MailboxCapabilityDomain.Retrieve,mgr);return Task.CompletedTask;},"captured control wrong role");
+            var alteredMgr=mgr.ToArray();alteredMgr[^1]^=1;
+            await Reject(()=>{DevNodeMailboxProvisioning.ValidateControl(policy,Deep.Protocol.DeepExtension.MailboxCapabilities.MailboxCapabilityDomain.Deposit,alteredMgr);return Task.CompletedTask;},"captured control changed signature");
             var encoded = File.ReadAllBytes(Path.Combine(candidate, "operator/renewal.state"));
             Check(CryptographicOperations.FixedTimeEquals(encoded.AsSpan(0, 32), HMACSHA256.HashData(integrity, encoded.AsSpan(32))), "candidate journal uses retained integrity key");
             var journal = DevPublisher.ReadJournal(Path.Combine(candidate, "operator/renewal.state"), integrity, bootstrap.Authority.NetworkId.ToArray());

@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('Init','Build','PrepareAuthority','PrepareOperational','ApplyOperational','PrepareMailbox','ProvisionMailbox','ActivateMailbox','AdmitObserver','Provision','ProvisionFloor','Up','Status','Stop','Start','Verify','FaultMatrix','HistoryFault','StackFault','EngineFault','ExpiryFault')][string]$Action,
+    [Parameter(Mandatory)][ValidateSet('Init','Build','PrepareAuthority','PrepareOperational','ApplyOperational','PrepareMailbox','ProvisionMailbox','ActivateMailbox','PrepareNodeMailbox','ProvisionNodeMailboxKeys','FetchNodeMailboxControl','EnrollNodeMailbox','ActivateNodeMailbox','AdmitObserver','Provision','ProvisionFloor','Up','Status','Stop','Start','Verify','FaultMatrix','HistoryFault','StackFault','EngineFault','ExpiryFault')][string]$Action,
+    [ValidateRange(1,3)][int]$NodeNumber = 1,
     [string]$OperationalCandidate,
     [string]$CustodyRoot = 'C:\Work\DeepSession\secrets\dev\deep-dev',
     [ValidateSet('deep-dev','deep-dev-current')][string]$ProjectName = 'deep-dev',
@@ -53,7 +54,7 @@ function Invoke-DesktopOperation([ValidateSet('start','stop')][string]$Operation
         if ($process.ExitCode -ne 0) { throw 'Docker Desktop operation failed; inspect host diagnostics. Retained volumes/custody were not reset.' }
     } finally { $process.Dispose() }
 }
-$devEnvironmentNames = @('DEEP_DEV_ROOT','DEEP_DEV_PROJECT','DEEP_DEV_IPV4_PREFIX','DEEP_DEV_PORT_PREFIX','DEEP_DEV_REGISTRY_PORT')
+$devEnvironmentNames = @('DEEP_DEV_ROOT','DEEP_DEV_PROJECT','DEEP_DEV_IPV4_PREFIX','DEEP_DEV_PORT_PREFIX','DEEP_DEV_REGISTRY_PORT','DEEP_DEV_MAILBOX_NETWORK','DEEP_DEV_MAILBOX_POLICY')
 $devPreviousEnvironment = @{}
 foreach ($name in $devEnvironmentNames) { $devPreviousEnvironment[$name] = [Environment]::GetEnvironmentVariable($name,'Process') }
 try {
@@ -68,6 +69,16 @@ $mailboxEnabled = Test-Path -LiteralPath $mailboxMarker -PathType Leaf
 if ($mailboxEnabled) {
     if ($ProjectName -cne 'deep-dev-current' -or ((Get-Item -LiteralPath $mailboxMarker).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Invalid current-dev mailbox activation marker.' }
     $compose += @('--file',(Join-Path $devopsRoot 'docker-compose.deep-dev.mailbox.yml'))
+}
+$nodeMailboxEnabled = Test-Path -LiteralPath (Join-Path $custodyPath 'mailbox/nodes-enabled') -PathType Leaf
+if ($nodeMailboxEnabled -or $Action -in @('EnrollNodeMailbox','ActivateNodeMailbox')) {
+    if (-not $mailboxEnabled) { throw 'Actual issuer must be enabled before node mailbox composition.' }
+    $bindingsFile = Join-Path $custodyPath 'mailbox/node-bindings.json'
+    if (-not (Test-Path -LiteralPath $bindingsFile -PathType Leaf) -or ((Get-Item -LiteralPath $bindingsFile).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Verified explicit node mailbox bindings missing/linked.' }
+    $bindings = Get-Content -LiteralPath $bindingsFile -Raw | ConvertFrom-Json
+    if ($bindings.NetworkIdHex -cnotmatch '^[0-9a-f]{32}$' -or $bindings.MailboxAuthorityCoreHashHex -cnotmatch '^[0-9a-f]{64}$') { throw 'Invalid node mailbox bindings.' }
+    $env:DEEP_DEV_MAILBOX_NETWORK = $bindings.NetworkIdHex; $env:DEEP_DEV_MAILBOX_POLICY = $bindings.MailboxAuthorityCoreHashHex
+    $compose += @('--file',(Join-Path $devopsRoot 'docker-compose.deep-dev.mailbox-nodes.yml'))
 }
 $devServiceCount = if ($mailboxEnabled) { 8 } else { 6 }
 $devServices = @('floor','registry','publisher','node-1','node-2','node-3')
@@ -167,6 +178,49 @@ if ($Action -eq 'ActivateMailbox') {
     return
 }
 if ($Action -eq 'AdmitObserver') { Invoke-DevObserverAdmission; return }
+if ($Action -in @('PrepareNodeMailbox','ProvisionNodeMailboxKeys','FetchNodeMailboxControl','EnrollNodeMailbox','ActivateNodeMailbox')) {
+    if ($ProjectName -cne 'deep-dev-current' -or -not $mailboxEnabled) { throw 'Current retained issuer required; no old-scope inference.' }
+    $nodeName = "node-$NodeNumber"
+    $enrollmentMarker = Join-Path $custodyPath "mailbox/$nodeName-enrolled"
+    switch ($Action) {
+        'PrepareNodeMailbox' {
+            if ($nodeMailboxEnabled) { throw 'Existing node scopes cannot be re-prepared as new.' }
+            Run-Native dotnet @('run','--project',(Join-Path $devopsRoot 'tools/deep-dev/Deep.Dev.csproj'),'-c','Debug','--','prepare-node-mailbox',$custodyPath,(Join-Path $devopsRoot 'tools/nts-observer/deep-nts-observer.exe'))
+        }
+        'ProvisionNodeMailboxKeys' {
+            if ($nodeMailboxEnabled -or (Test-Path -LiteralPath $enrollmentMarker)) { throw 'First key provision only; never regenerate enrolled custody.' }
+            foreach ($kind in @('keys','custody')) { Run-Native docker @('volume','create','--label','deep.environment=dev','--label',"deep.project=$ProjectName","$($ProjectName)_$nodeName-mailbox-$kind") }
+            Run-Native docker @('run','--rm','--network','none','--cap-drop','ALL','--security-opt','no-new-privileges:true','--ulimit','core=0',
+                '--mount',"type=volume,source=$($ProjectName)_$nodeName-mailbox-keys,target=/run/mailbox-keys",'--entrypoint','dotnet',
+                "$ProjectName/publisher:candidate",'Deep.Dev.dll','provision-node-mailbox-keys','/run/mailbox-keys')
+        }
+        'FetchNodeMailboxControl' {
+            $control = Join-Path $custodyPath 'mailbox/node-control'
+            if (-not (Test-Path -LiteralPath $control)) { $null=New-Item -ItemType Directory -Path $control }
+            if ((Get-Item -LiteralPath $control).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Control capture directory must not be linked.' }
+            Run-Native docker @('run','--rm','--network',"$($ProjectName)_dev",'--ulimit','core=0',
+                '--mount',"type=bind,source=$custodyPath/public,target=/run/deep-public,readonly",'--mount',"type=bind,source=$control,target=/run/node-control",
+                "$ProjectName/publisher:candidate",'Deep.Dev.dll','fetch-node-mailbox-control','/run/deep-public','/run/node-control','/usr/local/bin/deep-nts-observer')
+        }
+        'EnrollNodeMailbox' {
+            if ($nodeMailboxEnabled -or (Test-Path -LiteralPath $enrollmentMarker)) { throw 'Explicit genuinely new node enrollment only; preserve partial failures.' }
+            # Stop the existing owner before touching its same retained data/proof roots.
+            Run-Native docker ($compose + @('stop','--timeout','10',$nodeName))
+            Run-Native docker ($compose + @('run','--rm','--no-deps',$nodeName,'XNode.dll','current-mailbox-enroll',
+                '--deposit-mgr1-file','/run/node-control/deposit.mgr1','--retrieve-mgr1-file','/run/node-control/retrieve.mgr1'))
+            $null=New-Item -ItemType File -Path $enrollmentMarker -ErrorAction Stop
+            Write-Host 'Explicit new node mailbox floor enrollment completed; activate normal consumers separately.'
+        }
+        'ActivateNodeMailbox' {
+            if ($nodeMailboxEnabled) { throw 'Already enabled; use normal Up/Start with retained state.' }
+            foreach ($number in 1..3) { if (-not (Test-Path -LiteralPath (Join-Path $custodyPath "mailbox/node-$number-enrolled") -PathType Leaf)) { throw 'All three explicit enrollments required.' } }
+            $null=New-Item -ItemType File -Path (Join-Path $custodyPath 'mailbox/nodes-enabled') -ErrorAction Stop
+            Run-Native docker ($compose + @('up','-d','node-1','node-2','node-3'))
+            Write-Host 'Current node mailbox consumers activated; verified admission/restart still required.'
+        }
+    }
+    return
+}
 if ($Action -eq 'Build') {
     Run-Native dotnet @('run','--project',(Join-Path $devopsRoot 'tools/deep-dev/Deep.Dev.csproj'),'-c','Debug','--','configure',$custodyPath)
     Run-Native docker ($compose + @('build','registry','node-1','publisher')); return
@@ -185,7 +239,13 @@ function Test-CurrentCapabilities {
     foreach ($devNode in 1..3) {
         $nodeResult = & docker @($compose + @('exec','-T',"node-$devNode",'curl','--fail','--silent','--max-time','5','http://localhost:8080/health/ready')) 2>$null
         if ($LASTEXITCODE -ne 0) { Write-Host "Current capability unavailable: node-$devNode health HTTP (exit $LASTEXITCODE)."; $ready = $false; continue }
-        try { if (($nodeResult | ConvertFrom-Json).privacyRouting -cne 'ready') { Write-Host "Current capability unavailable: node-$devNode verified ONION."; $ready = $false } } catch { $ready = $false }
+        try {
+            $health = $nodeResult | ConvertFrom-Json
+            if ($health.privacyRouting -cne 'ready') { Write-Host "Current capability unavailable: node-$devNode verified ONION."; $ready = $false }
+            if ($nodeMailboxEnabled -and ($health.currentMailboxHost.recovered -ne $true -or $health.currentMailboxHost.state -cne 'recovered')) {
+                Write-Host "Current capability unavailable: node-$devNode native mailbox recovery."; $ready = $false
+            }
+        } catch { $ready = $false }
     }
     return $ready
 }
@@ -272,7 +332,8 @@ if ($Action -in @('StackFault','EngineFault','ExpiryFault')) {
     # Digests stay in process memory and never enter the public evidence object.
     $custody = @{}
     foreach ($service in @('registry','node-1','node-2','node-3')) {
-        $custody[$service] = & docker @($compose + @('exec','-T',$service,'sh','-c','sha256sum /run/secrets/*'))
+        $custodyCommand = if ($nodeMailboxEnabled -and $service -match '^node-[123]$') { 'sha256sum /run/secrets/* /var/lib/mailbox-keys/key-*.xml' } else { 'sha256sum /run/secrets/*' }
+        $custody[$service] = & docker @($compose + @('exec','-T',$service,'sh','-c',$custodyCommand))
         if ($LASTEXITCODE -ne 0 -or -not $custody[$service]) { throw 'Cannot snapshot retained online custody.' }
     }
     if ($mailboxEnabled) {
@@ -332,7 +393,9 @@ if ($Action -in @('StackFault','EngineFault','ExpiryFault')) {
             if ($LASTEXITCODE -ne 0 -or ($after -join "`n") -cne ($retained[$id] -join "`n")) { throw 'Recovery changed retained containers or custody/state mounts.' }
         }
         foreach ($service in $custody.Keys) {
-            $digestCommand = if ($service -in @('deposit-signer','retrieve-signer')) { 'sha256sum /run/role-secrets/role.seed' } else { 'sha256sum /run/secrets/*' }
+            $digestCommand = if ($service -in @('deposit-signer','retrieve-signer')) { 'sha256sum /run/role-secrets/role.seed' }
+                elseif ($nodeMailboxEnabled -and $service -match '^node-[123]$') { 'sha256sum /run/secrets/* /var/lib/mailbox-keys/key-*.xml' }
+                else { 'sha256sum /run/secrets/*' }
             $after = & docker @($compose + @('exec','-T',$service,'sh','-c',$digestCommand))
             if ($LASTEXITCODE -ne 0 -or ($after -join "`n") -cne ($custody[$service] -join "`n")) { throw 'Online custody changed across recovery.' }
         }

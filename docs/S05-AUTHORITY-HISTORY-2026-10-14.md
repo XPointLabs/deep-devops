@@ -616,3 +616,57 @@ generation15/entry_count15/committed15 in each existing role scope, no pending.
 No deletion, scope reinitialization, identity change, deadline enlargement or
 manual signature was used. This is one bounded recovery, not the complete S05
 rotation/outage/soak matrix or node/client/device acceptance.
+
+## Actual retained node mailbox enrollment
+
+The supported explicit workflow now prepares current signed scope, provisions
+separate empty protection-key volumes, captures exact signed MGR1 records and
+invokes XNode's existing `current-mailbox-enroll` command with each stopped
+owner's original identity/data roots. It neither synthesizes MGR signatures nor
+resets floors. All three actual enrollments07 completed native0; each sanitized
+`artifacts/s05-node-enrollment-20261014/07/node-N-enroll.log` has SHA256
+`3798D9A256EDA20C2236C416BCFC5BBDE2B9AC28F3D7B89AB309DD9752531D46`.
+Activation08 and strict Verify09 completed native0. Verify requires actual
+recovered mailbox hosts, not disabled success; its SHA256 is
+`DA713D9A2429A86C0720BDDE27695516BFFAF38AAF4ADFF2967EB7F47DB2B194`.
+
+Final operator preparation tests12:48 checks/native0, including signed role
+binding and negative response-framing cases. Receipt
+`artifacts/s05-node-enrollment-20261014/12/final-preparation-tests.log`, SHA256
+`395BC43730BF50920F2F1C56B637DB2A32D75C0F6456F34FF69C5819BED3C695`.
+Actual three-overlay Compose contracts15/0/native0; PowerShell AST and diff
+checks passed. Final Linux ARM64 operator image build13 native0, zero compiler
+warnings/errors, stderr SHA256
+`34061AE4FECAAE4F6312066F74F86619050E60545B88784FCFE2C47741B95D3B`.
+Release-gate contracts passed51 synthetic commands; actual production-readiness
+remains blocked by10 missing evidence inputs, not shipping acceptance. Final exact
+control capture15 native0 under TLS/closed framing, SHA256
+`F8E2C713EF3C5D29FDF6B0418CB2EC1BBA22F4AC5BA19F3B9314262BD393C22B`.
+Windows PowerShell5.1 resumed current-dev smoke15 native0, SHA256
+`D9E6EB69E9AF51A664A87255A013F6252ED206CDF2B295B793F8AEC4CCDCD2FC`.
+Direct actual reprovision of an existing keyring16 rejected with helper exit2;
+in-memory before/after digest comparison confirmed unchanged key bytes.
+Its closed stderr SHA256 is
+`5548EB026A54EF5F6B1D4B62FF9FCF1C22AEEB871DD8FE1152A23726D740AF6C`.
+
+Preserved attempts05/14 failed closed with IOException during control capture;
+read-only refetch06/15 passed. No native floor was replaced by these retries.
+Test11 failed because its negative-test helper did not catch InvalidDataException;
+the explicit rejection category was added, not an acceptance/assertion weakened.
+
+Retained restart10's log reports20s offline,153s recovery and30s stable current
+Registry/ONION/native mailbox hosts, unchanged identity/role/protection-key bytes
+and mounts. Receipt SHA256
+`CFDD96A04022915655CE4109546BCCC137AE7FEBE5149C38E62463E461A9B14A`.
+The original runner's native terminal was lost during context handoff; this
+restart remains **diagnostic/unqualified**, not accepted by inferring exit0
+from its final JSON. The independent resumed smoke above has a captured exit0.
+Long startup control/readiness unavailability is not claimed fixed by eventual
+recovery; no deadline, nonce, signature or floor fence was relaxed.
+
+This closes first explicit dev node enrollment, not private XMC2 acquisition
+through the owned client, node acceptance of those grants, coordinated later
+role/custody rollover or the remaining S05 fault matrix. Physical contacts,
+messages, attachments and groups remain0/4. Production, old-dev, main and GitHub
+Releases were not changed. Workflow details have one owner:
+[DEEP_DEV](DEEP_DEV.md#explicit-current-dev-node-mailbox-enrollment).

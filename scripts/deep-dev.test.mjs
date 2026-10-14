@@ -107,6 +107,21 @@ test('mailbox activation explicitly provisions permanent roots and never repairs
   assert.doesNotMatch(provisioning,/ON CONFLICT|DELETE FROM|TRUNCATE|volume','rm|provision-floor/);
 });
 
+test('enrolled node overlay preserves existing identities and isolates read-only key rings from data/custody',()=>{
+  const files=['deep-dev','deep-dev.mailbox','deep-dev.mailbox-nodes'].flatMap(name=>['-f',fileURLToPath(new URL(`../docker-compose.${name}.yml`,import.meta.url))]);
+  const config=JSON.parse(execFileSync('docker',['compose','--project-name','deep-dev-current',...files,'config','--format','json'],{
+    encoding:'utf8',env:{...process.env,DEEP_DEV_PROJECT:'deep-dev-current',DEEP_DEV_ROOT:'C:/Work/DeepSession/secrets/dev/deep-dev-current',
+      DEEP_DEV_MAILBOX_NETWORK:'11'.repeat(16),DEEP_DEV_MAILBOX_POLICY:'22'.repeat(32),DEEP_DEV_IPV4_PREFIX:'172.31.241',DEEP_DEV_PORT_PREFIX:'282',DEEP_DEV_REGISTRY_PORT:'28543'}}));
+  assert.equal(Object.keys(config.services).length,8);
+  for(const i of [1,2,3]) {
+    const node=config.services[`node-${i}`];assert.equal(node.environment.Mailbox__Enabled,'true');
+    for(const [target,source,readonly] of [['/var/lib/xnode',`node-${i}-state`,false],['/run/secrets',`node-${i}-secrets`,true],
+      ['/var/lib/mailbox-custody',`node-${i}-mailbox-custody`,false],['/var/lib/mailbox-keys',`node-${i}-mailbox-keys`,true]]) {
+      const mounts=node.volumes.filter(v=>v.target===target);assert.equal(mounts.length,1);assert.equal(mounts[0].source,source);assert.equal(!!mounts[0].read_only,readonly);
+    }
+  }
+});
+
 test('engine fault tests automatic restart with retained custody and refuse a shared engine', async () => {
   const script = await read('./deep-dev.ps1');
   const fault = script.split("if ($Action -in @('StackFault','EngineFault','ExpiryFault'))")[1].split("if ($Action -eq 'Verify')")[0];

@@ -5,6 +5,7 @@
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
   </PropertyGroup>
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <ProjectReference Include="../../../deep-client-shared/src/Deep.Client.Shared/Deep.Client.Shared.Production.csproj" />
   </ItemGroup>
 </Project>
