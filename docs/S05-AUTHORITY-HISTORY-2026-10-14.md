@@ -482,3 +482,35 @@ inputs; [Registry evidence](../../deep-registry-api/docs/testing/s05-epoch-readi
 owns its exact receipts. Final source secret scan of15 changed files found0 findings.
 The broad raw-artifact upload scan is not accepted: local logs/archives remain
 private diagnostic inputs, not a cleared release bundle.
+
+## Same-day lineage-aware recovery
+
+[DR-0119](../../docs/survival-program/decisions/DR-0119-dtt1-same-day-authority-handover.md)
+freezes the exact negative anti-replay lineage; no raw allowlist, nonce/quota reset,
+signature/wire change or historical-currentness conversion is used. Registry
+probes the unchanged HMAC nonce path for every protocol-minted overlapping paired
+namespace and retains all same-day markers and aggregate quota. Current signatures
+still name only the exact current authority/time/epoch. Older/sibling namespaces
+not in the current lineage reject. Readiness remains read-only.
+
+Actual retained current-dev Registry image build and scoped recreation completed
+native0. Registry proof and three independent ONION capabilities recovered21s:
+`artifacts/s05-same-day-runtime-20261014/01/verify.log`, SHA256
+`75A069194B3FFA0F4F941C487E14B6E5629D8E46DAA2DFEDEEB56C6CD859622D`.
+No Init/Provision, genesis/key/floor replacement, clock editing, marker deletion
+or production write occurred. The original failed activation remains above.
+
+Retained StackFault:20s offline,18s recovery,30s stable, native0, same custody
+digests and state/container mount bindings:
+`artifacts/s05-same-day-runtime-20261014/02/stack-fault.log`, SHA256
+`50EB11C15752EA47B80DE58423CDCB408D4AB6CF5C3E4339DE93E15A863CEDC1`.
+This is a real same-day renewal/restart scenario, not a whole-engine fault,
+long soak, complete root/witness rotation ceremony, mailbox issuance or physical
+contact/message/file/group acceptance. External grant sockets/journals and the
+remaining S05 gates are still open.
+
+Matching Registry canonical full accepted401/0/7,408 exact mappings and2842
+unchanged inputs, all native stages0; source scopes and hashes are owned by its
+[handover checkpoint](../../deep-registry-api/docs/testing/s05-same-day-handover-2026-10-14.md).
+Protocol's independent full retains the original S08 package failure; no release
+qualification is inferred from this successful development recovery.

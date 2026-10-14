@@ -183,6 +183,16 @@ open S05 coordination requirement, not permission to erase the ledger, change
 the clock, backdate policy, weaken fork rejection or publish a release. See the
 [source/runtime checkpoint](S05-AUTHORITY-HISTORY-2026-10-14.md).
 
+The coordinated consumer under
+[DR-0119](../../docs/survival-program/decisions/DR-0119-dtt1-same-day-authority-handover.md)
+now checks nonce paths across the exact verified same-day paired ancestry and
+preserves its aggregate quota and markers. It does not accept an arbitrary
+changed ID or clear the ledger. The current-only dev recovered Registry proof
+and all three ONION capabilities after the updated Registry image, then passed
+a scoped retained restart. This resolves that observed epoch collision, not
+all S05 issuance/rotation gates or device/message acceptance. See the checkpoint
+for exact real-runtime evidence; do not repeat unchanged full gates to infer more.
+
 `FaultMatrix` scopes stop/start to these six services, always restores stopped
 services, and verifies retained mount bindings. `HistoryFault` intentionally
 adds 130 real disposable DID2 accounts to **this DEV directory**, with all
