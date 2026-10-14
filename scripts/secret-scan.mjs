@@ -162,7 +162,9 @@ function looksLikeLiteralSecret(value, logicalName = '', quoted = false) {
   if (!quoted && /\.(?:cs|js|mjs|ps1|ts)$/i.test(logicalName)
     && (/^[A-Za-z_$][\w$]*$/.test(normalized)
       || /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$/.test(normalized)
-      || /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)?[\t ]*\(/.test(normalized))) {
+      || /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)?[\t ]*\(/.test(normalized)
+      || (/\.cs$/i.test(logicalName)
+        && /^await[\t ]+[A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)*[\t ]*\(/.test(normalized)))) {
     return false;
   }
   if (/^[0-9a-f]{64}$/i.test(normalized)) return true;

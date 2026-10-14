@@ -114,6 +114,40 @@ test('source member references are not literals but quoted references and creden
   }
 });
 
+test('C# awaited source calls are expressions, not a blanket exemption for literals or evidence', async () => {
+  const root = await fixture();
+  try {
+    const source = path.join(root, 'awaited.cs');
+    const expression = 'await OwnedInitialMessagingSeed.FromSenderAsync(retained, initial).ConfigureAwait(false)';
+    await writeFile(source, `seed = ${expression};\nsecret = await ReadAsync();\n`);
+    let result = await scan({ root, includeTracked: false, artifactRoots: [], paths: [source] });
+    assert.equal(result.status, 'ok');
+    for (const value of [expression, 'await LiteralCanary123']) {
+      await writeFile(source, `seed = "${value}";\n`);
+      result = await scan({ root, includeTracked: false, artifactRoots: [], paths: [source] });
+      assert.equal(result.status, 'failed');
+      assert.ok(result.findings.some(item => item.ruleId === 'sensitive-assignment'));
+      assert.ok(!JSON.stringify(result).includes(value));
+    }
+    const config = path.join(root, 'awaited.env');
+    await writeFile(config, `seed = ${expression}\n`);
+    result = await scan({ root, includeTracked: false, artifactRoots: [], paths: [config] });
+    assert.equal(result.status, 'failed');
+    assert.ok(result.findings.some(item => item.ruleId === 'sensitive-assignment'));
+
+    // Independent provider-token detection still inspects the entire call,
+    // including a literal argument after the source expression's opening quote.
+    const token = ['ghp', 'A'.repeat(32)].join('_');
+    await writeFile(source, `seed = await ReadAsync("${token}");\n`);
+    result = await scan({ root, includeTracked: false, artifactRoots: [], paths: [source] });
+    assert.equal(result.status, 'failed');
+    assert.ok(result.findings.some(item => item.ruleId === 'known-provider-token'));
+    assert.ok(!JSON.stringify(result).includes(token));
+  } finally {
+    await remove(root);
+  }
+});
+
 test('top-level evidence volume does not consume the nested archive expansion budget', async () => {
   const root = await fixture();
   try {

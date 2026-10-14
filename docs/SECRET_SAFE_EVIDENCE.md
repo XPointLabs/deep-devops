@@ -7,8 +7,10 @@ Mr. X is the accountable human owner for credential rotation, UAT reactivation,
 and evidence upload approval. Automation must fail closed and must never print,
 hash into a report, archive, or upload a secret value.
 
-The scanner distinguishes unquoted compiler identifier/member references in
-source files from embedded literal credentials. Quoted source assignments are
+The scanner distinguishes unquoted compiler identifier/member references and
+method calls in source files from embedded literal credentials, including C#
+`await` method-call expressions. This is expression classification only, not
+verification that the called method handles secrets safely. Quoted source assignments are
 still inspected as literals, including strings that look like member references.
 JSON, YAML, environment files and evidence receive no source-expression exemption.
 Private-key blocks, provider tokens, mnemonic and private-scalar detection remain
