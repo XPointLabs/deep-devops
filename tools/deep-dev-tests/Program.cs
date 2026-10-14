@@ -230,6 +230,36 @@ static async Task TestFileCeremonyAsync(VerifiedXPointNetworkBootstrap bootstrap
             using var crt = X509Certificate2.CreateFromPemFile(Path.Combine(candidate, "online/node-1/server.crt"), Path.Combine(candidate, "online/node-1/server.key"));
             Check(crt.HasPrivateKey && crt.MatchesHostname("node-1") && crt.MatchesHostname("172.31.240.11") &&
                 File.ReadAllBytes(Path.Combine(publicRoot, "network.ncp2")).AsSpan().SequenceEqual(bundle), "installable staged TLS and unchanged live source");
+            foreach (var service in new[] { "registry", "node-1", "node-2", "node-3" }) {
+                var configDirectory = Path.Combine(fixture, service); Directory.CreateDirectory(configDirectory);
+                var section = new { NetworkIdHex = Convert.ToHexString(bootstrap.Authority.NetworkId.Span),
+                    GenesisAuthorityCoreHashHex = Convert.ToHexString(bootstrap.GenesisPin.AuthorityCoreHash.Span) };
+                var config = service == "registry" ? new Dictionary<string, object> { ["DeepIdV2DirectoryAuthority"] = section } :
+                    new Dictionary<string, object> { ["DeepIdV2DirectoryProof"] = section, ["PrivacyRouting"] = new {
+                        Peers = Enumerable.Range(1, 3).Where(i => service != $"node-{i}").Select(i => new {
+                            BaseUrl = $"https://172.31.240.{10 + i}/", RouterId = Convert.ToHexString(nodeSigners[i - 1].Ed25519PublicKey.Span),
+                            CurrentSpkiSha256 = new string('a',64), NextSpkiSha256 = new string('b',64) }).ToArray() } };
+                File.WriteAllBytes(Path.Combine(configDirectory, "appsettings.Development.json"), JsonSerializer.SerializeToUtf8Bytes(config));
+            }
+            var registryConfig = File.ReadAllBytes(Path.Combine(fixture, "registry/appsettings.Development.json"));
+            DevOperationalActivation.Execute(fixture, candidate, install: false);
+            Check(File.Exists(Path.Combine(candidate, "installation.state")) &&
+                File.ReadAllBytes(Path.Combine(fixture, "registry/appsettings.Development.json")).AsSpan().SequenceEqual(registryConfig), "activation validation stages protected before-images without live writes");
+            var traffic = Path.Combine(candidate, "online/node-1/key_x25519"); var originalTraffic = File.ReadAllBytes(traffic);
+            File.WriteAllText(traffic, new string('f', 64));
+            await Reject(() => { DevOperationalActivation.Execute(fixture, candidate, false); return Task.CompletedTask; }, "changed sealed traffic custody");
+            File.WriteAllBytes(traffic, originalTraffic);
+            File.WriteAllText(Path.Combine(fixture, "registry/appsettings.Development.json"), "{}");
+            await Reject(() => { DevOperationalActivation.Execute(fixture, candidate, true); return Task.CompletedTask; }, "changed retained target before any install");
+            File.WriteAllBytes(Path.Combine(fixture, "registry/appsettings.Development.json"), registryConfig);
+            DevOperationalActivation.Execute(fixture, candidate, true);
+            DevOperationalActivation.Execute(fixture, candidate, true);
+            Check(File.ReadAllBytes(Path.Combine(publicRoot, "network.ncp2")).AsSpan().SequenceEqual(bundle) &&
+                File.ReadAllBytes(Path.Combine(offline, "root.seed")).AsSpan().SequenceEqual(root.Seed) &&
+                File.ReadAllBytes(Path.Combine(fixture, "node-1/secrets/key_x25519")).AsSpan().SequenceEqual(originalTraffic), "repeatable whitelist install leaves publisher closure and root custody unchanged");
+            File.WriteAllBytes(Path.Combine(publicRoot, "network.ncp2"), journal.Bundle);
+            DevOperationalActivation.Execute(fixture, candidate, true);
+            Check(true, "exact committed candidate installation can resume without a new generation");
         } finally { CryptographicOperations.ZeroMemory(integrity); }
     }
     finally

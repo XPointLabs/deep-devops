@@ -176,3 +176,22 @@ test('offline operational preparation freezes the exact publisher predecessor an
   assert.match(publisher, /WriteJournal\(state,candidate,key\)/);
   assert.doesNotMatch(publisher, /Signer.LoadRoot|root.seed/);
 });
+
+test('operational activation installs a sealed whitelist with all owners stopped before journal import', async () => {
+  const script = await read('./deep-dev.ps1');
+  const activation = script.split("if ($Action -eq 'ApplyOperational') {")[1].split("if ($Action -in @('StackFault'")[0];
+  assert.ok(activation.indexOf("'validate-operational-install'") < activation.indexOf("@('stop','--timeout','10')"));
+  assert.ok(activation.indexOf("@('stop','--timeout','10')") < activation.indexOf("'install-operational'"));
+  assert.ok(activation.indexOf("'install-operational'") < activation.indexOf("'import-operational'"));
+  assert.ok(activation.indexOf("'import-operational'") < activation.indexOf("@('start')"));
+  assert.match(activation, /Join-Path \$candidatePath 'operator'/);
+  assert.match(activation, /target=\/run\/deep-renewal,readonly/);
+  assert.doesNotMatch(activation, /source=\$candidatePath[,}]|Provision|provision-state|provision-floor|down|--volumes|key_ed25519|key_bls/);
+  const source = await read('../tools/deep-dev/DevOperationalActivation.cs');
+  assert.match(source, /CryptographicOperations.FixedTimeEquals/);
+  assert.match(source, /Stale installation candidate/);
+  assert.match(source, /CustomRootTrust/);
+  assert.match(source, /ResolveIssuer\(domain\)/);
+  assert.match(source, /Retained installation target changed/);
+  assert.doesNotMatch(source, /ServerCertificateCustomValidationCallback|VerificationFlags|AllowUnknownCertificateAuthority/);
+});

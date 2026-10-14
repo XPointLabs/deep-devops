@@ -111,6 +111,7 @@ internal static class DevOfflineOperationalRenewal
             var payload = JsonSerializer.SerializeToUtf8Bytes(journal);
             var encoded = new byte[payload.Length + 32]; HMACSHA256.HashData(integrity, payload).CopyTo(encoded, 0); payload.CopyTo(encoded, 32);
             Write("operator/renewal.state", encoded);
+            DevOperationalActivation.Seal(staging, integrity);
             var complete = staging[..^8]; Directory.Move(staging, complete); return complete;
 
             byte[] Certificate(string service, string dns, IPAddress address)

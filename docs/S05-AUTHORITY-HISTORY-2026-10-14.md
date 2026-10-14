@@ -434,3 +434,51 @@ public hash. Both private candidates remain under dev offline custody. Latest
 candidate has not been activated; no generator reset, registered identity change
 or manual signed-record edit occurred. Starting publisher explicitly cancels this
 preparation and requires a new candidate, not a compare-exchange bypass.
+
+## Coordinated installation and failed connected acceptance
+
+The sealed host installation package adds exact private-artifact HMAC binding,
+PMA role-seed matching, same-identity CA and leaf private/chain/SAN validation,
+traffic metadata checks, and a protected before/new installation plan. Only
+TLS/traffic/issuer custody, immutable paired-history files and owned config are
+replaced. Ed/BLS identities, genesis, replay/entropy protection, passwords and
+state/floor volumes are outside the whitelist. Repeating an interrupted plan
+requires every target to match its before or after bytes; altered targets reject
+before installation. Only candidate/operator is mounted for online CAS import.
+
+Native Windows PowerShell5.1/SDK10.0.301 build/test exits0, zero warnings/errors:
+`artifacts/s05-dev-operational-activation-20261014/03`,35 real-signature/file checks,
+12 topology/orchestration contracts. Tests SHA256:
+`FA7B2D08C221815A83C3F20EDC16760DA719244353F7732272C15336453819BD`.
+Final exact-plan whitelist source passed the matching04 build/test with the same
+35 checks, native0, zero warnings/errors and the same tests hash. The first test exposed
+incorrect public-only PEM loading; its original failure is not activation evidence.
+
+Actual new sealed candidate generation7 was prepared with NTS against the retained
+current predecessor. All six scoped owners stopped; private/config installation
+and protected publisher import completed; delegated publication resumed at8.
+The180-second independent Registry/three-ONION wait **failed native1**. No reset,
+floor replacement, registered-identity replacement or signed-byte edit was used.
+The retained dev remains running for diagnosis. Production and old deep-dev were
+not changed. This is partial operational progress, not activation/device PASS.
+
+Root/DTS handover during the same UTC-day changes the authenticated DTT1 epoch ID
+while preserving its number. The nonce ledger rejects that as rollback/fork;
+normal TLS/NTS and head renewal can succeed while proof issuance cannot. Registry
+readiness now requires a read-only ledger check with a closed diagnostic label.
+Coordinate the operational policy ceremony with that retained issuance namespace
+before repeating root handover. Do not fix this by deleting quota/markers,
+backdating time or policy, waiting silently, or accepting changed same-number IDs.
+External grant signers/journals and physical contacts/messages/files/groups remain
+unactivated and unqualified. S05/S06/release acceptance is not closed.
+
+Actual updated Registry readiness now returns503/native curl22 with the closed
+`issuance-epoch-rollback-or-fork` diagnostic, not a successful-shaped health.
+Receipt `artifacts/s05-dev-operational-activation-20261014/04/runtime-registry.log`,
+SHA256:`F024E0660EA2735D7E67894F19055F223D554EE0ECC4A7A27D114B2B4634061D`;
+three separately captured node health responses report ONION unavailable.
+Matching Registry canonical full passed398/0/7,405 mappings and2839 unchanged
+inputs; [Registry evidence](../../deep-registry-api/docs/testing/s05-epoch-readiness-2026-10-14.md)
+owns its exact receipts. Final source secret scan of15 changed files found0 findings.
+The broad raw-artifact upload scan is not accepted: local logs/archives remain
+private diagnostic inputs, not a cleared release bundle.

@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('Init','Build','PrepareAuthority','PrepareOperational','AdmitObserver','Provision','ProvisionFloor','Up','Status','Stop','Start','Verify','FaultMatrix','HistoryFault','StackFault','EngineFault','ExpiryFault')][string]$Action,
+    [Parameter(Mandatory)][ValidateSet('Init','Build','PrepareAuthority','PrepareOperational','ApplyOperational','AdmitObserver','Provision','ProvisionFloor','Up','Status','Stop','Start','Verify','FaultMatrix','HistoryFault','StackFault','EngineFault','ExpiryFault')][string]$Action,
+    [string]$OperationalCandidate,
     [string]$CustodyRoot = 'C:\Work\DeepSession\secrets\dev\deep-dev',
     [ValidateSet('deep-dev','deep-dev-current')][string]$ProjectName = 'deep-dev',
     [ValidateRange(1,20)][int]$Cycles = 2,
@@ -138,6 +139,58 @@ function Wait-CurrentCapabilities {
         Start-Sleep -Seconds 2
     }
     throw 'Current Registry proof and all three ONION capabilities did not recover. No custody reset was attempted.'
+}
+if ($Action -eq 'ApplyOperational') {
+    if (-not $OperationalCandidate) { throw 'ApplyOperational requires the exact completed private candidate path.' }
+    $candidatePath = [IO.Path]::GetFullPath($OperationalCandidate)
+    $activationLeasePath = Join-Path $custodyPath 'offline-root/activation.lease'
+    if ((Test-Path -LiteralPath $activationLeasePath) -and ((Get-Item -LiteralPath $activationLeasePath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Activation lease must not traverse links.' }
+    $activationLease = [IO.File]::Open($activationLeasePath,[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+    try {
+        $ids = @(& docker @($compose + @('ps','--all','--quiet')))
+        if ($LASTEXITCODE -ne 0 -or $ids.Count -ne 6) { throw 'Activation requires exactly six retained owned services.' }
+        $publisherId = & docker @($compose + @('ps','--all','--quiet','publisher'))
+        if ($LASTEXITCODE -ne 0 -or -not $publisherId) { throw 'Retained publisher missing.' }
+        $publisherInspection = (& docker inspect $publisherId | ConvertFrom-Json)[0]
+        if ($LASTEXITCODE -ne 0 -or $publisherInspection.State.Running -or $publisherInspection.HostConfig.RestartPolicy.Name -cne 'unless-stopped') { throw 'PrepareOperational must leave the publisher stopped before activation.' }
+        $tool = Join-Path $devopsRoot 'tools/deep-dev/Deep.Dev.csproj'
+        Run-Native dotnet @('run','--no-build','--project',$tool,'-c','Debug','--','validate-operational-install',$custodyPath,$candidatePath)
+        # Reject foreign/missing volumes before stopping or writing any owner.
+        foreach ($service in @('floor','registry','node-1','node-2','node-3')) {
+            $volume = "$($ProjectName)_$service-secrets"
+            $inspection = (& docker volume inspect $volume | ConvertFrom-Json)[0]
+            if ($LASTEXITCODE -ne 0 -or $inspection.Labels.'deep.project' -cne $ProjectName -or $inspection.Labels.'deep.environment' -cne 'dev') { throw 'Unowned retained custody volume.' }
+        }
+        Run-Native docker (@('update','--restart','unless-stopped') + $ids)
+        Run-Native docker ($compose + @('stop','--timeout','10'))
+        $copyImage = 'alpine:3.22'
+        foreach ($phase in @('verify','install')) {
+            if ($phase -ceq 'install') { Run-Native dotnet @('run','--no-build','--project',$tool,'-c','Debug','--','install-operational',$custodyPath,$candidatePath) }
+            foreach ($service in @('floor','registry','node-1','node-2','node-3')) {
+                $source = Join-Path $candidatePath "online/$service"
+                $before = Join-Path $candidatePath "volume-before/$service"
+                $owner = if ($service -ceq 'floor') { '70:70' } else { '0:0' }
+                # Exact bounded source set, no wildcard copy of retained identity/state keys.
+                $copy = 'set -eu; for f in /source/*; do test -f "$f" && test ! -L "$f"; n=${f##*/}; case "$n" in server.crt|server.key|key_x25519|key_x25519_next|mailbox-deposit.seed|mailbox-retrieve.seed) ;; *) exit 2;; esac; test ! -L "/target/$n"; if cmp -s "$f" "/target/$n"; then :; elif test -f "/before/$n"; then cmp -s "/before/$n" "/target/$n"; else test -f "/before/$n.absent" && test ! -e "/target/$n"; fi; done; '
+                if ($phase -ceq 'install') { $copy += 'for f in /source/*; do n=${f##*/}; test ! -L "/target/$n.installing"; cp "$f" "/target/$n.installing"; chmod 0600 "/target/$n.installing"; chown ' + $owner + ' "/target/$n.installing"; mv "/target/$n.installing" "/target/$n"; cmp -s "$f" "/target/$n"; done; sync' }
+                Run-Native docker @('run','--rm','--label',"deep.project=$ProjectName",'--network','none','--ulimit','core=0',
+                    '--mount',"type=bind,source=$source,target=/source,readonly",'--mount',"type=bind,source=$before,target=/before,readonly",
+                    '--mount',"type=volume,source=$($ProjectName)_$service-secrets,target=/target",$copyImage,'sh','-c',$copy)
+            }
+        }
+        # The publisher's existing journal/lease remains the only distribution owner.
+        # Never mount the whole candidate or offline-root into this online process.
+        $preparedOperator = Join-Path $candidatePath 'operator'
+        Run-Native docker @('run','--rm','--label',"deep.project=$ProjectName",'--network',"$($ProjectName)_dev",'--ulimit','core=0',
+            '--mount',"type=bind,source=$custodyPath/public,target=/run/deep-public",'--mount',"type=bind,source=$custodyPath/operator,target=/run/deep-operator,readonly",
+            '--mount',"type=bind,source=$preparedOperator,target=/run/deep-renewal,readonly",'--mount',"type=volume,source=$($ProjectName)_publisher-state,target=/var/lib/deep-publisher",
+            "$ProjectName/publisher:candidate",'Deep.Dev.dll','import-operational','/run/deep-public','/run/deep-operator','/run/deep-renewal','/usr/local/bin/deep-nts-observer')
+        Run-Native docker (@('update','--restart','always') + $ids)
+        Run-Native docker ($compose + @('start'))
+        $recovery = Wait-CurrentCapabilities
+        [ordered]@{schema='deep-dev-operational-activation.v1';retainedState=$true;verifiedRegistryAndThreeOnion=$true;recoverySeconds=$recovery;deviceEvidence=$false;mailboxIssuanceEvidence=$false} | ConvertTo-Json
+    } finally { $activationLease.Dispose() }
+    return
 }
 if ($Action -in @('StackFault','EngineFault','ExpiryFault')) {
     $wholeEngine = $Action -eq 'EngineFault'

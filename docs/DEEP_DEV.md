@@ -155,9 +155,33 @@ resume it. Failure restores its prior restart policy; explicit `Start` restores
 normal `always` policy and cancels preparation.
 Explicit `Start` cancels the preparation by permitting
 new delegated publication; prepare a new candidate rather than force old import.
-The owner import command has exact generation/hash/prefix checks, root/PMA
-verification and NTS recheck, but coordinated private/configuration activation
-and crash-resume/recovery remain to be implemented/qualified before use.
+After building the current publisher image, use `ApplyOperational
+-ProjectName deep-dev-current -OperationalCandidate <exact completed private directory>`.
+It validates the offline HMAC seal over the exact installation whitelist, PMA
+issuer custody, CA identity, leaf keys/chain/hostnames and traffic metadata.
+It stages HMAC-protected private before-images, rejects stale candidates or
+externally changed targets, stops all six owners, verifies every owned secret
+volume against before/new images, and installs only TLS/traffic/issuer files
+and authority/peer configuration. Original root/genesis, registered Ed/BLS
+identities, state-protection keys, passwords, databases and floors are not replaced.
+The online import mounts only `candidate/operator`, never the whole candidate
+or offline-root. Publisher generation/hash/prefix checks and real NTS recheck
+remain mandatory, with journal commit before public distribution. An interrupted
+installation can resume only against exact old/new target bytes and the exact
+unadvanced candidate; do not restart an old publisher midway. After a committed
+publisher advances further, that candidate is stale and is not an undo command.
+Failures before restart leave scoped services stopped; readiness failure after
+restart leaves retained services running for diagnosis, never resets or rolls
+back protected authority. A successful import alone is not successful activation.
+
+The first actual activation on2026-10-14 installed/imported the successor and
+resumed delegated publication, but three-node proof/ONION acceptance failed.
+Same-UTC-day root/DTS replacement changes the DTT1 namespace while retaining its
+day number; the existing replay ledger correctly rejects it. Registry readiness
+must inspect that ledger without consuming a nonce or compacting it. This is an
+open S05 coordination requirement, not permission to erase the ledger, change
+the clock, backdate policy, weaken fork rejection or publish a release. See the
+[source/runtime checkpoint](S05-AUTHORITY-HISTORY-2026-10-14.md).
 
 `FaultMatrix` scopes stop/start to these six services, always restores stopped
 services, and verifies retained mount bindings. `HistoryFault` intentionally
