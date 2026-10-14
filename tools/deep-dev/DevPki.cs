@@ -149,7 +149,7 @@ internal static class DevPki
         if(process.ExitCode!=0)throw new IOException("Current-user signed CRL cache import failed.");
         Console.WriteLine("Verified signed dev CRL cached in current-user CA store; no ROOT certificate or machine-store change.");
     }
-    private static void VerifySigned(byte[] exact,X509Certificate2 ca)
+    internal static void VerifySigned(byte[] exact,X509Certificate2 ca)
     {
         var reader=new AsnReader(exact,AsnEncodingRules.DER);var sequence=reader.ReadSequence();reader.ThrowIfNotEmpty();
         var body=sequence.ReadEncodedValue();var algorithm=sequence.ReadSequence();

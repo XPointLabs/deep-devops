@@ -55,7 +55,62 @@ try
         await Reject(()=>{DevPki.ValidateCrl(changed,ca);return Task.CompletedTask;},"changed CRL signature");
         using var wrong=RSA.Create(2048);
         await Reject(()=>{using var bad=DevPki.AuthorLeaf(ca,wrong,retainedLeaf);return Task.CompletedTask;},"PKI reissue wrong leaf key");
+        var address = DevPhysicalIngress.RequireAddress("192.168.40.20");
+        using var physical = DevPhysicalIngress.AuthorLeaf(ca, leafKey, retainedLeaf, address);
+        DevPhysicalIngress.ValidateLeaf(ca, retainedLeaf, physical, address);
+        Check(physical.MatchesHostname("registry") && physical.MatchesHostname(address.ToString()) &&
+            physical.PublicKey.ExportSubjectPublicKeyInfo().AsSpan().SequenceEqual(retainedLeaf.PublicKey.ExportSubjectPublicKeyInfo()) &&
+            physical.NotBefore == retainedLeaf.NotBefore && physical.NotAfter == retainedLeaf.NotAfter,
+            "physical certificate adds exact LAN SAN without key/identity/lifetime replacement");
+        await Reject(() => { DevPhysicalIngress.ValidateLeaf(ca, retainedLeaf, physical, IPAddress.Parse("192.168.40.21")); return Task.CompletedTask; }, "physical SAN/CDP target substitution");
+        await Reject(() => { using var bad = DevPhysicalIngress.AuthorLeaf(ca, wrong, retainedLeaf, address); return Task.CompletedTask; }, "physical wrong retained leaf key");
+        var unsupported = new CertificateRequest("CN=registry", leafKey, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        var unusualNames = new SubjectAlternativeNameBuilder(); unusualNames.AddDnsName("registry"); unusualNames.AddUri(new Uri("https://fixture.invalid/"));
+        unsupported.CertificateExtensions.Add(unusualNames.Build());
+        using var unusual = unsupported.Create(ca, now.AddMinutes(-5), now.AddDays(1), RandomNumberGenerator.GetBytes(16));
+        await Reject(() => { using var bad = DevPhysicalIngress.AuthorLeaf(ca, leafKey, unusual, address); return Task.CompletedTask; }, "physical unsupported SAN cannot be silently dropped");
     }
+    foreach(var text in new[]{"127.0.0.1", "0.0.0.0", "8.8.8.8", "172.31.241.11", "172.31.240.11", "192.168.040.20", "2001:db8::1"})
+        await Reject(() => { _ = DevPhysicalIngress.RequireAddress(text); return Task.CompletedTask; }, "physical address outside canonical LAN scope");
+    var physicalAddress = DevPhysicalIngress.RequireAddress("192.168.40.20");
+    Check(DevPhysicalIngress.NodeOrigin(physicalAddress, 1).EndsWith(":28294/", StringComparison.Ordinal) &&
+        DevPhysicalIngress.NodeOrigin(physicalAddress, 3).EndsWith(":28296/", StringComparison.Ordinal) &&
+        DevPhysicalIngress.CrlUri(physicalAddress).AbsolutePath == "/deep-dev-ca.crl", "fixed physical listener and signed-CRL bindings");
+    await Reject(() => { _ = DevPhysicalIngress.NodeOrigin(physicalAddress, 4); return Task.CompletedTask; }, "physical unknown node ordinal");
+    var peerConfig = System.Text.Encoding.UTF8.GetBytes("""
+        {"PrivacyRouting":{"PublicPeerBaseUrl":"https://172.31.241.11/","Peers":[
+        {"RouterId":"second","BaseUrl":"https://172.31.241.12/","CurrentSpkiSha256":"unchanged-two"},
+        {"RouterId":"third","BaseUrl":"https://172.31.241.13/","CurrentSpkiSha256":"unchanged-three"}]}}
+        """);
+    using(var configured = JsonDocument.Parse(DevPhysicalIngress.ConfigureNode(peerConfig, physicalAddress, 1))) {
+        var peers = configured.RootElement.GetProperty("PrivacyRouting").GetProperty("Peers");
+        Check(peers[0].GetProperty("BaseUrl").GetString()!.EndsWith(":28295/", StringComparison.Ordinal) &&
+            peers[1].GetProperty("BaseUrl").GetString()!.EndsWith(":28296/", StringComparison.Ordinal) &&
+            peers[0].GetProperty("CurrentSpkiSha256").GetString() == "unchanged-two", "physical peers bind exact original targets and retain pins");
+    }
+    await Reject(() => { _ = DevPhysicalIngress.ConfigureNode(System.Text.Encoding.UTF8.GetBytes(System.Text.Encoding.UTF8.GetString(peerConfig)
+        .Replace("172.31.241.13", "172.31.241.12", StringComparison.Ordinal)), physicalAddress, 1); return Task.CompletedTask; }, "physical duplicated peer target");
+    DevPhysicalIngress.RequireCurrentImage([1], [1], [2], false);
+    DevPhysicalIngress.RequireCurrentImage([2], [1], [2], false);
+    DevPhysicalIngress.RequireCurrentImage([2], [1], [2], true);
+    Check(true, "physical maintenance accepts before/after but completed install requires after");
+    await Reject(() => { DevPhysicalIngress.RequireCurrentImage([1], [1], [2], true); return Task.CompletedTask; }, "physical completed install cannot restart a predecessor image");
+    await Reject(() => { DevPhysicalIngress.RequireCurrentImage([3], [1], [2], false); return Task.CompletedTask; }, "physical interrupted install cannot overwrite a foreign image");
+    var physicalKey = Enumerable.Repeat((byte)9, 32).ToArray();
+    var intent = new DevPhysicalIngress.Intent("deep-dev-physical-intent.v1", new string('a',64), physicalAddress.ToString());
+    var sealedIntent = DevPhysicalIngress.Seal(intent, physicalKey);
+    Check(DevPhysicalIngress.Open<DevPhysicalIngress.Intent>(sealedIntent, physicalKey) == intent, "physical online intent HMAC roundtrip");
+    sealedIntent[^1] ^= 1;
+    await Reject(() => { _ = DevPhysicalIngress.Open<DevPhysicalIngress.Intent>(sealedIntent, physicalKey); return Task.CompletedTask; }, "physical changed intent seal");
+    var resultRoot = Path.Combine(directory, "physical-online"); Directory.CreateDirectory(resultRoot);
+    var resultJournal = new DevPublisher.Journal("deep-dev-renewal.v1", new string('b',32), 1, 100, intent.PriorBundleHash, [1,2,3]);
+    var exactResult = DevPhysicalIngress.Seal(new DevPhysicalIngress.Result(DevPhysicalIngress.IntentHash(intent), resultJournal), physicalKey);
+    File.WriteAllBytes(Path.Combine(resultRoot, "result.bin.pending"), exactResult);
+    var resumedResult = DevPhysicalIngress.ReadResult(resultRoot, intent, physicalKey);
+    Check(resumedResult!.Journal.Bundle.AsSpan().SequenceEqual(resultJournal.Bundle) && File.Exists(Path.Combine(resultRoot,"result.bin")) &&
+        !File.Exists(Path.Combine(resultRoot,"result.bin.pending")), "physical complete pending result resumes exact bytes without re-authoring");
+    await Reject(() => { DevPhysicalIngress.WriteResult(resultRoot, intent, resultJournal, physicalKey); return Task.CompletedTask; }, "physical result cannot be authored twice");
+    await Reject(() => { _ = DevPhysicalIngress.ReadResult(resultRoot, intent with { Address = "192.168.40.21" }, physicalKey); return Task.CompletedTask; }, "physical result cannot be rebound to another intent");
     using(var control=new HttpResponseMessage(HttpStatusCode.OK)) {
         control.Content=new ByteArrayContent(new byte[MailboxGrantRevocationV1Codec.MinimumBytes]);
         control.Content.Headers.ContentType=new("application/vnd.deep.mailbox-grant-revocation.v1+octet-stream");

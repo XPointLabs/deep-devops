@@ -6,6 +6,44 @@ import { fileURLToPath } from 'node:url';
 
 const read = p => readFile(new URL(p, import.meta.url), 'utf8');
 
+test('physical current-dev overlay exposes exact LAN listeners without changing service or custody owners', () => {
+  const root = fileURLToPath(new URL('../', import.meta.url));
+  const overlays = ['', '.mailbox', '.mailbox-nodes', '.contacts', '.coordination', '.pki', '.physical'];
+  const args = ['compose', '--project-name', 'deep-dev-current', ...overlays.flatMap(s => ['--file', `${root}/docker-compose.deep-dev${s}.yml`]), 'config', '--format', 'json'];
+  const env = { ...process.env, DEEP_DEV_ROOT: 'C:/Work/DeepSession/secrets/dev/deep-dev-current', DEEP_DEV_PROJECT: 'deep-dev-current',
+    DEEP_DEV_IPV4_PREFIX: '172.31.241', DEEP_DEV_PORT_PREFIX: '282', DEEP_DEV_REGISTRY_PORT: '28543',
+    DEEP_DEV_MAILBOX_NETWORK: '11'.repeat(16), DEEP_DEV_MAILBOX_POLICY: '22'.repeat(32),
+    DEEP_DEV_CONTACT_NODE1: '33'.repeat(32), DEEP_DEV_CONTACT_NODE2: '44'.repeat(32), DEEP_DEV_CONTACT_NODE3: '55'.repeat(32),
+    DEEP_DEV_PHYSICAL_ADDRESS: '192.168.40.20' };
+  const c = JSON.parse(execFileSync('docker', args, { encoding: 'utf8', env }));
+  assert.equal(Object.keys(c.services).length, 8);
+  for (const [service, port, target] of [['publisher', 28297, 8080], ['registry', 28543, 443],
+    ['node-1', 28294, 443], ['node-2', 28295, 443], ['node-3', 28296, 443]]) {
+    const p = c.services[service].ports.filter(p => p.host_ip === env.DEEP_DEV_PHYSICAL_ADDRESS);
+    assert.equal(p.length, 1); assert.equal(Number(p[0].published), port); assert.equal(p[0].target, target);
+    assert.ok(!c.services[service].volumes.some(v => v.type === 'bind' && /offline-root|physical-ingress/.test(v.source)));
+  }
+  for (const n of [1, 2, 3]) {
+    const s = c.services[`node-${n}`];
+    assert.equal(s.volumes.find(v => v.target === '/var/lib/xnode').source, `node-${n}-state`);
+    assert.equal(s.volumes.find(v => v.target === '/var/lib/mailbox-keys').read_only, true);
+    assert.ok(s.ports.some(p => p.host_ip === '127.0.0.1' && p.target === 443));
+  }
+});
+
+test('physical maintenance validates before stop and commits exact publisher bytes before runtime activation', async () => {
+  const script = await read('./deep-dev.ps1');
+  const flight = script.split("if ($Action -in @('PreparePhysicalIngress','ApplyPhysicalIngress')) {")[1].split("if ($Action -in @('PrepareDevPki'")[0];
+  assert.ok(flight.indexOf("'validate-physical-ingress'") < flight.indexOf("@('stop','--timeout','10')"));
+  assert.ok(flight.indexOf("'install-physical-ingress'") < flight.indexOf("'publish-physical-ingress'"));
+  assert.ok(flight.indexOf("'publish-physical-ingress'") < flight.indexOf("'mark-physical-ingress'"));
+  assert.match(flight, /\$candidate\/online:\/run\/deep-physical/);
+  assert.doesNotMatch(flight, /\/run\/deep-physical[^\n]*offline-root|key_ed25519|key_bls|provision-floor|--volumes/);
+  const publisher = await read('../tools/deep-dev/DevPublisher.cs');
+  assert.ok(publisher.indexOf('DevPhysicalIngress.WriteResult(physicalRoot!') < publisher.indexOf('WriteJournal(state,committed,integrity)'));
+  assert.match(publisher, /if \(physical is not null\) throw;/);
+});
+
 test('deep-dev keeps exactly six scoped native ARM64 services and durable custody', async () => {
   const compose = await read('../docker-compose.deep-dev.yml');
   const services = compose.split('services:\n')[1].split('\nnetworks:')[0];

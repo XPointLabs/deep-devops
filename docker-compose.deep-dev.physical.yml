@@ -1,0 +1,13 @@
+# Explicit current-dev LAN bindings. The signed XND1 addresses are authored
+# through the retained publisher; this is not a client endpoint override.
+services:
+  publisher:
+    ports: ["${DEEP_DEV_PHYSICAL_ADDRESS:?explicit LAN binding required}:28297:8080"]
+  registry:
+    ports: ["${DEEP_DEV_PHYSICAL_ADDRESS:?explicit LAN binding required}:28543:443"]
+  node-1:
+    ports: ["${DEEP_DEV_PHYSICAL_ADDRESS:?explicit LAN binding required}:28294:443"]
+  node-2:
+    ports: ["${DEEP_DEV_PHYSICAL_ADDRESS:?explicit LAN binding required}:28295:443"]
+  node-3:
+    ports: ["${DEEP_DEV_PHYSICAL_ADDRESS:?explicit LAN binding required}:28296:443"]

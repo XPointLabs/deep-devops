@@ -1,8 +1,9 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('Init','Build','PrepareAuthority','PrepareOperational','ApplyOperational','PrepareMailbox','ProvisionMailbox','ActivateMailbox','PrepareNodeMailbox','ProvisionNodeMailboxKeys','FetchNodeMailboxControl','EnrollNodeMailbox','ActivateNodeMailbox','ProvisionNodeContactKeys','EnrollNodeContact','ActivateNodeContact','PrepareContactCoordination','ProvisionContactCoordination','ActivateContactCoordination','PrepareDevPki','ApplyDevPki','CacheWindowsDevCrl','ExerciseOwnedMailboxWindows','ExerciseOwnedMailbox','AdmitObserver','Provision','ProvisionFloor','Up','Status','Stop','Start','Verify','FaultMatrix','HistoryFault','StackFault','EngineFault','ExpiryFault')][string]$Action,
+    [Parameter(Mandatory)][ValidateSet('Init','Build','PrepareAuthority','PrepareOperational','ApplyOperational','PrepareMailbox','ProvisionMailbox','ActivateMailbox','PrepareNodeMailbox','ProvisionNodeMailboxKeys','FetchNodeMailboxControl','EnrollNodeMailbox','ActivateNodeMailbox','ActivateNodeContact','ProvisionNodeContactKeys','EnrollNodeContact','PrepareContactCoordination','ProvisionContactCoordination','ActivateContactCoordination','PrepareDevPki','ApplyDevPki','PreparePhysicalIngress','ApplyPhysicalIngress','CacheWindowsDevCrl','ExerciseOwnedMailboxWindows','ExerciseOwnedMailbox','AdmitObserver','Provision','ProvisionFloor','Up','Status','Stop','Start','Verify','FaultMatrix','HistoryFault','StackFault','EngineFault','ExpiryFault')][string]$Action,
     [ValidateRange(1,3)][int]$NodeNumber = 1,
     [string]$OperationalCandidate,
+    [string]$IngressAddress,
     [string]$CustodyRoot = 'C:\Work\DeepSession\secrets\dev\deep-dev',
     [ValidateSet('deep-dev','deep-dev-current')][string]$ProjectName = 'deep-dev',
     [ValidateRange(1,20)][int]$Cycles = 2,
@@ -54,7 +55,7 @@ function Invoke-DesktopOperation([ValidateSet('start','stop')][string]$Operation
         if ($process.ExitCode -ne 0) { throw 'Docker Desktop operation failed; inspect host diagnostics. Retained volumes/custody were not reset.' }
     } finally { $process.Dispose() }
 }
-$devEnvironmentNames = @('DEEP_DEV_ROOT','DEEP_DEV_PROJECT','DEEP_DEV_IPV4_PREFIX','DEEP_DEV_PORT_PREFIX','DEEP_DEV_REGISTRY_PORT','DEEP_DEV_MAILBOX_NETWORK','DEEP_DEV_MAILBOX_POLICY','DEEP_DEV_CONTACT_NODE1','DEEP_DEV_CONTACT_NODE2','DEEP_DEV_CONTACT_NODE3')
+$devEnvironmentNames = @('DEEP_DEV_ROOT','DEEP_DEV_PROJECT','DEEP_DEV_IPV4_PREFIX','DEEP_DEV_PORT_PREFIX','DEEP_DEV_REGISTRY_PORT','DEEP_DEV_MAILBOX_NETWORK','DEEP_DEV_MAILBOX_POLICY','DEEP_DEV_CONTACT_NODE1','DEEP_DEV_CONTACT_NODE2','DEEP_DEV_CONTACT_NODE3','DEEP_DEV_PHYSICAL_ADDRESS')
 $devPreviousEnvironment = @{}
 foreach ($name in $devEnvironmentNames) { $devPreviousEnvironment[$name] = [Environment]::GetEnvironmentVariable($name,'Process') }
 try {
@@ -111,6 +112,20 @@ if ($pkiEnabled -or $Action -eq 'ApplyDevPki') {
     $compose += @('--file',(Join-Path $devopsRoot 'docker-compose.deep-dev.pki.yml'))
 }
 $devServiceCount = if ($mailboxEnabled) { 8 } else { 6 }
+$physicalMarker = Join-Path $custodyPath 'mailbox/physical-ingress.json'
+$physicalEnabled = Test-Path -LiteralPath $physicalMarker -PathType Leaf
+if ($physicalEnabled) {
+    if ($ProjectName -cne 'deep-dev-current' -or -not $pkiEnabled -or
+        ((Get-Item -LiteralPath $physicalMarker).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Invalid current-dev physical runtime configuration.' }
+    $physicalConfig = Get-Content -LiteralPath $physicalMarker -Raw | ConvertFrom-Json
+    $parsedPhysical = $null
+    if ($physicalConfig.schema -cne 'deep-dev-physical-config.v1' -or
+        -not [Net.IPAddress]::TryParse($physicalConfig.address, [ref]$parsedPhysical) -or
+        $parsedPhysical.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork -or
+        $parsedPhysical.ToString() -cne $physicalConfig.address) { throw 'Invalid physical runtime address configuration.' }
+    $env:DEEP_DEV_PHYSICAL_ADDRESS = $physicalConfig.address
+    $compose += @('--file',(Join-Path $devopsRoot 'docker-compose.deep-dev.physical.yml'))
+}
 $devServices = @('floor','registry','publisher','node-1','node-2','node-3')
 if ($mailboxEnabled) { $devServices += @('deposit-signer','retrieve-signer') }
 if ($mailboxEnabled -and $Action -in @('PrepareOperational','ApplyOperational','Provision','ProvisionFloor')) {
@@ -303,6 +318,59 @@ if ($Action -in @('PrepareContactCoordination','ProvisionContactCoordination','A
         Run-Native docker ($compose + @('up','-d','registry','node-1','node-2','node-3'))
         Write-Host 'Current contact threshold coordination activated; owned-client grant acceptance remains required.'
     }
+    return
+}
+if ($Action -in @('PreparePhysicalIngress','ApplyPhysicalIngress')) {
+    if ($ProjectName -cne 'deep-dev-current' -or -not $coordinationEnabled -or -not $pkiEnabled) { throw 'Retained current-dev issuer/PKI required for physical maintenance.' }
+    $project = Join-Path $devopsRoot 'tools/deep-dev/Deep.Dev.csproj'
+    $observer = Join-Path $devopsRoot 'tools/nts-observer/deep-nts-observer.exe'
+    if ($Action -eq 'PreparePhysicalIngress') {
+        if ($physicalEnabled -or -not $IngressAddress) { throw 'First explicit physical ingress preparation only; supply -IngressAddress.' }
+        Run-Native docker ($compose + @('stop','--timeout','10','publisher'))
+        Run-Native dotnet @('run','--project',$project,'-c','Debug','--','prepare-physical-ingress',$custodyPath,$IngressAddress,$observer)
+        Write-Host 'Physical candidate sealed; publisher stays stopped until the supported Apply or explicit maintenance Start.'
+        return
+    }
+    $candidate = Join-Path $custodyPath 'offline-root/physical-ingress'
+    $leasePath = Join-Path $custodyPath 'offline-root/physical-ingress-activation.lease'
+    if ((Test-Path -LiteralPath $leasePath) -and ((Get-Item -LiteralPath $leasePath).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Linked physical maintenance lease.' }
+    $lease = [IO.FileStream]::new($leasePath,[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+    try {
+        Run-Native dotnet @('run','--project',$project,'-c','Debug','--','validate-physical-ingress',$custodyPath,$observer)
+        if ($physicalEnabled) {
+            Run-Native docker ($compose + @('up','-d'))
+            Write-Host 'Previously installed physical configuration restarted with retained volumes; run Verify.'
+            return
+        }
+        # The sealed plan was validated in the native owner before extracting
+        # this untrusted binding configuration. It is never authority for a client.
+        $sealedPlan = [IO.File]::ReadAllBytes((Join-Path $candidate 'plan.bin'))
+        $planConfig = [Text.Encoding]::UTF8.GetString($sealedPlan,32,$sealedPlan.Length-32) | ConvertFrom-Json
+        $env:DEEP_DEV_PHYSICAL_ADDRESS = $planConfig.Intent.Address
+        $targetCompose = $compose + @('--file',(Join-Path $devopsRoot 'docker-compose.deep-dev.physical.yml'))
+        foreach ($service in @('registry','floor','node-1','node-2','node-3')) {
+            $volume = if ($service -ceq 'registry') { "$($ProjectName)_registry-mailbox-secrets" } else { "$($ProjectName)_$service-secrets" }
+            $v = (& docker volume inspect $volume | ConvertFrom-Json)[0]
+            if ($LASTEXITCODE -ne 0 -or $v.Labels.'deep.project' -cne $ProjectName -or $v.Labels.'deep.environment' -cne 'dev') { throw 'Unowned physical maintenance volume.' }
+        }
+        Run-Native docker ($compose + @('stop','--timeout','10'))
+        foreach ($service in @('registry','floor','node-1','node-2','node-3')) {
+            $volume = if ($service -ceq 'registry') { "$($ProjectName)_registry-mailbox-secrets" } else { "$($ProjectName)_$service-secrets" }
+            $after = Join-Path $candidate "after/$service/secrets/server.crt"
+            $before = Join-Path $candidate "before/$service/secrets/server.crt"
+            $copy = 'set -eu; test -f /target/server.crt && test ! -L /target/server.crt; test -f /target/server.key && test ! -L /target/server.key; cmp -s /source/server.crt /target/server.crt || cmp -s /before/server.crt /target/server.crt; if test -e /target/server.crt.physical-stage; then test ! -L /target/server.crt.physical-stage; cmp -s /source/server.crt /target/server.crt.physical-stage; else cp /source/server.crt /target/server.crt.physical-stage; fi; owner=$(stat -c "%u:%g" /target/server.key); chown "$owner" /target/server.crt.physical-stage; chmod 0600 /target/server.crt.physical-stage; mv /target/server.crt.physical-stage /target/server.crt'
+            Run-Native docker @('run','--rm','--network','none','--mount',"type=bind,source=$after,target=/source/server.crt,readonly",
+                '--mount',"type=bind,source=$before,target=/before/server.crt,readonly",'--mount',"type=volume,source=$volume,target=/target",'alpine:3.22','sh','-c',$copy)
+        }
+        Run-Native dotnet @('run','--project',$project,'-c','Debug','--','install-physical-ingress',$custodyPath)
+        # Only the public-only online intent/result directory goes to this
+        # isolated author. No CA private key or private plan/config mount.
+        Run-Native docker ($compose + @('run','--rm','--no-deps','--volume',"$candidate/online:/run/deep-physical",'publisher',
+            'Deep.Dev.dll','publish-physical-ingress','/run/deep-public','/run/deep-operator','/usr/local/bin/deep-nts-observer','/run/deep-physical'))
+        Run-Native dotnet @('run','--project',$project,'-c','Debug','--','mark-physical-ingress',$custodyPath)
+        Run-Native docker ($targetCompose + @('up','-d'))
+        Write-Host 'Signed physical ingress installed with retained custody; Verify and owned-client TLS/admission remain required.'
+    } finally { $lease.Dispose() }
     return
 }
 if ($Action -in @('PrepareDevPki','ApplyDevPki')) {

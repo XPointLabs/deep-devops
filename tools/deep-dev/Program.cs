@@ -29,6 +29,14 @@ try {
     else if (args.Length == 3 && args[0] == "prepare-contact-coordination")
         await DevContactCoordinationPreparation.PrepareAsync(args[1], args[2], ReadNtsAsync);
     else if (args.Length == 3 && args[0] == "prepare-dev-pki") await DevPki.PrepareAsync(args[1],args[2],ReadNtsAsync);
+    else if (args.Length == 4 && args[0] == "prepare-physical-ingress") await DevPhysicalIngress.PrepareAsync(args[1],args[2],args[3],ReadNtsAsync);
+    else if (args.Length == 3 && args[0] == "validate-physical-ingress") {
+        _ = DevPhysicalIngress.Validate(args[1]);
+        _ = await DevNodeMailboxProvisioning.PolicyAsync(Path.Combine(args[1],"public"),args[2],ReadNtsAsync);
+        Console.WriteLine("Sealed physical candidate and current policy verified; runtime unchanged.");
+    }
+    else if (args.Length == 2 && args[0] == "install-physical-ingress") DevPhysicalIngress.InstallFiles(args[1]);
+    else if (args.Length == 2 && args[0] == "mark-physical-ingress") DevPhysicalIngress.MarkInstalled(args[1]);
     else if (args.Length == 2 && args[0] == "validate-dev-pki") { _=DevPki.Validate(args[1]);Console.WriteLine("Sealed same-key dev PKI candidate validated; runtime unchanged."); }
     else if (args.Length == 2 && args[0] == "install-dev-pki") DevPki.Install(args[1]);
     else if (args.Length == 2 && args[0] == "cache-windows-dev-crl") await DevPki.CacheWindowsCrlAsync(args[1]);
@@ -36,6 +44,8 @@ try {
         DevOperationalActivation.Execute(args[1], args[2], args[0] == "install-operational");
     else if (args.Length == 4 && args[0] == "publish") await DevPublisher.RunAsync(args[1], args[2], args[3], ReadNtsAsync);
     else if (args.Length == 4 && args[0] == "publish-with-crl") await DevPkiPublisher.RunAsync(args[1],args[2],args[3],ReadNtsAsync);
+    else if (args.Length == 5 && args[0] == "publish-physical-ingress")
+        await DevPublisher.RunAsync(args[1],args[2],args[3],ReadNtsAsync,singlePublication:true,physicalRoot:args[4]);
     else if (args.Length == 4 && args[0] == "publish-short-view") await DevPublisher.RunAsync(args[1], args[2], args[3], ReadNtsAsync, operationalLifetimeSeconds:180, singlePublication:true);
     else if (args.Length == 2 && args[0] == "exercise-directory") await DevDirectoryExercise.RunAsync(args[1]);
     else if (args.Length == 2 && args[0] == "exercise-owned-mailbox") await DevOwnedMailboxExercise.RunAsync(args[1]);
@@ -52,7 +62,12 @@ try {
     }
     else await InitializeAsync(args);
 }
-catch (Exception exception) { Console.Error.WriteLine($"Development provisioning failed closed ({exception.GetType().Name}); retained private staging is not deployment evidence."); Environment.ExitCode = 2; }
+catch (Exception exception) {
+    Console.Error.WriteLine($"Development provisioning failed closed ({exception.GetType().Name}); retained private staging is not deployment evidence.");
+    if (args.Length > 0 && args[0].Contains("physical-ingress",StringComparison.Ordinal))
+        Console.Error.WriteLine($"Physical ingress failure category: {DevPhysicalIngress.FailureCategory(exception)}.");
+    Environment.ExitCode = 2;
+}
 
 static void ConfigureAtomicBundle(string custodyRoot)
 {

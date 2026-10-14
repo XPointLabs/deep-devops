@@ -44,7 +44,8 @@ internal static class DevPublisher
 
     internal static async Task RunAsync(string publicRoot, string operatorRoot, string executable,
         Func<string,AccountDirectoryDts1Source[],Task<ulong>> observe,
-        uint operationalLifetimeSeconds = 3_600, bool singlePublication = false, CancellationToken stoppingToken = default)
+        uint operationalLifetimeSeconds = 3_600, bool singlePublication = false, CancellationToken stoppingToken = default,
+        string? physicalRoot = null)
     {
         if (operationalLifetimeSeconds is < 180 or > 3_600) throw new ArgumentOutOfRangeException(nameof(operationalLifetimeSeconds));
         if (OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Run the dev publisher as its scoped Docker service.");
@@ -66,6 +67,9 @@ internal static class DevPublisher
         if (keys.Length != 3) throw new InvalidDataException("Wrong dev node custody count.");
         var integrity = Bounded(Path.Combine(operatorRoot,"renewal-integrity.key"),32);
         if (integrity.Length != 32 || integrity.AsSpan().IndexOfAnyExcept((byte)0) < 0) throw new InvalidDataException("Wrong renewal integrity key.");
+        if (physicalRoot is not null && (!singlePublication || manifest.RootElement.GetProperty("projectName").GetString() != "deep-dev-current"))
+            throw new ArgumentException("Physical relocation requires an explicit one-shot current-dev maintenance flight.");
+        var physical = physicalRoot is null ? null : DevPhysicalIngress.ReadOnlineIntent(physicalRoot, integrity);
         var witnesses = Enumerable.Range(1,3).Select(i => Signer.Load(Path.Combine(operatorRoot,$"witness-{i}.seed"))).ToArray();
         var nodes = Enumerable.Range(1,3).Select(i => Signer.Load(Path.Combine(operatorRoot,$"node-{i}.seed"),true)).ToArray();
         using var stopping = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
@@ -79,6 +83,26 @@ internal static class DevPublisher
             Journal? cursor = File.Exists(state) ? ReadJournal(state,integrity,network) : null;
             var file = Path.Combine(publicRoot,"network.ncp2");
             if (cursor is not null) Publish(cursor,file,publicRoot);
+            if (physical is not null)
+            {
+                if (cursor is null) throw new InvalidDataException("Physical relocation requires the retained publisher journal.");
+                var result = DevPhysicalIngress.ReadResult(physicalRoot!, physical, integrity);
+                if (result is not null)
+                {
+                    var exact = result.Journal;
+                    if (exact.Network != Convert.ToHexStringLower(network) || !XPointNetworkClosureWireCodec.DecodeResponse(exact.Bundle).NetworkId.Span.SequenceEqual(network))
+                        throw new CryptographicException("Physical result belongs to another retained network.");
+                    if (cursor.Generation == exact.Generation && cursor.Bundle.AsSpan().SequenceEqual(exact.Bundle))
+                    { Publish(cursor,file,publicRoot); Console.WriteLine("Exact physical publication already committed; no re-authoring."); return; }
+                    if (exact.Generation != checked(cursor.Generation + 1) ||
+                        Convert.ToHexStringLower(SHA256.HashData(cursor.Bundle)) != physical.PriorBundleHash || exact.Observed < cursor.Observed)
+                        throw new CryptographicException("Physical result cannot replace this publisher generation.");
+                    WriteJournal(state,exact,integrity); Publish(exact,file,publicRoot);
+                    Console.WriteLine("Exact physical publication resumed through the retained journal."); return;
+                }
+                if (Convert.ToHexStringLower(SHA256.HashData(cursor.Bundle)) != physical.PriorBundleHash)
+                    throw new CryptographicException("Physical predecessor changed; no signature or publication.");
+            }
             var expiryWarning = false;
             while (!stopping.IsCancellationRequested) {
                 try {
@@ -116,7 +140,8 @@ internal static class DevPublisher
                     if (policyHorizon-observed > 86_400) expiryWarning = false;
                     var rollovers = nodes.Select((node,i) => new XPointNetworkOperationalNodeRollover(node,
                         Convert.FromHexString(keys[i].CurrentPin),Convert.FromHexString(keys[i].NextPin),
-                        Convert.FromHexString(keys[i].CurrentKey),Convert.FromHexString(keys[i].NextKey))).ToArray();
+                        Convert.FromHexString(keys[i].CurrentKey),Convert.FromHexString(keys[i].NextKey),
+                        physical is null ? null : [DevPhysicalIngress.Relocation(DevPhysicalIngress.RequireAddress(physical.Address), i + 1)])).ToArray();
                     // Renew installed current/announced-next slots. New private
                     // keys are never generated online or substituted into custody.
                     var next = await XPointNetworkOperationalSuccessorAuthor.AuthorDelegatedAsync(new(
@@ -132,6 +157,7 @@ internal static class DevPublisher
                         closure.ExactMailboxAuthorityChain);
                     var committed = new Journal("deep-dev-renewal.v1",Convert.ToHexStringLower(network),
                         checked((cursor?.Generation ?? 0)+1),observed,Convert.ToHexStringLower(SHA256.HashData(prior)),bundle);
+                    if (physical is not null) DevPhysicalIngress.WriteResult(physicalRoot!, physical, committed, integrity);
                     WriteJournal(state,committed,integrity); // Durable before either public file.
                     cursor = committed;
                     Publish(committed,file,publicRoot);
@@ -142,6 +168,7 @@ internal static class DevPublisher
                 }
                 catch (OperationCanceledException) when (stopping.IsCancellationRequested) { break; }
                 catch (Exception error) when (error is IOException or CryptographicException or ArgumentException or FormatException or InvalidOperationException) {
+                    if (physical is not null) throw; // Maintenance resumes its exact sealed result, never a new signed generation.
                     File.Delete("/tmp/deep-publisher-ready");
                     Console.Error.WriteLine($"Development operational renewal unavailable ({error.GetType().Name}). Custody and floors retained.");
                     await Task.Delay(TimeSpan.FromSeconds(error.Message == "Development offline policy renewal required." ? 60 : 10),stopping.Token);

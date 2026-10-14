@@ -65,8 +65,9 @@ internal static class DevOwnedMailboxExercise
         var source=new DeepIdV2ContactPathAuthoritySource(pin,accounts,proofs,artifacts,networkFloor,clock);
         await StageAsync("CurrentNetwork",async()=>{var current=await source.VerifyCurrentNetworkAsync(pin.NetworkId,ct);current.EnsureCurrent();},ct);
         await StageAsync("PreKeyStage",async()=>{_ = await accounts.EnsureOwnInitialPreKeyInventoryAsync(source,ct);},ct);
-        var custody=await accounts.OpenOwnOnionClientCustodyAsync(ct);
-        await StageAsync("PreKeyPublication",async()=>{_ = await accounts.PublishOwnStagedPreKeyInventoryAsync(source,custody,ct);},ct);
+        DeepIdV2OnionClientCustody? custody=null;
+        await StageAsync("OnionCustody",async()=>{custody=await accounts.OpenOwnOnionClientCustodyAsync(ct);},ct);
+        await StageAsync("PreKeyPublication",async()=>{_ = await accounts.PublishOwnStagedPreKeyInventoryAsync(source,custody!,ct);},ct);
         await StageAsync("ContactPublication",async()=>{_ = await accounts.EnsureOwnPermanentContactPublishedAsync(source,ct);},ct);
         DeepIdV2MailboxSynchronizationResult? result=null;
         await StageAsync("OwnedGrantNodeRead",async()=>{result=await accounts.SynchronizeOwnMailboxAsync(source,ct);},ct);
@@ -90,6 +91,13 @@ internal static class DevOwnedMailboxExercise
             Console.WriteLine("Owned development client stage completed: "+stage+".");
         }
         catch(Exception error){Console.Error.WriteLine("Owned development client stage failed: "+stage+" ("+error.GetType().Name+").");
+            if(error is CryptographicException && error.Message=="The protected DID2 publication differs from current placement.")
+                Console.Error.WriteLine("Owned development closed failure classification: prekey-placement-changed.");
+            var frames=new StackTrace(error,false).GetFrames()??[];var emitted=0;
+            foreach(var frame in frames){var method=frame.GetMethod();var type=method?.DeclaringType;
+                if(type?.Assembly.GetName().Name is not ("Deep.Client.Shared" or "Deep.Protocol"))continue;
+                Console.Error.WriteLine("Owned development source classification: "+type.FullName+"."+method!.Name+".");
+                if(++emitted==5)break;}
             if(error is Deep.Client.Shared.Services.AccountDirectoryV2.DeepIdV2DirectoryProofUnavailableException unavailable)
                 Console.Error.WriteLine("Owned development proof availability: status="+((int)unavailable.StatusCode)+".");
             var depth=0;for(var inner=error.InnerException;inner is not null && depth++<4;inner=inner.InnerException){

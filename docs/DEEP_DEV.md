@@ -234,7 +234,54 @@ NoCheck, unknown-revocation exceptions and TLS-accept callbacks are not added.
 CRL and offline-policy expiry still require operator renewal; this is not
 unattended CA rotation, production PKI or physical acceptance.
 
-### Supported Windows owned-client probe
+### Explicit physical LAN ingress maintenance
+
+The current-only signed origin relocation contract is
+[DR-0120](../../docs/survival-program/decisions/DR-0120-signed-operational-origin-relocation.md).
+Use an explicit canonical private LAN IPv4 belonging to this host, not the VPN
+or Docker bridge. Do not put actual machine addresses into tracked documentation.
+
+```powershell
+./scripts/deep-dev.ps1 -Action PreparePhysicalIngress -ProjectName deep-dev-current -IngressAddress <LAN_IPV4>
+./scripts/deep-dev.ps1 -Action ApplyPhysicalIngress -ProjectName deep-dev-current
+./scripts/deep-dev.ps1 -Action Verify -ProjectName deep-dev-current
+./scripts/deep-dev.ps1 -Action CacheWindowsDevCrl -ProjectName deep-dev-current
+./scripts/deep-dev.ps1 -Action ExerciseOwnedMailboxWindows -ProjectName deep-dev-current
+```
+
+Build the current publisher image before maintenance. Prepare stops the retained
+publisher to fix its exact predecessor and leaves it stopped. It stages a new
+`offline-root/physical-ingress` candidate rather than overwriting the old PKI
+candidate. The original CA, all leaf private keys, node identities, BLS keys,
+policy/epoch, native floors and histories remain. Same-key leaf certificates
+retain subject/lifetime/extensions and existing DNS/IP SANs, add the one exact
+LAN SAN and point at the existing publisher's bounded CA-signed CRL listener.
+No application request becomes HTTP and no machine ROOT trust is added.
+
+Apply validates the sealed twelve-file whitelist/current policy, stops all eight
+owners, compare-replaces only server certificates in the five existing secret
+volumes preserving key-file ownership, and installs exact host before/after
+images. Only the public-only `online` directory is mounted into the one-shot
+publisher; CA private custody and private config/plan never go online. The author
+uses unchanged traffic keys/pins and the same publisher lease/journal/CAS. Its
+sealed exact result precedes the journal; a complete pending rename resumes,
+while partial/foreign bytes fail closed without re-authoring. The physical
+configuration marker is an untrusted listener setting, never client authority.
+
+The optional physical overlay adds no service. It publishes the Registry's28543,
+the three node TLS ports28294–28296 and signed-CRL HTTP28297 on the explicit LAN
+address; existing loopback mappings and all named volumes stay. It does not
+expose floor, signer sockets, keys or management ports to the LAN. Normal
+Up/Start/fault workflows retain the overlay after successful installation.
+Already-installed Apply verifies the same sealed files/prefix and restarts;
+it never authors a second relocation. A failed partial install remains stopped:
+resume that same candidate, never Init/Provision or a floor reset.
+
+Readiness, strict host TLS and immutable owned-client publication are separate
+checks. A successful relocation cannot restage/re-sign an old XPP inventory that
+was bound to a prior placement; such lifecycle failures remain real blockers.
+
+### Supported Windows owned-client probe commands
 
 ```powershell
 ./scripts/deep-dev.ps1 -Action CacheWindowsDevCrl -ProjectName deep-dev-current
