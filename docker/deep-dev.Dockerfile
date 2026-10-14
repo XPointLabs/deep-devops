@@ -21,6 +21,11 @@ FROM build AS protocol-tests
 # native compiler or source rebuild is used by this local validation target.
 RUN dotnet test deep-protocol/tests/Deep.Protocol.Tests/Deep.Protocol.Tests.csproj -c Release --filter 'FullyQualifiedName~DeepIdV2Root_RestoreRecreatesExactCredentialAndCommitment|FullyQualifiedName~DeepIdV2Genesis_UsesSamePhraseForAccountAndPqRoot_AndRestoresExactDid2|FullyQualifiedName~Dab2_RealNativeHybridSignaturesCloseOverExactDidAndAccount|FullyQualifiedName~Did2Verifier_RealPqGenesisClosesSignedCurrentProof|FullyQualifiedName~DeepMlDsa65NativeProviderTests|FullyQualifiedName~Did2Admission_AdvancesThresholdHeadAndRejectsChangedPrivateJournal|FullyQualifiedName~Did2Proof_EarlierLeafInSameBatchUsesFinalMapWithoutRewritingTransition'
 
+FROM build AS mailbox-signer-tests
+# Actual protected Linux custody, signatures and Unix framing; no mock can
+# stand in for this lane. Not grant/authority/device activation evidence.
+RUN dotnet test deep-registry-api/tests/Deep.Registry.Api.Tests/Deep.Registry.Api.Tests.csproj -c Release -p:DeepProtocolSourceCutover=true -p:DeepProtocolLocalCutover=true --filter 'FullyQualifiedName~MailboxRoleSignerTests|FullyQualifiedName~UnixSocketEd25519ExternalSignerTests'
+
 FROM mcr.microsoft.com/dotnet/aspnet@sha256:e3736b0d423db99c6988e1ddf5ea725c14b12579bb120024e5ff7ff204a14080
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && rm -rf /var/lib/apt/lists/*

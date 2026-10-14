@@ -514,3 +514,23 @@ unchanged inputs, all native stages0; source scopes and hashes are owned by its
 [handover checkpoint](../../deep-registry-api/docs/testing/s05-same-day-handover-2026-10-14.md).
 Protocol's independent full retains the original S08 package failure; no release
 qualification is inferred from this successful development recovery.
+
+## Protected role signer source and engine-resumed smoke
+
+The optional `mailbox-signer-tests` target in `docker/deep-dev.Dockerfile`
+executes real Linux ARM64 role custody/signatures and the Unix adapter tests,
+without live authority mounts or service ports. Actual21/0/0/native Docker0;
+exact source receipt, build copy-retry warnings and remaining deployment gates
+are owned by the [Registry checkpoint](../../deep-registry-api/docs/testing/s05-protected-role-signer-2026-10-14.md).
+Topology contracts12/0/native0. The normal six-service composition is unchanged;
+no role signer service is claimed deployed. A dedicated role-only mount and
+explicit independent grant/MGR roots must precede enabling private issuance.
+
+After the operator restarted Docker, `test-env.ps1 -Suite smoke -BackendMode
+deep-dev -DeepDevProjectName deep-dev-current` completed native0 through the
+isolated native runner: Registry proof ready, three verified ONION nodes,
+3-second observation. `artifacts/s05-role-signer-20261014/03/smoke.log`, SHA256
+`3B422649935678F8B1158EFE158F91E2BEC41BA2CA6EF1826FB03F43829B7AC1`.
+No container/volume/WSL reset, production mutation or role-key signature occurred.
+This is retained current-dev control/ONION smoke, not mailbox or device delivery.
+Original pre-cutover deep-dev remains separately retained and unhealthy.
