@@ -209,7 +209,7 @@ production key rotation, process/retained-volume recovery or physical E2E.
 `0C14260B867D406D5182D76364E8FF4BB9A2F5EB6E1FEF562666AA47C59F4C28`.
 Its selected artifact secret scan passed1 file. Scoped rehearsal cleanup
 completed; no project containers or volumes remained. The separate existing
-`deep-dev` project's post-engine-restart unhealthy status is unresolved; its
+`deep-dev` project's post-engine-restart unhealthy status is not recovered; its
 state/keys were not changed or reset to make these receipts pass.
 
 This lane checks infrastructure/real Xray health. Its `ci:smoke` physical-harness
@@ -225,3 +225,24 @@ returned native1/blocked with10 missing evidence/sign-off blockers, including
 device/deployment acceptance. No mock device PASS or production readiness follows.
 Contract summary SHA256:
 `A98D0F1B6959EF68E0E24F69F265CE45FEC53541205BD79BAEA7A8D5A23B3524`.
+
+## Retained dev policy expiry diagnosis
+
+Read-only inspection after engine recovery found70 publisher renewal
+`ArgumentException` entries and Registry authenticated-time failures classified
+`CryptographicException/policy-interval`. The existing Protocol DTS1 canonical
+decoder reads the retained public genesis policy interval as
+2026-09-29T14:07:08Z–2026-10-06T14:07:38Z. The host UTC clock is past that expiry.
+This decode is not independent signature/current-authority acceptance; no trust
+claim or floor is minted from it. It corroborates the observed live-policy
+rejection. Dev provisioning authors seven-day XNA1/DTS1 scope; the publisher
+uses that original bootstrap authority and delegated policy, not an indefinitely
+renewable root. Its successor request rejects a lifetime outside that authority.
+
+The next S05 operational slice must add supported signed authority/policy
+renewal and its retained-history activation, including expiry warnings and
+the dependent origin-certificate lifetime. It must preserve original independent
+genesis, node identities, publisher journal, independent DB floor and node/client
+protected floors. The production-oriented offline renewal CLI candidate is not
+a supported dev activation command. Do not rerun Init/Provision, edit signed
+expiry bytes, waive TLS/trusted time or reset custody to restore health.
