@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('Init','Build','PrepareAuthority','PrepareOperational','ApplyOperational','PrepareMailbox','ProvisionMailbox','ActivateMailbox','PrepareNodeMailbox','ProvisionNodeMailboxKeys','FetchNodeMailboxControl','EnrollNodeMailbox','ActivateNodeMailbox','ProvisionNodeContactKeys','EnrollNodeContact','ActivateNodeContact','PrepareContactCoordination','ProvisionContactCoordination','ActivateContactCoordination','ExerciseOwnedMailbox','AdmitObserver','Provision','ProvisionFloor','Up','Status','Stop','Start','Verify','FaultMatrix','HistoryFault','StackFault','EngineFault','ExpiryFault')][string]$Action,
+    [Parameter(Mandatory)][ValidateSet('Init','Build','PrepareAuthority','PrepareOperational','ApplyOperational','PrepareMailbox','ProvisionMailbox','ActivateMailbox','PrepareNodeMailbox','ProvisionNodeMailboxKeys','FetchNodeMailboxControl','EnrollNodeMailbox','ActivateNodeMailbox','ProvisionNodeContactKeys','EnrollNodeContact','ActivateNodeContact','PrepareContactCoordination','ProvisionContactCoordination','ActivateContactCoordination','PrepareDevPki','ApplyDevPki','ExerciseOwnedMailbox','AdmitObserver','Provision','ProvisionFloor','Up','Status','Stop','Start','Verify','FaultMatrix','HistoryFault','StackFault','EngineFault','ExpiryFault')][string]$Action,
     [ValidateRange(1,3)][int]$NodeNumber = 1,
     [string]$OperationalCandidate,
     [string]$CustodyRoot = 'C:\Work\DeepSession\secrets\dev\deep-dev',
@@ -102,6 +102,13 @@ if ($coordinationEnabled -or $Action -eq 'ActivateContactCoordination') {
         [Environment]::SetEnvironmentVariable("DEEP_DEV_CONTACT_NODE$number",$key,'Process')
     }
     $compose += @('--file',(Join-Path $devopsRoot 'docker-compose.deep-dev.coordination.yml'))
+}
+$pkiMarker = Join-Path $custodyPath 'mailbox/pki-enabled'
+$pkiEnabled = Test-Path -LiteralPath $pkiMarker -PathType Leaf
+if ($pkiEnabled -or $Action -eq 'ApplyDevPki') {
+    if ($ProjectName -cne 'deep-dev-current' -or -not $coordinationEnabled) { throw 'Current retained issuer/coordination required for dev PKI.' }
+    if ($pkiEnabled -and ((Get-Item -LiteralPath $pkiMarker).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Linked dev PKI marker.' }
+    $compose += @('--file',(Join-Path $devopsRoot 'docker-compose.deep-dev.pki.yml'))
 }
 $devServiceCount = if ($mailboxEnabled) { 8 } else { 6 }
 $devServices = @('floor','registry','publisher','node-1','node-2','node-3')
@@ -298,6 +305,36 @@ if ($Action -in @('PrepareContactCoordination','ProvisionContactCoordination','A
     }
     return
 }
+if ($Action -in @('PrepareDevPki','ApplyDevPki')) {
+    if ($ProjectName -cne 'deep-dev-current' -or -not $coordinationEnabled) { throw 'Supported current-dev-only TLS ceremony.' }
+    $project = Join-Path $devopsRoot 'tools/deep-dev/Deep.Dev.csproj'
+    if ($Action -eq 'PrepareDevPki') {
+        Run-Native dotnet @('run','--project',$project,'-c','Debug','--','prepare-dev-pki',$custodyPath,(Join-Path $devopsRoot 'tools/nts-observer/deep-nts-observer.exe'))
+        return
+    }
+    $candidate = Join-Path $custodyPath 'offline-root/dev-pki'
+    $leasePath = Join-Path $custodyPath 'offline-root/dev-pki-activation.lease'
+    if ((Test-Path -LiteralPath $leasePath) -and ((Get-Item -LiteralPath $leasePath).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Linked dev PKI lease.' }
+    $lease = [IO.FileStream]::new($leasePath,[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+    try {
+        Run-Native dotnet @('run','--project',$project,'-c','Debug','--','validate-dev-pki',$custodyPath)
+        Run-Native docker ($compose + @('stop','--timeout','10'))
+        # A partial installation stays stopped and resumes from sealed before/after images.
+        foreach ($service in @('registry','floor','node-1','node-2','node-3')) {
+            $volume = if ($service -ceq 'registry') { "$($ProjectName)_registry-mailbox-secrets" } else { "$($ProjectName)_$service-secrets" }
+            $after = Join-Path $candidate "$service/secrets/server.crt"
+            $before = Join-Path $candidate "volume-before/$service/secrets/server.crt"
+            $copy = 'set -eu; test -f /target/server.crt && test ! -L /target/server.crt; test -f /target/server.key && test ! -L /target/server.key; cmp -s /source/server.crt /target/server.crt || cmp -s /before/server.crt /target/server.crt; if test -e /target/server.crt.pki-stage; then test ! -L /target/server.crt.pki-stage; cmp -s /source/server.crt /target/server.crt.pki-stage; else cp /source/server.crt /target/server.crt.pki-stage; fi; owner=$(stat -c "%u:%g" /target/server.key); chown "$owner" /target/server.crt.pki-stage; chmod 0600 /target/server.crt.pki-stage; mv /target/server.crt.pki-stage /target/server.crt'
+            Run-Native docker @('run','--rm','--network','none','--mount',"type=bind,source=$after,target=/source/server.crt,readonly",
+                '--mount',"type=bind,source=$before,target=/before/server.crt,readonly",'--mount',"type=volume,source=$volume,target=/target",'alpine:3.22','sh','-c',$copy)
+        }
+        Run-Native dotnet @('run','--project',$project,'-c','Debug','--','install-dev-pki',$custodyPath)
+        if (-not $pkiEnabled) { $null=New-Item -ItemType File -Path $pkiMarker -ErrorAction Stop }
+        Run-Native docker ($compose + @('up','-d'))
+        Write-Host 'Same-key dev PKI and signed revocation distribution activated; Verify and owned-client TLS/admission still required.'
+    } finally { $lease.Dispose() }
+    return
+}
 if ($Action -eq 'ExerciseOwnedMailbox') {
     if ($ProjectName -cne 'deep-dev-current' -or -not $coordinationEnabled) { throw 'Actual current issuer, resolver and coordination required for the owned client.' }
     Run-Native docker @('run','--rm','--network',"$($ProjectName)_dev",'--ulimit','core=0',
@@ -311,6 +348,10 @@ if ($Action -eq 'Build') {
 }
 function Test-CurrentCapabilities {
     $ready = $true
+    if ($pkiEnabled) {
+        & docker @($compose + @('exec','-T','publisher','curl','--fail','--silent','--max-time','5','--output','/dev/null','http://localhost:8080/deep-dev-ca.crl')) 2>$null
+        if ($LASTEXITCODE -ne 0) { Write-Host 'Current capability unavailable: signed dev CRL distribution.'; return $false }
+    }
     if ($mailboxEnabled) {
         foreach ($role in @('deposit','retrieve')) {
             & docker @($compose + @('exec','-T',"$role-signer",'test','-S',"/run/role-socket/$role.sock")) 2>$null

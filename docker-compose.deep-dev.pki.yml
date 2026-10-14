@@ -1,0 +1,4 @@
+# Signed CRL only; internal Docker listener, no published port or new service.
+services:
+  publisher:
+    command: [Deep.Dev.dll, publish-with-crl, /run/deep-public, /run/deep-operator, /usr/local/bin/deep-nts-observer]

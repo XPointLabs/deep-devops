@@ -25,6 +25,26 @@ try
     await Reject(()=>{_ = DevContactCoordinationPreparation.RootSql(new byte[16]);return Task.CompletedTask;},"zero coordination network");
     await Reject(()=>{_ = DevContactCoordinationPreparation.RootSql(new byte[15]);return Task.CompletedTask;},"short coordination network");
     await Reject(()=>DevOwnedMailboxExercise.RunAsync("/run/operator"),"owned client rejects custody mount");
+    using(var caKey=RSA.Create(2048))using(var leafKey=RSA.Create(2048)) {
+        var caRequest=new CertificateRequest("CN=Dev PKI test CA",caKey,HashAlgorithmName.SHA256,RSASignaturePadding.Pkcs1);
+        caRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(true,false,0,true));
+        caRequest.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyCertSign|X509KeyUsageFlags.CrlSign,true));
+        var now=DateTimeOffset.UtcNow;
+        using var ca=caRequest.CreateSelfSigned(now.AddMinutes(-10),now.AddDays(2));
+        var request=new CertificateRequest("CN=registry",leafKey,HashAlgorithmName.SHA256,RSASignaturePadding.Pkcs1);
+        var names=new SubjectAlternativeNameBuilder();names.AddDnsName("registry");request.CertificateExtensions.Add(names.Build());
+        request.CertificateExtensions.Add(new X509BasicConstraintsExtension(false,false,0,true));
+        using var retainedLeaf=request.Create(ca,now.AddMinutes(-5),now.AddDays(1),RandomNumberGenerator.GetBytes(16));
+        using var issued=DevPki.AuthorLeaf(ca,leafKey,retainedLeaf);
+        Check(issued.MatchesHostname("registry") && issued.PublicKey.ExportSubjectPublicKeyInfo().AsSpan().SequenceEqual(retainedLeaf.PublicKey.ExportSubjectPublicKeyInfo()) &&
+            issued.NotBefore==retainedLeaf.NotBefore && issued.NotAfter==retainedLeaf.NotAfter && issued.Extensions["2.5.29.31"] is not null,"PKI reissue preserves leaf key/host/lifetime and adds distribution point");
+        var crl=new CertificateRevocationListBuilder().Build(ca,1,now.AddDays(1),HashAlgorithmName.SHA256,RSASignaturePadding.Pkcs1,now.AddMinutes(-1));
+        DevPki.ValidateCrl(crl,ca);Check(true,"actual CA-signed CRL verifies without online trust bypass");
+        var changed=crl.ToArray();changed[^1]^=1;
+        await Reject(()=>{DevPki.ValidateCrl(changed,ca);return Task.CompletedTask;},"changed CRL signature");
+        using var wrong=RSA.Create(2048);
+        await Reject(()=>{using var bad=DevPki.AuthorLeaf(ca,wrong,retainedLeaf);return Task.CompletedTask;},"PKI reissue wrong leaf key");
+    }
     using(var control=new HttpResponseMessage(HttpStatusCode.OK)) {
         control.Content=new ByteArrayContent(new byte[MailboxGrantRevocationV1Codec.MinimumBytes]);
         control.Content.Headers.ContentType=new("application/vnd.deep.mailbox-grant-revocation.v1+octet-stream");

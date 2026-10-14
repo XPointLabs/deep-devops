@@ -44,7 +44,7 @@ internal static class DevPublisher
 
     internal static async Task RunAsync(string publicRoot, string operatorRoot, string executable,
         Func<string,AccountDirectoryDts1Source[],Task<ulong>> observe,
-        uint operationalLifetimeSeconds = 3_600, bool singlePublication = false)
+        uint operationalLifetimeSeconds = 3_600, bool singlePublication = false, CancellationToken stoppingToken = default)
     {
         if (operationalLifetimeSeconds is < 180 or > 3_600) throw new ArgumentOutOfRangeException(nameof(operationalLifetimeSeconds));
         if (OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Run the dev publisher as its scoped Docker service.");
@@ -68,7 +68,7 @@ internal static class DevPublisher
         if (integrity.Length != 32 || integrity.AsSpan().IndexOfAnyExcept((byte)0) < 0) throw new InvalidDataException("Wrong renewal integrity key.");
         var witnesses = Enumerable.Range(1,3).Select(i => Signer.Load(Path.Combine(operatorRoot,$"witness-{i}.seed"))).ToArray();
         var nodes = Enumerable.Range(1,3).Select(i => Signer.Load(Path.Combine(operatorRoot,$"node-{i}.seed"),true)).ToArray();
-        using var stopping = new CancellationTokenSource();
+        using var stopping = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
         // The expiry fault lane has bounded acquisition and produces real
         // shorter-lived signed successors; it never edits a verifier's clock.
         if (singlePublication) stopping.CancelAfter(TimeSpan.FromMinutes(2));

@@ -739,3 +739,60 @@ not S06/physical acceptance. Private grants/client verification/node acceptance,
 remaining rollover/outage matrix and physical0/4 remain open. Production,
 old-dev, main and GitHub Releases were not changed. Workflow owner:
 [DEEP_DEV](DEEP_DEV.md#current-dev-contact-and-issuer-connected-client).
+
+## Same-key dev PKI and strict managed admission
+
+2026-10-15: added the explicit supported dev-only TLS ceremony described in
+[DEEP_DEV](DEEP_DEV.md#current-dev-tls-revocation-distribution). It retains the
+CA certificate/key, every leaf key/SPKI, host/SAN/extensions and validity window.
+The CA signs a standard CRL and reissues the existing leaves with a fixed CRL
+Distribution Point. A sealed exact whitelist/before-after plan is validated
+before stopping owners; partial installs resume the same candidate. Private
+CA/leaf keys never become online mounts or artifacts. No signed network bytes,
+protocol root, identity, floor, grant scope or journal root changed.
+
+The existing publisher gained only one bounded internal public CRL endpoint,
+no new container or published port, no app HTTP path or signing endpoint.
+It verifies the CA signature before serving DER bytes and emits no access log.
+Actual distribution returned HTTP200/564 bytes. The Linux .NET10 implementation
+requires an HTTP CDP; application HTTPS/H2, chain/name/EKU and online revocation
+remain enforced. No client trust callback, NoCheck or ignored chain flags was
+introduced. Publisher cancellation is linked to its host lifetime; its original
+renewal/journal ownership remains unchanged.
+
+Preparation tests02:58 checks/native0, zero compiler warnings/errors; receipt
+`artifacts/s05-dev-pki-20261015/02/pki-preparation-tests.log`, SHA256
+`09F62B4FBB570B5DAAE01D3E7840986958E157448FE8197C79F3BA04EFC29286`.
+Actual signed candidate03 native0, SHA256
+`4BCCB180E71DCA0341CEE57001F1116DF5E65DB661F61148FC58251D8BBB605D`.
+Final actual Compose/contracts19/0/native0 and PowerShell AST passed. Matching
+ARM64 publisher/operator image04 built native0/zero compiler warnings/errors.
+Original test01 failed a fixture local-name collision; corrected, not waived.
+
+Original Apply05 completed0, but Verify06 failed1 because the certificate copy
+lost PostgreSQL's non-root file owner: server.crt became0:0/mode0600 while the
+retained key remained70:70/mode0600. Six closed permission-denied log lines
+confirmed the cause. Copy now preserves numeric ownership from the unchanged
+TLS key, with assertions against copying key bytes. Same sealed-candidate resume07
+native0 repaired ownership to70:70/mode0600; PostgreSQL/floors were not reset.
+Resume SHA256 `3DED4FE3E2269AC85CE32C6FDD5592BDC62F640F5CB8F20DCF61458D822F9D60`.
+Current capability Verify08 completed0 after156s recovery, all three ONION/native
+mailbox/contact terminals recovered; SHA256
+`495328960C847984FB2D9AD0D048BFE8A5F32819B72491E58052F02B35015B9E`.
+The first failure remains a failure; eventual healthy containers do not qualify it.
+Final resumed Windows PowerShell5.1 smoke10 native0, SHA256
+`A9CDA4E8A869CEA1486C1AB8589C8BB9AF5AB2BD8596B02FDE8520B479E7A349`.
+
+Strict owned-client09 now completed actual AccountCreate, **AccountAdmission**
+and **CurrentNetwork** through the unchanged managed HTTPS client. This resolves
+the observed TLS failure; it does not prove grant issuance/node read. Receipt
+`artifacts/s05-dev-pki-20261015/09/owned-client.log`, SHA256
+`D0CE6618A68A6DED434F53D639BF25D3C0DBE7D23C9917BDF58495723032542C`.
+The command still failed1 at PreKeyStage with PlatformNotSupportedException:
+the default approved ML-KEM assets/loader support Windows x64/ARM64 and Android
+ARM64, not this Linux probe process. Do not broaden shipping crypto approval or
+inject fake prekeys solely to make this diagnostic pass. Continue the connected
+owned-client path on the supported Windows/Android platforms (or a separately
+reviewed genuine Linux crypto-provider qualification). Physical0/4, grant/node
+acceptance, remaining S05 lifecycle and shipping gates remain open. No production,
+old-dev, main or GitHub Releases mutation occurred.

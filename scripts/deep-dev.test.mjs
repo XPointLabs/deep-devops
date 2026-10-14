@@ -175,6 +175,24 @@ test('owned mailbox exercise is public-input-only and calls real account-owned A
   assert.doesNotMatch(probe,/ServerCertificateValidationCallback|NoCheck|FrozenClock|Signer.Load|SignDetached/);
 });
 
+test('dev PKI serves only signed public CRL inside the existing publisher with no new port mapping',async()=>{
+  const files=['deep-dev','deep-dev.mailbox','deep-dev.mailbox-nodes','deep-dev.contacts','deep-dev.coordination','deep-dev.pki'].flatMap(name=>['-f',fileURLToPath(new URL(`../docker-compose.${name}.yml`,import.meta.url))]);
+  const config=JSON.parse(execFileSync('docker',['compose','--project-name','deep-dev-current',...files,'config','--format','json'],{
+    encoding:'utf8',env:{...process.env,DEEP_DEV_PROJECT:'deep-dev-current',DEEP_DEV_ROOT:'C:/Work/DeepSession/secrets/dev/deep-dev-current',
+      DEEP_DEV_CONTACT_NODE1:'11'.repeat(32),DEEP_DEV_CONTACT_NODE2:'22'.repeat(32),DEEP_DEV_CONTACT_NODE3:'33'.repeat(32),
+      DEEP_DEV_MAILBOX_NETWORK:'11'.repeat(16),DEEP_DEV_MAILBOX_POLICY:'22'.repeat(32),DEEP_DEV_IPV4_PREFIX:'172.31.241',DEEP_DEV_PORT_PREFIX:'282',DEEP_DEV_REGISTRY_PORT:'28543'}}));
+  assert.equal(Object.keys(config.services).length,8);assert.equal(config.services.publisher.command[1],'publish-with-crl');
+  assert.equal(config.services.publisher.ports?.length||0,0);
+  const host=await read('../tools/deep-dev/DevPkiPublisher.cs');assert.match(host,/ValidateCrl\(bytes,ca\)/);assert.match(host,/ClearProviders/);
+  assert.equal((host.match(/MapGet\(/g)||[]).length,1);assert.doesNotMatch(host,/MapPost|\.key|root.seed|SignDetached|NoCheck/);
+  const script=await read('./deep-dev.ps1');const ceremony=script.split("if ($Action -in @('PrepareDevPki','ApplyDevPki')) {")[1].split("if ($Action -eq 'ExerciseOwnedMailbox')")[0];
+  assert.ok(ceremony.indexOf("'validate-dev-pki'")<ceremony.indexOf("@('stop','--timeout','10')"));
+  assert.ok(ceremony.indexOf("@('stop','--timeout','10')")<ceremony.indexOf("'install-dev-pki'"));
+  assert.match(ceremony,/stat -c "%u:%g" \/target\/server.key/);
+  assert.match(ceremony,/chown "\$owner" \/target\/server.crt.pki-stage/);
+  assert.doesNotMatch(ceremony,/provision-floor|--volumes|cp[^;]*server.key|volume','rm/);
+});
+
 test('engine fault tests automatic restart with retained custody and refuse a shared engine', async () => {
   const script = await read('./deep-dev.ps1');
   const fault = script.split("if ($Action -in @('StackFault','EngineFault','ExpiryFault'))")[1].split("if ($Action -eq 'Verify')")[0];

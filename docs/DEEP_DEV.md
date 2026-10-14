@@ -188,6 +188,51 @@ physical Windows/Android acceptance. A failed stage does not pass this scenario.
 The exact receipts and remaining work belong to the
 [S05 checkpoint](S05-AUTHORITY-HISTORY-2026-10-14.md).
 
+### Current-dev TLS revocation distribution
+
+The managed HTTPS client requires online revocation as well as ordinary
+chain/hostname/EKU validation. The original local certificates had no CRL
+Distribution Point; curl readiness alone did not prove this managed TLS path.
+Use the explicit current-dev-only ceremony, after contact coordination is enabled:
+
+```powershell
+./scripts/deep-dev.ps1 -Action PrepareDevPki -ProjectName deep-dev-current
+# Build the matching operator/publisher image before applying the candidate.
+./scripts/deep-dev.ps1 -Action ApplyDevPki -ProjectName deep-dev-current
+./scripts/deep-dev.ps1 -Action Verify -ProjectName deep-dev-current
+./scripts/deep-dev.ps1 -Action ExerciseOwnedMailbox -ProjectName deep-dev-current
+```
+
+Preparation runs on the operator host, independently observes authenticated
+time, verifies current policy and uses the retained local TLS CA key. It
+preserves the CA certificate, leaf keys, SPKI bindings, DNS/SAN/extensions and
+leaf validity windows. Only the standard CRL Distribution Point and fresh
+certificate serial/signature change. The signed CRL preserves previously revoked
+entries and advances its standard CRL number. Neither thisUpdate nor TLS
+certificate times supply protocol freshness. No protocol authority, identity,
+floor, signed network record or issuer journal is edited.
+
+The candidate contains public certificates/CRL and a sealed exact installation
+plan with recoverable before-images; it contains no CA/leaf private keys.
+Apply validates the whole fixed whitelist before stopping the eight dev owners,
+compares every retained volume certificate to its exact before/after image,
+copies only server.crt with mode0600 and the retained TLS key's numeric owner
+(including PostgreSQL's non-root owner), installs the host files and resumes the same retained
+topology. A partial/uncertain install stays stopped: preserve the candidate and
+resume Apply, not Prepare, Init, Provision or a state reset. Existing candidates
+reject re-authoring. CA custody is never mounted online.
+
+The optional PKI overlay adds **no service or published port**. The existing
+publisher serves only bounded, CA-signature-verified public CRL bytes at the
+fixed internal `http://publisher:8080/deep-dev-ca.crl`, without access logs,
+query parameters, app API, payload or signing capability. HTTP is used only for
+cryptographically authenticated CRL distribution: .NET10's Linux
+[CRL cache implementation](https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/System.Security.Cryptography/src/System/Security/Cryptography/X509Certificates/OpenSslCrlCache.cs)
+selects HTTP distribution points. Every application request remains HTTPS/H2;
+NoCheck, unknown-revocation exceptions and TLS-accept callbacks are not added.
+CRL and offline-policy expiry still require operator renewal; this is not
+unattended CA rotation, production PKI or physical acceptance.
+
 ## Architecture and custody
 
 This workstation uses native Linux ARM64 Docker. .NET and Go images are pinned
