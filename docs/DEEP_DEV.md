@@ -174,10 +174,11 @@ Build the matching operator image before running the connected client probe:
 ./scripts/deep-dev.ps1 -Action ExerciseOwnedMailbox -ProjectName deep-dev-current
 ```
 
-It mounts public bootstrap only and creates one genuinely disposable account
-inside its `--rm` container. Account keys remain in process-owned storage and
-its actual encrypted account database; no node/witness/root/role custody is
-mounted. It calls production account-owned admission, current network, pre-key
+The Linux form mounts public bootstrap only and creates one genuinely disposable
+account inside its `--rm` container. Its account keys remain in process-owned
+storage and the actual encrypted account database; no node/witness/root/role
+custody is mounted. The Windows form below instead preserves the owned probe's
+keys and exact staged state. Both call production account-owned admission, current network, pre-key
 publication, contact publication and mailbox synchronization APIs. TLS uses the
 image's explicit dev CA and ordinary platform validation; signed endpoints,
 client route selection, issuer journal and node admission are not mocked.
@@ -232,6 +233,38 @@ selects HTTP distribution points. Every application request remains HTTPS/H2;
 NoCheck, unknown-revocation exceptions and TLS-accept callbacks are not added.
 CRL and offline-policy expiry still require operator renewal; this is not
 unattended CA rotation, production PKI or physical acceptance.
+
+### Supported Windows owned-client probe
+
+```powershell
+./scripts/deep-dev.ps1 -Action CacheWindowsDevCrl -ProjectName deep-dev-current
+./scripts/deep-dev.ps1 -Action ExerciseOwnedMailboxWindows -ProjectName deep-dev-current
+```
+
+The first command validates the bounded CA-signed public CRL and caches it with
+Windows `certutil -user -addstore CA`; it imports no ROOT certificate, touches no
+machine store, and adds no trust bypass. Windows online chain validation can
+then use the genuine signed CRL while the Docker-only publisher name is absent
+from host DNS. Private CA trust remains app-scoped through the existing supported
+factory; hostname/EKU and online revocation remain required.
+
+The Windows probe uses Registry's fixed loopback HTTPS port and supported
+Windows native PQ assets. Its fixed probe directory is separate from MAUI/user
+accounts. Journaled secure storage uses Data Protection keys protected with
+current-user DPAPI; restarts reopen the same account and exact staged inventory,
+not a recreated identity or re-encrypted retry. Existing corrupt/missing custody
+fails closed. Only typed directory 429/503 receive at most three retries honoring
+Retry-After inside the original five-minute operation budget. Unknown forwarding
+completion is retained, never automatically acknowledged or reported as success.
+
+This is an operator-owned runtime diagnostic, **not physical MAUI/device E2E**.
+Account admission/current network/pre-key authoring have passed on Windows.
+The current signed bridge-IP locators do not yet form a usable Windows TLS/H2
+route: direct bridge-IP handshake times out while the published localhost port
+successfully negotiates strict H2. A TCP connect alone is insufficient evidence.
+Do not silently translate sealed endpoints in the client, disable pins/TLS,
+change the profile on failure or reset genesis/floors. A supported signed ingress
+update or production-representative reachable deployment remains required.
 
 ## Architecture and custody
 

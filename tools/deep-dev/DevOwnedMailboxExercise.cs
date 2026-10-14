@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using Deep.Client.Shared.Persistence;
 using Deep.Client.Shared.Services;
@@ -16,7 +17,10 @@ internal static class DevOwnedMailboxExercise
 {
     internal static async Task RunAsync(string publicRoot)
     {
-        if(!OperatingSystem.IsLinux() || publicRoot!="/run/deep-public")throw new ArgumentException("Wrong disposable client mount.");
+        var windows=OperatingSystem.IsWindows();
+        var expected=windows?Path.GetFullPath("C:/Work/DeepSession/secrets/dev/deep-dev-current/public"):"/run/deep-public";
+        if((!windows && !OperatingSystem.IsLinux()) || !string.Equals(Path.GetFullPath(publicRoot),expected,
+            windows?StringComparison.OrdinalIgnoreCase:StringComparison.Ordinal))throw new ArgumentException("Wrong disposable client public root.");
         using var manifest=JsonDocument.Parse(Read(Path.Combine(publicRoot,"deep-dev.json"),16_384));
         var m=manifest.RootElement;
         if(m.GetProperty("schema").GetString()!="deep-dev.v1" || m.GetProperty("projectName").GetString()!="deep-dev-current" ||
@@ -32,41 +36,66 @@ internal static class DevOwnedMailboxExercise
         var head=Read(Path.Combine(publicRoot,"genesis.adh1"),4096);
         var headPin=Convert.FromHexString(m.GetProperty("genesisHeadCoreHashHex").GetString()!);
         _=DeepIdV2DirectoryBootstrapVerifier.RestoreGenesis(authority,head,headPin);
-        const string scratch="/tmp/deep-dev-owned-mailbox-exercise";
-        if(Directory.Exists(scratch))throw new IOException("Disposable client scratch already exists; preserve it.");
+        var scratch=windows?Path.Combine(Path.GetDirectoryName(expected)!,"client-probes/windows-owned-mailbox"):"/tmp/deep-dev-owned-mailbox-exercise";
+        RequireNoLinks(scratch);
+        if(!windows && Directory.Exists(scratch))throw new IOException("Disposable client scratch already exists; preserve it.");
         Directory.CreateDirectory(scratch);
-        using var storage=new InMemoryDeepSecureStorage();
+        IDeepSecureStorage secureStorage=windows?new JournaledDeepSecureStorage(Path.Combine(scratch,"secure-state.bin"),
+            new DevWindowsSecretProtector(Path.Combine(scratch,"protection"))):new InMemoryDeepSecureStorage();
+        using var storageLifetime=(IDisposable)secureStorage;
+        var storage=secureStorage;
         var accounts=new DeepIdV2AccountService(storage,scratch,pin.NetworkId.Span,1,new SystemClock(),DeepMlDsa65CandidateVerifierFactory.OpenForCurrentProcess);
         using var budget=new CancellationTokenSource(TimeSpan.FromMinutes(5));var ct=budget.Token;
-        await StageAsync("AccountCreate",async()=>{_ = await accounts.CreateAsync("Dev owned mailbox fixture",ct);});
+        await StageAsync("AccountCreateOrRestore",async()=>{if(await accounts.GetCurrentAsync(ct) is null)
+            _ = await accounts.CreateAsync("Dev owned mailbox fixture",ct);},ct);
         var floor=await accounts.OpenDirectoryLkgStoreAsync(authority,head,headPin,ct);
         var factory=new HttpServiceTransportFactory(HttpServiceEndpointPolicy.Production);
-        // Ordinary platform TLS against the explicit dev CA installed by the image.
-        using var admissions=factory.CreateDeepIdV2GenesisAdmissionClient("https://registry/");
+        // Windows adds only an exact app-scoped dev root, keeping online
+        // revocation/name/EKU checks. Linux uses the image's explicit dev CA.
+        if(windows){using var ca=X509Certificate2.CreateFromPem(System.Text.Encoding.ASCII.GetString(Read(Path.Combine(publicRoot,"dev-ca.crt"),16_384)));
+            factory=factory.WithAppScopedPrivateCertificateAuthority(ca.RawData);}
+        var origin=windows?"https://localhost:28543/":"https://registry/";
+        using var admissions=factory.CreateDeepIdV2GenesisAdmissionClient(origin);
         using var verifier=DeepMlDsa65CandidateVerifierFactory.OpenForCurrentProcess();
         var clock=new ProcessMonotonicClock();
-        using var proofs=factory.CreateDeepIdV2DirectoryProofClient("https://registry/",clock,verifier,floor);
-        await StageAsync("AccountAdmission",async()=>{_ = await accounts.AdmitAndVerifyGenesisAsync(admissions,proofs,authority,cancellationToken:ct);});
-        using var artifacts=factory.CreateDeepIdV2NetworkClosureArtifactSource("https://registry/");
+        using var proofs=factory.CreateDeepIdV2DirectoryProofClient(origin,clock,verifier,floor);
+        await StageAsync("AccountAdmission",async()=>{_ = await accounts.AdmitAndVerifyGenesisAsync(admissions,proofs,authority,cancellationToken:ct);},ct);
+        using var artifacts=factory.CreateDeepIdV2NetworkClosureArtifactSource(origin);
         var networkFloor=await accounts.OpenNetworkLkgStoreAsync(pin,ct);
         var source=new DeepIdV2ContactPathAuthoritySource(pin,accounts,proofs,artifacts,networkFloor,clock);
-        await StageAsync("CurrentNetwork",async()=>{var current=await source.VerifyCurrentNetworkAsync(pin.NetworkId,ct);current.EnsureCurrent();});
-        await StageAsync("PreKeyStage",async()=>{_ = await accounts.EnsureOwnInitialPreKeyInventoryAsync(source,ct);});
+        await StageAsync("CurrentNetwork",async()=>{var current=await source.VerifyCurrentNetworkAsync(pin.NetworkId,ct);current.EnsureCurrent();},ct);
+        await StageAsync("PreKeyStage",async()=>{_ = await accounts.EnsureOwnInitialPreKeyInventoryAsync(source,ct);},ct);
         var custody=await accounts.OpenOwnOnionClientCustodyAsync(ct);
-        await StageAsync("PreKeyPublication",async()=>{_ = await accounts.PublishOwnStagedPreKeyInventoryAsync(source,custody,ct);});
-        await StageAsync("ContactPublication",async()=>{_ = await accounts.EnsureOwnPermanentContactPublishedAsync(source,ct);});
+        await StageAsync("PreKeyPublication",async()=>{_ = await accounts.PublishOwnStagedPreKeyInventoryAsync(source,custody,ct);},ct);
+        await StageAsync("ContactPublication",async()=>{_ = await accounts.EnsureOwnPermanentContactPublishedAsync(source,ct);},ct);
         DeepIdV2MailboxSynchronizationResult? result=null;
-        await StageAsync("OwnedGrantNodeRead",async()=>{result=await accounts.SynchronizeOwnMailboxAsync(source,ct);});
+        await StageAsync("OwnedGrantNodeRead",async()=>{result=await accounts.SynchronizeOwnMailboxAsync(source,ct);},ct);
         if(result is null || result.ProcessedEnvelopes!=0 || result.HasMore || result.DurableTombstones!=0)
             throw new InvalidDataException("A fresh disposable mailbox did not return an authenticated empty page.");
         Console.WriteLine(JsonSerializer.Serialize(new {schema="deep-dev-owned-mailbox-exercise.v1",ownedClientGrantNodeRead=true,
             authenticatedEmptyPage=true,deviceEvidence=false,messageDeliveryEvidence=false,restartEvidence=false}));
     }
 
-    private static async Task StageAsync(string stage,Func<Task> action)
+    private static async Task StageAsync(string stage,Func<Task> action,CancellationToken ct)
     {
-        try{await action();Console.WriteLine("Owned development client stage completed: "+stage+".");}
+        try{
+            for(var attempt=0;;attempt++){
+                try{await action();break;}
+                catch(Deep.Client.Shared.Services.AccountDirectoryV2.DeepIdV2DirectoryProofUnavailableException unavailable)when(attempt<3){
+                    var delay=unavailable.RetryAfter??TimeSpan.FromSeconds(10);
+                    Console.WriteLine("Owned development proof backoff: "+stage+"; status="+((int)unavailable.StatusCode)+"; attempt="+(attempt+1)+".");
+                    await Task.Delay(delay,ct);
+                }
+            }
+            Console.WriteLine("Owned development client stage completed: "+stage+".");
+        }
         catch(Exception error){Console.Error.WriteLine("Owned development client stage failed: "+stage+" ("+error.GetType().Name+").");
+            if(error is Deep.Client.Shared.Services.AccountDirectoryV2.DeepIdV2DirectoryProofUnavailableException unavailable)
+                Console.Error.WriteLine("Owned development proof availability: status="+((int)unavailable.StatusCode)+".");
+            var depth=0;for(var inner=error.InnerException;inner is not null && depth++<4;inner=inner.InnerException){
+                Console.Error.WriteLine("Owned development inner classification: "+inner.GetType().Name+".");
+                if(inner is OnionBoundaryException boundary)Console.Error.WriteLine("Owned development ONION classification: "+boundary.Code+".");
+            }
             if(error is HttpRequestException http)Console.Error.WriteLine("Owned development HTTP classification: status="+
                 (http.StatusCode is {} status?((int)status).ToString(System.Globalization.CultureInfo.InvariantCulture):"transport")+
                 "; category="+http.HttpRequestError+"; inner="+(http.InnerException?.GetType().Name??"none")+".");throw;}

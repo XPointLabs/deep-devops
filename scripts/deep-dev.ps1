@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('Init','Build','PrepareAuthority','PrepareOperational','ApplyOperational','PrepareMailbox','ProvisionMailbox','ActivateMailbox','PrepareNodeMailbox','ProvisionNodeMailboxKeys','FetchNodeMailboxControl','EnrollNodeMailbox','ActivateNodeMailbox','ProvisionNodeContactKeys','EnrollNodeContact','ActivateNodeContact','PrepareContactCoordination','ProvisionContactCoordination','ActivateContactCoordination','PrepareDevPki','ApplyDevPki','ExerciseOwnedMailbox','AdmitObserver','Provision','ProvisionFloor','Up','Status','Stop','Start','Verify','FaultMatrix','HistoryFault','StackFault','EngineFault','ExpiryFault')][string]$Action,
+    [Parameter(Mandatory)][ValidateSet('Init','Build','PrepareAuthority','PrepareOperational','ApplyOperational','PrepareMailbox','ProvisionMailbox','ActivateMailbox','PrepareNodeMailbox','ProvisionNodeMailboxKeys','FetchNodeMailboxControl','EnrollNodeMailbox','ActivateNodeMailbox','ProvisionNodeContactKeys','EnrollNodeContact','ActivateNodeContact','PrepareContactCoordination','ProvisionContactCoordination','ActivateContactCoordination','PrepareDevPki','ApplyDevPki','CacheWindowsDevCrl','ExerciseOwnedMailboxWindows','ExerciseOwnedMailbox','AdmitObserver','Provision','ProvisionFloor','Up','Status','Stop','Start','Verify','FaultMatrix','HistoryFault','StackFault','EngineFault','ExpiryFault')][string]$Action,
     [ValidateRange(1,3)][int]$NodeNumber = 1,
     [string]$OperationalCandidate,
     [string]$CustodyRoot = 'C:\Work\DeepSession\secrets\dev\deep-dev',
@@ -333,6 +333,12 @@ if ($Action -in @('PrepareDevPki','ApplyDevPki')) {
         Run-Native docker ($compose + @('up','-d'))
         Write-Host 'Same-key dev PKI and signed revocation distribution activated; Verify and owned-client TLS/admission still required.'
     } finally { $lease.Dispose() }
+    return
+}
+if ($Action -in @('CacheWindowsDevCrl','ExerciseOwnedMailboxWindows')) {
+    if ($ProjectName -cne 'deep-dev-current' -or -not $coordinationEnabled -or -not $pkiEnabled) { throw 'Actual current dev issuer, coordination and signed revocation distribution required.' }
+    $command = if ($Action -ceq 'CacheWindowsDevCrl') { 'cache-windows-dev-crl' } else { 'exercise-owned-mailbox' }
+    Run-Native dotnet @('run','--project',(Join-Path $devopsRoot 'tools/deep-dev/Deep.Dev.csproj'),'-c','Debug','--',$command,(Join-Path $custodyPath 'public'))
     return
 }
 if ($Action -eq 'ExerciseOwnedMailbox') {

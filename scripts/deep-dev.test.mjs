@@ -175,6 +175,17 @@ test('owned mailbox exercise is public-input-only and calls real account-owned A
   assert.doesNotMatch(probe,/ServerCertificateValidationCallback|NoCheck|FrozenClock|Signer.Load|SignDetached/);
 });
 
+test('Windows owned probe retains DPAPI-protected state and adds no global ROOT trust',async()=>{
+  const probe=await read('../tools/deep-dev/DevOwnedMailboxExercise.cs');
+  assert.match(probe,/JournaledDeepSecureStorage/);assert.match(probe,/accounts.GetCurrentAsync/);
+  assert.match(probe,/WithAppScopedPrivateCertificateAuthority/);
+  assert.match(probe,/unavailable.RetryAfter/);assert.match(probe,/await Task.Delay\(delay,ct\)/);
+  assert.doesNotMatch(probe,/NoCheck|Ignore.*Revocation|ServerCertificateValidationCallback/);
+  const protection=await read('../tools/deep-dev/DevWindowsSecretProtector.cs');assert.match(protection,/ProtectKeysWithDpapi/);
+  const pki=await read('../tools/deep-dev/DevPki.cs');assert.match(pki,/new\[\]\{"-user","-addstore","CA",path\}/);
+  assert.doesNotMatch(pki,/'-addstore','ROOT'|"-addstore","ROOT"|"-enterprise"/);
+});
+
 test('dev PKI serves only signed public CRL inside the existing publisher with no new port mapping',async()=>{
   const files=['deep-dev','deep-dev.mailbox','deep-dev.mailbox-nodes','deep-dev.contacts','deep-dev.coordination','deep-dev.pki'].flatMap(name=>['-f',fileURLToPath(new URL(`../docker-compose.${name}.yml`,import.meta.url))]);
   const config=JSON.parse(execFileSync('docker',['compose','--project-name','deep-dev-current',...files,'config','--format','json'],{

@@ -25,6 +25,17 @@ try
     await Reject(()=>{_ = DevContactCoordinationPreparation.RootSql(new byte[16]);return Task.CompletedTask;},"zero coordination network");
     await Reject(()=>{_ = DevContactCoordinationPreparation.RootSql(new byte[15]);return Task.CompletedTask;},"short coordination network");
     await Reject(()=>DevOwnedMailboxExercise.RunAsync("/run/operator"),"owned client rejects custody mount");
+    await Reject(()=>DevPki.CacheWindowsCrlAsync("/run/operator"),"CRL cache rejects non-public root");
+    if(OperatingSystem.IsWindows()) {
+        var secretDirectory=Path.Combine(directory,"windows-probe-protection");
+        var protector=new DevWindowsSecretProtector(secretDirectory);var plaintext=RandomNumberGenerator.GetBytes(32);
+        var encrypted=protector.Protect(plaintext);var reopened=new DevWindowsSecretProtector(secretDirectory);
+        var restored=reopened.Unprotect(encrypted);
+        Check(restored.AsSpan().SequenceEqual(plaintext) && !encrypted.AsSpan().SequenceEqual(plaintext),"Windows DPAPI-protected probe keys survive cold protector reopen");
+        CryptographicOperations.ZeroMemory(restored);CryptographicOperations.ZeroMemory(plaintext);
+        encrypted[^1]^=1;
+        await Reject(()=>{_ = reopened.Unprotect(encrypted);return Task.CompletedTask;},"modified protected probe keys");
+    }
     using(var caKey=RSA.Create(2048))using(var leafKey=RSA.Create(2048)) {
         var caRequest=new CertificateRequest("CN=Dev PKI test CA",caKey,HashAlgorithmName.SHA256,RSASignaturePadding.Pkcs1);
         caRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(true,false,0,true));

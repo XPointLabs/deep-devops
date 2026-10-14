@@ -127,6 +127,28 @@ internal static class DevPki
         _=body.ReadInteger();_=body.ReadEncodedValue();
         if(!body.ReadEncodedValue().Span.SequenceEqual(ca.SubjectName.RawData))throw new CryptographicException("CRL issuer differs.");
     }
+    internal static async Task CacheWindowsCrlAsync(string publicRoot)
+    {
+        var root=Path.GetFullPath(publicRoot);
+        if(!OperatingSystem.IsWindows() || !string.Equals(root,Path.GetFullPath("C:/Work/DeepSession/secrets/dev/deep-dev-current/public"),StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("CRL cache accepts only the exact current-dev public root.");
+        RequireNoLinks(root);var path=Path.Combine(root,"dev-ca.crl");RequireNoLinks(path);
+        using var held=new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.Read);
+        if(held.Length is < 1 or > 65_536)throw new InvalidDataException("Dev CRL cache input exceeds bounds.");
+        var bytes=new byte[checked((int)held.Length)];held.ReadExactly(bytes);
+        using var ca=X509Certificate2.CreateFromPem(Encoding.ASCII.GetString(Read(Path.Combine(root,"dev-ca.crt"),16_384)));
+        ValidateCrl(bytes,ca);
+        var start=new System.Diagnostics.ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows),"System32/certutil.exe")) {
+            UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true };
+        foreach(var argument in new[]{"-user","-addstore","CA",path})start.ArgumentList.Add(argument);
+        using var process=System.Diagnostics.Process.Start(start)??throw new IOException("CRL cache process unavailable.");
+        using var budget=new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var stdout=process.StandardOutput.ReadToEndAsync();var stderr=process.StandardError.ReadToEndAsync();
+        try{await process.WaitForExitAsync(budget.Token);_=await stdout;_=await stderr;}
+        catch{if(!process.HasExited)process.Kill();throw;}
+        if(process.ExitCode!=0)throw new IOException("Current-user signed CRL cache import failed.");
+        Console.WriteLine("Verified signed dev CRL cached in current-user CA store; no ROOT certificate or machine-store change.");
+    }
     private static void VerifySigned(byte[] exact,X509Certificate2 ca)
     {
         var reader=new AsnReader(exact,AsnEncodingRules.DER);var sequence=reader.ReadSequence();reader.ThrowIfNotEmpty();

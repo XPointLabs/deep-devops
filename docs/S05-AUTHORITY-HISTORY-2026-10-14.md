@@ -796,3 +796,59 @@ owned-client path on the supported Windows/Android platforms (or a separately
 reviewed genuine Linux crypto-provider qualification). Physical0/4, grant/node
 acceptance, remaining S05 lifecycle and shipping gates remain open. No production,
 old-dev, main or GitHub Releases mutation occurred.
+
+## Windows approved-provider connected attempt
+
+The supported host probe now uses the existing Windows-approved native PQ assets,
+Registry's fixed loopback HTTPS origin and the existing app-scoped private CA
+factory. `CacheWindowsDevCrl` first verifies the bounded signed CRL, then caches
+only that CRL in Windows current-user CA store. No ROOT certificate, machine
+store, TLS callback or unknown-revocation exception was added. Actual cache01
+native0 and read-only Online/ExcludeRoot/custom-root chain check returned true
+with no chain statuses. Receipt
+`artifacts/s05-windows-owned-client-20261015/01/signed-crl-cache.log`, SHA256
+`B910D766325FDB5C937AEC0556B59A15EEE80CCCB3C670704238C7EC8B00755C`.
+
+Windows client02 completed AccountCreate, AccountAdmission, CurrentNetwork and
+**PreKeyStage**, unlike the unsupported Linux process. It then failed native1
+at PreKeyPublication with ClientMailboxDispatchOutcomeUnknownException; not a
+delivery/grant PASS. SHA256
+`2776DD559DDC01C17D5224754A6C2CF57538C73C91297F2F5B7DABFC24510A76`.
+The original process-only probe cannot recover that discarded account's keys;
+its isolated encrypted scratch and failed receipt were preserved, not imported.
+
+The Windows probe now uses a fixed isolated directory and the existing
+JournaledDeepSecureStorage with current-user-DPAPI-protected Data Protection keys.
+Cold runs restore the same account and exact inventory rather than recreate or
+re-encrypt pending work. Helper tests actually verify cold protector reopen and
+tampered ciphertext refusal. Only typed proof429/503 receive at most three
+retries honoring Retry-After within the original five-minute operation budget;
+unknown forwarding completion still rejects and is not automatically retried.
+Resumed03/04 failed proof availability (confirmed429 in04), preserved as FAIL.
+Resumed05 completed AccountCreateOrRestore/Admission/CurrentNetwork/PreKeyStage,
+observed one proof429 backoff, then failed publication with unknown completion
+and nested TaskCanceledException. Its closed stderr SHA256
+`A6D961D1DD13E32EDC4546946B8CC525FCF1DCF9502395F697E863659FFE51B0`.
+
+Read-only transport diagnosis corrected an earlier overly weak conclusion:
+direct TCP to the signed Docker bridge IP connects, but strict TLS/H2 cancels
+after7 seconds; curl likewise times out after6 seconds. The same node's published
+localhost port negotiates strict TLS/H2 successfully. Thus TCP reachability and
+container health do not prove the selected Windows route. Docker Desktop's
+[documented Linux-container networking boundary](https://docs.docker.com/desktop/features/networking/)
+matches this observed limitation. Do not silently translate sealed endpoints,
+relax pins or select another profile. A supported signed ingress/locator update
+or matching reachable deployment remains required before another publication
+qualification attempt. The existing operational-rollover API carries only
+keys/pins and retains prior descriptors; its signature alone does not prove
+support for this endpoint change. Node/Registry/Protocol source was unchanged.
+
+Final helper tests06:61 checks/native0, zero compiler warnings/errors, SHA256
+`39CCD3605A07FD0E5B94B4A01EA65139F93F2700950E68CEF5D486C8F6503C5A`.
+Actual Compose/closed-input contracts20/0/native0 and PowerShell AST passed.
+Final current-dev smoke07 under Windows PowerShell5.1 native0, SHA256
+`D9E6EB69E9AF51A664A87255A013F6252ED206CDF2B295B793F8AEC4CCDCD2FC`.
+No account, floor, registry/node identity, old-dev or production state was reset.
+This is an operator runtime probe, not installed physical Windows/Android E2E.
+Owned grant/node read and physical0/4 remain unqualified; S05 is still active.
+Workflow owner: [DEEP_DEV](DEEP_DEV.md#supported-windows-owned-client-probe).

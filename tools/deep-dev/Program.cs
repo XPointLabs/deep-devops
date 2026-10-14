@@ -31,6 +31,7 @@ try {
     else if (args.Length == 3 && args[0] == "prepare-dev-pki") await DevPki.PrepareAsync(args[1],args[2],ReadNtsAsync);
     else if (args.Length == 2 && args[0] == "validate-dev-pki") { _=DevPki.Validate(args[1]);Console.WriteLine("Sealed same-key dev PKI candidate validated; runtime unchanged."); }
     else if (args.Length == 2 && args[0] == "install-dev-pki") DevPki.Install(args[1]);
+    else if (args.Length == 2 && args[0] == "cache-windows-dev-crl") await DevPki.CacheWindowsCrlAsync(args[1]);
     else if (args.Length == 3 && args[0] is "validate-operational-install" or "install-operational")
         DevOperationalActivation.Execute(args[1], args[2], args[0] == "install-operational");
     else if (args.Length == 4 && args[0] == "publish") await DevPublisher.RunAsync(args[1], args[2], args[3], ReadNtsAsync);
