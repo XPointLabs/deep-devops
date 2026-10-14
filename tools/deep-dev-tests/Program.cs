@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using System.Net;
 using Deep.Protocol.AccountDirectoryV1;
@@ -114,7 +115,7 @@ static async Task TestFileCeremonyAsync(VerifiedXPointNetworkBootstrap bootstrap
     {
         var nodes = nodeSigners.Select((s, i) => new XPointNetworkOperationalNode(s,
             B((byte)(20 + i)), B(30), B((byte)(40 + i)), B((byte)(50 + i)), (uint)(64_500 + i), 840,
-            B((byte)(60 + i)), IPAddress.Parse($"192.0.2.{i + 1}"), 443,
+            B((byte)(60 + i)), IPAddress.Parse($"172.31.240.{11 + i}"), 443,
             B((byte)(70 + i)), B((byte)(80 + i)),
             ScalarMult.Base(B((byte)(90 + i))), ScalarMult.Base(B((byte)(100 + i))),
             Enumerable.Range(0, 5).Select(role => (ReadOnlyMemory<byte>)PublicKeyAuth.GenerateKeyPair(B((byte)(110 + i * 5 + role))).PublicKey).ToArray())).ToArray();
@@ -149,6 +150,7 @@ static async Task TestFileCeremonyAsync(VerifiedXPointNetworkBootstrap bootstrap
             [bootstrap.ExactXna1], [bootstrap.ExactDts1], [operational.ExactXvp1], [operational.ExactXnv1],
             [operational.ExactXnh1], operational.ExactXnd1, [operational.ExactPmt2], [operational.ExactPma2]);
         var manifest = JsonSerializer.SerializeToUtf8Bytes(new { schema = "deep-dev.v1", nodeCount = 3,
+            projectName = "deep-dev", containerIpv4Prefix = "172.31.240",
             networkIdHex = Convert.ToHexString(bootstrap.Authority.NetworkId.Span),
             genesisAuthorityCoreHashHex = Convert.ToHexString(bootstrap.GenesisPin.AuthorityCoreHash.Span) });
         File.WriteAllBytes(Path.Combine(publicRoot, "deep-dev.json"), manifest);
@@ -181,6 +183,54 @@ static async Task TestFileCeremonyAsync(VerifiedXPointNetworkBootstrap bootstrap
         File.WriteAllBytes(Path.Combine(publicRoot, "network.ncp2"), malformed);
         await Reject(() => DevOfflineAuthorityRenewal.PrepareAsync(fixture, "unused", (_, _) => throw new Exception("Observer must not run")), "retired seven-chain closure");
         Check(Directory.GetDirectories(Path.Combine(offline, "renewals")).Length == 1, "rejected ceremonies create no candidate");
+        File.WriteAllBytes(Path.Combine(publicRoot, "network.ncp2"), bundle);
+        File.WriteAllBytes(Path.Combine(publicRoot, "genesis.adh1"), head.ExactAdh1.ToArray());
+        var operatorRoot = Path.Combine(fixture, "operator"); Directory.CreateDirectory(operatorRoot);
+        for (var i = 0; i < 3; i++) {
+            File.WriteAllBytes(Path.Combine(operatorRoot, $"witness-{i + 1}.seed"), witnesses[i].Seed);
+            File.WriteAllBytes(Path.Combine(operatorRoot, $"node-{i + 1}.seed"), nodeSigners[i].Seed);
+        }
+        var integrity = RandomNumberGenerator.GetBytes(32);
+        try {
+            File.WriteAllBytes(Path.Combine(operatorRoot, "renewal-integrity.key"), integrity);
+            using var caKey = RSA.Create(2048);
+            var caRequest = new CertificateRequest("CN=Isolated development test CA", caKey, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+            caRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true));
+            caRequest.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyCertSign | X509KeyUsageFlags.CrlSign, true));
+            using var ca = caRequest.CreateSelfSigned(DateTimeOffset.FromUnixTimeSeconds(800), DateTimeOffset.FromUnixTimeSeconds(10_000));
+            File.WriteAllText(Path.Combine(publicRoot, "dev-ca.crt"), ca.ExportCertificatePem());
+            File.WriteAllText(Path.Combine(offline, "dev-ca.key"), caKey.ExportPkcs8PrivateKeyPem());
+            var candidate = await DevOfflineOperationalRenewal.PrepareAsync(fixture, "fixture-observer", (_, _) => Task.FromResult(1_800_000_000UL));
+            var next = XPointNetworkClosureWireCodec.DecodeResponse(File.ReadAllBytes(Path.Combine(candidate, "public/network.ncp2")));
+            var nextAuthority = XPointNetworkAuthorityVerifier.Verify(bootstrap.GenesisPin, next.ExactAuthorityChain, next.ExactTimePolicyChain);
+            Check(next.ExactViewChain.Count == 2 && next.ExactAuthorityChain.Count == 2 &&
+                next.ExactViewChain[0].Span.SequenceEqual(operational.ExactXnv1.Span) &&
+                next.ExactMailboxAuthorityChain[0].Span.SequenceEqual(operational.ExactPma2.Span), "operational file candidate retains complete original signed prefix");
+            var policy = MailboxAuthorityV2Verifier.Verify(nextAuthority, next.ExactMailboxAuthorityChain[^1].Span, 1_800_000_010, 1_800_000_011);
+            using var deposit = Signer.Load(Path.Combine(candidate, "online/registry/mailbox-deposit.seed"));
+            using var retrieve = Signer.Load(Path.Combine(candidate, "online/registry/mailbox-retrieve.seed"));
+            Check(policy.ResolveIssuer(Deep.Protocol.DeepExtension.MailboxCapabilities.MailboxCapabilityDomain.Deposit).PublicKey.Span.SequenceEqual(deposit.Ed25519PublicKey.Span) &&
+                policy.ResolveIssuer(Deep.Protocol.DeepExtension.MailboxCapabilities.MailboxCapabilityDomain.Retrieve).PublicKey.Span.SequenceEqual(retrieve.Ed25519PublicKey.Span) &&
+                policy.MinimumGrantGeneration == 2 && policy.BindsProjection(next.ExactPlacementTopologyChain[^1].Span), "signed new role keys match staged private custody and projection");
+            var encoded = File.ReadAllBytes(Path.Combine(candidate, "operator/renewal.state"));
+            Check(CryptographicOperations.FixedTimeEquals(encoded.AsSpan(0, 32), HMACSHA256.HashData(integrity, encoded.AsSpan(32))), "candidate journal uses retained integrity key");
+            var journal = DevPublisher.ReadJournal(Path.Combine(candidate, "operator/renewal.state"), integrity, bootstrap.Authority.NetworkId.ToArray());
+            var originalJournal = new DevPublisher.Journal("deep-dev-renewal.v1", Convert.ToHexStringLower(bootstrap.Authority.NetworkId.Span),
+                0, 1_100, new string('0',64), bundle);
+            DevPublisher.ValidatePreparedImport(bootstrap.GenesisPin, originalJournal, journal);
+            Check(journal.Generation == 1, "owner import validates exact signed one-step candidate");
+            await Reject(() => { DevPublisher.ValidatePreparedImport(bootstrap.GenesisPin, originalJournal,
+                journal with { PriorPublicHash = new string('0',64) }); return Task.CompletedTask; }, "stale import public digest");
+            await Reject(() => { DevPublisher.ValidatePreparedImport(bootstrap.GenesisPin, originalJournal,
+                journal with { Generation = 2 }); return Task.CompletedTask; }, "skipped import generation");
+            var badEncoded = encoded.ToArray(); badEncoded[^1] ^= 1;
+            File.WriteAllBytes(Path.Combine(candidate, "operator/hostile.state"), badEncoded);
+            await Reject(() => { _ = DevPublisher.ReadJournal(Path.Combine(candidate, "operator/hostile.state"), integrity, bootstrap.Authority.NetworkId.ToArray());
+                return Task.CompletedTask; }, "corrupt candidate journal");
+            using var crt = X509Certificate2.CreateFromPemFile(Path.Combine(candidate, "online/node-1/server.crt"), Path.Combine(candidate, "online/node-1/server.key"));
+            Check(crt.HasPrivateKey && crt.MatchesHostname("node-1") && crt.MatchesHostname("172.31.240.11") &&
+                File.ReadAllBytes(Path.Combine(publicRoot, "network.ncp2")).AsSpan().SequenceEqual(bundle), "installable staged TLS and unchanged live source");
+        } finally { CryptographicOperations.ZeroMemory(integrity); }
     }
     finally
     {

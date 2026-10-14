@@ -111,6 +111,7 @@ Run from the DevOps repository:
 ```powershell
 ./scripts/deep-dev.ps1 -Action Status
 ./scripts/deep-dev.ps1 -Action PrepareAuthority
+./scripts/deep-dev.ps1 -Action PrepareOperational
 ./scripts/deep-dev.ps1 -Action AdmitObserver
 ./scripts/deep-dev.ps1 -Action Build
 ./scripts/deep-dev.ps1 -Action Up
@@ -139,6 +140,21 @@ It does **not** publish NCP2, change public bootstrap/configuration, import the
 publisher journal, renew TLS or alter account/floor/state volumes. New root/time
 bytes alone cannot make old XVP1/PMA2 current: operational preparation and the
 supported retained-journal activation step must still be completed before `Verify`.
+`PrepareOperational` is a separate Windows-host offline ceremony. It renews
+the exact paired authority, authors a root-signed policy/PMA role-key successor,
+stages fresh current/next traffic keys and installable TLS/CA certificates, and
+retains every original signed history byte and registered node identity. It
+writes private custody plus an HMAC-authenticated candidate publisher journal
+beneath `offline-root/renewals/operational-*`; do not upload that directory.
+It neither installs secrets/configuration nor publishes/adopts the candidate.
+It requires a running owned publisher and leaves that publisher stopped after
+success so its predecessor cannot advance. Failure restores only the publisher
+this command stopped. Explicit `Start` cancels the preparation by permitting
+new delegated publication; prepare a new candidate rather than force old import.
+The owner import command has exact generation/hash/prefix checks, root/PMA
+verification and NTS recheck, but coordinated private/configuration activation
+and crash-resume/recovery remain to be implemented/qualified before use.
+
 `FaultMatrix` scopes stop/start to these six services, always restores stopped
 services, and verifies retained mount bindings. `HistoryFault` intentionally
 adds 130 real disposable DID2 accounts to **this DEV directory**, with all

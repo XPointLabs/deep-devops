@@ -163,7 +163,82 @@ internal static class DevPublisher
         if (!Bounded(file,XPointNetworkClosureWireCodec.MaximumResponseLength).AsSpan().SequenceEqual(journal.Bundle) ||
             !Bounded(Path.Combine(root,"current.xnv1"),65_535).AsSpan().SequenceEqual(view.Span)) throw new IOException("Published closure readback changed.");
     }
-    private static Journal ReadJournal(string file,byte[] key,byte[] network)
+    // Distribution-state adoption only. The offline candidate is authenticated
+    // by retained operator integrity custody and actual root signatures; every
+    // running consumer still independently acquires current proof/time.
+    internal static async Task ImportPreparedAsync(string publicRoot, string operatorRoot, string preparedRoot,
+        string executable, Func<string,AccountDirectoryDts1Source[],Task<ulong>> observe)
+    {
+        if (!OperatingSystem.IsLinux() || publicRoot != "/run/deep-public" || operatorRoot != "/run/deep-operator" ||
+            preparedRoot != "/run/deep-renewal") throw new ArgumentException("Prepared import requires exact scoped development mounts.");
+        const string state = "/var/lib/deep-publisher/renewal.state";
+        using var lease = new FileStream(state + ".lease", FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        using var manifest = JsonDocument.Parse(Bounded(Path.Combine(publicRoot, "deep-dev.json"),16_384));
+        if (manifest.RootElement.GetProperty("schema").GetString() != "deep-dev.v1" || manifest.RootElement.GetProperty("nodeCount").GetInt32() != 3)
+            throw new InvalidDataException("Wrong development import scope.");
+        var network = Convert.FromHexString(manifest.RootElement.GetProperty("networkIdHex").GetString()!);
+        var pin = new XPointNetworkGenesisPin(network,Convert.FromHexString(manifest.RootElement.GetProperty("genesisAuthorityCoreHashHex").GetString()!));
+        _ = XPointNetworkBootstrapAuthor.VerifyExistingGenesis(Bounded(Path.Combine(publicRoot,"genesis.xna1"),65_535),
+            Bounded(Path.Combine(publicRoot,"genesis.dts1"),65_535),pin);
+        var key = Bounded(Path.Combine(operatorRoot,"renewal-integrity.key"),32);
+        try {
+            if (key.Length != 32 || key.AsSpan().IndexOfAnyExcept((byte)0) < 0) throw new InvalidDataException("Retained publisher integrity key missing.");
+            var current = ReadJournal(state,key,network);
+            var candidate = ReadJournal(Path.Combine(preparedRoot,"renewal.state"),key,network);
+            if (current.Schema == candidate.Schema && current.Network == candidate.Network && current.Generation == candidate.Generation &&
+                current.Observed == candidate.Observed && current.PriorPublicHash == candidate.PriorPublicHash && current.Bundle.AsSpan().SequenceEqual(candidate.Bundle))
+            {
+                Publish(current,Path.Combine(publicRoot,"network.ncp2"),publicRoot);
+                Console.WriteLine("Exact prepared development commit resumed; no new generation or current authority was minted.");
+                return;
+            }
+            ValidatePreparedImport(pin,current,candidate);
+            var closure = XPointNetworkClosureWireCodec.DecodeResponse(candidate.Bundle);
+            var authority = XPointNetworkAuthorityVerifier.Verify(pin,closure.ExactAuthorityChain,closure.ExactTimePolicyChain);
+            var observed = await observe(executable,AccountDirectoryDts1Codec.Decode(closure.ExactTimePolicyChain[^1].Span).Sources.ToArray());
+            if (observed < candidate.Observed || observed < authority.NotBefore || observed >= Math.Min(authority.ExpiresAt,authority.Dts1ExpiresAt))
+                throw new CryptographicException("Prepared import is outside current independently observed authority/time.");
+            _ = MailboxAuthorityV2Verifier.Verify(authority,closure.ExactMailboxAuthorityChain[^1].Span,observed,checked(observed+1));
+            var file = Path.Combine(publicRoot,"network.ncp2");
+            Publish(current,file,publicRoot); // Finish an existing commit before compare-exchange.
+            if (!Bounded(file,XPointNetworkClosureWireCodec.MaximumResponseLength).AsSpan().SequenceEqual(current.Bundle))
+                throw new CryptographicException("Prepared import source compare-exchange rejected.");
+            WriteJournal(state,candidate,key); // Same mutation owner, durable before publication.
+            Publish(candidate,file,publicRoot);
+            Console.WriteLine("Prepared development operational journal imported; independent runtime verification remains mandatory.");
+        } finally { CryptographicOperations.ZeroMemory(key); }
+    }
+
+    internal static void ValidatePreparedImport(XPointNetworkGenesisPin pin, Journal current, Journal candidate)
+    {
+        if (current.Schema != "deep-dev-renewal.v1" || candidate.Schema != current.Schema ||
+            candidate.Network != current.Network || candidate.Generation != checked(current.Generation+1) ||
+            candidate.Observed < current.Observed || candidate.PriorPublicHash != Convert.ToHexStringLower(SHA256.HashData(current.Bundle)))
+            throw new CryptographicException("Prepared journal is not the exact retained one-step successor.");
+        var before = XPointNetworkClosureWireCodec.DecodeResponse(current.Bundle);
+        var after = XPointNetworkClosureWireCodec.DecodeResponse(candidate.Bundle);
+        if (before.ExactViewChain.Count != checked((int)current.Generation+1) || after.ExactViewChain.Count != checked((int)candidate.Generation+1) ||
+            after.ExactActiveNodeDescriptors.Count != 3 || before.ExactActiveNodeDescriptors.Count != 3 ||
+            !after.NetworkId.Span.SequenceEqual(pin.NetworkId.Span) || !before.NetworkId.Span.SequenceEqual(pin.NetworkId.Span))
+            throw new CryptographicException("Prepared closure has a different genesis network.");
+        var authority = XPointNetworkAuthorityVerifier.Verify(pin,after.ExactAuthorityChain,after.ExactTimePolicyChain);
+        Prefix(before.ExactAuthorityChain,after.ExactAuthorityChain);
+        Prefix(before.ExactTimePolicyChain,after.ExactTimePolicyChain);
+        Prefix(before.ExactNetworkPolicyChain,after.ExactNetworkPolicyChain);
+        Prefix(before.ExactViewChain,after.ExactViewChain);
+        Prefix(before.ExactHeadChain,after.ExactHeadChain);
+        Prefix(before.ExactPlacementTopologyChain,after.ExactPlacementTopologyChain);
+        Prefix(before.ExactMailboxAuthorityChain,after.ExactMailboxAuthorityChain);
+        var pma = MailboxAuthorityV2Verifier.Verify(authority,after.ExactMailboxAuthorityChain[^1].Span,candidate.Observed,checked(candidate.Observed+1));
+        if (!pma.BindsProjection(after.ExactPlacementTopologyChain[^1].Span) ||
+            pma.MinimumGrantGeneration < XPointNetworkOperationalSuccessorAuthor.ComputeNextMailboxGrantFloor(authority,before.ExactMailboxAuthorityChain[^1].Span))
+            throw new CryptographicException("Prepared role policy/floor differs from its signed projection.");
+        static void Prefix(IReadOnlyList<ReadOnlyMemory<byte>> prior,IReadOnlyList<ReadOnlyMemory<byte>> next) {
+            if (next.Count != prior.Count+1 || prior.Where((b,i) => !b.Span.SequenceEqual(next[i].Span)).Any())
+                throw new CryptographicException("Prepared import cannot truncate or rewrite retained signed history.");
+        }
+    }
+    internal static Journal ReadJournal(string file,byte[] key,byte[] network)
     {
         var bytes = Bounded(file,100*1024*1024);
         if (bytes.Length <= 32 || !CryptographicOperations.FixedTimeEquals(bytes.AsSpan(0,32),HMACSHA256.HashData(key,bytes.AsSpan(32))))

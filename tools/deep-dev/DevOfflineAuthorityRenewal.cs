@@ -96,7 +96,7 @@ internal static class DevOfflineAuthorityRenewal
             nextXna.Select(b => b.ToArray()).ToArray(), nextDts.Select(b => b.ToArray()).ToArray());
     }
 
-    private static void RequireNoLinks(string path)
+    internal static void RequireNoLinks(string path)
     {
         for (string? current = Path.GetFullPath(path); current is not null; current = Path.GetDirectoryName(current))
         {
@@ -108,7 +108,7 @@ internal static class DevOfflineAuthorityRenewal
                 throw new IOException("Development custody must not traverse links.");
         }
     }
-    private static byte[] Read(string path, int bound)
+    internal static byte[] Read(string path, int bound)
     {
         RequireNoLinks(path);
         using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);

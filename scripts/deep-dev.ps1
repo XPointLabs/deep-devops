@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('Init','Build','PrepareAuthority','AdmitObserver','Provision','ProvisionFloor','Up','Status','Stop','Start','Verify','FaultMatrix','HistoryFault','StackFault','EngineFault','ExpiryFault')][string]$Action,
+    [Parameter(Mandatory)][ValidateSet('Init','Build','PrepareAuthority','PrepareOperational','AdmitObserver','Provision','ProvisionFloor','Up','Status','Stop','Start','Verify','FaultMatrix','HistoryFault','StackFault','EngineFault','ExpiryFault')][string]$Action,
     [string]$CustodyRoot = 'C:\Work\DeepSession\secrets\dev\deep-dev',
     [ValidateSet('deep-dev','deep-dev-current')][string]$ProjectName = 'deep-dev',
     [ValidateRange(1,20)][int]$Cycles = 2,
@@ -78,11 +78,26 @@ if ($Action -notin @('Status','Stop')) {
         throw 'The current custody manifest does not match this isolated Compose project. No legacy configuration inference is supported.'
     }
 }
-if ($Action -eq 'PrepareAuthority') {
+if ($Action -in @('PrepareAuthority','PrepareOperational')) {
     $observer = Join-Path $devopsRoot 'tools/nts-observer/deep-nts-observer.exe'
     if (-not (Test-Path -LiteralPath $observer -PathType Leaf)) { throw 'Build the existing pinned NTS observer first; no clock fallback is supported.' }
-    Run-Native dotnet @('run','--project',(Join-Path $devopsRoot 'tools/deep-dev/Deep.Dev.csproj'),'-c','Debug','--',
-        'prepare-authority',$custodyPath,$observer)
+    if ($Action -eq 'PrepareOperational') {
+        $publisherId = & docker @($compose + @('ps','--quiet','publisher'))
+        if ($LASTEXITCODE -ne 0 -or -not $publisherId) { throw 'Operational preparation requires the running owned publisher; operator-stopped services stay stopped.' }
+        $publisherState = (& docker inspect $publisherId | ConvertFrom-Json)[0].State
+        if ($LASTEXITCODE -ne 0 -or -not $publisherState.Running) { throw 'Operator-stopped publisher cannot be resumed by preparation.' }
+        Run-Native docker ($compose + @('stop','--timeout','10','publisher'))
+        $operationalPrepared = $false
+        try {
+            Run-Native dotnet @('run','--project',(Join-Path $devopsRoot 'tools/deep-dev/Deep.Dev.csproj'),'-c','Debug','--',
+                'prepare-operational',$custodyPath,$observer)
+            $operationalPrepared = $true
+            Write-Host 'Operational successor prepared. Publisher remains stopped for exact-predecessor activation; Start explicitly cancels this preparation.'
+        } finally { if (-not $operationalPrepared) { Run-Native docker ($compose + @('start','publisher')) } }
+    } else {
+        Run-Native dotnet @('run','--project',(Join-Path $devopsRoot 'tools/deep-dev/Deep.Dev.csproj'),'-c','Debug','--',
+            'prepare-authority',$custodyPath,$observer)
+    }
     return
 }
 function Invoke-DevObserverAdmission {

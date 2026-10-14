@@ -123,7 +123,7 @@ test('publisher authenticates terminal paired history and warns without loading 
 
 test('offline dev ceremony is explicit and cannot publish root-only renewal as an operational closure', async () => {
   const script = await read('./deep-dev.ps1');
-  assert.match(script, /\$Action -eq 'PrepareAuthority'/);
+  assert.match(script, /\$Action -in @\('PrepareAuthority','PrepareOperational'\)/);
   assert.match(script, /'prepare-authority',\$custodyPath,\$observer/);
   const source = await read('../tools/deep-dev/DevOfflineAuthorityRenewal.cs');
   assert.match(source, /XPointNetworkAuthorityVerifier\.Verify/);
@@ -157,4 +157,21 @@ test('observer admission sends the retained exact request over normal TLS withou
   assert.match(source, /https:\/\/registry\/api\/v2\/account-directory\/genesis-admissions/);
   assert.match(source, /receipt.OperationId.Span.SequenceEqual\(request.OperationId.Span\)/);
   assert.doesNotMatch(source, /ServerCertificateCustomValidationCallback|RemoteCertificateValidationCallback|CreateAsync|new SystemClock|EnsureCurrent/);
+});
+
+test('offline operational preparation freezes the exact publisher predecessor and never mounts root online', async () => {
+  const script = await read('./deep-dev.ps1');
+  assert.match(script, /if \(\$Action -eq 'PrepareOperational'\)/);
+  assert.match(script, /Operator-stopped publisher cannot be resumed/);
+  assert.match(script, /if \(-not \$operationalPrepared\) \{ Run-Native docker/);
+  const source = await read('../tools/deep-dev/DevOfflineOperationalRenewal.cs');
+  assert.match(source, /AuthorPairAsync/);
+  assert.match(source, /ComputeNextMailboxGrantFloor/);
+  assert.match(source, /XPointNetworkOperationalSuccessorAuthor.AuthorAsync/);
+  assert.match(source, /HMACSHA256.HashData\(integrity, payload\)/);
+  assert.doesNotMatch(source, /NotImplementedException|FileMode.Create[,)]/);
+  const publisher = await read('../tools/deep-dev/DevPublisher.cs');
+  assert.match(publisher, /ValidatePreparedImport\(pin,current,candidate\)/);
+  assert.match(publisher, /WriteJournal\(state,candidate,key\)/);
+  assert.doesNotMatch(publisher, /Signer.LoadRoot|root.seed/);
 });

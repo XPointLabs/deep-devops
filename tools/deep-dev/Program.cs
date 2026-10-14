@@ -20,6 +20,12 @@ try {
     else if (args.Length == 4 && args[0] == "publish-short-view") await DevPublisher.RunAsync(args[1], args[2], args[3], ReadNtsAsync, operationalLifetimeSeconds:180, singlePublication:true);
     else if (args.Length == 2 && args[0] == "exercise-directory") await DevDirectoryExercise.RunAsync(args[1]);
     else if (args.Length == 3 && args[0] == "admit-observer") await DevObserverAdmission.RunAsync(args[1], args[2]);
+    else if (args.Length == 3 && args[0] == "prepare-operational") {
+        _ = await DevOfflineOperationalRenewal.PrepareAsync(args[1], args[2], ReadNtsAsync);
+        Console.WriteLine("Offline development operational successor prepared with staged role/traffic/TLS custody; not activated.");
+    }
+    else if (args.Length == 5 && args[0] == "import-operational")
+        await DevPublisher.ImportPreparedAsync(args[1], args[2], args[3], args[4], ReadNtsAsync);
     else if (args.Length == 3 && args[0] == "prepare-authority") {
         _ = await DevOfflineAuthorityRenewal.PrepareAsync(args[1], args[2], ReadNtsAsync);
         Console.WriteLine("Development paired authority renewal prepared offline; no runtime, journal, key or floor was changed.");

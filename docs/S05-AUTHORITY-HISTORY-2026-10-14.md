@@ -393,3 +393,44 @@ Final DevOps release-contract runner returned native0/51 commands on this
 package. Its fixtures live only in `artifacts/release-gate-contracts`; synthetic
 device/GA PASS there is not actual acceptance. Actual production-readiness
 status separately returned native1 with10 missing evidence blockers.
+
+## Offline operational role/traffic/TLS candidate
+
+The existing current fixture's discarded role keys are now replaced only by a
+properly signed offline successor under
+[DR-0118](../../docs/survival-program/decisions/DR-0118-offline-mailbox-issuer-rollover.md).
+The host producer authenticates complete current history, obtains real NTS,
+authors a same-key root/time renewal and offline policy/PMA successor, and stages
+new independent issuer seeds, six fresh traffic-key slots, installable TLS leaf
+certificates and a fresh CA certificate retaining the original CA key. Node
+identity/BLS/role/replay/history/floor custody is not replaced. It emits a complete
+eight-chain public candidate plus a publisher journal authenticated by the retained
+integrity key, without public/config/secret-volume mutation.
+
+Owner import source validates retained HMAC, exact generation/prior public hash,
+all seven retained history prefixes, root chain, signed role policy/projection and
+increased grant floor. It rechecks NTS before a new commit, writes its own durable
+journal before public distribution, and can finish exactly the same pending commit
+without minting another generation. This is distribution ownership, not live
+network authority. Coordinated TLS/private/config installation and runtime import
+have NOT been executed; do not invoke import alone on a live old-key deployment.
+
+Focused run03:30 checks, Windows PowerShell5.1/SDK10.0.301, native build/test0,
+zero warnings/errors. `artifacts/s05-dev-operational-renewal-20261014/03/tests.log`
+SHA256: `96C5223B18749D312E643CA80496089D432AE3CADF8493AEA584A77CC18CE5D6`.
+Real root/witness/node/DID2 signatures, complete old-prefix retention, new policy
+to private role-key binding, installable TLS/SAN, retained-key HMAC, current source
+immutability and stale/skipped/corrupt import rejection are checked. Unit time is
+a fixed fixture observation, not NTS/runtime evidence. Topology/source contracts
+passed11/0; no physical or release acceptance is implied.
+
+Actual current-dev preparation succeeded with real NTS. The first wrapper resumed
+publisher after preparation, which immediately produced another delegated view
+and invalidated that candidate's exact predecessor. It was not imported. The
+corrected wrapper preserves operator-stopped services, restores its own stop on
+failure, and on success leaves only the publisher stopped for coordinated
+activation. A second complete candidate generation7 exactly matched the retained
+public hash. Both private candidates remain under dev offline custody. Latest
+candidate has not been activated; no generator reset, registered identity change
+or manual signed-record edit occurred. Starting publisher explicitly cancels this
+preparation and requires a new candidate, not a compare-exchange bypass.
