@@ -388,3 +388,8 @@ does not prove grant issuance, contact/message/group/blob terminals or carrier
 delivery. Root/witness/role/traffic/TLS rotation and protected publisher import
 remain S05 work. Physical contacts/messages/files/groups remain0/4; production,
 main and GitHub Releases were not changed.
+
+Final DevOps release-contract runner returned native0/51 commands on this
+package. Its fixtures live only in `artifacts/release-gate-contracts`; synthetic
+device/GA PASS there is not actual acceptance. Actual production-readiness
+status separately returned native1 with10 missing evidence blockers.
