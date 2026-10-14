@@ -19,6 +19,10 @@ try {
     else if (args.Length == 4 && args[0] == "publish") await DevPublisher.RunAsync(args[1], args[2], args[3], ReadNtsAsync);
     else if (args.Length == 4 && args[0] == "publish-short-view") await DevPublisher.RunAsync(args[1], args[2], args[3], ReadNtsAsync, operationalLifetimeSeconds:180, singlePublication:true);
     else if (args.Length == 2 && args[0] == "exercise-directory") await DevDirectoryExercise.RunAsync(args[1]);
+    else if (args.Length == 3 && args[0] == "prepare-authority") {
+        _ = await DevOfflineAuthorityRenewal.PrepareAsync(args[1], args[2], ReadNtsAsync);
+        Console.WriteLine("Development paired authority renewal prepared offline; no runtime, journal, key or floor was changed.");
+    }
     else await InitializeAsync(args);
 }
 catch (Exception exception) { Console.Error.WriteLine($"Development provisioning failed closed ({exception.GetType().Name}); retained private staging is not deployment evidence."); Environment.ExitCode = 2; }
@@ -355,7 +359,16 @@ sealed class Signer : IXPointNetworkBootstrapRootSigner, IXPointNetworkWitnessSi
     internal static Signer Create(string file, bool rootSigner = false, bool nodeSigner = false)
     { var seed = RandomNumberGenerator.GetBytes(32); Directory.CreateDirectory(Path.GetDirectoryName(file)!); using var f = new FileStream(file, FileMode.CreateNew, FileAccess.Write, FileShare.None); f.Write(seed); f.Flush(true); return new(seed, rootSigner, nodeSigner); }
     internal static Signer Load(string file, bool nodeSigner = false)
-    { var bytes = File.ReadAllBytes(file); if (bytes.Length != 32) { CryptographicOperations.ZeroMemory(bytes); throw new InvalidDataException("Wrong dev signer custody."); } return new(bytes, false, nodeSigner); }
+    { return LoadExact(file, false, nodeSigner); }
+    internal static Signer LoadRoot(string file) => LoadExact(file, true, false);
+    private static Signer LoadExact(string file, bool rootSigner, bool nodeSigner)
+    {
+        using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read);
+        if (stream.Length != 32) throw new InvalidDataException("Wrong dev signer custody.");
+        var bytes = new byte[32];
+        try { stream.ReadExactly(bytes); return new(bytes, rootSigner, nodeSigner); }
+        catch { CryptographicOperations.ZeroMemory(bytes); throw; }
+    }
     public ReadOnlyMemory<byte> RootKeyId => root ? SignerId : default;
     public ReadOnlyMemory<byte> SignerId { get; }
     public ReadOnlyMemory<byte> WitnessId => SignerId;

@@ -89,3 +89,18 @@ test('publisher authenticates terminal paired history and warns without loading 
   assert.match(publisher, /offline policy renewal required/);
   assert.doesNotMatch(publisher, /bootstrap\.Authority|ExactNetworkPolicyChain\.Count != 1|Signer\.Load\([^\n]*root\.seed/);
 });
+
+test('offline dev ceremony is explicit and cannot publish root-only renewal as an operational closure', async () => {
+  const script = await read('./deep-dev.ps1');
+  assert.match(script, /\$Action -eq 'PrepareAuthority'/);
+  assert.match(script, /'prepare-authority',\$custodyPath,\$observer/);
+  const source = await read('../tools/deep-dev/DevOfflineAuthorityRenewal.cs');
+  assert.match(source, /XPointNetworkAuthorityVerifier\.Verify/);
+  assert.match(source, /AuthorSameKeyRenewalAsync/);
+  assert.match(source, /RequireUnchanged\(\)/);
+  assert.match(source, /FileShare\.None/);
+  assert.match(source, /FileMode\.CreateNew/);
+  assert.doesNotMatch(source, /EncodeResponse|WriteJournal|FileMode\.Create[,)]|genesis reset/);
+  const compose = await read('../docker-compose.deep-dev.yml');
+  assert.doesNotMatch(compose, /offline-root/);
+});

@@ -282,3 +282,51 @@ of the Docker publisher. Current publisher build evidence is under
 `artifacts/s05-dev-current-authority-20261014/`; it does not recover the still
 expired retained network. Supported dev offline preparation/import with original
 journal, retained node/Registry floors and TLS certificates remains open.
+
+## Development offline paired-authority preparation
+
+The explicit host-only `PrepareAuthority` command now prepares a same-key
+XNA1/DTS1 successor through the existing Protocol author. It authenticates the
+full paired history and unchanged original genesis, acquires NTS from the exact
+retained signed source policy, and never backdates a renewal into an expired
+window. It holds a separate exclusive offline lease, rejects a source change
+before signing and again before staging, and completes one public-only candidate
+directory by rename. Root seeds are not copied; publisher journal, online public
+closure/configuration, TLS keys and independent retained floors remain unchanged.
+The output is deliberately a paired-authority candidate, not an NCP2 containing
+old policy/PMA under new authority. Operational completion/import remain open.
+
+Focused Windows PowerShell5.1/SDK10.0.301 run05:
+`artifacts/s05-dev-offline-authority-20261014/05/`.
+Build native0, zero warnings/errors; executable native0 with **20 checks**.
+`tests.log` SHA256:
+`178CFF9328C7E64BAD816E5A5EF33262F1352F23C8DA0C7CF65B93E7C353EE0B`.
+The tests use isolated real root/witness/node signatures and a real native DID2
+provider to construct current eight-chain fixture bytes, then execute file
+preparation, verify its signed result and compare unchanged source/root bytes.
+Wrong root, non-root adapter, corrupt/missing history, backward/overflow time,
+unbound digest, outside-dev path, concurrent lease, source mutation and the
+retired seven-chain header reject. Fixture observation time is controlled;
+this is not NTS acquisition, a running network or device evidence. The temporary
+private test fixture was removed by its exact validated cleanup; retained dev
+custody was not targeted. Source topology contracts passed **7/0**.
+
+Run01 rejected a fixture with only two witnesses; the fixture now uses the
+required three, without weakening the producer. Run02 passed the initial
+13-check core scope; run03 added file ceremony coverage and passed20. Run04
+additionally verifies unchanged source before root callbacks; prior logs remain.
+Run05 retains that20-check PASS after review changed ancestry checks to fresh
+`File.GetAttributes`: access/other IO errors propagate rather than masquerading
+as missing paths through `File.Exists`. Only actual missing components are ignored.
+An initial ordinary-shell build passed but is only a diagnostic, not the named
+PowerShell5.1 qualification above.
+
+Actual retained-dev preparation attempt `prepare-01` returned native2 before
+observation/signing: its NCP2 is still the pre-cutover **seven-chain** frame,
+with610 views/heads/topologies and no eighth PMA history chain. Read-only framing
+inspection is not signature or current-authority evidence. This corrects the
+earlier diagnosis that policy/TLS expiry was its only obstacle. No candidate was
+created, no old decoder/converter was added, and no volume, registered identity,
+genesis or floor was reset. The separate current provisioning clean-break and
+supported retained-journal activation must be resolved before runtime readiness
+can be claimed. Existing infrastructure smoke is not acceptance of this fixture.

@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('Init','Build','Provision','ProvisionFloor','Up','Status','Stop','Start','Verify','FaultMatrix','HistoryFault','StackFault','EngineFault','ExpiryFault')][string]$Action,
+    [Parameter(Mandatory)][ValidateSet('Init','Build','PrepareAuthority','Provision','ProvisionFloor','Up','Status','Stop','Start','Verify','FaultMatrix','HistoryFault','StackFault','EngineFault','ExpiryFault')][string]$Action,
     [string]$CustodyRoot = 'C:\Work\DeepSession\secrets\dev\deep-dev',
     [ValidateRange(1,20)][int]$Cycles = 2,
     [ValidateRange(20,7200)][int]$OfflineSeconds = 20,
@@ -62,6 +62,13 @@ if ($Action -eq 'Init') {
     return
 }
 if (-not (Test-Path -LiteralPath (Join-Path $custodyPath 'public/deep-dev.json') -PathType Leaf)) { throw 'deep-dev is not provisioned; run Init.' }
+if ($Action -eq 'PrepareAuthority') {
+    $observer = Join-Path $devopsRoot 'tools/nts-observer/deep-nts-observer.exe'
+    if (-not (Test-Path -LiteralPath $observer -PathType Leaf)) { throw 'Build the existing pinned NTS observer first; no clock fallback is supported.' }
+    Run-Native dotnet @('run','--project',(Join-Path $devopsRoot 'tools/deep-dev/Deep.Dev.csproj'),'-c','Debug','--',
+        'prepare-authority',$custodyPath,$observer)
+    return
+}
 if ($Action -eq 'Build') {
     Run-Native dotnet @('run','--project',(Join-Path $devopsRoot 'tools/deep-dev/Deep.Dev.csproj'),'-c','Debug','--','configure',$custodyPath)
     Run-Native docker ($compose + @('build','registry','node-1','publisher')); return

@@ -47,6 +47,13 @@ are not a recovered network. Follow
 [DR-0116](../../docs/survival-program/decisions/DR-0116-offline-root-continuity-after-expiry.md)
 and the [current source checkpoint](S05-AUTHORITY-HISTORY-2026-10-14.md).
 
+The 2026-10-14 read-only diagnosis additionally found a pre-cutover seven-chain
+NCP2 in this retained deployment (610 views/heads/topologies). The current
+eight-chain decoder deliberately rejects it before offline observation/signing.
+`PrepareAuthority` does not convert that frame or erase retained state. This is
+a separate provisioning clean-break issue, not merely policy expiry; preserving
+the existing fixture is not evidence that the current deployment works.
+
 Provider anycast sets can contain unreachable members and UDP datagrams can be
 lost. The observer therefore races staggered NTS-KE dials over at most eight
 addresses within the same 4 second bound and retries one lost NTP datagram on
@@ -65,6 +72,7 @@ Run from the DevOps repository:
 
 ```powershell
 ./scripts/deep-dev.ps1 -Action Status
+./scripts/deep-dev.ps1 -Action PrepareAuthority
 ./scripts/deep-dev.ps1 -Action Build
 ./scripts/deep-dev.ps1 -Action Up
 ./scripts/deep-dev.ps1 -Action Verify
@@ -79,6 +87,19 @@ Run from the DevOps repository:
 
 `Verify` requires current Registry proof readiness and **all three verified
 ONION capabilities**, not the development process-health exemption.
+`PrepareAuthority` is an explicit Windows-host offline ceremony. It authenticates
+the complete retained paired XNA1/DTS1 history against the unchanged genesis,
+acquires an actual NTS observation using the retained signed source policy,
+and uses the existing offline root to prepare one same-key seven-day successor.
+It never clamps the observation into an expired interval. Concurrent source
+change rejects; a separate exclusive offline lease prevents concurrent ceremonies.
+The completed public-only candidate is under `offline-root/renewals/authority-*`;
+an incomplete write retains a `.pending` sibling and is not an activation input.
+No seed is copied into the candidate and no online root mount is introduced.
+It does **not** publish NCP2, change public bootstrap/configuration, import the
+publisher journal, renew TLS or alter account/floor/state volumes. New root/time
+bytes alone cannot make old XVP1/PMA2 current: operational preparation and the
+supported retained-journal activation step must still be completed before `Verify`.
 `FaultMatrix` scopes stop/start to these six services, always restores stopped
 services, and verifies retained mount bindings. `HistoryFault` intentionally
 adds 130 real disposable DID2 accounts to **this DEV directory**, with all
