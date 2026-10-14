@@ -246,3 +246,39 @@ genesis, node identities, publisher journal, independent DB floor and node/clien
 protected floors. The production-oriented offline renewal CLI candidate is not
 a supported dev activation command. Do not rerun Init/Provision, edit signed
 expiry bytes, waive TLS/trusted time or reset custody to restore health.
+
+## DR-0116 source continuation
+
+[Protocol owns](../../deep-protocol/docs/testing/s05-root-continuity-2026-10-14.md)
+the frozen root-continuity semantics, explicit successor policy horizon and
+source-gate status. The operator's existing offline preparation can now author
+an exact post-expiry successor using real supplied observation time, without
+backdating/reviving its predecessor. Operational completion additionally requires
+`--root-policy-expires-unix`; actual CLI tests check XVP1/PMA2 expiry140000 while
+the first operational view remains shorter, and reject a horizon below the
+operational interval or above the actual authority. Three retained node identities
+and original input bytes are preserved.
+
+Operator run17 failed compilation because its new tests attempted to access
+Protocol-internal records/history. Those internals were not exposed: tests use
+existing public PMA verification and the existing independent test-only scalar
+reader. Run18 built but failed a new upper-bound test:200001 was below its actual
+fixture authority ceiling300000. Its input now derives `authority.ExpiresAt+1`;
+the rejection assertion remains. Both prior failures are retained. Run19 built
+with zero warnings/errors, native0; executable native0 with six top-level and
+three nested command/history scopes, including69 views and post-expiry renewal.
+`artifacts/s05-authority-history-20261014/19/operator-tests.log` SHA256:
+`0EBD345AE6E646638DB4EAF3E6A3AF032D312E63841CACAF1D5BED0FCD383CB9`.
+No production custody was opened and no TRX/full-stage acceptance is implied.
+
+The publisher candidate now authenticates the complete paired terminal
+authority from its retained journal bundle, takes its actual terminal DTS/PMA,
+and warns about offline expiry without mounting root custody or resetting state.
+Delegated authoring still verifies the exact XVP1 before callbacks and cannot
+extend its policy. Exhausted root/DTS budgets back off60s; other failures retain
+their10s backoff. Its normal authenticated NTS observation is not a client proof.
+The source topology contracts passed6/0; those are text contracts, not execution
+of the Docker publisher. Current publisher build evidence is under
+`artifacts/s05-dev-current-authority-20261014/`; it does not recover the still
+expired retained network. Supported dev offline preparation/import with original
+journal, retained node/Registry floors and TLS certificates remains open.

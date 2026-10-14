@@ -31,6 +31,7 @@ internal static class SuccessorCeremony
             throw new ArgumentOutOfRangeException(nameof(observedUnix));
         var notBefore = observedUnix - 60;
         var expiresAt = checked(notBefore + 86_400);
+        var rootPolicyExpiresAt = arguments.RequiredU64("--root-policy-expires-unix");
         var expectedHeadHash = Hex(arguments.Required("--protected-head-core-hash"), 32, "protected head core hash");
         var expectedPmtHash = Hex(arguments.Required("--protected-pmt-artifact-hash"), 32, "protected PMT artifact hash");
         var expectedAdhHash = Hex(arguments.Required("--current-adh1-core-hash"), 32, "current ADH1 core hash");
@@ -53,6 +54,9 @@ internal static class SuccessorCeremony
                     throw new CryptographicException("The protected source belongs to another production authority.");
                 var authority = source.VerifyAuthority(
                     new XPointNetworkGenesisPin(network, genesisHash));
+                if (rootPolicyExpiresAt < expiresAt || rootPolicyExpiresAt > authority.ExpiresAt ||
+                    rootPolicyExpiresAt - notBefore > 2_592_000)
+                    throw new ArgumentException("Offline policy horizon does not cover the operational interval within current authority.");
                 var adh = AccountDirectoryAdh1Codec.Decode(exactAdh);
                 var actualAdhHash = XPointNetworkOperationalSuccessorAuthor.ComputeAdh1CoreHash(exactAdh);
                 if (!CryptographicOperations.FixedTimeEquals(actualAdhHash, expectedAdhHash) ||
@@ -95,7 +99,7 @@ internal static class SuccessorCeremony
                     source.One("xnh1"), source.One("pma2"), source.One("pmt2"),
                     expectedHeadHash, expectedPmtHash,
                     CoreReference("ADH1", actualAdhHash),
-                    notBefore, notBefore, expiresAt);
+                    notBefore, notBefore, expiresAt, rootPolicyExpiresAt);
                 var authored = await XPointNetworkOperationalSuccessorAuthor.AuthorAsync(request);
                 WriteOutput(outputRoot, source, authored, exactAdh, notBefore, expiresAt);
                 Console.WriteLine("A monotonic operational successor was authored; no host or Registry state was changed.");

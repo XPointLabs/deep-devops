@@ -38,6 +38,14 @@ current/announced-next key slots can be selected only by verified signed views;
 this does **not** yet implement indefinite generation/staging of new traffic
 keys or unattended TLS certificate rotation. A new offline policy ceremony is
 required before the delegation expires.
+The S05 source candidate now reads terminal paired authority/time-policy and
+PMA from the retained closure rather than generation zero, warns before offline
+policy expiry, and rejects an exhausted horizon before signing. It does not
+import a new root bundle into the protected publisher journal or update TLS
+custody automatically. The retained deployment is still expired; source builds
+are not a recovered network. Follow
+[DR-0116](../../docs/survival-program/decisions/DR-0116-offline-root-continuity-after-expiry.md)
+and the [current source checkpoint](S05-AUTHORITY-HISTORY-2026-10-14.md).
 
 Provider anycast sets can contain unreachable members and UDP datagrams can be
 lost. The observer therefore races staggered NTS-KE dials over at most eight

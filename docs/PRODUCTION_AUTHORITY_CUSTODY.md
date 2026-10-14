@@ -65,7 +65,8 @@ dotnet run --project tools/production-authority-bootstrap/ProductionAuthority.Bo
 The network/genesis pins and both accepted predecessor hashes must come from
 independently accepted operator state, not the proposed inventory. Public scope
 and predecessor checks run before opening the root file. Explicit offline time
-and expiry inputs must satisfy the unchanged Protocol overlap/horizon bounds;
+and expiry inputs must satisfy Protocol's non-regressing time/horizon bounds
+under [DR-0116](../../docs/survival-program/decisions/DR-0116-offline-root-continuity-after-expiry.md);
 the command is not NTS acquisition or an automatic online signing service.
 The key must match the existing custody manifest and predecessor root metadata.
 Source files, private root and host floors are not overwritten or reset.
@@ -128,6 +129,14 @@ not merely generation zero. This command does not author an XNA1/DTS1 renewal or
 root/witness-key rotation; those signed inputs must already exist from their
 authorized offline ceremony, including the explicit preparation above. Routine same-key renewal follows
 [DR-0108](../../docs/survival-program/decisions/DR-0108-current-authority-operational-successor.md).
+It additionally requires `--root-policy-expires-unix`: the actual offline
+XVP1/PMA2 delegation expiry, covering the new operational interval, no later
+than terminal authority and within30days. XND1/XNV1/XNH1/PMT2 keep their existing
+24-hour scope. A root renewal can thus authorize later delegated short views
+without loading root custody online. Neither an expired predecessor nor the
+prepared root successor restores current authority before operational completion
+and independent current runtime verification. Use actual observation time;
+never backdate it to fit an expired authority.
 The DID2 directory leaf is derived by the existing Protocol codec. The retired
 Contact/XPK bootstrap-leaf hash is not accepted and cannot select a successor
 path; missing/mismatched DID2 input rejects before opening signer custody.

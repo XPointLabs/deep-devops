@@ -35,7 +35,8 @@ static void TestArguments()
         "--seed1-root", "synthetic", "--seed2-root", "synthetic", "--seed3-root", "synthetic", "--output", "synthetic",
         "--observed-unix", "8600", "--rollover-root", "synthetic", "--protected-head-core-hash", "synthetic",
         "--protected-pmt-artifact-hash", "synthetic", "--current-adh1-path", "synthetic",
-        "--current-adh1-core-hash", "synthetic", "--requested-did2-path", "synthetic" };
+        "--current-adh1-core-hash", "synthetic", "--requested-did2-path", "synthetic",
+        "--root-policy-expires-unix", "180000" };
     if (!Arguments.Parse(successor).IsSuccessor) throw new Exception("Current DID2 successor command was not selected.");
     Reject<ArgumentException>(() => Arguments.Parse(successor[..^2]));
     var preparation = new[] { "--prepare-rollover", "true", "--authority-root", "synthetic",

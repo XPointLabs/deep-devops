@@ -293,7 +293,7 @@ sealed class Arguments
             "--export-xnode-did2-assets", "--genesis-head-path", "--genesis-head-core-hash",
             "--observer-contact-file", "--registry-origin",
             "--renew-authority-from", "--protected-authority-core-hash", "--protected-dts1-policy-hash",
-            "--authority-expires-unix", "--time-policy-expires-unix",
+            "--authority-expires-unix", "--time-policy-expires-unix", "--root-policy-expires-unix",
         };
         var values = new Dictionary<string, string>(StringComparer.Ordinal);
         for (var index = 0; index < args.Length; index += 2)
@@ -343,7 +343,7 @@ sealed class Arguments
             : successor
             ? new[] { "--authority-root", "--seed1-root", "--seed2-root", "--seed3-root", "--output",
                 "--observed-unix", "--successor-from", "--rollover-root", "--protected-head-core-hash",
-                "--protected-pmt-artifact-hash", "--current-adh1-path", "--current-adh1-core-hash", "--requested-did2-path" }
+                "--protected-pmt-artifact-hash", "--current-adh1-path", "--current-adh1-core-hash", "--requested-did2-path", "--root-policy-expires-unix" }
             : new[] { "--authority-root", "--seed1-root", "--seed2-root", "--seed3-root", "--output",
                 "--observed-unix", "--boot-id", "--nonce-created", "--response-received", "--current-sample", "--requested-did2-path" };
         if (required.Any(value => !values.ContainsKey(value)) || values.Count != required.Length)

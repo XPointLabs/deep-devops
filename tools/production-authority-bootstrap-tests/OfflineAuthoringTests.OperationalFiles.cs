@@ -61,7 +61,7 @@ internal static partial class OfflineAuthoringTests
         var output = Path.Combine(directory, "cli-operational-complete");
         var args = new[] { "--successor-from", prepared, "--authority-root", custody,
             "--seed1-root", roots[0], "--seed2-root", roots[1], "--seed3-root", roots[2], "--output", output,
-            "--observed-unix", "8600", "--rollover-root", rollover,
+            "--observed-unix", "8600", "--rollover-root", rollover, "--root-policy-expires-unix", "140000",
             "--protected-head-core-hash", Convert.ToHexString(XPointNetworkOperationalSuccessorAuthor.ComputeXnh1CoreHash(genesis.ExactXnh1.Span)),
             "--protected-pmt-artifact-hash", Convert.ToHexString(ContactCodec.Decode("PMT2", genesis.ExactPmt2.Span).ArtifactHash.Span),
             "--current-adh1-path", head, "--current-adh1-core-hash", Convert.ToHexString(XPointNetworkOperationalSuccessorAuthor.ComputeAdh1CoreHash(genesis.ExactAdh1.Span)),
@@ -87,7 +87,17 @@ internal static partial class OfflineAuthoringTests
             if (authority.AuthorityGeneration != 1 || decoded.ExactViewChain.Count != 2 ||
                 decoded.ExactActiveNodeDescriptors.Count != 3 || decoded.ExactHeadChain.Count != 2)
                 throw new Exception("Completed CLI lost its authority history or three-node operational prefix.");
+            if (ReadU64Field(decoded.ExactNetworkPolicyChain[^1].Span, 17) != 140_000 ||
+                MailboxAuthorityV2Verifier.Verify(authority, decoded.ExactMailboxAuthorityChain[^1].Span, 8_600, 8_601).ExpiresAtUnixSeconds != 140_000 ||
+                ReadU64Field(decoded.ExactViewChain[^1].Span, 21) >= 140_000)
+                throw new Exception("Offline policy horizon was collapsed into the short operational view.");
             var rejected = args.ToArray(); rejected[11] = Path.Combine(directory, "cli-operational-rejected");
+            var policyExpiryIndex = Array.IndexOf(rejected, "--root-policy-expires-unix") + 1;
+            rejected[policyExpiryIndex] = "9000";
+            await RejectAsync<ArgumentException>(() => SuccessorCeremony.RunAsync(Arguments.Parse(rejected)));
+            rejected[policyExpiryIndex] = checked(authority.ExpiresAt + 1).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            await RejectAsync<ArgumentException>(() => SuccessorCeremony.RunAsync(Arguments.Parse(rejected)));
+            rejected[policyExpiryIndex] = "140000";
             using var otherPhrase = DeepRecoveryV1.Generate(); var other = DeepIdV2Root.DeriveDid2(otherPhrase);
             var wrongCredential = Path.Combine(directory, "cli-wrong.did2"); File.WriteAllBytes(wrongCredential, other.CanonicalBytes.ToArray());
             rejected[^1] = wrongCredential;

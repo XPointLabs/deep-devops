@@ -78,3 +78,14 @@ test('expiry fault authors shorter real signed views without clock or trust chan
   assert.match(publisher, /if \(singlePublication\) return/);
   assert.doesNotMatch(script, /Set-Date|hwclock|timedatectl/);
 });
+
+test('publisher authenticates terminal paired history and warns without loading root or repairing state', async () => {
+  const publisher = await read('../tools/deep-dev/DevPublisher.cs');
+  assert.match(publisher, /XPointNetworkAuthorityVerifier\.Verify\(pin,\s*closure\.ExactAuthorityChain,closure\.ExactTimePolicyChain\)/);
+  assert.match(publisher, /closure\.ExactTimePolicyChain\[\^1\]/);
+  assert.match(publisher, /closure\.ExactMailboxAuthorityChain\[\^1\]/);
+  assert.match(publisher, /MailboxAuthorityV2Verifier\.Verify\(authority,pma\.Span,observed,checked\(observed\+1\)\)/);
+  assert.match(publisher, /offline policy expiry approaching/);
+  assert.match(publisher, /offline policy renewal required/);
+  assert.doesNotMatch(publisher, /bootstrap\.Authority|ExactNetworkPolicyChain\.Count != 1|Signer\.Load\([^\n]*root\.seed/);
+});

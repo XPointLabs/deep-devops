@@ -57,10 +57,8 @@ internal static class DevPublisher
         if (manifest.RootElement.GetProperty("schema").GetString() != "deep-dev.v1") throw new InvalidDataException("Not dev custody.");
         var network = Convert.FromHexString(manifest.RootElement.GetProperty("networkIdHex").GetString()!);
         var pin = new XPointNetworkGenesisPin(network,Convert.FromHexString(manifest.RootElement.GetProperty("genesisAuthorityCoreHashHex").GetString()!));
-        var bootstrap = XPointNetworkBootstrapAuthor.VerifyExistingGenesis(Bounded(Path.Combine(publicRoot,"genesis.xna1"),65_535),
+        _ = XPointNetworkBootstrapAuthor.VerifyExistingGenesis(Bounded(Path.Combine(publicRoot,"genesis.xna1"),65_535),
             Bounded(Path.Combine(publicRoot,"genesis.dts1"),65_535),pin);
-        var sources = AccountDirectoryDts1Codec.Decode(bootstrap.ExactDts1.Span).Sources.ToArray();
-        var pma = Bounded(Path.Combine(publicRoot,"pma2.bin"),65_535);
         var head = Bounded(Path.Combine(publicRoot,"genesis.adh1"),4096);
         var adhReference = new byte[38]; "ADH1"u8.CopyTo(adhReference); BinaryPrimitives.WriteUInt16BigEndian(adhReference.AsSpan(4),1);
         XPointNetworkOperationalSuccessorAuthor.ComputeAdh1CoreHash(head).CopyTo(adhReference,6);
@@ -81,23 +79,48 @@ internal static class DevPublisher
             Journal? cursor = File.Exists(state) ? ReadJournal(state,integrity,network) : null;
             var file = Path.Combine(publicRoot,"network.ncp2");
             if (cursor is not null) Publish(cursor,file,publicRoot);
+            var expiryWarning = false;
             while (!stopping.IsCancellationRequested) {
                 try {
                     var prior = cursor?.Bundle ?? Bounded(file,XPointNetworkClosureWireCodec.MaximumResponseLength);
                     var closure = XPointNetworkClosureWireCodec.DecodeResponse(prior);
                     if (cursor is null && closure.ExactViewChain.Count != 1) throw new InvalidDataException("Missing publisher state cannot become genesis.");
-                    if (!closure.NetworkId.Span.SequenceEqual(network) || closure.ExactNetworkPolicyChain.Count != 1 ||
+                    if (!closure.NetworkId.Span.SequenceEqual(network) ||
                         closure.ExactViewChain.Count >= XPointNetworkClosureWireCodec.MaximumChainCount)
                         throw new InvalidDataException("Development delegation/history scope is exhausted.");
+                    // Original genesis authenticates the complete retained
+                    // paired chain. Never keep using generation-zero keys or
+                    // time policy after an offline operational handover.
+                    var authority = XPointNetworkAuthorityVerifier.Verify(pin,
+                        closure.ExactAuthorityChain,closure.ExactTimePolicyChain);
+                    var policy = AccountDirectoryDts1Codec.Decode(closure.ExactTimePolicyChain[^1].Span);
+                    var pma = closure.ExactMailboxAuthorityChain[^1];
+                    var sources = policy.Sources.ToArray();
                     var observed = await observe(executable,sources);
                     if (cursor is not null && observed < cursor.Observed) throw new CryptographicException("Renewal clock regressed.");
+                    var authorityHorizon = Math.Min(authority.ExpiresAt,policy.ExpiresAt);
+                    if (observed >= authorityHorizon || authorityHorizon-observed < operationalLifetimeSeconds)
+                        throw new InvalidOperationException("Development offline policy renewal required.");
+                    var mailboxPolicy = MailboxAuthorityV2Verifier.Verify(authority,pma.Span,observed,checked(observed+1));
+                    var policyHorizon = Math.Min(authorityHorizon,mailboxPolicy.ExpiresAtUnixSeconds);
+                    // The supported offline producer couples XVP1/PMA2 expiry.
+                    // AuthorDelegatedAsync still authenticates the exact XVP1
+                    // window before callbacks; never copy its private parser.
+                    if (observed >= policyHorizon || policyHorizon-observed < operationalLifetimeSeconds)
+                        throw new InvalidOperationException("Development offline policy renewal required.");
+                    if (policyHorizon-observed <= 86_400 && !expiryWarning)
+                    {
+                        Console.Error.WriteLine("Development offline policy expiry approaching; prepare an offline renewal, never reset custody.");
+                        expiryWarning = true;
+                    }
+                    if (policyHorizon-observed > 86_400) expiryWarning = false;
                     var rollovers = nodes.Select((node,i) => new XPointNetworkOperationalNodeRollover(node,
                         Convert.FromHexString(keys[i].CurrentPin),Convert.FromHexString(keys[i].NextPin),
                         Convert.FromHexString(keys[i].CurrentKey),Convert.FromHexString(keys[i].NextKey))).ToArray();
                     // Renew installed current/announced-next slots. New private
                     // keys are never generated online or substituted into custody.
                     var next = await XPointNetworkOperationalSuccessorAuthor.AuthorDelegatedAsync(new(
-                        RandomNumberGenerator.GetBytes(32),bootstrap.Authority,[],witnesses,rollovers,
+                        RandomNumberGenerator.GetBytes(32),authority,[],witnesses,rollovers,
                         closure.ExactNetworkPolicyChain[^1],closure.ExactActiveNodeDescriptors,closure.ExactViewChain,
                         closure.ExactHeadChain[^1],pma,closure.ExactPlacementTopologyChain[^1],
                         XPointNetworkOperationalSuccessorAuthor.ComputeXnh1CoreHash(closure.ExactHeadChain[^1].Span),
@@ -121,7 +144,7 @@ internal static class DevPublisher
                 catch (Exception error) when (error is IOException or CryptographicException or ArgumentException or FormatException or InvalidOperationException) {
                     File.Delete("/tmp/deep-publisher-ready");
                     Console.Error.WriteLine($"Development operational renewal unavailable ({error.GetType().Name}). Custody and floors retained.");
-                    await Task.Delay(TimeSpan.FromSeconds(10),stopping.Token);
+                    await Task.Delay(TimeSpan.FromSeconds(error.Message == "Development offline policy renewal required." ? 60 : 10),stopping.Token);
                     if (cursor is not null) Publish(cursor,file,publicRoot);
                 }
             }

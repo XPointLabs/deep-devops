@@ -85,8 +85,17 @@ internal static partial class OfflineAuthoringTests
                     throw new Exception("The CLI did not fail with sanitized diagnostics before opening missing private custody.");
             }
             finally { File.Move(privatePath + ".retained", privatePath); }
+            var afterExpiryOutput = Path.Combine(directory, "offline-after-expiry");
+            await AuthorityRenewalCeremony.RunAsync(Arguments.Parse(
+                Args(source, afterExpiryOutput, bootstrap.Authority, 10_001, 30_000, 20_000)));
+            var afterExpiry = SuccessorCeremony.ReadSource(afterExpiryOutput).VerifyAuthority(bootstrap.GenesisPin);
+            if (afterExpiry.IssuedAt != 10_001 || afterExpiry.NotBefore != 10_001 ||
+                afterExpiry.AuthorityGeneration != 1 ||
+                !SuccessorCeremony.ReadSource(afterExpiryOutput).Many("xna1")[0].AsSpan().SequenceEqual(bootstrap.ExactXna1.Span))
+                throw new Exception("Offline root continuity backdated time or revived its expired predecessor.");
+            RequirePreservedSource(source, afterExpiryOutput);
             await RejectAsync<ArgumentException>(() => AuthorityRenewalCeremony.RunAsync(Arguments.Parse(
-                Args(source, invalidOutput, bootstrap.Authority, 10_001, 30_000, 20_000))));
+                Args(source, invalidOutput, bootstrap.Authority, bootstrap.Authority.NotBefore - 1, 30_000, 20_000))));
             await RejectAsync<ArgumentException>(() => AuthorityRenewalCeremony.RunAsync(Arguments.Parse(
                 Args(source, invalidOutput, bootstrap.Authority, 8_500, 30_000, 8_999))));
             if (Directory.Exists(invalidOutput)) throw new Exception("Rejected offline renewal published an output.");

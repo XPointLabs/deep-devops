@@ -164,17 +164,20 @@ internal static partial class OfflineAuthoringTests
                 Deep.Protocol.DeepExtension.PrivacyRouting.OnionBoundaryException) { return; }
             throw new Exception("Hostile delegated renewal accepted.");
         }
-        static ulong ReadU64Field(ReadOnlySpan<byte> exact, ushort tag)
+    }
+
+    // Existing independent test-only TLV inspection, not a runtime reader or
+    // authority. Public operator outputs are authenticated separately above.
+    private static ulong ReadU64Field(ReadOnlySpan<byte> exact, ushort tag)
+    {
+        for (var offset = 12; offset < exact.Length;)
         {
-            for (var offset = 12; offset < exact.Length;)
-            {
-                var fieldTag = BinaryPrimitives.ReadUInt16BigEndian(exact[offset..]);
-                var length = checked((int)BinaryPrimitives.ReadUInt32BigEndian(exact[(offset+4)..]));
-                if (fieldTag == tag) return BinaryPrimitives.ReadUInt64BigEndian(exact[(offset+8)..]);
-                offset += 8 + length;
-            }
-            throw new Exception("Missing epoch field in authored test record.");
+            var fieldTag = BinaryPrimitives.ReadUInt16BigEndian(exact[offset..]);
+            var length = checked((int)BinaryPrimitives.ReadUInt32BigEndian(exact[(offset+4)..]));
+            if (fieldTag == tag) return BinaryPrimitives.ReadUInt64BigEndian(exact[(offset+8)..]);
+            offset += 8 + length;
         }
+        throw new Exception("Missing scalar field in authored test record.");
     }
 
     private sealed class CountingSigner(IXPointNetworkOperationalSigner inner) : IXPointNetworkOperationalSigner
