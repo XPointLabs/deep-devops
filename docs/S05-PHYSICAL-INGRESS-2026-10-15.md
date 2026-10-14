@@ -75,6 +75,8 @@ already-committed cases. Then repeat the owned-client exchange before claiming
 issuance/client/node acceptance or opening S06.
 
 The prior Node full1508/0/0 and infrastructure smoke/rehearsal remain their
-original scope. Protocol's DR-0120 focused59/0/0 is not a new canonical full;
-run the required integrated source qualification after this operator slice.
-The independent S08 package graph failure remains open and is not waived.
+original scope. The subsequent Protocol canonical full completed2327/1/7,
+2335 exact mappings and1587 unchanged inputs; build/preflight/qualification0,
+test1 and FullAccepted=false. The sole failure remains the independent S08
+retired-MAU2 package graph rejection; seven existing skips were preserved.
+[Exact source receipt](../../deep-protocol/docs/testing/s05-origin-relocation-2026-10-15.md#integrated-source-qualification-after-the-operator-slice).
