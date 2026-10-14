@@ -122,6 +122,59 @@ test('enrolled node overlay preserves existing identities and isolates read-only
   }
 });
 
+test('contact overlay composes the current resolver and private issuer with independent custody',async()=>{
+  const files=['deep-dev','deep-dev.mailbox','deep-dev.mailbox-nodes','deep-dev.contacts'].flatMap(name=>['-f',fileURLToPath(new URL(`../docker-compose.${name}.yml`,import.meta.url))]);
+  const config=JSON.parse(execFileSync('docker',['compose','--project-name','deep-dev-current',...files,'config','--format','json'],{
+    encoding:'utf8',env:{...process.env,DEEP_DEV_PROJECT:'deep-dev-current',DEEP_DEV_ROOT:'C:/Work/DeepSession/secrets/dev/deep-dev-current',
+      DEEP_DEV_MAILBOX_NETWORK:'11'.repeat(16),DEEP_DEV_MAILBOX_POLICY:'22'.repeat(32),DEEP_DEV_IPV4_PREFIX:'172.31.241',DEEP_DEV_PORT_PREFIX:'282',DEEP_DEV_REGISTRY_PORT:'28543'}}));
+  assert.equal(Object.keys(config.services).length,8);
+  for(const i of [1,2,3]) {
+    const node=config.services[`node-${i}`];
+    for(const flag of ['ContactService__RuntimeActivation','ContactService__MapReplicaEndpoint','RequiredTerminals__Contact','DeepIdV2ReplicaStage__Enabled',
+      'DeepIdV2PreKeyClaim__Enabled','DeepIdV2ContactResolver__Enabled','DeepIdV2ContactResolver__MailboxGrantEnabled'])assert.equal(node.environment[flag],'true');
+    assert.equal(node.environment.DeepIdV2ContactResolver__MailboxGrantAuthorityOrigin,'https://registry/');
+    for(const [target,source,readonly] of [['/var/lib/contact-custody',`node-${i}-contact-custody`,false],['/var/lib/contact-keys',`node-${i}-contact-keys`,true],
+      ['/var/lib/mailbox-keys',`node-${i}-mailbox-keys`,true],['/var/lib/xnode',`node-${i}-state`,false],['/run/secrets',`node-${i}-secrets`,true]]) {
+      const mounts=node.volumes.filter(v=>v.target===target);assert.equal(mounts.length,1);assert.equal(mounts[0].source,source);assert.equal(!!mounts[0].read_only,readonly);
+    }
+  }
+  const script=await read('./deep-dev.ps1');
+  const actions=script.split("if ($Action -in @('ProvisionNodeContactKeys'")[1].split("if ($Action -eq 'Build')")[0];
+  assert.match(actions,/contact-resolver-enroll/);assert.match(actions,/'--network','none'/);
+  assert.ok(actions.indexOf("@('stop','--timeout','10',$nodeName)")<actions.indexOf("'contact-resolver-enroll'"));
+  assert.doesNotMatch(actions,/provision-floor|Signer.Create|DELETE|TRUNCATE|--volumes|volume','rm/);
+});
+
+test('coordination overlay retains eight services and uses explicit current journal roots',async()=>{
+  const files=['deep-dev','deep-dev.mailbox','deep-dev.mailbox-nodes','deep-dev.contacts','deep-dev.coordination'].flatMap(name=>['-f',fileURLToPath(new URL(`../docker-compose.${name}.yml`,import.meta.url))]);
+  const config=JSON.parse(execFileSync('docker',['compose','--project-name','deep-dev-current',...files,'config','--format','json'],{
+    encoding:'utf8',env:{...process.env,DEEP_DEV_PROJECT:'deep-dev-current',DEEP_DEV_ROOT:'C:/Work/DeepSession/secrets/dev/deep-dev-current',
+      DEEP_DEV_CONTACT_NODE1:'11'.repeat(32),DEEP_DEV_CONTACT_NODE2:'22'.repeat(32),DEEP_DEV_CONTACT_NODE3:'33'.repeat(32),
+      DEEP_DEV_MAILBOX_NETWORK:'11'.repeat(16),DEEP_DEV_MAILBOX_POLICY:'22'.repeat(32),DEEP_DEV_IPV4_PREFIX:'172.31.241',DEEP_DEV_PORT_PREFIX:'282',DEEP_DEV_REGISTRY_PORT:'28543'}}));
+  assert.equal(Object.keys(config.services).length,8);
+  assert.equal(config.services.registry.environment.ContactRouteAuthority__Enabled,'true');
+  assert.equal(config.services.registry.environment.ContactPublicationAuthority__Enabled,'true');
+  for(const i of [1,2,3])assert.equal(config.services[`node-${i}`].environment.ContactCoordination__BackendOrigin,'https://registry/');
+  const script=await read('./deep-dev.ps1');
+  const action=script.split("if ($Action -in @('PrepareContactCoordination','ProvisionContactCoordination','ActivateContactCoordination')) {")[1].split("if ($Action -eq 'Build')")[0];
+  assert.match(action,/'BEGIN;'/);assert.match(action,/'COMMIT;'/);
+  assert.match(action,/did2-route-threshold-journal.sql/);assert.match(action,/did2-publication-journal.sql/);
+  assert.doesNotMatch(action,/IF NOT EXISTS|ON CONFLICT|DELETE FROM|TRUNCATE|provision-floor|--volumes/);
+});
+
+test('owned mailbox exercise is public-input-only and calls real account-owned APIs',async()=>{
+  const script=await read('./deep-dev.ps1');
+  const action=script.split("if ($Action -eq 'ExerciseOwnedMailbox') {")[1].split("if ($Action -eq 'Build')")[0];
+  assert.equal((action.match(/'--mount'/g)||[]).length,1);
+  assert.match(action,/source=\$custodyPath\/public,target=\/run\/deep-public,readonly/);
+  assert.doesNotMatch(action,/role.seed|root.seed|\/run\/secrets|source=.*operator|provision-floor/);
+  const probe=await read('../tools/deep-dev/DevOwnedMailboxExercise.cs');
+  for(const call of ['AdmitAndVerifyGenesisAsync','VerifyCurrentNetworkAsync','PublishOwnStagedPreKeyInventoryAsync',
+    'EnsureOwnPermanentContactPublishedAsync','SynchronizeOwnMailboxAsync'])assert.ok(probe.includes(call));
+  assert.match(probe,/deviceEvidence=false,messageDeliveryEvidence=false,restartEvidence=false/);
+  assert.doesNotMatch(probe,/ServerCertificateValidationCallback|NoCheck|FrozenClock|Signer.Load|SignDetached/);
+});
+
 test('engine fault tests automatic restart with retained custody and refuse a shared engine', async () => {
   const script = await read('./deep-dev.ps1');
   const fault = script.split("if ($Action -in @('StackFault','EngineFault','ExpiryFault'))")[1].split("if ($Action -eq 'Verify')")[0];

@@ -670,3 +670,72 @@ role/custody rollover or the remaining S05 fault matrix. Physical contacts,
 messages, attachments and groups remain0/4. Production, old-dev, main and GitHub
 Releases were not changed. Workflow details have one owner:
 [DEEP_DEV](DEEP_DEV.md#explicit-current-dev-node-mailbox-enrollment).
+
+## Contact consumers and owned-client issuance attempt
+
+The current-dev operator now explicitly provisions separate resolver key rings
+and independent custody, then stops each original node owner and invokes its
+existing `contact-resolver-enroll` command with the same retained identity,
+data, mailbox and proof state. All three actual enrollment04 commands completed
+native0. Each `artifacts/s05-contact-issuer-20261014/04/node-N-enroll.log` has
+SHA256 `435859203F315085F2020C21925579FB52AEF0F7A5011E3019F5C74F1E803739`.
+Activation05 and verified recovery06 completed0; Verify SHA256
+`E9324AB66485095E4A860662C754C234EAC9028D3B3400E3F8513450366CA42C`.
+The contact overlay composes actual current pre-key staging/claims, resolver and
+private HTTPS grant client, not the unavailable fallback or a mock issuer.
+
+Current coordination preparation verifies genesis/current policy and records
+the three existing configured transport keys, not issuance authority. Explicit
+provisioning08 atomically created the canonical route/publication journal tables
+and two network roots in the independent PostgreSQL database. Existing tables
+reject and runtime performs no DDL. Receipt
+`artifacts/s05-contact-issuer-20261014/08/coordination-provision.log`, SHA256
+`16205CA1268D89A06C18BDE4373AEEDD5A4012E686CB715AEDE69BF0A67564E9`.
+Read-only initial counts: route roots1/publication roots1, entries0/0.
+Actual activation09 and Verify10 native0, Verify SHA256
+`39067090901F9A482098D6AAC0EE7DA126DE6C27A24DD62C40B2C02FC930DDD0`.
+The optional overlays retain eight services and existing keys/mounts.
+
+Final operator tests16:54 checks/native0, SHA256
+`BC008452CE2D843A228A2C9B04A05FE7D2C79AB7919D836C56C0AF28CBC99138`.
+Actual Compose/closed-input contracts18/0/native0 and PowerShell AST passed.
+An earlier contract selected a nested action branch instead of the complete
+outer branch; its FAIL was fixed by an exact boundary, not weaker assertions.
+Final operator build14 native0/zero compiler warnings/errors; a NuGet EOF retry
+remains in that log, not a lost or interrupted terminal. Source-only packages
+for Node/Registry/Protocol were unchanged and their full gates were not repeated.
+Final current-dev smoke17 from Windows PowerShell5.1 native0, SHA256
+`E6EB444BBDD3B43B7205789AF927BEBBD5A53E90A2827603661331AA3F08941D`.
+Actual existing-contact-key reprovision18 rejected with native exit2; in-memory
+before/after digests confirmed unchanged keys. Closed stderr SHA256
+`5548EB026A54EF5F6B1D4B62FF9FCF1C22AEEB871DD8FE1152A23726D740AF6C`.
+
+The new supported `ExerciseOwnedMailbox` probe mounts **public bootstrap only**,
+creates a disposable real account owner/encrypted database, and invokes the
+actual account-owned admission/network/publication/mailbox APIs with normal TLS
+and real ONION selection. It injects no signed grant, signer, transport callback
+or fixture clock; process monotonic time is real elapsed time. Process-only
+secure storage is explicitly disposable and never device/recovery evidence.
+
+Actual attempt13 failed native1 at AccountAdmission after AccountCreate;
+classified attempt15 failed again, not accepted. Its closed stderr SHA256 is
+`970AC88825AAC3C4CD3F43708B9D62CD973DA0D6BD0325A130A3A3D7D4653C90`:
+HttpRequestException / SecureConnectionError / AuthenticationException.
+The same public dev leaf/root inspected read-only on Windows with Online
+revocation and an explicit private root produced RevocationStatusUnknown;
+the leaf has no CRL Distribution Point. Actual curl HTTPS/H2 readiness returned
+200/version2, so healthy services and curl do not qualify the strict managed TLS
+consumer. Missing dev revocation distribution is the leading concrete PKI
+cause; Linux TLS-chain status and a successful corrected runtime retry remain
+required before claiming it resolved.
+
+Do not fix this by NoCheck, accepting unknown revocation/chain errors, cleartext
+fallback, raw signed grants or another identity/floor reset. The next supported
+operator change is signed dev CRL distribution plus correctly issued leaf
+certificates, retaining CA/leaf keys and signed SPKI bindings. .NET has built-in
+[CRL Distribution Point authoring](https://learn.microsoft.com/en-us/dotnet/api/system.security.cryptography.x509certificates.certificaterevocationlistbuilder.buildcrldistributionpointextension?view=net-10.0);
+no additional crypto library is required. This is still S05 connected issuance,
+not S06/physical acceptance. Private grants/client verification/node acceptance,
+remaining rollover/outage matrix and physical0/4 remain open. Production,
+old-dev, main and GitHub Releases were not changed. Workflow owner:
+[DEEP_DEV](DEEP_DEV.md#current-dev-contact-and-issuer-connected-client).

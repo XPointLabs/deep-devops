@@ -1,0 +1,35 @@
+# Explicit dev resolver enrollment with original node identity/data; no new service.
+services:
+  node-1:
+    environment: &contact-bindings
+      ContactService__RuntimeActivation: "true"
+      ContactService__MapReplicaEndpoint: "true"
+      RequiredTerminals__Contact: "true"
+      DeepIdV2ReplicaStage__Enabled: "true"
+      DeepIdV2PreKeyClaim__Enabled: "true"
+      DeepIdV2ContactResolver__Enabled: "true"
+      DeepIdV2ContactResolver__MailboxGrantEnabled: "true"
+      DeepIdV2ContactResolver__MailboxGrantAuthorityOrigin: https://registry/
+      ContactResolverCustody__NetworkIdHex: ${DEEP_DEV_MAILBOX_NETWORK:?verified node scope required}
+      ContactResolverCustody__IndependentCustodyDirectory: /var/lib/contact-custody
+      ContactResolverCustody__DataProtectionKeysDirectory: /var/lib/contact-keys
+    volumes:
+      - node-1-contact-custody:/var/lib/contact-custody
+      - node-1-contact-keys:/var/lib/contact-keys:ro
+  node-2:
+    environment: *contact-bindings
+    volumes:
+      - node-2-contact-custody:/var/lib/contact-custody
+      - node-2-contact-keys:/var/lib/contact-keys:ro
+  node-3:
+    environment: *contact-bindings
+    volumes:
+      - node-3-contact-custody:/var/lib/contact-custody
+      - node-3-contact-keys:/var/lib/contact-keys:ro
+volumes:
+  node-1-contact-custody: {external: true, name: "${DEEP_DEV_PROJECT}_node-1-contact-custody"}
+  node-1-contact-keys: {external: true, name: "${DEEP_DEV_PROJECT}_node-1-contact-keys"}
+  node-2-contact-custody: {external: true, name: "${DEEP_DEV_PROJECT}_node-2-contact-custody"}
+  node-2-contact-keys: {external: true, name: "${DEEP_DEV_PROJECT}_node-2-contact-keys"}
+  node-3-contact-custody: {external: true, name: "${DEEP_DEV_PROJECT}_node-3-contact-custody"}
+  node-3-contact-keys: {external: true, name: "${DEEP_DEV_PROJECT}_node-3-contact-keys"}

@@ -132,6 +132,62 @@ requires `currentMailboxHost.recovered=true` and state `recovered` on every node
 memory alongside retained identity/role custody and mounts. This remains local
 dev infrastructure evidence, not XMC2 issuance, message delivery or device E2E.
 
+### Current-dev contact and issuer-connected client
+
+Once all mailbox hosts are enrolled, provision separate contact protection
+keys and invoke the existing node resolver enrollment command:
+
+```powershell
+foreach ($node in 1..3) {
+    ./scripts/deep-dev.ps1 -Action ProvisionNodeContactKeys -ProjectName deep-dev-current -NodeNumber $node
+}
+foreach ($node in 1..3) {
+    ./scripts/deep-dev.ps1 -Action EnrollNodeContact -ProjectName deep-dev-current -NodeNumber $node
+}
+./scripts/deep-dev.ps1 -Action ActivateNodeContact -ProjectName deep-dev-current
+./scripts/deep-dev.ps1 -Action Verify -ProjectName deep-dev-current
+./scripts/deep-dev.ps1 -Action ProvisionContactCoordination -ProjectName deep-dev-current
+./scripts/deep-dev.ps1 -Action ActivateContactCoordination -ProjectName deep-dev-current
+./scripts/deep-dev.ps1 -Action Verify -ProjectName deep-dev-current
+```
+
+The optional contact/coordination overlays retain eight services and every
+existing node identity/data/mailbox mount. Each resolver has its own disjoint
+custody volume and read-only protection key ring. First key provisioning is
+networkless; resolver enrollment stops the existing owner, acquires independent
+current proof/time and uses `contact-resolver-enroll` with native read-back.
+Preserve uncertain or partially enrolled state; never erase it to retry.
+
+Contact activation composes current pre-key staging/claims, resolver and the
+private HTTPS mailbox issuer. Coordination preparation verifies the retained
+genesis and current policy, then captures the three configured node transport
+keys. This allowlist controls transport access only, not membership or issuance
+authority. Explicit provisioning executes the canonical route/publication
+schemas plus two first network roots in one PostgreSQL transaction. Existing
+tables reject; no upsert, automatic DDL or root reset is available. Activation
+adds the private threshold backend to the selected ONION terminals. All
+original witness/role keys and protected journals remain retained.
+
+Build the matching operator image before running the connected client probe:
+
+```powershell
+./scripts/deep-dev.ps1 -Action ExerciseOwnedMailbox -ProjectName deep-dev-current
+```
+
+It mounts public bootstrap only and creates one genuinely disposable account
+inside its `--rm` container. Account keys remain in process-owned storage and
+its actual encrypted account database; no node/witness/root/role custody is
+mounted. It calls production account-owned admission, current network, pre-key
+publication, contact publication and mailbox synchronization APIs. TLS uses the
+image's explicit dev CA and ordinary platform validation; signed endpoints,
+client route selection, issuer journal and node admission are not mocked.
+Stage labels and exception categories are closed; credentials/grants/payloads
+are never printed. A successful authenticated empty mailbox page is a scoped
+issuer→owned-client→node read, not message delivery, durable probe recovery or
+physical Windows/Android acceptance. A failed stage does not pass this scenario.
+The exact receipts and remaining work belong to the
+[S05 checkpoint](S05-AUTHORITY-HISTORY-2026-10-14.md).
+
 ## Architecture and custody
 
 This workstation uses native Linux ARM64 Docker. .NET and Go images are pinned

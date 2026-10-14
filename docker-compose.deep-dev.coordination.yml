@@ -1,0 +1,17 @@
+# Transport allowlist is operator access only; current proof/threshold/journal checks remain mandatory.
+services:
+  registry:
+    environment:
+      ContactRouteAuthority__Enabled: "true"
+      ContactPublicationAuthority__Enabled: "true"
+      ContactCoordinationIngress__AllowedNodePublicKeysHex__0: ${DEEP_DEV_CONTACT_NODE1:?explicit transport binding required}
+      ContactCoordinationIngress__AllowedNodePublicKeysHex__1: ${DEEP_DEV_CONTACT_NODE2:?explicit transport binding required}
+      ContactCoordinationIngress__AllowedNodePublicKeysHex__2: ${DEEP_DEV_CONTACT_NODE3:?explicit transport binding required}
+  node-1:
+    environment: &coordination
+      ContactCoordination__Enabled: "true"
+      ContactCoordination__BackendOrigin: https://registry/
+  node-2:
+    environment: *coordination
+  node-3:
+    environment: *coordination

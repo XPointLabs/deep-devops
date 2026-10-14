@@ -15,26 +15,30 @@ using static DevOfflineAuthorityRenewal;
 internal static class DevNodeMailboxProvisioning
 {
     internal const string Application = "XPoint.XNode.Mailbox.Custody.v1";
-    internal static void ProvisionKeys(string path)
+    internal static void ProvisionKeys(string path) => ProvisionProtectionKeys(path,"/run/mailbox-keys",Application);
+    internal static void ProvisionContactKeys(string path) =>
+        ProvisionProtectionKeys(path,"/run/contact-keys","XPoint.XNode.ContactResolver.Custody.v1");
+
+    private static void ProvisionProtectionKeys(string path,string requiredMount,string application)
     {
-        if (!OperatingSystem.IsLinux() || path != "/run/mailbox-keys") throw new ArgumentException("Wrong explicit key provisioning mount.");
+        if (!OperatingSystem.IsLinux() || path != requiredMount) throw new ArgumentException("Wrong explicit key provisioning mount.");
         RequireNoLinks(path);
         if (!Directory.Exists(path) || Directory.EnumerateFileSystemEntries(path).Any())
             throw new IOException("Key provisioning requires a genuinely empty owned volume; never regenerate existing custody.");
         File.SetUnixFileMode(path,UnixFileMode.UserRead|UnixFileMode.UserWrite|UnixFileMode.UserExecute);
         var services = new ServiceCollection();
         services.AddDataProtection().PersistKeysToFileSystem(new DirectoryInfo(path))
-            .SetApplicationName(Application).DisableAutomaticKeyGeneration();
+            .SetApplicationName(application).DisableAutomaticKeyGeneration();
         using(var provider = services.BuildServiceProvider())
             provider.GetRequiredService<IKeyManager>().CreateNewKey(DateTimeOffset.UtcNow.AddMinutes(-1),DateTimeOffset.UtcNow.AddDays(90));
         var files = Directory.GetFiles(path);
         if(files.Length != 1 || !Path.GetFileName(files[0]).StartsWith("key-",StringComparison.Ordinal) || Path.GetExtension(files[0]) != ".xml")
             throw new IOException("Unexpected generated key-ring state; preserve it for inspection.");
         File.SetUnixFileMode(files[0],UnixFileMode.UserRead|UnixFileMode.UserWrite);
-        Console.WriteLine("Explicit new mailbox protection key ring provisioned; no node identity or floor was created.");
+        Console.WriteLine("Explicit new protection key ring provisioned; no node identity or floor was created.");
     }
 
-    private static async Task<VerifiedMailboxAuthorityV2> PolicyAsync(string publicRoot,string executable,
+    internal static async Task<VerifiedMailboxAuthorityV2> PolicyAsync(string publicRoot,string executable,
         Func<string,AccountDirectoryDts1Source[],Task<ulong>> observe)
     {
         using var manifest = JsonDocument.Parse(Read(Path.Combine(publicRoot,"deep-dev.json"),16_384));

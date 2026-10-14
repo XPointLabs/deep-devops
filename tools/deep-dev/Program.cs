@@ -20,15 +20,20 @@ try {
         await DevMailboxPreparation.PrepareAsync(args[1], args[2], ReadNtsAsync);
     else if (args.Length == 2 && args[0] == "provision-node-mailbox-keys")
         DevNodeMailboxProvisioning.ProvisionKeys(args[1]);
+    else if (args.Length == 2 && args[0] == "provision-node-contact-keys")
+        DevNodeMailboxProvisioning.ProvisionContactKeys(args[1]);
     else if (args.Length == 4 && args[0] == "fetch-node-mailbox-control")
         await DevNodeMailboxProvisioning.FetchControlAsync(args[1], args[2], args[3], ReadNtsAsync);
     else if (args.Length == 3 && args[0] == "prepare-node-mailbox")
         await DevNodeMailboxProvisioning.PrepareAsync(args[1], args[2], ReadNtsAsync);
+    else if (args.Length == 3 && args[0] == "prepare-contact-coordination")
+        await DevContactCoordinationPreparation.PrepareAsync(args[1], args[2], ReadNtsAsync);
     else if (args.Length == 3 && args[0] is "validate-operational-install" or "install-operational")
         DevOperationalActivation.Execute(args[1], args[2], args[0] == "install-operational");
     else if (args.Length == 4 && args[0] == "publish") await DevPublisher.RunAsync(args[1], args[2], args[3], ReadNtsAsync);
     else if (args.Length == 4 && args[0] == "publish-short-view") await DevPublisher.RunAsync(args[1], args[2], args[3], ReadNtsAsync, operationalLifetimeSeconds:180, singlePublication:true);
     else if (args.Length == 2 && args[0] == "exercise-directory") await DevDirectoryExercise.RunAsync(args[1]);
+    else if (args.Length == 2 && args[0] == "exercise-owned-mailbox") await DevOwnedMailboxExercise.RunAsync(args[1]);
     else if (args.Length == 3 && args[0] == "admit-observer") await DevObserverAdmission.RunAsync(args[1], args[2]);
     else if (args.Length == 3 && args[0] == "prepare-operational") {
         _ = await DevOfflineOperationalRenewal.PrepareAsync(args[1], args[2], ReadNtsAsync);

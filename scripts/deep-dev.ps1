@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('Init','Build','PrepareAuthority','PrepareOperational','ApplyOperational','PrepareMailbox','ProvisionMailbox','ActivateMailbox','PrepareNodeMailbox','ProvisionNodeMailboxKeys','FetchNodeMailboxControl','EnrollNodeMailbox','ActivateNodeMailbox','AdmitObserver','Provision','ProvisionFloor','Up','Status','Stop','Start','Verify','FaultMatrix','HistoryFault','StackFault','EngineFault','ExpiryFault')][string]$Action,
+    [Parameter(Mandatory)][ValidateSet('Init','Build','PrepareAuthority','PrepareOperational','ApplyOperational','PrepareMailbox','ProvisionMailbox','ActivateMailbox','PrepareNodeMailbox','ProvisionNodeMailboxKeys','FetchNodeMailboxControl','EnrollNodeMailbox','ActivateNodeMailbox','ProvisionNodeContactKeys','EnrollNodeContact','ActivateNodeContact','PrepareContactCoordination','ProvisionContactCoordination','ActivateContactCoordination','ExerciseOwnedMailbox','AdmitObserver','Provision','ProvisionFloor','Up','Status','Stop','Start','Verify','FaultMatrix','HistoryFault','StackFault','EngineFault','ExpiryFault')][string]$Action,
     [ValidateRange(1,3)][int]$NodeNumber = 1,
     [string]$OperationalCandidate,
     [string]$CustodyRoot = 'C:\Work\DeepSession\secrets\dev\deep-dev',
@@ -54,7 +54,7 @@ function Invoke-DesktopOperation([ValidateSet('start','stop')][string]$Operation
         if ($process.ExitCode -ne 0) { throw 'Docker Desktop operation failed; inspect host diagnostics. Retained volumes/custody were not reset.' }
     } finally { $process.Dispose() }
 }
-$devEnvironmentNames = @('DEEP_DEV_ROOT','DEEP_DEV_PROJECT','DEEP_DEV_IPV4_PREFIX','DEEP_DEV_PORT_PREFIX','DEEP_DEV_REGISTRY_PORT','DEEP_DEV_MAILBOX_NETWORK','DEEP_DEV_MAILBOX_POLICY')
+$devEnvironmentNames = @('DEEP_DEV_ROOT','DEEP_DEV_PROJECT','DEEP_DEV_IPV4_PREFIX','DEEP_DEV_PORT_PREFIX','DEEP_DEV_REGISTRY_PORT','DEEP_DEV_MAILBOX_NETWORK','DEEP_DEV_MAILBOX_POLICY','DEEP_DEV_CONTACT_NODE1','DEEP_DEV_CONTACT_NODE2','DEEP_DEV_CONTACT_NODE3')
 $devPreviousEnvironment = @{}
 foreach ($name in $devEnvironmentNames) { $devPreviousEnvironment[$name] = [Environment]::GetEnvironmentVariable($name,'Process') }
 try {
@@ -79,6 +79,29 @@ if ($nodeMailboxEnabled -or $Action -in @('EnrollNodeMailbox','ActivateNodeMailb
     if ($bindings.NetworkIdHex -cnotmatch '^[0-9a-f]{32}$' -or $bindings.MailboxAuthorityCoreHashHex -cnotmatch '^[0-9a-f]{64}$') { throw 'Invalid node mailbox bindings.' }
     $env:DEEP_DEV_MAILBOX_NETWORK = $bindings.NetworkIdHex; $env:DEEP_DEV_MAILBOX_POLICY = $bindings.MailboxAuthorityCoreHashHex
     $compose += @('--file',(Join-Path $devopsRoot 'docker-compose.deep-dev.mailbox-nodes.yml'))
+}
+$contactMarker = Join-Path $custodyPath 'mailbox/contacts-enabled'
+$contactEnabled = Test-Path -LiteralPath $contactMarker -PathType Leaf
+if ($contactEnabled -or $Action -in @('EnrollNodeContact','ActivateNodeContact')) {
+    if ($ProjectName -cne 'deep-dev-current' -or -not $nodeMailboxEnabled) { throw 'Enrolled current mailbox hosts required before resolver composition.' }
+    if ($contactEnabled -and ((Get-Item -LiteralPath $contactMarker).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Linked resolver activation marker.' }
+    $compose += @('--file',(Join-Path $devopsRoot 'docker-compose.deep-dev.contacts.yml'))
+}
+$coordinationMarker = Join-Path $custodyPath 'mailbox/coordination/enabled'
+$coordinationEnabled = Test-Path -LiteralPath $coordinationMarker -PathType Leaf
+if ($coordinationEnabled -or $Action -eq 'ActivateContactCoordination') {
+    if (-not $contactEnabled) { throw 'Enrolled current resolver hosts required before contact coordination.' }
+    if ($coordinationEnabled -and ((Get-Item -LiteralPath $coordinationMarker).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Linked coordination marker.' }
+    $coordinationBindings = Join-Path $custodyPath 'mailbox/coordination/bindings.json'
+    if (-not (Test-Path -LiteralPath $coordinationBindings -PathType Leaf) -or ((Get-Item -LiteralPath $coordinationBindings).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Prepared coordination transport bindings missing/linked.' }
+    $transport = Get-Content -LiteralPath $coordinationBindings -Raw | ConvertFrom-Json
+    if ($transport.NetworkIdHex -cne $env:DEEP_DEV_MAILBOX_NETWORK -or $transport.Nodes.Count -ne 3 -or @($transport.Nodes | Sort-Object -Unique).Count -ne 3) { throw 'Foreign coordination transport bindings.' }
+    foreach ($number in 1..3) {
+        $key = $transport.Nodes[$number-1]
+        if ($key -cnotmatch '^[0-9a-f]{64}$' -or $key -ceq ('0'*64)) { throw 'Invalid coordination transport identity.' }
+        [Environment]::SetEnvironmentVariable("DEEP_DEV_CONTACT_NODE$number",$key,'Process')
+    }
+    $compose += @('--file',(Join-Path $devopsRoot 'docker-compose.deep-dev.coordination.yml'))
 }
 $devServiceCount = if ($mailboxEnabled) { 8 } else { 6 }
 $devServices = @('floor','registry','publisher','node-1','node-2','node-3')
@@ -221,6 +244,67 @@ if ($Action -in @('PrepareNodeMailbox','ProvisionNodeMailboxKeys','FetchNodeMail
     }
     return
 }
+if ($Action -in @('ProvisionNodeContactKeys','EnrollNodeContact','ActivateNodeContact')) {
+    if ($ProjectName -cne 'deep-dev-current' -or -not $nodeMailboxEnabled) { throw 'Enrolled current mailbox hosts required; no new scope inference.' }
+    $nodeName = "node-$NodeNumber"
+    $enrollmentMarker = Join-Path $custodyPath "mailbox/$nodeName-contact-enrolled"
+    switch ($Action) {
+        'ProvisionNodeContactKeys' {
+            if ($contactEnabled -or (Test-Path -LiteralPath $enrollmentMarker)) { throw 'First resolver key provision only; preserve enrolled custody.' }
+            foreach ($kind in @('keys','custody')) { Run-Native docker @('volume','create','--label','deep.environment=dev','--label',"deep.project=$ProjectName","$($ProjectName)_$nodeName-contact-$kind") }
+            Run-Native docker @('run','--rm','--network','none','--cap-drop','ALL','--security-opt','no-new-privileges:true','--ulimit','core=0',
+                '--mount',"type=volume,source=$($ProjectName)_$nodeName-contact-keys,target=/run/contact-keys",'--entrypoint','dotnet',
+                "$ProjectName/publisher:candidate",'Deep.Dev.dll','provision-node-contact-keys','/run/contact-keys')
+        }
+        'EnrollNodeContact' {
+            if ($contactEnabled -or (Test-Path -LiteralPath $enrollmentMarker)) { throw 'Explicit genuinely new resolver enrollment only; preserve uncertain state.' }
+            Run-Native docker ($compose + @('stop','--timeout','10',$nodeName))
+            Run-Native docker ($compose + @('run','--rm','--no-deps',$nodeName,'XNode.dll','contact-resolver-enroll'))
+            $null=New-Item -ItemType File -Path $enrollmentMarker -ErrorAction Stop
+            Write-Host 'Explicit resolver enrollment completed; current runtime verification remains required.'
+        }
+        'ActivateNodeContact' {
+            if ($contactEnabled) { throw 'Already enabled; use normal Up/Start with retained state.' }
+            foreach ($number in 1..3) { if (-not (Test-Path -LiteralPath (Join-Path $custodyPath "mailbox/node-$number-contact-enrolled") -PathType Leaf)) { throw 'All three explicit resolver enrollments required.' } }
+            $null=New-Item -ItemType File -Path $contactMarker -ErrorAction Stop
+            Run-Native docker ($compose + @('up','-d','node-1','node-2','node-3'))
+            Write-Host 'Current contact and private grant consumers activated; no client delivery claim.'
+        }
+    }
+    return
+}
+if ($Action -in @('PrepareContactCoordination','ProvisionContactCoordination','ActivateContactCoordination')) {
+    if ($ProjectName -cne 'deep-dev-current' -or -not $contactEnabled -or $coordinationEnabled) { throw 'First current coordination enrollment only; preserve existing journals.' }
+    $coordinationProvisioned = Join-Path $custodyPath 'mailbox/coordination/provisioned'
+    if ($Action -in @('PrepareContactCoordination','ProvisionContactCoordination')) {
+        if (Test-Path -LiteralPath $coordinationProvisioned) { throw 'Existing coordination roots cannot be provisioned as new.' }
+        Run-Native dotnet @('run','--project',(Join-Path $devopsRoot 'tools/deep-dev/Deep.Dev.csproj'),'-c','Debug','--','prepare-contact-coordination',$custodyPath,(Join-Path $devopsRoot 'tools/nts-observer/deep-nts-observer.exe'))
+    }
+    if ($Action -eq 'ProvisionContactCoordination') {
+        $roots = Join-Path $custodyPath 'mailbox/coordination/roots.sql'
+        $schema = Join-Path (Split-Path $devopsRoot -Parent) 'deep-registry-api/docs/sql'
+        $sql = 'BEGIN;' + [IO.File]::ReadAllText((Join-Path $schema 'did2-route-threshold-journal.sql')) +
+            [IO.File]::ReadAllText((Join-Path $schema 'did2-publication-journal.sql')) + [IO.File]::ReadAllText($roots) + 'COMMIT;'
+        $result = $sql | & docker @($compose + @('exec','-T','floor','gosu','postgres','psql','-q','-v','ON_ERROR_STOP=1','-h','/var/run/postgresql','-U','postgres','-d','deep_dev')) 2>&1
+        if ($LASTEXITCODE -ne 0) { throw 'Explicit coordination journal transaction failed; preserve uncertain state, no root reset.' }
+        $null=New-Item -ItemType File -Path $coordinationProvisioned -ErrorAction Stop
+        Write-Host 'Permanent current route/publication journal roots explicitly committed; runtime performs no DDL.'
+    }
+    if ($Action -eq 'ActivateContactCoordination') {
+        if (-not (Test-Path -LiteralPath $coordinationProvisioned -PathType Leaf)) { throw 'Explicit coordination journal provisioning required.' }
+        $null=New-Item -ItemType File -Path $coordinationMarker -ErrorAction Stop
+        Run-Native docker ($compose + @('up','-d','registry','node-1','node-2','node-3'))
+        Write-Host 'Current contact threshold coordination activated; owned-client grant acceptance remains required.'
+    }
+    return
+}
+if ($Action -eq 'ExerciseOwnedMailbox') {
+    if ($ProjectName -cne 'deep-dev-current' -or -not $coordinationEnabled) { throw 'Actual current issuer, resolver and coordination required for the owned client.' }
+    Run-Native docker @('run','--rm','--network',"$($ProjectName)_dev",'--ulimit','core=0',
+        '--mount',"type=bind,source=$custodyPath/public,target=/run/deep-public,readonly",
+        "$ProjectName/publisher:candidate",'Deep.Dev.dll','exercise-owned-mailbox','/run/deep-public')
+    return
+}
 if ($Action -eq 'Build') {
     Run-Native dotnet @('run','--project',(Join-Path $devopsRoot 'tools/deep-dev/Deep.Dev.csproj'),'-c','Debug','--','configure',$custodyPath)
     Run-Native docker ($compose + @('build','registry','node-1','publisher')); return
@@ -244,6 +328,9 @@ function Test-CurrentCapabilities {
             if ($health.privacyRouting -cne 'ready') { Write-Host "Current capability unavailable: node-$devNode verified ONION."; $ready = $false }
             if ($nodeMailboxEnabled -and ($health.currentMailboxHost.recovered -ne $true -or $health.currentMailboxHost.state -cne 'recovered')) {
                 Write-Host "Current capability unavailable: node-$devNode native mailbox recovery."; $ready = $false
+            }
+            if ($contactEnabled -and $health.requiredTerminals.ready -ne $true) {
+                Write-Host "Current capability unavailable: node-$devNode required contact terminal."; $ready = $false
             }
         } catch { $ready = $false }
     }
@@ -332,7 +419,8 @@ if ($Action -in @('StackFault','EngineFault','ExpiryFault')) {
     # Digests stay in process memory and never enter the public evidence object.
     $custody = @{}
     foreach ($service in @('registry','node-1','node-2','node-3')) {
-        $custodyCommand = if ($nodeMailboxEnabled -and $service -match '^node-[123]$') { 'sha256sum /run/secrets/* /var/lib/mailbox-keys/key-*.xml' } else { 'sha256sum /run/secrets/*' }
+        $custodyCommand = if ($contactEnabled -and $service -match '^node-[123]$') { 'sha256sum /run/secrets/* /var/lib/mailbox-keys/key-*.xml /var/lib/contact-keys/key-*.xml' }
+            elseif ($nodeMailboxEnabled -and $service -match '^node-[123]$') { 'sha256sum /run/secrets/* /var/lib/mailbox-keys/key-*.xml' } else { 'sha256sum /run/secrets/*' }
         $custody[$service] = & docker @($compose + @('exec','-T',$service,'sh','-c',$custodyCommand))
         if ($LASTEXITCODE -ne 0 -or -not $custody[$service]) { throw 'Cannot snapshot retained online custody.' }
     }
@@ -394,6 +482,7 @@ if ($Action -in @('StackFault','EngineFault','ExpiryFault')) {
         }
         foreach ($service in $custody.Keys) {
             $digestCommand = if ($service -in @('deposit-signer','retrieve-signer')) { 'sha256sum /run/role-secrets/role.seed' }
+                elseif ($contactEnabled -and $service -match '^node-[123]$') { 'sha256sum /run/secrets/* /var/lib/mailbox-keys/key-*.xml /var/lib/contact-keys/key-*.xml' }
                 elseif ($nodeMailboxEnabled -and $service -match '^node-[123]$') { 'sha256sum /run/secrets/* /var/lib/mailbox-keys/key-*.xml' }
                 else { 'sha256sum /run/secrets/*' }
             $after = & docker @($compose + @('exec','-T',$service,'sh','-c',$digestCommand))

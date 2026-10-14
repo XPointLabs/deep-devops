@@ -17,6 +17,14 @@ try
     Check(DevTopology.ForProject("deep-dev").Ipv4Prefix == "172.31.240" &&
         DevTopology.ForProject("deep-dev-current").Ipv4Prefix == "172.31.241", "separate current topology addresses");
     await Reject(() => { _ = DevTopology.ForProject("production"); return Task.CompletedTask; }, "unknown dev project");
+    await Reject(() => { DevNodeMailboxProvisioning.ProvisionKeys("/run/contact-keys"); return Task.CompletedTask; }, "mailbox key provision rejects contact mount");
+    await Reject(() => { DevNodeMailboxProvisioning.ProvisionContactKeys("/run/mailbox-keys"); return Task.CompletedTask; }, "contact key provision rejects mailbox mount");
+    var coordinationSql=DevContactCoordinationPreparation.RootSql(Enumerable.Repeat((byte)1,16).ToArray());
+    Check(coordinationSql.Split("INSERT INTO ").Length==3 && !coordinationSql.Contains("CONFLICT",StringComparison.Ordinal) &&
+        !coordinationSql.Contains("DELETE",StringComparison.Ordinal) && !coordinationSql.Contains("UPDATE",StringComparison.Ordinal),"explicit coordination roots are insert-only");
+    await Reject(()=>{_ = DevContactCoordinationPreparation.RootSql(new byte[16]);return Task.CompletedTask;},"zero coordination network");
+    await Reject(()=>{_ = DevContactCoordinationPreparation.RootSql(new byte[15]);return Task.CompletedTask;},"short coordination network");
+    await Reject(()=>DevOwnedMailboxExercise.RunAsync("/run/operator"),"owned client rejects custody mount");
     using(var control=new HttpResponseMessage(HttpStatusCode.OK)) {
         control.Content=new ByteArrayContent(new byte[MailboxGrantRevocationV1Codec.MinimumBytes]);
         control.Content.Headers.ContentType=new("application/vnd.deep.mailbox-grant-revocation.v1+octet-stream");
