@@ -534,3 +534,85 @@ isolated native runner: Registry proof ready, three verified ONION nodes,
 No container/volume/WSL reset, production mutation or role-key signature occurred.
 This is retained current-dev control/ONION smoke, not mailbox or device delivery.
 Original pre-cutover deep-dev remains separately retained and unhealthy.
+
+## Actual protected mailbox issuer activation
+
+Current-dev now uses the optional eight-service overlay in the
+[operator runbook](DEEP_DEV.md#explicit-current-dev-mailbox-issuer-activation).
+The existing signed PMA2 role keys were verified with actual NTS and copied to
+separate role-only volumes. Registry's replacement secret mount excludes both
+role seeds; original custody/volume is preserved. No offline root or node/BLS
+identity was mounted to a signer or replaced. Four canonical grant/MGR tables,
+one network root and two actual policy/role roots were explicitly initialized
+in one PostgreSQL transaction. Runtime performs no DDL or re-enrollment.
+
+Preparation tests38 checks/native0, zero build errors/warnings; final receipt
+`artifacts/s05-mailbox-activation-20261014/11/final-preparation-tests.log`, SHA256
+`C7899ADF0EEC14BCC920FE509A28098E87EB0DAC99F12ADAA5B724644CB672A6`.
+Actual Compose isolation/lifecycle contracts14/0/native0. Explicit provisioning04
+native0; initial read-back was network1/scopes2/grant entries0/MGR entries0:
+`artifacts/s05-mailbox-activation-20261014/04/provision.log`, SHA256
+`A79070311CFB9D76C7CD6C168F4F0E6E0998AD858F1FD32EA8FA4E15615502EC`.
+Preparation02 passed; first provisioning03 rejected CryptographicException
+before any volume/schema mutation (read-back tables0). That cause is not claimed
+fixed by a successful retry; additional closed NTS/policy labels now aid recurrence.
+Build05 failed before a native child: Get-Command Docker returned two applications.
+The runner now selects the exact verified docker.exe; builds06/09 completed0.
+
+Actual activation07 native0; both sockets/processes became healthy and Registry
+committed two signed MGR1 winners, one per role. Direct container checks confirm
+neither seed exists in Registry's runtime mount. Receipt
+`artifacts/s05-mailbox-activation-20261014/07/activate.log`, SHA256
+`4B2AE275E334CFCDEF437DC5022C3DC358C0524A6273E25E1C73B74DC4F7BB63`.
+Ordinary renewal subsequently committed generation3 in both retained scopes.
+
+Original restart08 failed native1 during30-second stability, despite eventual
+healthy containers. Preserve `artifacts/s05-mailbox-activation-20261014/08/restart.log.stderr`, SHA256
+`32D60E4E0863EA65B621C33E8A554DE7A576B88D35CFC92090AE50A8271CC61F`.
+The Registry read-only readiness owner now waits within its original deadline;
+matching/full source receipts and unchanged security fences belong to the
+[Registry checkpoint](../../deep-registry-api/docs/testing/s05-protected-role-signer-2026-10-14.md#actual-dev-activation-and-readiness-contention).
+Updated image and retained observer Up10 native0:
+`artifacts/s05-mailbox-activation-20261014/10/update.log`, SHA256
+`395BB4CB64B4FAB5AD39167B5156AAC64AE7A009BAA28F01E88724B859F1F4E0`.
+Node floor enrollment, private XMC2 issuance/client verification/node acceptance,
+coordinated future role-volume/journal rollover and physical delivery remain open.
+Pre-mailbox rollover commands refuse the enabled contour rather than applying a
+partial update. No production/old-dev mutation, reset or release occurred.
+
+Restart12 also failed native1 (Registry HTTP22/28), despite eventual recovery:
+`artifacts/s05-mailbox-activation-20261014/12/restart.log.stderr`, SHA256
+`8F097DC2E450E57998AAF7E3F4CB762595BCB9314971970496B99B149B0AF85E`.
+Six read-only readiness probes measured2319/2345/2533/4245/2433ms with HTTP200,
+then HTTP000/native28 at5415ms. A temporary role journal recreated a database
+pool each time; Registry now has one authority-owned fixed-config connection
+pool, not a cache of verified winners. Matching PostgreSQL17 checks and the
+subsequent19-case ownership remediation pass are recorded by Registry; its
+original407/2/10 full FAIL remains preserved, not accepted.
+
+Pooled Registry image13 build native0, updated retained composition14 native0;
+no schema, seed, floor or winner was replaced. Six later probes returned HTTP200
+native0 at3096/2196/2552/2367/2230/3282ms. This small sample is not a performance,
+restart, sustained delivery or physical qualification. Remaining S05 gates stay open.
+
+Pooled restart15 still failed its stability window, not accepted:
+`artifacts/s05-mailbox-activation-20261014/15/pool-restart.log.stderr`, SHA256
+`2C7D5BC4C15A7A4C5C901B01A1EE5507C16F53368B416AF1CB031D4CED15A26B`.
+The final source separates refresh single-flight from journal write exclusion:
+unchanged proof/read work does not block readiness; actual due work re-reads
+state under the owner and keeps it through both roles/final pair verification.
+Final matching19/0/0 and canonical full409/0/10,419 exact mappings/2844 unchanged
+inputs, all native stages0 and zero build warnings/errors are owned by the
+[Registry source receipt](../../deep-registry-api/docs/testing/s05-protected-role-signer-2026-10-14.md#shared-connection-owner-remediation).
+
+Actual build16/update17 native0, then eight-service retained restart18 native0:
+20s offline,38s recovery,30s stable current Registry/MGR and three ONION
+capabilities; same Registry/node/role custody and all container/state mounts.
+`artifacts/s05-mailbox-activation-20261014/18/owner-restart.log`, SHA256
+`CD90E40D9079C2EEA06C73865BD9BD86562A98FFCC2AAD723A4465C5A9A1EB26`.
+Initial recovery503/timeouts remain in that successful receipt; stable interval
+started only after verified recovery. Read-back then found30 signed MGR1 rows,
+generation15/entry_count15/committed15 in each existing role scope, no pending.
+No deletion, scope reinitialization, identity change, deadline enlargement or
+manual signature was used. This is one bounded recovery, not the complete S05
+rotation/outage/soak matrix or node/client/device acceptance.

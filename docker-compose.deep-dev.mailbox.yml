@@ -1,0 +1,63 @@
+# Explicit current-dev activation overlay. Not a production deployment file.
+services:
+  registry:
+    environment:
+      DeepIdV2MailboxGrantAuthority__Enabled: "true"
+      DeepIdV2MailboxGrantAuthority__ObserverCredentialPath: /run/deep-public/observer.did2
+      DeepIdV2MailboxGrantAuthority__DepositSignerSocketPath: /run/deposit-socket/deposit.sock
+      DeepIdV2MailboxGrantAuthority__RetrieveSignerSocketPath: /run/retrieve-socket/retrieve.sock
+    volumes:
+      # Compose replaces the base mount by target; this volume excludes role seeds.
+      - registry-mailbox-secrets:/run/secrets:ro
+      - deposit-socket:/run/deposit-socket:ro
+      - retrieve-socket:/run/retrieve-socket:ro
+    depends_on:
+      deposit-signer: {condition: service_healthy}
+      retrieve-signer: {condition: service_healthy}
+  deposit-signer: &signer
+    image: ${DEEP_DEV_PROJECT:?explicit current project}/registry:candidate
+    platform: linux/arm64
+    restart: always
+    init: true
+    entrypoint: [dotnet]
+    command: [Deep.Registry.Api.dll, mailbox-role-signer, run]
+    working_dir: /app
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 32
+    mem_limit: 256m
+    cpus: 0.5
+    ulimits: {core: {soft: 0, hard: 0}}
+    volumes:
+      - ${DEEP_DEV_ROOT}/mailbox/deposit.json:/app/appsettings.Development.json:ro
+      - deposit-secrets:/run/role-secrets:ro
+      - deposit-socket:/run/role-socket
+    healthcheck:
+      test: [CMD, test, -S, /run/role-socket/deposit.sock]
+      interval: 5s
+      timeout: 2s
+      retries: 6
+    logging:
+      driver: json-file
+      options: {max-size: 1m, max-file: "1"}
+  retrieve-signer:
+    <<: *signer
+    volumes:
+      - ${DEEP_DEV_ROOT}/mailbox/retrieve.json:/app/appsettings.Development.json:ro
+      - retrieve-secrets:/run/role-secrets:ro
+      - retrieve-socket:/run/role-socket
+    healthcheck:
+      test: [CMD, test, -S, /run/role-socket/retrieve.sock]
+      interval: 5s
+      timeout: 2s
+      retries: 6
+volumes:
+  registry-mailbox-secrets: {external: true, name: "${DEEP_DEV_PROJECT}_registry-mailbox-secrets"}
+  deposit-secrets: {external: true, name: "${DEEP_DEV_PROJECT}_deposit-secrets"}
+  retrieve-secrets: {external: true, name: "${DEEP_DEV_PROJECT}_retrieve-secrets"}
+  deposit-socket: {external: true, name: "${DEEP_DEV_PROJECT}_deposit-socket"}
+  retrieve-socket: {external: true, name: "${DEEP_DEV_PROJECT}_retrieve-socket"}

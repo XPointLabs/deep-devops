@@ -45,6 +45,50 @@ journals or mailbox admission. An already initialized fixture with discarded
 issuer keys requires a properly signed policy/role successor; do not create an
 unrelated seed and pretend it matches its old PMA2.
 
+### Explicit current-dev mailbox issuer activation
+
+The optional `docker-compose.deep-dev.mailbox.yml` overlay adds two Linux role
+signers, making eight services only in `deep-dev-current`. Each has no network,
+ports or HTTP listener, a read-only root filesystem, one existing role seed in
+its own owned0700/0600 volume and a separate protected socket volume. Registry
+receives read-only sockets and a filtered online-secrets volume containing no
+mailbox seed. The original secrets volume and host custody remain recoverable;
+no registered node key, offline root, genesis or floor is replaced.
+
+Run in order, once for a genuinely uninitialized mailbox issuer:
+
+```powershell
+./scripts/deep-dev.ps1 -Action PrepareMailbox -ProjectName deep-dev-current
+./scripts/deep-dev.ps1 -Action ProvisionMailbox -ProjectName deep-dev-current
+./scripts/deep-dev.ps1 -Action ActivateMailbox -ProjectName deep-dev-current
+./scripts/deep-dev.ps1 -Action Verify -ProjectName deep-dev-current
+```
+
+Build the matching current Registry image before activation. Preparation verifies
+the original genesis, complete signed authority/time chain, authenticated NTS,
+current PMA2/projection and both existing role keys. It writes exact operator
+config/SQL under private dev custody; repeated differing inputs reject. No new
+key or signature is authored. Provisioning repeats verification and atomically
+creates the four existing canonical grant/MGR tables and explicit network/two
+role roots in the independent PostgreSQL database. Existing tables reject; no
+upsert, reset, floor provisioning or implicit repair exists. Preserve a failed
+or uncertain transaction and inspect it; do not delete tables/markers to retry.
+
+The `mailbox/enabled` marker selects the overlay for normal Up/Start/Stop/Verify
+and retained recovery. A partial activation resumes with normal Up, not another
+first enrollment. Readiness independently verifies current signed journal
+winners; process/socket health alone cannot authorize grants. Node mailbox
+floor enrollment and configured issuance→client verification→node acceptance
+remain separate S05 work, followed by physical device qualification.
+
+Pre-mailbox PrepareOperational/ApplyOperational and first floor-provisioning
+commands deliberately reject once enabled: they do not yet atomically update
+role volumes and journal scopes. Do not bypass this fence with a manual partial
+rollover. Coordinated role rollover and uncertain first-provision recovery remain
+operator-workflow gates, not claims closed by the successful initial activation.
+Exact runs/failures are recorded in the
+[S05 checkpoint](S05-AUTHORITY-HISTORY-2026-10-14.md#actual-protected-mailbox-issuer-activation).
+
 ## Architecture and custody
 
 This workstation uses native Linux ARM64 Docker. .NET and Go images are pinned

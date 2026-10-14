@@ -75,13 +75,45 @@ test('local builds use reviewed image digests and a prebuilt native asset, not C
   assert.match(testEnv, /\$BackendMode = .*else \{ "deep-dev" \}/);
 });
 
+test('mailbox overlay isolates each seed and socket without adding any public listener', () => {
+  const base=fileURLToPath(new URL('../docker-compose.deep-dev.yml',import.meta.url));
+  const overlay=fileURLToPath(new URL('../docker-compose.deep-dev.mailbox.yml',import.meta.url));
+  const config=JSON.parse(execFileSync('docker',['compose','--project-name','deep-dev-current','-f',base,'-f',overlay,'config','--format','json'],{
+    encoding:'utf8',env:{...process.env,DEEP_DEV_PROJECT:'deep-dev-current',DEEP_DEV_ROOT:'C:/Work/DeepSession/secrets/dev/deep-dev-current',
+      DEEP_DEV_IPV4_PREFIX:'172.31.241',DEEP_DEV_PORT_PREFIX:'282',DEEP_DEV_REGISTRY_PORT:'28543'}}));
+  assert.equal(Object.keys(config.services).length,8);
+  for(const role of ['deposit','retrieve']) {
+    const s=config.services[`${role}-signer`];
+    assert.equal(s.network_mode,'none');assert.equal(s.read_only,true);assert.equal(s.ports,undefined);
+    assert.deepEqual(s.entrypoint,['dotnet']);assert.deepEqual(s.command,['Deep.Registry.Api.dll','mailbox-role-signer','run']);
+    assert.equal(s.volumes.filter(v=>v.target==='/run/role-secrets'&&v.source===`${role}-secrets`&&v.read_only).length,1);
+    assert.equal(s.volumes.length,3);assert.equal(s.restart,'always');
+  }
+  const secrets=config.services.registry.volumes.filter(v=>v.target==='/run/secrets');
+  assert.equal(secrets.length,1);assert.equal(secrets[0].source,'registry-mailbox-secrets');
+  assert.equal(config.services.registry.environment.DeepIdV2MailboxGrantAuthority__Enabled,'true');
+});
+
+test('mailbox activation explicitly provisions permanent roots and never repairs a retained journal',async()=>{
+  const script=await read('./deep-dev.ps1');
+  const preparation=await read('../tools/deep-dev/DevMailboxPreparation.cs');
+  assert.match(preparation,/MailboxAuthorityV2Verifier.Verify/);assert.match(preparation,/policy.BindsProjection/);
+  assert.match(preparation,/signer.Ed25519PublicKey.Span.SequenceEqual/);assert.doesNotMatch(preparation,/Signer.Create|SignDetached|DateTime.UtcNow/);
+  assert.match(script,/registry-mailbox-secrets/);assert.match(script,/permanent grant\/MGR roots explicitly committed/);
+  assert.match(script,/\$devServiceCount = if \(\$mailboxEnabled\) \{ 8 \} else \{ 6 \}/);
+  assert.match(script,/Mailbox-enabled custody requires coordinated role-volume\/journal rollover/);
+  const provisioning=script.split("if ($Action -eq 'ProvisionMailbox')")[1].split("if ($Action -eq 'ActivateMailbox')")[0];
+  assert.match(provisioning,/BEGIN;/);assert.match(provisioning,/COMMIT;/);
+  assert.doesNotMatch(provisioning,/ON CONFLICT|DELETE FROM|TRUNCATE|volume','rm|provision-floor/);
+});
+
 test('engine fault tests automatic restart with retained custody and refuse a shared engine', async () => {
   const script = await read('./deep-dev.ps1');
   const fault = script.split("if ($Action -in @('StackFault','EngineFault','ExpiryFault'))")[1].split("if ($Action -eq 'Verify')")[0];
   assert.match(script, /\$Action -eq 'EngineFault' -and -not \$ConfirmEngineShutdown/);
   assert.match(fault, /\$wholeEngine = \$Action -eq 'EngineFault'/);
   assert.match(fault, /desktop-linux/);
-  assert.match(fault, /\$allRunning.Count -ne 6/);
+  assert.match(fault, /\$allRunning.Count -ne \$devServiceCount/);
   assert.match(fault, /\$policy -cne 'always'/);
   assert.match(fault, /Invoke-DesktopOperation 'stop' 60/);
   assert.match(fault, /finally\s*\{\s*if \(\$wholeEngine\) \{[^}]*Invoke-DesktopOperation 'start' 120/s);

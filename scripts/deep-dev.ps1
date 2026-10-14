@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('Init','Build','PrepareAuthority','PrepareOperational','ApplyOperational','AdmitObserver','Provision','ProvisionFloor','Up','Status','Stop','Start','Verify','FaultMatrix','HistoryFault','StackFault','EngineFault','ExpiryFault')][string]$Action,
+    [Parameter(Mandatory)][ValidateSet('Init','Build','PrepareAuthority','PrepareOperational','ApplyOperational','PrepareMailbox','ProvisionMailbox','ActivateMailbox','AdmitObserver','Provision','ProvisionFloor','Up','Status','Stop','Start','Verify','FaultMatrix','HistoryFault','StackFault','EngineFault','ExpiryFault')][string]$Action,
     [string]$OperationalCandidate,
     [string]$CustodyRoot = 'C:\Work\DeepSession\secrets\dev\deep-dev',
     [ValidateSet('deep-dev','deep-dev-current')][string]$ProjectName = 'deep-dev',
@@ -63,6 +63,18 @@ $env:DEEP_DEV_IPV4_PREFIX = if ($ProjectName -ceq 'deep-dev-current') { '172.31.
 $env:DEEP_DEV_PORT_PREFIX = if ($ProjectName -ceq 'deep-dev-current') { '282' } else { '281' }
 $env:DEEP_DEV_REGISTRY_PORT = if ($ProjectName -ceq 'deep-dev-current') { '28543' } else { '28443' }
 $compose = @('compose','--project-name',$ProjectName,'--file',(Join-Path $devopsRoot 'docker-compose.deep-dev.yml'))
+$mailboxMarker = Join-Path $custodyPath 'mailbox/enabled'
+$mailboxEnabled = Test-Path -LiteralPath $mailboxMarker -PathType Leaf
+if ($mailboxEnabled) {
+    if ($ProjectName -cne 'deep-dev-current' -or ((Get-Item -LiteralPath $mailboxMarker).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Invalid current-dev mailbox activation marker.' }
+    $compose += @('--file',(Join-Path $devopsRoot 'docker-compose.deep-dev.mailbox.yml'))
+}
+$devServiceCount = if ($mailboxEnabled) { 8 } else { 6 }
+$devServices = @('floor','registry','publisher','node-1','node-2','node-3')
+if ($mailboxEnabled) { $devServices += @('deposit-signer','retrieve-signer') }
+if ($mailboxEnabled -and $Action -in @('PrepareOperational','ApplyOperational','Provision','ProvisionFloor')) {
+    throw 'Mailbox-enabled custody requires coordinated role-volume/journal rollover; these pre-mailbox ceremonies cannot mutate it.'
+}
 if ($Action -eq 'Init') {
     if (Test-Path -LiteralPath $custodyPath) { throw 'Existing dev custody cannot be overwritten; use Provision/Up for reuse.' }
     $ntsSource = Join-Path $devopsRoot 'tools/nts-observer'
@@ -115,6 +127,45 @@ function Invoke-DevObserverAdmission {
         '--mount',"type=bind,source=$admissionFile,target=/run/deep-observer/admission.dga2,readonly",
         "$ProjectName/publisher:candidate",'Deep.Dev.dll','admit-observer','/run/deep-public','/run/deep-observer/admission.dga2')
 }
+if ($Action -eq 'PrepareMailbox') {
+    if ($ProjectName -cne 'deep-dev-current' -or $mailboxEnabled) { throw 'Preparation requires the retained current contour before activation.' }
+    Run-Native dotnet @('run','--project',(Join-Path $devopsRoot 'tools/deep-dev/Deep.Dev.csproj'),'-c','Debug','--','prepare-mailbox',$custodyPath,(Join-Path $devopsRoot 'tools/nts-observer/deep-nts-observer.exe'))
+    return
+}
+if ($Action -eq 'ProvisionMailbox') {
+    if ($ProjectName -cne 'deep-dev-current' -or $mailboxEnabled -or (Test-Path -LiteralPath (Join-Path $custodyPath 'mailbox/provisioned'))) { throw 'Explicit first mailbox provisioning only; never reset a retained issuer.' }
+    Run-Native dotnet @('run','--project',(Join-Path $devopsRoot 'tools/deep-dev/Deep.Dev.csproj'),'-c','Debug','--','prepare-mailbox',$custodyPath,(Join-Path $devopsRoot 'tools/nts-observer/deep-nts-observer.exe'))
+    $roots = Join-Path $custodyPath 'mailbox/roots.sql'
+    if (-not (Test-Path -LiteralPath $roots -PathType Leaf)) { throw 'PrepareMailbox must verify retained signed role custody first.' }
+    foreach ($role in @('deposit','retrieve')) {
+        foreach ($kind in @('secrets','socket')) { Run-Native docker @('volume','create','--label','deep.environment=dev','--label',"deep.project=$ProjectName","$($ProjectName)_$role-$kind") }
+        $seed = Join-Path $custodyPath "registry/secrets/mailbox-$role.seed"
+        $copy = 'set -eu; test -f /source/role.seed && test ! -L /source/role.seed; if test -f /target/role.seed; then cmp -s /source/role.seed /target/role.seed; else test -z "$(ls -A /target)"; cp /source/role.seed /target/role.seed; fi; test "$(ls -A /target | wc -l)" = 1; chmod 0700 /target; chmod 0600 /target/role.seed; chown 0:0 /target /target/role.seed'
+        Run-Native docker @('run','--rm','--network','none','--mount',"type=bind,source=$seed,target=/source/role.seed,readonly",'--mount',"type=volume,source=$($ProjectName)_$role-secrets,target=/target",'alpine:3.22','sh','-c',$copy)
+        Run-Native docker @('run','--rm','--network','none','--mount',"type=volume,source=$($ProjectName)_$role-socket,target=/target",'alpine:3.22','sh','-c','set -eu; test -z "$(ls -A /target)"; chmod 0700 /target; chown 0:0 /target')
+    }
+    Run-Native docker @('volume','create','--label','deep.environment=dev','--label',"deep.project=$ProjectName","$($ProjectName)_registry-mailbox-secrets")
+    # Keep the original volume intact for recovery. Registry's new mount excludes both role seeds.
+    $filtered = 'set -eu; for f in /source/*; do test -f "$f" && test ! -L "$f"; n=${f##*/}; case "$n" in mailbox-deposit.seed|mailbox-retrieve.seed) continue;; directory-integrity.key|proof-ledger-integrity.key|request-ledger-integrity.key|time-integrity.key|server.crt|server.key|witness-1.seed|witness-2.seed|witness-3.seed) ;; *) exit 2;; esac; if test -f "/target/$n"; then cmp -s "$f" "/target/$n"; else cp "$f" "/target/$n"; fi; done; test "$(ls -A /target | wc -l)" = 9; test ! -e /target/mailbox-deposit.seed; test ! -e /target/mailbox-retrieve.seed; chmod 0700 /target; chmod 0600 /target/*; chown -R 0:0 /target'
+    Run-Native docker @('run','--rm','--network','none','--mount',"type=bind,source=$custodyPath/registry/secrets,target=/source,readonly",'--mount',"type=volume,source=$($ProjectName)_registry-mailbox-secrets,target=/target",'alpine:3.22','sh','-c',$filtered)
+    # One explicit atomic DDL/root transaction. Existing tables reject; no IF NOT EXISTS,
+    # upsert, deletion or floor provisioning can silently repair lost issuer state.
+    $sql = 'BEGIN;' + [IO.File]::ReadAllText((Join-Path (Split-Path $devopsRoot -Parent) 'deep-registry-api/docs/sql/did2-mailbox-grant-journal.sql')) +
+        [IO.File]::ReadAllText((Join-Path (Split-Path $devopsRoot -Parent) 'deep-registry-api/docs/sql/mailbox-revocation-journal.sql')) + [IO.File]::ReadAllText($roots) + 'COMMIT;'
+    $result = $sql | & docker @($compose + @('exec','-T','floor','gosu','postgres','psql','-q','-v','ON_ERROR_STOP=1','-h','/var/run/postgresql','-U','postgres','-d','deep_dev')) 2>&1
+    if ($LASTEXITCODE -ne 0) { throw 'Explicit mailbox journal transaction failed; inspect private state, never reinitialize retained floors.' }
+    $null = New-Item -ItemType File -Path (Join-Path $custodyPath 'mailbox/provisioned') -ErrorAction Stop
+    Write-Host 'Existing role keys copied to isolated custody; permanent grant/MGR roots explicitly committed. Not activated.'
+    return
+}
+if ($Action -eq 'ActivateMailbox') {
+    if ($ProjectName -cne 'deep-dev-current' -or $mailboxEnabled -or -not (Test-Path -LiteralPath (Join-Path $custodyPath 'mailbox/provisioned') -PathType Leaf)) { throw 'Explicit prepared/provisioned current mailbox custody required.' }
+    $null = New-Item -ItemType File -Path $mailboxMarker -ErrorAction Stop
+    $compose += @('--file',(Join-Path $devopsRoot 'docker-compose.deep-dev.mailbox.yml'))
+    Run-Native docker ($compose + @('up','-d','--wait','--wait-timeout','90','deposit-signer','retrieve-signer','registry'))
+    Write-Host 'Mailbox composition enabled with retained journals; run Verify before any issuer/device acceptance claim.'
+    return
+}
 if ($Action -eq 'AdmitObserver') { Invoke-DevObserverAdmission; return }
 if ($Action -eq 'Build') {
     Run-Native dotnet @('run','--project',(Join-Path $devopsRoot 'tools/deep-dev/Deep.Dev.csproj'),'-c','Debug','--','configure',$custodyPath)
@@ -122,13 +173,19 @@ if ($Action -eq 'Build') {
 }
 function Test-CurrentCapabilities {
     $ready = $true
+    if ($mailboxEnabled) {
+        foreach ($role in @('deposit','retrieve')) {
+            & docker @($compose + @('exec','-T',"$role-signer",'test','-S',"/run/role-socket/$role.sock")) 2>$null
+            if ($LASTEXITCODE -ne 0) { Write-Host "Current capability unavailable: $role-signer process/socket."; return $false }
+        }
+    }
     $registryResult = & docker @($compose + @('exec','-T','registry','curl','--fail','--silent','--max-time','5','--cacert','/run/deep-public/dev-ca.crt','https://localhost/health/did2/ready')) 2>$null
-    if ($LASTEXITCODE -ne 0) { return $false }
+    if ($LASTEXITCODE -ne 0) { Write-Host "Current capability unavailable: Registry readiness HTTP (exit $LASTEXITCODE)."; return $false }
     try { if (($registryResult | ConvertFrom-Json).ok -ne $true) { return $false } } catch { return $false }
     foreach ($devNode in 1..3) {
         $nodeResult = & docker @($compose + @('exec','-T',"node-$devNode",'curl','--fail','--silent','--max-time','5','http://localhost:8080/health/ready')) 2>$null
-        if ($LASTEXITCODE -ne 0) { $ready = $false; continue }
-        try { if (($nodeResult | ConvertFrom-Json).privacyRouting -cne 'ready') { $ready = $false } } catch { $ready = $false }
+        if ($LASTEXITCODE -ne 0) { Write-Host "Current capability unavailable: node-$devNode health HTTP (exit $LASTEXITCODE)."; $ready = $false; continue }
+        try { if (($nodeResult | ConvertFrom-Json).privacyRouting -cne 'ready') { Write-Host "Current capability unavailable: node-$devNode verified ONION."; $ready = $false } } catch { $ready = $false }
     }
     return $ready
 }
@@ -200,10 +257,10 @@ if ($Action -in @('StackFault','EngineFault','ExpiryFault')) {
         $context = & docker context show
         if ($LASTEXITCODE -ne 0 -or $context -cne 'desktop-linux') { throw 'EngineFault requires the local Docker Desktop Linux engine.' }
         $allRunning = @(& docker ps -q)
-        if ($LASTEXITCODE -ne 0 -or $allRunning.Count -ne 6) { throw 'EngineFault requires no unrelated running containers.' }
+        if ($LASTEXITCODE -ne 0 -or $allRunning.Count -ne $devServiceCount) { throw 'EngineFault requires no unrelated running containers.' }
     }
     $devRunning = @(& docker ps -q --filter "label=com.docker.compose.project=$ProjectName")
-    if ($LASTEXITCODE -ne 0 -or $devRunning.Count -ne 6) { throw 'Recovery fault requires exactly the six running deep-dev services.' }
+    if ($LASTEXITCODE -ne 0 -or $devRunning.Count -ne $devServiceCount) { throw 'Recovery fault requires the exact owned running service set.' }
     [void](Wait-CurrentCapabilities)
     $retained = @{}
     foreach ($id in $devRunning) {
@@ -217,6 +274,12 @@ if ($Action -in @('StackFault','EngineFault','ExpiryFault')) {
     foreach ($service in @('registry','node-1','node-2','node-3')) {
         $custody[$service] = & docker @($compose + @('exec','-T',$service,'sh','-c','sha256sum /run/secrets/*'))
         if ($LASTEXITCODE -ne 0 -or -not $custody[$service]) { throw 'Cannot snapshot retained online custody.' }
+    }
+    if ($mailboxEnabled) {
+        foreach ($role in @('deposit','retrieve')) {
+            $custody["$role-signer"] = & docker @($compose + @('exec','-T',"$role-signer",'sh','-c','sha256sum /run/role-secrets/role.seed'))
+            if ($LASTEXITCODE -ne 0 -or -not $custody["$role-signer"]) { throw 'Cannot snapshot retained role custody.' }
+        }
     }
     if ($Action -eq 'ExpiryFault') {
         # Finish one protected delegated commit while the normal publisher is
@@ -269,7 +332,8 @@ if ($Action -in @('StackFault','EngineFault','ExpiryFault')) {
             if ($LASTEXITCODE -ne 0 -or ($after -join "`n") -cne ($retained[$id] -join "`n")) { throw 'Recovery changed retained containers or custody/state mounts.' }
         }
         foreach ($service in $custody.Keys) {
-            $after = & docker @($compose + @('exec','-T',$service,'sh','-c','sha256sum /run/secrets/*'))
+            $digestCommand = if ($service -in @('deposit-signer','retrieve-signer')) { 'sha256sum /run/role-secrets/role.seed' } else { 'sha256sum /run/secrets/*' }
+            $after = & docker @($compose + @('exec','-T',$service,'sh','-c',$digestCommand))
             if ($LASTEXITCODE -ne 0 -or ($after -join "`n") -cne ($custody[$service] -join "`n")) { throw 'Online custody changed across recovery.' }
         }
         $cases.Add([ordered]@{cycle=$cycle;offlineSeconds=$OfflineSeconds;recovered=$true;recoverySeconds=$seconds;stableSeconds=$StableSeconds})
@@ -293,13 +357,13 @@ if ($Action -eq 'FaultMatrix') {
     # Record exact dev container mounts, not private keys/identifiers. They must
     # remain byte-for-byte the same binding throughout stop/start and recreation.
     $mounts = @{}
-    foreach ($service in @('floor','registry','publisher','node-1','node-2','node-3')) {
+    foreach ($service in $devServices) {
         $containerId = & docker @($compose + @('ps','-q',$service))
         $mounts[$service] = (& docker inspect --format '{{json .Mounts}}' $containerId) | ConvertFrom-Json | ForEach-Object { "$($_.Type)|$($_.Source)|$($_.Destination)|$($_.RW)" } | Sort-Object
         if ($LASTEXITCODE -ne 0) { throw 'Cannot snapshot exact development mounts.' }
     }
     $cases = [Collections.Generic.List[object]]::new()
-    foreach ($service in @('node-1','node-2','node-3','registry','floor','publisher')) {
+    foreach ($service in $devServices) {
         try {
             Run-Native docker ($compose + @('stop','--timeout','10',$service))
             # Let existing bounded request/refresh windows expire naturally.
@@ -374,7 +438,7 @@ if ($Action -in @('Provision','ProvisionFloor')) {
 }
 switch ($Action) {
     'Up' {
-        Run-Native docker ($compose + @('up','-d','floor','publisher','registry','node-1','node-2','node-3'))
+        Run-Native docker ($compose + @('up','-d'))
         Invoke-DevObserverAdmission
     }
     'Status' { Run-Native docker ($compose + @('ps','--all')) }
@@ -382,13 +446,13 @@ switch ($Action) {
         # Explicit maintenance stop stays stopped across engine boots. This is
         # distinct from Desktop shutdown of the normally auto-starting network.
         $ids = @(& docker @($compose + @('ps','--all','--quiet')))
-        if ($LASTEXITCODE -ne 0 -or $ids.Count -ne 6) { throw 'Cannot resolve exactly six retained dev services.' }
+        if ($LASTEXITCODE -ne 0 -or $ids.Count -ne $devServiceCount) { throw 'Cannot resolve exact retained dev services.' }
         Run-Native docker (@('update','--restart','unless-stopped') + $ids)
         Run-Native docker ($compose + @('stop'))
     }
     'Start' {
         $ids = @(& docker @($compose + @('ps','--all','--quiet')))
-        if ($LASTEXITCODE -ne 0 -or $ids.Count -ne 6) { throw 'Cannot resolve exactly six retained dev services; use Up for initial creation.' }
+        if ($LASTEXITCODE -ne 0 -or $ids.Count -ne $devServiceCount) { throw 'Cannot resolve exact retained dev services; use Up for initial creation.' }
         Run-Native docker (@('update','--restart','always') + $ids)
         Run-Native docker ($compose + @('start'))
     }

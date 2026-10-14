@@ -76,6 +76,10 @@ try
     }), "outside development scope");
     Check(!observed && File.ReadAllBytes(Path.Combine(directory, "root.seed")).AsSpan().SequenceEqual(original),
         "no external observation or custody mutation on rejected path");
+    await Reject(() => DevMailboxPreparation.PrepareAsync(directory,"unused",(_,_)=> {
+        observed=true;return Task.FromResult(700_000UL);
+    }),"mailbox preparation outside development scope");
+    Check(!observed,"mailbox scope rejection before NTS or writes");
     await TestFileCeremonyAsync(genesis, root, [witness1, witness2, witness3]);
     Console.WriteLine("Development offline paired-authority tests passed; runtime/device activation not tested.");
 }
@@ -212,6 +216,12 @@ static async Task TestFileCeremonyAsync(VerifiedXPointNetworkBootstrap bootstrap
             Check(policy.ResolveIssuer(Deep.Protocol.DeepExtension.MailboxCapabilities.MailboxCapabilityDomain.Deposit).PublicKey.Span.SequenceEqual(deposit.Ed25519PublicKey.Span) &&
                 policy.ResolveIssuer(Deep.Protocol.DeepExtension.MailboxCapabilities.MailboxCapabilityDomain.Retrieve).PublicKey.Span.SequenceEqual(retrieve.Ed25519PublicKey.Span) &&
                 policy.MinimumGrantGeneration == 2 && policy.BindsProjection(next.ExactPlacementTopologyChain[^1].Span), "signed new role keys match staged private custody and projection");
+            var rootsSql=DevMailboxPreparation.RootSql(policy);
+            Check(rootsSql.Split("INSERT INTO ").Length==4 && rootsSql.Contains(Convert.ToHexString(policy.CoreHash.Span),StringComparison.Ordinal) &&
+                rootsSql.Contains(Convert.ToHexString(deposit.Ed25519PublicKey.Span),StringComparison.Ordinal) &&
+                rootsSql.Contains(Convert.ToHexString(retrieve.Ed25519PublicKey.Span),StringComparison.Ordinal) &&
+                !rootsSql.Contains("CONFLICT",StringComparison.Ordinal) && !rootsSql.Contains("DELETE",StringComparison.Ordinal),
+                "explicit new journal roots bind verified policy and both roles without reset/upsert");
             var encoded = File.ReadAllBytes(Path.Combine(candidate, "operator/renewal.state"));
             Check(CryptographicOperations.FixedTimeEquals(encoded.AsSpan(0, 32), HMACSHA256.HashData(integrity, encoded.AsSpan(32))), "candidate journal uses retained integrity key");
             var journal = DevPublisher.ReadJournal(Path.Combine(candidate, "operator/renewal.state"), integrity, bootstrap.Authority.NetworkId.ToArray());
