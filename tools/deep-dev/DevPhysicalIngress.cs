@@ -32,6 +32,19 @@ internal static class DevPhysicalIngress
         "Online intent differs from the sealed private plan." => "online-intent",
         "Physical publication result differs." => "publication-result",
         "Installed physical publication is not in the retained prefix." => "publication-prefix",
+        "Physical leaf custody differs." => "leaf-custody",
+        "Retained SAN missing." => "san-missing",
+        "Physical seal key differs." => "seal-key",
+        "Unexpected dev PKI signature algorithm." => "pki-signature-algorithm",
+        "Dev PKI signature differs." => "pki-signature",
+        "CRL issuer differs." => "crl-issuer",
+        "Original genesis differs." => "policy-genesis",
+        "Policy/projection differs." => "policy-projection",
+        "The PMA2 trusted-time interval is invalid." => "policy-time-interval",
+        "PMA2 is outside its exact XNA1 authority and authenticated interval." => "policy-authority-window",
+        "PMA2 does not authorize the current selection-bound mailbox algorithm." => "policy-algorithm",
+        "PMA2 does not meet the XNA1 root threshold." => "policy-threshold",
+        "PMA2 contains an unknown or invalid root receipt." => "policy-root-receipt",
         _ => "unclassified"
     };
     internal static IPAddress RequireAddress(string text)
