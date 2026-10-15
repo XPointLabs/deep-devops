@@ -174,6 +174,9 @@ internal static class DevOwnedMailboxExercise
             if(error is CryptographicException && error.Data["Deep.ContactPublication.Status"] is ushort publicationStatus &&
                 publicationStatus is >=1 and <=9 && error.Data["Deep.ContactPublication.MutationOutcome"] is byte mutationOutcome)
                 Console.Error.WriteLine("Owned development closed publication result: status="+publicationStatus+"; mutation="+mutationOutcome+".");
+            if(error is CryptographicException && error.Data["Deep.ContactPublication.RequestScope"] is string publicationScope &&
+                publicationScope is "request-window" or "request-authority-bound" or "owned-lineage")
+                Console.Error.WriteLine("Owned development closed publication request scope: "+publicationScope+".");
             if(error is CryptographicException && error.Message=="The protected DID2 publication differs from current placement.")
                 Console.Error.WriteLine("Owned development closed failure classification: prekey-placement-changed.");
             if(error is ClientMailboxDispatchOutcomeUnknownException) {

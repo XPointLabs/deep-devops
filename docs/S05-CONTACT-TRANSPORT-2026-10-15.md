@@ -112,12 +112,56 @@ Production, GitHub Releases and main were untouched.
 ## Next observed lifecycle boundary
 
 The same-owner view57 success does not establish changed-view renewal. Ordinary
-delegated publication advances PMT with the view; view58 exposed the explicitly
-unimplemented PMT transition from DR-0071/0072/0078. The current rejection is the
-required fail-closed behavior, not a reason to remove the exact-PMT check or use
-historical route facts as current authority. Completing this S05 boundary needs
-an explicitly bounded successor contract spanning authoring, threshold issuance,
-protected pending custody, publication and replica/node verification. Earlier
-incomplete owners remain a separate reconciliation boundary. The failed local
+delegated publication advances PMT with the view; view58 exposed the missing
+logical-assignment/current-carriage lifecycle. That original rejection was
+fail-closed under its then-current contract. The accepted
+[DR-0122](../../docs/survival-program/decisions/DR-0122-logical-mailbox-assignment-carriage.md)
+now owns the semantic clean break: preserve the exact original assignment and
+independently verify current eligibility, logical-resource validity, issuance
+history and fresh operation authority. It does not rewrite saved references,
+revive expired routes or redispatch old mutation requests. The source candidate
+has matching focused coverage; same-owner current-dev activation and final full
+qualification remain open in [NEXT-SPRINT](../../docs/NEXT-SPRINT.md).
+The historical receipts above are unchanged. Earlier incomplete owners remain
+a separate reconciliation boundary. The failed local
 wrapper preparation for `acceptance-renewal-02/` did not launch the client;
 `acceptance-renewal-03/` is the actual subsequent process receipt.
+
+## DR-0122 candidate: real opaque consumer and retained-owner retry
+
+The same local project was rebuilt without resetting keys, accounts, volumes,
+genesis or floors. Receipts are under `artifacts/s05-logical-assignment-20261015/`:
+
+- `runtime-01/`: Build/Up/Verify/CRL native0; the retained owner reopened its exact
+  prekey receipt pair, then got Unauthorized/None from the opaque publication
+  consumer. Source review found its obsolete genesis-only/current-PMT checks.
+- `runtime-02/`: Build native0. Up started all nine services but observer admission
+  failed closed during recovery. This is not a successful Up or client result.
+- `runtime-03/`: retry of supported Up native0; Verify native0 with Registry and
+  three verified onion nodes, recovery105s; CRL native0. The same Windows owner
+  reached view71 and reauthenticated its byte-identical prekey pair. Contact
+  renewal stopped before replica dispatch in owned request verification.
+- `runtime-04/`: the unchanged account/request retried with only closed diagnostic
+  labels added. Native1, `request-window` confirms the original pending publication
+  envelope no longer covers current protected time. No request, nonce, scalar,
+  permanent generation fence or custody was replaced. No expiry check was waived.
+
+The closed request diagnostic permits only `request-window`,
+`request-authority-bound` and `owned-lineage`; it logs no times, identifiers,
+capabilities, payloads or caller-supplied strings.
+
+The matched XNode regression in
+`xnode/artifacts/s05-logical-assignment-20261015/opaque-successor-03/`
+passed19/0/0/native0 after a zero-warning build. It obtains real durable genesis
+receipts before authoring the successor, then commits/reopens/replays both stores
+and resolves signed generation1. Generation and receipt substitutions reject;
+existing one-time tests stay strict. The first fixture attempt hit unchanged
+service-expiry containment; the corrected bounded fixture then exposed the actual
+genesis-only resolver defect. Both original failed receipts remain in place.
+These are signed local source/storage tests, not remote or physical E2E.
+
+The remaining original-intent recovery needs its separate bounded contract; an
+unsigned Unauthorized/None result cannot release a permanent issuer fence, and
+an expired XPU cannot be redispatched as fresh authority. This is not solved by
+creating a fifth owner. Final source qualification, S05 and all physical delivery
+claims remain open. Production, Releases and main were untouched.
