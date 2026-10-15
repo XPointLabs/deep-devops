@@ -5,11 +5,42 @@ Execution order remains [S05](../../docs/architecture/IMPLEMENTATION-PLAN-V1.md#
 This extends [the prekey checkpoint](S05-PREKEY-LIFECYCLE-2026-10-15.md), not its
 historical receipts or physical/release acceptance.
 
+## Current local update — 2026-10-16
+
+Registry `a4805bf` adds one bounded public admission waiter alongside the existing
+single issuer waiter. The active frame/issuer limit stays one, and queueing uses
+the original30s request budget. The binary contract, signatures and client retry
+limit are unchanged; [Registry mapping](../../deep-registry-api/docs/DID2_DIRECTORY_CANDIDATE.md#private-did2-contact-coordination-deployment)
+owns its implementation constraints. Focused TestServer/admission/file15 passed,
+not signed/PG/physical evidence. Android had exhausted eight429 reads before this
+update; matching managed-input metadata identifies that earlier failure.
+
+Supported `deep-dev.ps1 Build` and `Up` updated only retained `deep-dev-current`.
+The post-Up raw mount hash comparison failed; its pre-Up rows were not persisted,
+so original before/after equality is NOT claimed or retrospectively marked PASS.
+Docker Desktop exposes both host-drive and desktop-drive source forms. A separate
+read-only audit verified all29 declared named-volume bindings predate the upgrade,
+all25 bind sources are in the declared current-dev or exact repo-config scope,
+and Registry runs the built candidate. No volume was created/deleted/reset and no
+key/floor was reprovisioned. A retained-upgrade gate with persisted canonical
+before/after inputs remains required. Readiness subsequently verified Registry
+and all three ONION capabilities in14s; this is not physical delivery.
+
+Receipts: `artifacts/s05-current-publication-20261015/`
+`public-read-admission-activation-01/failure.json` preserves the failed guard;
+`public-read-declared-mount-audit-02/result.json` records only closed audit results.
+Raw build/Up logs stay outside Git. Android APK19 retains its account/originals;
+the corrected stop is physically confirmed, but the post-update exact AddContact17
+has no terminal device result yet. A failed hierarchy observation was not retried
+as a send. Windows build12 is built, not launched after physical Escape. Production,
+GitHub Releases and main were not changed; physical contacts/text/files/groups0/4.
+
 ## Observed defects and coherent fixes
 
 - The primary retained owner now reports the closed `pmt-reference` failure for
   its incomplete XRA. It was not reset, migrated or silently reauthored.
-- Raw network distribution uses one in-flight response with no server queue.
+- At the original diagnostic, raw network distribution used one in-flight response
+  with no server queue; the bounded current update is distinguished above.
   The first diagnostic owner encountered429 during multi-fragment publication.
   The client now retries only rejected identity-neutral public reads, at most
   eight times with jitter and Retry-After, within the original configured total
