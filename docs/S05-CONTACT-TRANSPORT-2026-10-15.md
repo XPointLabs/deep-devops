@@ -165,3 +165,40 @@ unsigned Unauthorized/None result cannot release a permanent issuer fence, and
 an expired XPU cannot be redispatched as fresh authority. This is not solved by
 creating a fifth owner. Final source qualification, S05 and all physical delivery
 claims remain open. Production, Releases and main were untouched.
+
+## DR-0123 connected fresh-lease checkpoint
+
+The target is owned by [DR-0123](../../docs/survival-program/decisions/DR-0123-retained-publication-intent.md).
+XPL1 is the sole reusable mutation envelope; its original XPU/request/op/hash
+and permanent winner remain unchanged. One-time genesis remains a separate
+strict current operation. Neither the node saga nor protected route journal
+changes format. No account, key, floor, volume or original intent was reset.
+
+Exact receipts under `artifacts/s05-logical-assignment-20261015/`:
+
+- `publication-lease-runtime-01/`: Build/Up/Verify/CRL native0; current owner
+  reached view77 and reauthenticated the byte-identical prekey pair. Private
+  coordination failed closed with unknown completion; no success is inferred.
+- `publication-lease-runtime-02/`: Build/Up/Verify/CRL native0. The fresh lease
+  passed, but publication received a terminal failure. Added closed HTTP/issuer
+  diagnostics contain no payload, origin, identity or credential.
+- `publication-lease-runtime-03/`: only the supported same-owner exercise, no
+  rebuild/reset. The authenticated terminal code was `MalformedRequest`.
+  Source review found the external DID2 dispatcher still decoding raw XPU;
+  its ordinary complete-interval guard now consumes fresh lease metadata.
+- `publication-lease-runtime-04/`: Build/Up/Verify/CRL native0; actual contact
+  generation1 committed and was adopted. Owned grant/read returned unknown,
+  preserved as a failed whole exercise, not empty-mailbox success.
+- `publication-lease-runtime-05/`: supported exercise of the SAME retained
+  owner, native0. The byte-identical prekey pair and saved contact generation1
+  reauthenticated after reopen, then the current owned grant and node read
+  returned an authenticated empty page. No further publication was required.
+
+The existing bounded before-forward backoff remains; no unknown result frees
+a fence or rewrites original bytes. Source checks include Shared26, Node57
+(including real loopback TLS/H2 peer composition and restart), Protocol138 and
+Registry24 with disposable PostgreSQL/TestServer, all without skips/failures in
+their focused scopes. These are not installed MAUI or physical message delivery,
+full source qualification, operational rollover acceptance or a release. Earlier
+reserved-without-winner/expired-inner-resource owners remain separate recovery
+work; this checkpoint does not replace them with another account.

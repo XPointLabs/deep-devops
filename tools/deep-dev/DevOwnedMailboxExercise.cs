@@ -188,6 +188,9 @@ internal static class DevOwnedMailboxExercise
                     "Privacy ingress outcome is unknown because dispatch was cancelled."=>"dispatch-cancelled",
                     _=>"unclassified"};
                 Console.Error.WriteLine("Owned development closed ingress classification: "+category+".");
+                if (error.Data["Deep.ContactResolve.TerminalFailure"] is ushort terminalCode &&
+                    Enum.IsDefined(typeof(OnionFailureCode), terminalCode))
+                    Console.Error.WriteLine("Owned development authenticated terminal failure: "+(OnionFailureCode)terminalCode+".");
             }
             var frames=new StackTrace(error,false).GetFrames()??[];var emitted=0;
             foreach(var frame in frames){var method=frame.GetMethod();var type=method?.DeclaringType;
