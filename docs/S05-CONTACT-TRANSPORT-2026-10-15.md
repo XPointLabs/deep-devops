@@ -202,3 +202,28 @@ their focused scopes. These are not installed MAUI or physical message delivery,
 full source qualification, operational rollover acceptance or a release. Earlier
 reserved-without-winner/expired-inner-resource owners remain separate recovery
 work; this checkpoint does not replace them with another account.
+
+## DR-0124 completed-winner read-back candidate
+
+The contract is owned by [DR-0124](../../docs/survival-program/decisions/DR-0124-publication-winner-readback.md).
+Physical MAUI020496d profiles passed bootstrap TLS/authority history, then both
+reported unknown contact-publication completion. The retained Android retry
+rejected its expired original request. Read-only database aggregates were
+publication6/completed6/pending0 and route7/completed7/pending0; these counts do
+not prove which request belongs to either physical client.
+
+The matched source candidate adds one current signed READ of a completed winner,
+not another issuance/mutation or a journal generation. Original requests,
+nonces, generation fences, keys, floors and retained accounts stay unchanged.
+Focused component receipts under each repo's
+`artifacts/s05-winner-readback-20261015/` cover Shared5/0/0, Node23/0/0,
+Protocol19/0/0; Registry's wrapper receipt is
+`artifacts/s05-winner-readback-20261015/registry-focused-01/provider.log`, linking
+its disposable PostgreSQL native3/0/0 run. The temporary test container and tmpfs
+were removed by the supported provider; current-dev volumes were not touched.
+
+The previous diagnostics-only runtime at
+`artifacts/s05-local-device-20261015/route-diagnostic-runtime-01/` finished
+Build/Up/Verify/CacheWindowsDevCrl0. It does NOT include this read-back candidate.
+A supported retained rebuild/activation and physical rerun remain required.
+No production machine, GitHub Release or main branch was changed by this slice.
