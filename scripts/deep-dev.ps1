@@ -3,6 +3,7 @@ param(
     [Parameter(Mandatory)][ValidateSet('Init','Build','PrepareAuthority','PrepareOperational','ApplyOperational','PrepareMailbox','ProvisionMailbox','ActivateMailbox','PrepareNodeMailbox','ProvisionNodeMailboxKeys','FetchNodeMailboxControl','EnrollNodeMailbox','ActivateNodeMailbox','ActivateNodeContact','ProvisionNodeContactKeys','EnrollNodeContact','PrepareContactCoordination','ProvisionContactCoordination','ActivateContactCoordination','PrepareDevPki','ApplyDevPki','PreparePhysicalIngress','ApplyPhysicalIngress','CacheWindowsDevCrl','ExerciseOwnedMailboxWindows','ExerciseOwnedMailbox','AdmitObserver','Provision','ProvisionFloor','Up','Status','Stop','Start','Verify','FaultMatrix','HistoryFault','StackFault','EngineFault','ExpiryFault')][string]$Action,
     [ValidateRange(1,3)][int]$NodeNumber = 1,
     [string]$OperationalCandidate,
+    [ValidateSet('primary','contact-diagnostic','contact-replication','contact-acceptance')][string]$OwnedClientScope = 'primary',
     [string]$IngressAddress,
     [string]$CustodyRoot = 'C:\Work\DeepSession\secrets\dev\deep-dev',
     [ValidateSet('deep-dev','deep-dev-current')][string]$ProjectName = 'deep-dev',
@@ -13,6 +14,9 @@ param(
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+if ($PSBoundParameters.ContainsKey('OwnedClientScope') -and $Action -cne 'ExerciseOwnedMailboxWindows') {
+    throw 'OwnedClientScope is only supported by the retained Windows client exercise.'
+}
 if ($Action -eq 'EngineFault' -and -not $ConfirmEngineShutdown) {
     throw 'EngineFault requires explicit whole-Desktop shutdown approval and -ConfirmEngineShutdown. Use StackFault for routine recovery tests.'
 }
@@ -408,7 +412,9 @@ if ($Action -in @('PrepareDevPki','ApplyDevPki')) {
 if ($Action -in @('CacheWindowsDevCrl','ExerciseOwnedMailboxWindows')) {
     if ($ProjectName -cne 'deep-dev-current' -or -not $coordinationEnabled -or -not $pkiEnabled) { throw 'Actual current dev issuer, coordination and signed revocation distribution required.' }
     $command = if ($Action -ceq 'CacheWindowsDevCrl') { 'cache-windows-dev-crl' } else { 'exercise-owned-mailbox' }
-    Run-Native dotnet @('run','--project',(Join-Path $devopsRoot 'tools/deep-dev/Deep.Dev.csproj'),'-c','Debug','--',$command,(Join-Path $custodyPath 'public'))
+    $clientArguments = @('run','--project',(Join-Path $devopsRoot 'tools/deep-dev/Deep.Dev.csproj'),'-c','Debug','--',$command,(Join-Path $custodyPath 'public'))
+    if ($OwnedClientScope -cne 'primary') { $clientArguments += $OwnedClientScope }
+    Run-Native dotnet $clientArguments
     return
 }
 if ($Action -eq 'ExerciseOwnedMailbox') {
@@ -727,7 +733,15 @@ if ($Action -in @('Provision','ProvisionFloor')) {
 switch ($Action) {
     'Up' {
         if ($physicalEnabled) {
-            Run-Native docker ($compose + @('run','--rm','--no-deps','ingress','--check'))
+            $runningIngress = @(& docker @($compose + @('ps','--status','running','-q','ingress')))
+            if ($LASTEXITCODE -ne 0 -or $runningIngress.Count -gt 1) { throw 'Physical ingress runtime scope is ambiguous.' }
+            if ($runningIngress.Count -eq 1) {
+                # A second one-off container cannot claim the live proxy's
+                # exact trusted static address. Recheck its mounted inputs in place.
+                Run-Native docker ($compose + @('exec','-T','ingress','/bin/sh','/usr/local/bin/deep-dev-physical-ingress','--check'))
+            } else {
+                Run-Native docker ($compose + @('run','--rm','--no-deps','ingress','--check'))
+            }
         }
         Run-Native docker ($compose + @('up','-d'))
         Invoke-DevObserverAdmission

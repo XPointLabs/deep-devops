@@ -306,6 +306,11 @@ Readiness, strict host TLS and immutable owned-client publication are separate
 checks. A successful relocation cannot restage/re-sign an old XPP inventory that
 was bound to a prior placement; such lifecycle failures remain real blockers.
 
+For physical `Up`, a running ingress validates mounted inputs in its own
+ephemeral tmpfs before Compose activation; it does not allocate a second proxy
+at the same trusted static address. The one-off validation container is used
+only when ingress is not running. Ambiguous runtime ownership fails closed.
+
 ### Supported Windows owned-client probe commands
 
 After the DR-0121 semantic clean break the fixed current probe uses a separate
@@ -337,14 +342,28 @@ fails closed. Only typed directory 429/503 receive at most three retries honorin
 Retry-After inside the original five-minute operation budget. Unknown forwarding
 completion is retained, never automatically acknowledged or reported as success.
 
+To diagnose a first publication separately from a retained pending operation,
+explicitly select `-OwnedClientScope contact-diagnostic` on the Windows exercise.
+`contact-replication` is a second fixed owner for diagnosing the first actual
+two-store publication. Both use DPAPI-protected storage; subsequent runs retain them.
+`contact-acceptance` is the fixed post-fix acceptance owner. These scopes never
+replace or reset the earlier owners' incomplete operations.
+There is no automatic fallback to this owner, arbitrary path argument or reset.
+The primary account and its unresolved result remain required recovery evidence;
+success for the diagnostic owner cannot qualify primary-account recovery.
+For contact publication only, the probe may retry a typed retryable before-forward rejection within its
+original cancellation budget; it never catches/retries unknown completion.
+This diagnostic orchestration is not installed UI scheduler acceptance.
+
 This is an operator-owned runtime diagnostic, **not physical MAUI/device E2E**.
-Account admission/current network/pre-key authoring have passed on Windows.
-The current signed bridge-IP locators do not yet form a usable Windows TLS/H2
-route: direct bridge-IP handshake times out while the published localhost port
-successfully negotiates strict H2. A TCP connect alone is insufficient evidence.
+Account admission/current network/pre-key publication and exact receipt-pair
+reopen have passed on Windows. The signed reachable origins and separated public
+H2 ingress supersede the earlier unusable Docker-bridge route; current evidence
+is [the S05 checkpoint](S05-PREKEY-LIFECYCLE-2026-10-15.md). A TCP connect or healthy
+capability alone is still insufficient evidence of publication/delivery.
 Do not silently translate sealed endpoints in the client, disable pins/TLS,
-change the profile on failure or reset genesis/floors. A supported signed ingress
-update or production-representative reachable deployment remains required.
+change the profile on failure or reset genesis/floors. Pending contact-publication
+reconciliation and owned grant/node acceptance remain unqualified.
 
 ## Architecture and custody
 

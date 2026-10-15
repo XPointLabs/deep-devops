@@ -6,6 +6,20 @@ import { fileURLToPath } from 'node:url';
 
 const read = p => readFile(new URL(p, import.meta.url), 'utf8');
 
+test('contact diagnostic explicitly selects another retained owner without fallback or reset', async () => {
+  const script = await read('./deep-dev.ps1');
+  const program = await read('../tools/deep-dev/Program.cs');
+  const probe = await read('../tools/deep-dev/DevOwnedMailboxExercise.cs');
+  assert.match(script, /ValidateSet\('primary','contact-diagnostic','contact-replication','contact-acceptance'\).*OwnedClientScope = 'primary'/);
+  assert.match(script, /ContainsKey\('OwnedClientScope'\).*\$Action -cne 'ExerciseOwnedMailboxWindows'/);
+  assert.match(program, /args.Length == 3 && args\[0\] == "exercise-owned-mailbox" && args\[2\] is \("contact-diagnostic" or "contact-replication" or "contact-acceptance"\)/);
+  assert.match(probe, /clientScope != "primary" && !windows/);
+  assert.match(probe, /"contact-diagnostic" => "client-probes\/windows-contact-diagnostic"/);
+  assert.match(probe, /"contact-replication" => "client-probes\/windows-contact-replication"/);
+  assert.match(probe, /_ => throw new ArgumentException\("Unknown retained test owner/);
+  assert.doesNotMatch(probe, /Directory\.Delete|File\.Delete|catch[^\n]*RunAsync/);
+});
+
 test('rebuilding installed physical dev validates sealed images without reconfiguring them', async () => {
   const source = await read('./deep-dev.ps1');
   const build = source.split("if ($Action -eq 'Build') {")[1].split('function Test-CurrentCapabilities')[0];
@@ -13,6 +27,16 @@ test('rebuilding installed physical dev validates sealed images without reconfig
   assert.match(physical, /'validate-physical-ingress'/);
   assert.doesNotMatch(physical, /'configure'|install-|prepare-|provision/);
   assert.ok(build.indexOf("'validate-physical-ingress'") < build.indexOf("@('build','registry','node-1','publisher')"));
+});
+
+test('repeated physical Up checks the running ingress without allocating its static address twice', async () => {
+  const source = await read('./deep-dev.ps1');
+  const up = source.slice(source.lastIndexOf("switch ($Action) {")).split("'Status'")[0];
+  assert.match(up, /'ps','--status','running','-q','ingress'/);
+  assert.match(up, /\$runningIngress.Count -gt 1/);
+  assert.match(up, /\$runningIngress.Count -eq 1/);
+  assert.match(up, /'exec','-T','ingress','\/bin\/sh','\/usr\/local\/bin\/deep-dev-physical-ingress','--check'/);
+  assert.match(up, /else \{\s*Run-Native docker \(\$compose \+ @\('run','--rm','--no-deps','ingress','--check'\)\)/);
 });
 
 test('physical current-dev overlay exposes exact LAN listeners without changing service or custody owners', () => {

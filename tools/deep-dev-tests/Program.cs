@@ -14,6 +14,46 @@ var directory = Path.Combine(Path.GetTempPath(), "deep-dev-offline-tests-" + Gui
 Directory.CreateDirectory(directory);
 try
 {
+    var beforeForwardCalls=0;
+    await DevOwnedMailboxExercise.StageAsync("ContactPublication",()=>{
+        if(++beforeForwardCalls==1)throw new Deep.Client.Shared.Services.ClientMailboxTransportException(
+            Deep.Client.Shared.Services.ClientMailboxTransportFailure.DependencyUnavailable,true,"Fixture rejected before forwarding.");
+        return Task.CompletedTask;
+    },default);
+    Check(beforeForwardCalls==2,"retryable before-forward rejection resumes the same owned stage");
+    var unknownCalls=0;
+    try {
+        await DevOwnedMailboxExercise.StageAsync("ContactPublication",()=>{
+            unknownCalls++;throw new Deep.Client.Shared.Services.ClientMailboxDispatchOutcomeUnknownException("Fixture unknown outcome.");
+        },default);
+        throw new InvalidOperationException("Unknown completion was swallowed.");
+    } catch(Deep.Client.Shared.Services.ClientMailboxDispatchOutcomeUnknownException) {
+        Check(unknownCalls==1,"unknown forwarding completion never retries the stage");
+    }
+    using(var cancelledStage=new CancellationTokenSource()) {
+        var cancellationCalls=0;
+        try {
+            await DevOwnedMailboxExercise.StageAsync("ContactPublication",()=>{
+                cancellationCalls++;cancelledStage.Cancel();
+                throw new Deep.Client.Shared.Services.ClientMailboxTransportException(
+                    Deep.Client.Shared.Services.ClientMailboxTransportFailure.DependencyUnavailable,true,"Fixture rejected before forwarding.");
+            },cancelledStage.Token);
+            throw new InvalidOperationException("Stage cancellation was swallowed.");
+        } catch(OperationCanceledException) {
+            Check(cancellationCalls==1,"before-forward backoff honors original caller cancellation");
+        }
+    }
+    var otherStageCalls=0;
+    try {
+        await DevOwnedMailboxExercise.StageAsync("UnrelatedFixture",()=>{
+            otherStageCalls++;
+            throw new Deep.Client.Shared.Services.ClientMailboxTransportException(
+                Deep.Client.Shared.Services.ClientMailboxTransportFailure.DependencyUnavailable,true,"Fixture unavailable.");
+        },default);
+        throw new InvalidOperationException("Unrelated stage failure was swallowed.");
+    } catch(Deep.Client.Shared.Services.ClientMailboxTransportException) {
+        Check(otherStageCalls==1,"contact before-forward retry does not widen unrelated stage certainty");
+    }
     Check(DevTopology.ForProject("deep-dev").Ipv4Prefix == "172.31.240" &&
         DevTopology.ForProject("deep-dev-current").Ipv4Prefix == "172.31.241", "separate current topology addresses");
     await Reject(() => { _ = DevTopology.ForProject("production"); return Task.CompletedTask; }, "unknown dev project");

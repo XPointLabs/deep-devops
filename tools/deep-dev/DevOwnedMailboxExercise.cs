@@ -19,9 +19,17 @@ using static DevOfflineAuthorityRenewal;
 // injected transport callbacks, pre-signed grants or fixture clocks.
 internal static class DevOwnedMailboxExercise
 {
-    internal static async Task RunAsync(string publicRoot)
+    internal static async Task RunAsync(string publicRoot, string clientScope = "primary")
     {
         var windows=OperatingSystem.IsWindows();
+        var relativeScope = clientScope switch {
+            "primary" => "client-probes/windows-current-publication",
+            "contact-diagnostic" => "client-probes/windows-contact-diagnostic",
+            "contact-replication" => "client-probes/windows-contact-replication",
+            "contact-acceptance" => "client-probes/windows-contact-acceptance",
+            _ => throw new ArgumentException("Unknown retained test owner.", nameof(clientScope))
+        };
+        if(clientScope != "primary" && !windows)throw new PlatformNotSupportedException("The retained contact diagnostic owner requires Windows protected storage.");
         var expected=windows?Path.GetFullPath("C:/Work/DeepSession/secrets/dev/deep-dev-current/public"):"/run/deep-public";
         if((!windows && !OperatingSystem.IsLinux()) || !string.Equals(Path.GetFullPath(publicRoot),expected,
             windows?StringComparison.OrdinalIgnoreCase:StringComparison.Ordinal))throw new ArgumentException("Wrong disposable client public root.");
@@ -43,7 +51,7 @@ internal static class DevOwnedMailboxExercise
         // DR-0121 semantic clean break. Keep the pre-cutover probe untouched as
         // negative evidence; this is one fixed current test owner, not a state
         // migration, a key replacement or a legacy execution path.
-        var scratch=windows?Path.Combine(Path.GetDirectoryName(expected)!,"client-probes/windows-current-publication"):"/tmp/deep-dev-owned-mailbox-exercise";
+        var scratch=windows?Path.Combine(Path.GetDirectoryName(expected)!,relativeScope):"/tmp/deep-dev-owned-mailbox-exercise";
         RequireNoLinks(scratch);
         if(!windows && Directory.Exists(scratch))throw new IOException("Disposable client scratch already exists; preserve it.");
         Directory.CreateDirectory(scratch);
@@ -70,7 +78,11 @@ internal static class DevOwnedMailboxExercise
         using var artifacts=factory.CreateDeepIdV2NetworkClosureArtifactSource(origin);
         var networkFloor=await accounts.OpenNetworkLkgStoreAsync(pin,ct);
         var source=new DeepIdV2ContactPathAuthoritySource(pin,accounts,proofs,artifacts,networkFloor,clock);
-        await StageAsync("CurrentNetwork",async()=>{var current=await source.VerifyCurrentNetworkAsync(pin.NetworkId,ct);current.EnsureCurrent();},ct);
+        await StageAsync("CurrentNetwork",async()=>{
+            var current=await source.VerifyCurrentNetworkAsync(pin.NetworkId,ct);current.EnsureCurrent();
+            var checkpoint=current.ProtectedLkg??throw new CryptographicException("Verified network checkpoint is absent.");
+            Console.WriteLine("Owned development verified view generation: "+checkpoint.ViewGeneration.ToString(System.Globalization.CultureInfo.InvariantCulture)+".");
+        },ct);
         await StageAsync("PreKeyStage",async()=>{_ = await accounts.EnsureOwnInitialPreKeyInventoryAsync(source,ct);},ct);
         if(windows) await StageAsync("SignedEntryTls",async()=>{
             var staged=await accounts.ReadOwnStagedPreKeyPublicationAsync(ct)??throw new InvalidDataException("Protected inventory missing.");
@@ -88,7 +100,10 @@ internal static class DevOwnedMailboxExercise
                 throw new CryptographicException("Protected prekey receipt pair changed during reopen.");
             if(priorPair is not null)Console.WriteLine("Owned development protected prekey pair reauthenticated byte-identically after reopen.");
         },ct);
-        await StageAsync("ContactPublication",async()=>{_ = await accounts.EnsureOwnPermanentContactPublishedAsync(source,ct);},ct);
+        await StageAsync("ContactPublication",async()=>{
+            var committed=await accounts.EnsureOwnPermanentContactPublishedAsync(source,ct);
+            Console.WriteLine("Owned development verified contact generation: "+committed.Generation.ToString(System.Globalization.CultureInfo.InvariantCulture)+".");
+        },ct);
         DeepIdV2MailboxSynchronizationResult? result=null;
         await StageAsync("OwnedGrantNodeRead",async()=>{result=await accounts.SynchronizeOwnMailboxAsync(source,ct);},ct);
         if(result is null || result.ProcessedEnvelopes!=0 || result.HasMore || result.DurableTombstones!=0)
@@ -128,20 +143,34 @@ internal static class DevOwnedMailboxExercise
         if(matched!=3)throw new CryptographicException("Signed entry certificate/placement binding differs.");
     }
 
-    private static async Task StageAsync(string stage,Func<Task> action,CancellationToken ct)
+    internal static async Task StageAsync(string stage,Func<Task> action,CancellationToken ct)
     {
         try{
             for(var attempt=0;;attempt++){
+                ct.ThrowIfCancellationRequested();
                 try{await action();break;}
                 catch(Deep.Client.Shared.Services.AccountDirectoryV2.DeepIdV2DirectoryProofUnavailableException unavailable)when(attempt<3){
                     var delay=unavailable.RetryAfter??TimeSpan.FromSeconds(10);
-                    Console.WriteLine("Owned development proof backoff: "+stage+"; status="+((int)unavailable.StatusCode)+"; attempt="+(attempt+1)+".");
+                    Console.WriteLine("Owned development proof backoff: "+stage+"; status="+((int)unavailable.StatusCode)+"; attempt="+(attempt+1)+"; delaySeconds="+delay.TotalSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture)+".");
+                    await Task.Delay(delay,ct);
+                }
+                catch(ClientMailboxTransportException unavailable)when(stage=="ContactPublication" && attempt<4 && unavailable.Retryable &&
+                    unavailable.Failure==ClientMailboxTransportFailure.DependencyUnavailable){
+                    // This contact transport preserves the ingress's explicit
+                    // before-forward rejection. Unknown completion uses another
+                    // exception and is never caught/replayed here. The account
+                    // owner reopens exact journal custody on the next attempt.
+                    var delay=TimeSpan.FromMilliseconds(RandomNumberGenerator.GetInt32(500,1500)*(1<<Math.Min(attempt,3)));
+                    Console.WriteLine("Owned development before-forward backoff: "+stage+"; attempt="+(attempt+1)+".");
                     await Task.Delay(delay,ct);
                 }
             }
             Console.WriteLine("Owned development client stage completed: "+stage+".");
         }
         catch(Exception error){Console.Error.WriteLine("Owned development client stage failed: "+stage+" ("+error.GetType().Name+").");
+            if(error is CryptographicException && error.Data["Deep.ContactRoute.Scope"] is string routeScope &&
+                routeScope is "pmt-reference" or "device-or-delegation")
+                Console.Error.WriteLine("Owned development closed route scope: "+routeScope+".");
             if(error is CryptographicException && error.Data["Deep.ContactPublication.Status"] is ushort publicationStatus &&
                 publicationStatus is >=1 and <=9 && error.Data["Deep.ContactPublication.MutationOutcome"] is byte mutationOutcome)
                 Console.Error.WriteLine("Owned development closed publication result: status="+publicationStatus+"; mutation="+mutationOutcome+".");

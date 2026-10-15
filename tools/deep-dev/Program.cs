@@ -49,6 +49,8 @@ try {
     else if (args.Length == 4 && args[0] == "publish-short-view") await DevPublisher.RunAsync(args[1], args[2], args[3], ReadNtsAsync, operationalLifetimeSeconds:180, singlePublication:true);
     else if (args.Length == 2 && args[0] == "exercise-directory") await DevDirectoryExercise.RunAsync(args[1]);
     else if (args.Length == 2 && args[0] == "exercise-owned-mailbox") await DevOwnedMailboxExercise.RunAsync(args[1]);
+    else if (args.Length == 3 && args[0] == "exercise-owned-mailbox" && args[2] is ("contact-diagnostic" or "contact-replication" or "contact-acceptance"))
+        await DevOwnedMailboxExercise.RunAsync(args[1], args[2]);
     else if (args.Length == 3 && args[0] == "admit-observer") await DevObserverAdmission.RunAsync(args[1], args[2]);
     else if (args.Length == 3 && args[0] == "prepare-operational") {
         _ = await DevOfflineOperationalRenewal.PrepareAsync(args[1], args[2], ReadNtsAsync);
