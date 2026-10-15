@@ -269,3 +269,65 @@ and permanent reservations, forbid expired mutation/backdated approval and
 retain all accounts; resetting a profile is not recovery evidence. Repeating
 the unchanged device action cannot close this boundary.
 No production machine, GitHub Release or main branch was changed by this slice.
+
+## DR-0125 retained runtime and device checkpoint
+
+The superseding [current submission](../../docs/survival-program/decisions/DR-0125-current-publication-submission.md)
+replaces targets3/4 with target5 across Protocol `f0ef288`, Shared `e8a1178`,
+Registry `13678dc` and Node `01d86d5`; MAUI `95ef514` and DevOps `1bba9f3`
+compose these source dependencies. Existing accounts, original intents, keys,
+floors and retained volumes are unchanged. Prior failed observations above
+remain evidence, not active completed-only recovery instructions.
+
+DevOps `artifacts/s05-current-publication-20261015/runtime-01/` records supported
+Build/Up/Verify/CacheWindowsDevCrl, all native0, independent Registry readiness
+and three verified onion nodes, recovery30s. This is the local nine-service
+retained current-dev contour, not a production rollout or device delivery.
+Node's matching canonical `artifacts/s05-current-publication-20261015/full-01`
+is accepted1519/0/0,1519 exact mappings and2212 unchanged inputs. Protocol's
+full02 remains2331/1/7, MatrixQualified=true but FullAccepted=false due to the
+actual retired-MAU2 package token; Shared/Registry final qualification is open.
+
+MAUI `artifacts/s05-current-publication-20261015/` contains Android build02 and
+install01, Settings/scroll/Verify/Inspect receipts and Windows build01.
+Android APK SHA256 `84246a2b5da2b1b8ffdba3a421dbc547ad497502997050734036e46485109fee`
+passed the pinned signer check and updated only the dedicated HTTPS package.
+The existing account and encrypted recovery were observed, with all three
+protected packages unchanged. After a fresh human go-ahead, the old Windows
+build was closed through its own UI and the new ARM64 candidate launched on the
+same retained profile. One UI Verify reached verified-publication; encrypted
+recovery was observed without revealing/copying it. The explicitly manual
+`windows-observation-01.json` binds source dependencies and assembly hashes;
+it is not a release receipt or cross-device delivery evidence.
+
+The first Android verification and one serial same-account retry both ended
+ContactPublication/OnionCompletionUnknown. Inspect02 could not obtain a UI
+hierarchy and is an observation failure, not an account reset or network result;
+subsequent inspections observed the owned UI. Bounded server observations contain
+Current publication Admission/busy and node Backend/http-unavailable. These
+closed events are not identity-correlated noncommit certificates. Read-only
+PostgreSQL activity showed idle connections without a waiting transaction at
+that observation; this does not prove the absence of a stored winner.
+
+The shared distribution permit is also held by public sends and background
+renewal. A bounded current-issuer admission candidate passed51/0/0/provider0:
+Registry `artifacts/s00/s05-current-admission-01-77334276858b4e8892b6c59d80d6b7cd`.
+The supported wrapper removed its labelled temporary PostgreSQL and tmpfs;
+no retained volume was used. Queue/cancellation/ownership tests and actual
+current-HTTP recovery/permanent-journal/independent-issuer cases passed. Retain
+one active operation and permit at most one waiting current issuer inside its
+original30s deadline. It does not release a permanent reservation, add a client
+fallback, reset a profile or waive current authority. No further unchanged
+device retry is evidence of closure. Contacts/text/files/groups remain0/4.
+
+Registry scheduling fix `6eb84ee` was pushed and its remote SHA independently
+matched. Supported `runtime-02/` Build/Up/Verify/CacheWindowsDevCrl all returned
+native0, independent Registry/three-node readiness recovered in60s. Initial
+readiness timeout/unavailable observations remain in the receipt; no reset was
+used. Same-account Android Verify03 after this activation reached the exact
+`verified-publication` terminal UI in Inspect09. The installed production-code
+pipeline independently verifies fresh account proof, both prekey receipts and
+the permanent-contact commitment before this UI success. Encrypted recovery
+and the three protected-package snapshots remain unchanged. This closes that
+physical account/publication diagnostic, not cross-device contact acceptance,
+message delivery, cold-reopen recovery, S05/S06 acceptance or a release.
