@@ -7,6 +7,37 @@ historical receipts or physical/release acceptance.
 
 ## Current local update — 2026-10-16
 
+Retained runtime diagnosis continued after matching Windows15/APK22 installation
+(MAUI `7cf9d21`, Shared `acc65f1`, Protocol `605090b`). Source test qualification
+belongs to [owned contact start](../../deep-client-shared/docs/architecture/owned-authored-counter-custody.md#current-same-command-proof-and-owned-transport-candidate);
+device observations belong to [the physical checkpoint](../../deep-client-maui/docs/DID2-HTTPS-DEVICE-2026-09-28.md).
+No physical contact/text/files/groups acceptance is gained. Registry readiness
+oscillated; node mailbox recovery was unavailable despite ONION/contact readiness.
+Registry's closed authenticated-time acquisition logs contained quorum, interval
+and lower-floor denials. Publisher operational renewals still succeeded; offline
+policy expiry was not established and no policy/floor/account was replaced.
+
+Node `2a5f718` adds closed private recovery reasons without changing health JSON,
+authority, deadlines or native storage. Its source and unresolved regressions
+are recorded in [the operator guide](../../xnode/docs/operator.md).
+Supported Build completed, with no compiler warnings/errors observed, then
+supported local Up activated the built Node image on all three retained nodes.
+New `host-recovery-diagnostic-activation-01` preserves exact private before/after
+mount snapshots: nine services,29 named-volume bindings and25 bind mounts match
+after canonical host-drive normalization. This is a new successful retained-mount
+check, not repair/reclassification of the earlier missing-before-snapshot FAIL.
+The initial post-Up reason on all three nodes is `observation-missing`; this
+does not establish missing/corrupt native mailbox custody or permit enrollment.
+Readiness and same-account device recovery remain separate qualification.
+
+The additional `peer-binary-diagnostic-04` uses a hash-bound existing Windows
+test binary, not current-source/full qualification. Its one Store/reopen test
+failed at the original10s deadline. The exact peer handler had captured its
+response after3939ms with one request/body EOF, without a handler exception;
+the caller cancelled and drained the same operation. No retry, increased
+deadline, guaranteed noncommit or physical delivery is inferred. Original
+27PASS/3FAIL source-focused and interrupted retry receipts remain unchanged.
+
 Registry `a4805bf` adds one bounded public admission waiter alongside the existing
 single issuer waiter. The active frame/issuer limit stays one, and queueing uses
 the original30s request budget. The binary contract, signatures and client retry
