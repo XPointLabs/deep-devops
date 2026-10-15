@@ -225,5 +225,47 @@ were removed by the supported provider; current-dev volumes were not touched.
 The previous diagnostics-only runtime at
 `artifacts/s05-local-device-20261015/route-diagnostic-runtime-01/` finished
 Build/Up/Verify/CacheWindowsDevCrl0. It does NOT include this read-back candidate.
-A supported retained rebuild/activation and physical rerun remain required.
+A supported retained rebuild/activation is recorded in
+`artifacts/s05-winner-readback-20261015/runtime-02/`: Build, Up, Verify and
+CacheWindowsDevCrl native0, all nine retained services healthy. The preceding
+runtime01 preflight failed with CryptographicException/unclassified before
+Docker mutation; the original failure remains and its transient cause is not
+proven. Diagnostic label additions do not change PKI validation or policy.
+
+MAUI receipts under `artifacts/s05-local-device-20261015/` now include Android
+build06/install06/network-prep05/inspect12 and Windows build03 plus the explicitly
+manual `windows-observation-03.json`. Both builds consume the matched source.
+The updated Android retained its account and encrypted recovery copy, with
+three protected packages unchanged; its next publication still ended unknown.
+Windows reopened the existing profile in build03 without reset; its single
+verification ended ContactPublication/ProofRateLimited. Neither is delivery.
+Registry's subsequent bounded reader phase diagnostics passed focused3/0/0
+with real disposable PostgreSQL (`registry-focused-02/provider.log`); exact
+foreign nonce rejection leaves the permanent count/signers unchanged and
+logs no exception/request. Retained runtime03 Build/Up/Verify/CacheWindowsDevCrl
+all returned native0, independent readiness recovery59s. Another serial device
+observation remains required; no new account substitutes for recovery. A first
+prep06 stopped before Verify because the already scrolled Settings page hid
+the identity control. Supported ScrollSettingsUp then observed the same account
+and recovery; this harness precondition failure is not an account reset/loss.
+
+Registry32c390a adds closed lookup reasons without changing rejection or journal
+semantics. `registry-focused-03/provider.log` is native3/0/0 with real temporary
+PostgreSQL; source security covers all four changed files with zero findings.
+Runtime04 Build/Up/Verify/CacheWindowsDevCrl returned native0, recovery30s.
+Android restart06, prep08 and inspect14 retain the same account/recovery and
+protected packages. The terminal UI remains ContactPublication/OnionCompletionUnknown;
+the serial run observed reader Winner/winner-missing. The manually collected
+closed observation is `runtime-04/device-observation.json`, explicitly not a
+release receipt or an identity-correlated noncommit certificate. Aggregate
+publication6/completed6/pending0 remained unchanged. No further Windows input
+was issued after the user's physical Esc.
+
+The completed-only DR-0124 read works in its qualified component scope but
+cannot mint a response when the original nonce was never recorded. Missing,
+reserved-pending and completed phase5 outcomes need one coherent current-owner
+reconciliation contract before implementation. It must preserve original intent
+and permanent reservations, forbid expired mutation/backdated approval and
+retain all accounts; resetting a profile is not recovery evidence. Repeating
+the unchanged device action cannot close this boundary.
 No production machine, GitHub Release or main branch was changed by this slice.
