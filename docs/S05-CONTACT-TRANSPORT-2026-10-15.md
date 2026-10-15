@@ -84,7 +84,10 @@ predicate without further evidence. No clock checks were relaxed or backdated.
   FullAccepted=false remains. The declaration is corrected without changing the
   semantic replacement; the shared gate now checks declarations before build
   as well as at final qualification,49 contracts/native0. A fresh full remains
-  required for those changed captured inputs.
+  independently recorded below.
+- Fresh Node canonical full02 accepted1513/0/0,1513 exact mappings and2191
+  unchanged inputs; build/preflight/test/qualification all0, FullAccepted=true.
+  This closes the single-endpoint source checkpoint only, not S05 lifecycle.
 - Final changed-file secret scan selected/scanned25 files, zero findings;
   all five diff checks and three PowerShell AST checks passed.
 - Protocol canonical full:2330/1/7,2338 exact mappings,1587 unchanged inputs;
