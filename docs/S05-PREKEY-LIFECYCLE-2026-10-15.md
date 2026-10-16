@@ -72,5 +72,35 @@ recover an incomplete publication. Authenticate/reconcile the original outcome
 before authoring any successor; do not reset, re-sign or waive current checks.
 
 Owned grant/node read, S05 acceptance and all physical contacts/messages/files/
-groups remain unqualified. Android ADB currently has no online device.
+groups remain unqualified. The earlier Android-disconnected observation is
+historical; the 2026-10-16 read-only check found one authorized USB device.
 No GitHub Release or main merge is authorized by this evidence.
+
+## DR-0131 consumer/runtime checkpoint, 2026-10-16
+
+The owned probe now uses the single maintenance/publication command described
+in [DEEP_DEV](DEEP_DEV.md), without removed initial-only API aliases. The same
+exact XPP1 requires the exact retained receipt pair; genuine renewal is not
+misclassified as corrupted retry custody. The explicit route-issuer fixture
+authors/stages real signed support and independently verifies it, without
+pretending to dispatch an inventory.
+
+`artifacts/s05-prekey-maintenance-20261016/image-15` built all three supported
+images, native0 with no compiler warnings/errors. `up-16` exited0 and ran those
+exact images on Registry, both role signers, publisher and all three nodes.
+Its retained before/after snapshots prove all29 volume bindings unchanged.
+The raw25-bind hash comparison failed: Docker inspect alternates Windows drive
+paths and Docker Desktop host mappings. A separate bounded mapping check matched
+each old hash uniquely using only equivalent drive/separator/Desktop source
+representations, with exact destination/type/RW and retained scope. Both results
+remain distinct in the preservation receipt; no reset/reprovision was performed.
+Supported smoke17 exited0: current Registry proof, all3 verified ONION nodes,
+recovery37s within the original bound. Sustained readiness, retained-account
+recovery and physical business acceptance are separate requirements;
+image/Up/readiness success does not satisfy them.
+
+The26 DevOps contracts passed. Registry consumer14 passed3 actual PQ/PostgreSQL
+route/recovery cases/native0, no failures/skips; its earlier consumer12 wrapper
+failure and consumer13 fixture compile error are not passes. Windows QA
+CompileOnly11 passed0 warnings/errors but did not publish, install or launch.
+Neither production nor GitHub Releases/main was changed.

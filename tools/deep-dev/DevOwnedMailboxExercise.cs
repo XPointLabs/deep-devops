@@ -83,22 +83,24 @@ internal static class DevOwnedMailboxExercise
             var checkpoint=current.ProtectedLkg??throw new CryptographicException("Verified network checkpoint is absent.");
             Console.WriteLine("Owned development verified view generation: "+checkpoint.ViewGeneration.ToString(System.Globalization.CultureInfo.InvariantCulture)+".");
         },ct);
-        await StageAsync("PreKeyStage",async()=>{_ = await accounts.EnsureOwnInitialPreKeyInventoryAsync(source,ct);},ct);
+        DeepIdV2OnionClientCustody? custody=null;
+        await StageAsync("OnionCustody",async()=>{custody=await accounts.OpenOwnOnionClientCustodyAsync(ct);},ct);
+        var priorPublication=await accounts.ReadOwnStagedPreKeyPublicationAsync(ct);
+        var priorPair=await accounts.ReadOwnPreKeyCommitPairAsync(ct);
+        await StageAsync("PreKeyPublication",async()=>{
+            var pair=await accounts.PublishOwnPreKeyInventoryAsync(source,custody!,ct);
+            var current=await accounts.ReadOwnStagedPreKeyPublicationAsync(ct)??throw new InvalidDataException("Protected inventory missing.");
+            var samePublication=priorPublication is not null && priorPublication.ExactXpp1.Span.SequenceEqual(current.ExactXpp1.Span);
+            if(samePublication && priorPair is not null && (!priorPair.ExactFirstXic1.Span.SequenceEqual(pair.ExactFirstXic1.Span)||
+                !priorPair.ExactSecondXic1.Span.SequenceEqual(pair.ExactSecondXic1.Span)))
+                throw new CryptographicException("Protected prekey receipt pair changed during reopen.");
+            if(samePublication && priorPair is not null)Console.WriteLine("Owned development protected prekey pair reauthenticated byte-identically after reopen.");
+        },ct);
         if(windows) await StageAsync("SignedEntryTls",async()=>{
             var staged=await accounts.ReadOwnStagedPreKeyPublicationAsync(ct)??throw new InvalidDataException("Protected inventory missing.");
             var publication=DeepIdV2PreKeyPublicationCodec.Decode(staged.ExactXpp1.Span);
             var selected=await source.GetCurrentForPublicationAsync(pin.NetworkId,publication.Manifest.Field(2),ct);
             await VerifyEntryTlsAsync(selected.Network,selected.Placement,publicRoot,ct);
-        },ct);
-        DeepIdV2OnionClientCustody? custody=null;
-        await StageAsync("OnionCustody",async()=>{custody=await accounts.OpenOwnOnionClientCustodyAsync(ct);},ct);
-        var priorPair=await accounts.ReadOwnPreKeyCommitPairAsync(ct);
-        await StageAsync("PreKeyPublication",async()=>{
-            var pair=await accounts.PublishOwnStagedPreKeyInventoryAsync(source,custody!,ct);
-            if(priorPair is not null && (!priorPair.ExactFirstXic1.Span.SequenceEqual(pair.ExactFirstXic1.Span)||
-                !priorPair.ExactSecondXic1.Span.SequenceEqual(pair.ExactSecondXic1.Span)))
-                throw new CryptographicException("Protected prekey receipt pair changed during reopen.");
-            if(priorPair is not null)Console.WriteLine("Owned development protected prekey pair reauthenticated byte-identically after reopen.");
         },ct);
         await StageAsync("ContactPublication",async()=>{
             var committed=await accounts.EnsureOwnPermanentContactPublishedAsync(source,ct);

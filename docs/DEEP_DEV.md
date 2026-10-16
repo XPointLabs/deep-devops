@@ -341,6 +341,16 @@ then use the genuine signed CRL while the Docker-only publisher name is absent
 from host DNS. Private CA trust remains app-scoped through the existing supported
 factory; hostname/EKU and online revocation remain required.
 
+The probe uses the single owned `PublishOwnPreKeyInventoryAsync` command for
+initial publication, exact pending retry and completed-inventory maintenance
+under [DR-0131](../../docs/survival-program/decisions/DR-0131-owned-prekey-maintenance-author.md).
+It does not separately call an initial-only producer. Byte-identical XIC1 pair
+reopen is required for the same exact XPP1; a genuinely renewed inventory has
+its independently verified new pair. The supplementary signed-entry TLS check
+runs against the inventory selected by that command; transport TLS validation
+remains enforced during publication itself. An expired unresolved pending
+operation is still retained and rejected, not replaced by this probe.
+
 The Windows probe uses Registry's fixed loopback HTTPS port and supported
 Windows native PQ assets. Its fixed probe directory is separate from MAUI/user
 accounts. Journaled secure storage uses Data Protection keys protected with

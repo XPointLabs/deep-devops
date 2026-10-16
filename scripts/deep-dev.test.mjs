@@ -274,8 +274,11 @@ test('owned mailbox exercise is public-input-only and calls real account-owned A
   assert.match(action,/source=\$custodyPath\/public,target=\/run\/deep-public,readonly/);
   assert.doesNotMatch(action,/role.seed|root.seed|\/run\/secrets|source=.*operator|provision-floor/);
   const probe=await read('../tools/deep-dev/DevOwnedMailboxExercise.cs');
-  for(const call of ['AdmitAndVerifyGenesisAsync','VerifyCurrentNetworkAsync','PublishOwnStagedPreKeyInventoryAsync',
+  for(const call of ['AdmitAndVerifyGenesisAsync','VerifyCurrentNetworkAsync','PublishOwnPreKeyInventoryAsync',
     'EnsureOwnPermanentContactPublishedAsync','SynchronizeOwnMailboxAsync'])assert.ok(probe.includes(call));
+  assert.doesNotMatch(probe,/EnsureOwnInitialPreKeyInventoryAsync|PublishOwnStagedPreKeyInventoryAsync/);
+  assert.match(probe,/samePublication && priorPair is not null/);
+  assert.ok(probe.indexOf('PublishOwnPreKeyInventoryAsync') < probe.indexOf('StageAsync("SignedEntryTls"'));
   assert.match(probe,/deviceEvidence=false,messageDeliveryEvidence=false,restartEvidence=false/);
   assert.doesNotMatch(probe,/ServerCertificateValidationCallback|NoCheck|FrozenClock|Signer.Load|SignDetached/);
 });
