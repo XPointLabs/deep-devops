@@ -87,6 +87,27 @@ stay silent. Stdout framing, signed policy, retries and authority predicates are
 unchanged. `nts-source-diagnostics-04` passed all8 Go tests and built Linux ARM64,
 native0. This source result does not prove the current acquisition failure's cause.
 
+Registry component build06 completed at `469460e` (the managed change from
+`2859756` is a comment only), with helper `dd36774`; the complete native build
+log contained0 compiler warnings/errors. Supported Up06 succeeded and again
+matched all29/25 retained mounts across nine services. The active helper's SHA256
+matched the eight-test SDK image. Supported smoke06 still exited1; all three
+mailbox hosts were unavailable in the post-Up snapshot while ONION/contact were
+ready. The initial bounded runtime helper log contained no failure category,
+which is not proof of sustained time acquisition. Node reasons still include
+`revocation-context`, `observation-missing` and `check-deadline`. Recover mailbox
+authority/catch-up separately; do not declare NTS packet timeout the sole cause.
+By02:00Z the active helper also logged four closed `query-timeout` failures;
+Registry renewal logged trusted-time package unavailability and cancellation.
+Thus the later runtime does reproduce query failure, not only the isolated probe.
+
+The isolated diagnostic helper's24 responses included quorum loss and later
+recovery, with five closed `query-timeout` failures. Its Docker process did not
+close within the diagnostic two-second shutdown budget and was terminated
+(Terminal=false/native-1); this is an unqualified connectivity diagnostic, not
+PASS, a persistent-state mutation or a physical receipt. DevOps contract rerun
+exited0; actual production readiness still exited1. No release evidence is waived.
+
 Node `2a5f718` adds closed private recovery reasons without changing health JSON,
 authority, deadlines or native storage. Its source and unresolved regressions
 are recorded in [the operator guide](../../xnode/docs/operator.md).
