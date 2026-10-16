@@ -7,6 +7,14 @@ release/device/message-delivery evidence profile. Production servers were not
 changed. Mr. X remains the single development operator; three signer keys are
 not three independent operators.
 
+The dev image build runs the pinned NTS helper's Go tests before compiling it.
+UDP loss retains session keys only during the existing bounded exponential
+backoff; it does not mint time, waive quorum or change a signed lifetime. Other
+failures still discard the session. See [the adapter boundary](../tools/nts-observer/README.md).
+Helper source tests do not qualify the retained runtime: current time, mailbox
+catch-up and physical Windows/Android recovery must still be observed, without
+resetting custody or re-enrolling existing accounts/nodes.
+
 The wrapper accepts exactly two isolated project names: `deep-dev` and
 `deep-dev-current`. Both use the same current-only code, not different protocol
 readers. `deep-dev-current` permits a new current fixture alongside the preserved
@@ -627,8 +635,8 @@ same retained state passed after single-pass authenticated journal validation.
 No failed run was erased or represented as a success. These runs do not close
 the Docker-engine restart, 20-cycle, long-TTL or key-rotation gates. Follow
 [NETWORK_STABILITY_RECOVERY.md](NETWORK_STABILITY_RECOVERY.md) for remaining
-cases. Mr. X owns the 72-hour soak; local Windows/Android device E2E belongs
-to the separate agent and is never represented as CI evidence.
+cases. Mr. X owns the 72-hour soak; Windows/Android device E2E runs locally
+and is never represented as CI evidence.
 
 The MAUI reconnect worker currently reopens the DID2 proof/closure/pre-key
 composition, preserving account/floors. It does not yet restore a shipping

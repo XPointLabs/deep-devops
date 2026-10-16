@@ -255,7 +255,7 @@ func (p *peer) observe(s source) (o observation, err error) {
 		err = r.Validate()
 	} // includes NTS authentication result
 	if err != nil {
-		p.fail()
+		p.queryFailed(err)
 		return o, err
 	}
 	// The authenticated server transmit time, not local wall time + ClockOffset.
@@ -270,8 +270,21 @@ func (p *peer) observe(s source) (o observation, err error) {
 	return observation{s.ID, r.Time.Unix(), uint16(math.Ceil(radius.Seconds()))}, nil
 }
 func itoaPort(p uint16) string { return strconv.Itoa(int(p)) }
+func (p *peer) queryFailed(err error) {
+	if isTimeout(err) {
+		// No authenticated response means no evidence that the negotiated keys
+		// are invalid. Retain them for the next bounded query, but do not bypass
+		// the existing exponential backoff or emit an observation.
+		p.backOff()
+		return
+	}
+	p.fail()
+}
 func (p *peer) fail() {
 	p.session = nil
+	p.backOff()
+}
+func (p *peer) backOff() {
 	if p.backoff == 0 {
 		p.backoff = 10 * time.Second
 	} else {

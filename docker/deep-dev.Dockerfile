@@ -3,7 +3,8 @@ FROM --platform=$BUILDPLATFORM golang@sha256:8ac98ca534ac3f51e1f420a1dd2c15e74c7
 WORKDIR /src
 COPY deep-devops/tools/nts-observer/go.mod deep-devops/tools/nts-observer/go.sum ./
 RUN go mod download
-COPY deep-devops/tools/nts-observer/main.go ./
+COPY deep-devops/tools/nts-observer/main.go deep-devops/tools/nts-observer/main_test.go ./
+RUN go test -count=1 -v ./...
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -o /deep-nts-observer .
 
 FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk@sha256:ea8bde36c11b6e7eec2656d0e59101d4462f6bd630730f2c8201ed0572b295d5 AS build

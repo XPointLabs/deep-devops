@@ -20,6 +20,28 @@ dispersion/delay and precision determine its interval. `ClockOffset`, HTTP Date
 and plain NTP are not authority. No cookie, exporter key, packet or diagnostics
 is printed. Failed sources are absent from the bounded response.
 
+After the existing two bounded UDP attempts time out, the peer retains its
+negotiated session rather than treating packet loss as evidence that its keys
+are invalid. The same exponential retry backoff still applies, including the
+minimum10 seconds, factor1.5 and maximum5 days; no observation is emitted while
+waiting. Non-timeout authentication/framing/provider failures still discard the
+session. Only a successfully authenticated and policy-bounded NTP response resets
+backoff. TLS, source pins, nonce/AEAD validation, per-query timeouts and signed
+Registry interval/freshness checks are unchanged. The default dev Docker build
+now executes the checked-in Go tests before compiling the helper.
+
+`artifacts/s05-current-publication-20261015/nts-query-timeout-red-01/` reproduced
+the timeout/session-discard regression. `nts-query-timeout-02/` passed the
+unfiltered Go package tests and built the Linux ARM64 helper with native0.
+Docker progress/test output is in `native.log.stderr`, not the empty stdout log.
+These are source/helper receipts, not sustained NTS, mailbox or physical evidence;
+the existing Windows operator helper has not been replaced by these builds.
+Final `nts-query-timeout-03/` executed all seven tests with0fail/skip, native0,
+and built/exported the helper SDK test image; gofmt inspection found no
+unformatted files. DevOps release contracts passed51 commands; the actual
+production readiness status remains blocked by10 missing release evidence
+items. Synthetic contract device-acceptance results are not physical devices.
+
 Registry additionally rejects unknown/duplicate IDs, binds the current exact
 signed policy, enforces two signed failure families, bounds age/radius and
 intersects intervals. It persists a HMAC-authenticated greatest lower bound

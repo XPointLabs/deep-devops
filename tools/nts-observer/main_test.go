@@ -8,6 +8,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/beevik/nts"
 )
 
 type fakeConn struct{ closed chan struct{} }
@@ -64,6 +66,28 @@ func TestTimeoutClassification(t *testing.T) {
 	}
 	if isTimeout(nil) || isTimeout(errors.New("authentication failed")) {
 		t.Fatal("non-timeout classified as retryable")
+	}
+}
+func TestQueryTimeoutRetainsSessionAndEnforcesExistingBackoff(t *testing.T) {
+	session := &nts.Session{}
+	p := peer{session: session}
+	p.queryFailed(fmt.Errorf("lost datagram: %w", os.ErrDeadlineExceeded))
+	if p.session != session || p.backoff != 10*time.Second || time.Until(p.retry) <= 0 {
+		t.Fatal("UDP timeout discarded keys or lost the existing retry backoff")
+	}
+	if _, err := p.observe(source{}); err == nil || p.session != session {
+		t.Fatal("backoff admitted a query or discarded the retained session")
+	}
+	p.queryFailed(os.ErrDeadlineExceeded)
+	if p.session != session || p.backoff != 15*time.Second {
+		t.Fatal("repeated timeout bypassed exponential backoff")
+	}
+}
+func TestNonTimeoutQueryFailureStillDropsSession(t *testing.T) {
+	p := peer{session: &nts.Session{}}
+	p.queryFailed(errors.New("authentication failed"))
+	if p.session != nil || p.backoff != 10*time.Second || time.Until(p.retry) <= 0 {
+		t.Fatal("untrusted query failure retained keys or skipped backoff")
 	}
 }
 func packet() []byte {
