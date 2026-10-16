@@ -18,7 +18,11 @@ must confirm NTS authentication and synchronized NTPv4 before output. Only
 authenticated **server transmit time**, full monotonic query duration, signed
 dispersion/delay and precision determine its interval. `ClockOffset`, HTTP Date
 and plain NTP are not authority. No cookie, exporter key, packet or diagnostics
-is printed. Failed sources are absent from the bounded response.
+is printed. Failed sources are absent from the bounded response. Stderr contains
+only fixed failure categories (key exchange timeout/rejection, query timeout/
+rejection, validation, interval or provider failure), with no source identifiers
+or provider error text. Backoff-only polls are silent. Diagnostics are not
+observations and do not alter the closed stdout response or any trust check.
 
 After the existing two bounded UDP attempts time out, the peer retains its
 negotiated session rather than treating packet loss as evidence that its keys

@@ -68,6 +68,20 @@ func TestTimeoutClassification(t *testing.T) {
 		t.Fatal("non-timeout classified as retryable")
 	}
 }
+func TestFailureDiagnosticsAreClosedAndBackoffRemainsSilent(t *testing.T) {
+	allowed := map[string]bool{"ready": true, "backoff": true, "key-exchange-timeout": true,
+		"key-exchange-rejected": true, "query-timeout": true, "query-rejected": true,
+		"validation-rejected": true, "interval-rejected": true, "provider-failure": true}
+	for value := 0; value <= 255; value++ {
+		if !allowed[failureLabel(observationFailure(value))] {
+			t.Fatal("diagnostics escaped the closed category set")
+		}
+	}
+	p := peer{retry: time.Now().Add(time.Minute)}
+	if _, err := p.observe(source{}); err == nil || p.failure != backoffFailure {
+		t.Fatal("backoff did not retain its separately suppressed diagnostic category")
+	}
+}
 func TestQueryTimeoutRetainsSessionAndEnforcesExistingBackoff(t *testing.T) {
 	session := &nts.Session{}
 	p := peer{session: session}

@@ -67,6 +67,26 @@ signed-policy/window change or production deployment was performed. Stable time,
 mailbox catch-up and physical delivery remain open; source tests cannot supply
 those facts. All private failure evidence and original receipts are retained.
 
+Later Registry component build05 included the tested NTS helper from DevOps
+`2e96265`, with unchanged managed Registry `2859756`. Supported Up05 completed:
+all29 named-volume and25 bind identities matched across the same nine services,
+and retained observer admission succeeded. This does not reclassify failed Up04.
+Supported smoke05 still exited1: mailbox remained unavailable, and subsequently
+ONION readiness oscillated again. The helper's isolated twelve-request probe
+obtained two observations every time; that is neither sustained runtime authority
+nor node/physical acceptance. A bounded Registry CPU-quota diagnostic from1 to2
+still observed HTTP503 and quorum denials; the exact same container's original
+one-CPU quota was restored without restart or state reset. Windows registration
+and Android Verify28/Inspect88 both ended AdmissionAuthorityUnavailable on their
+retained profiles. Do not repeat contact sends while this prerequisite is absent.
+
+The next helper-only diagnostic candidate adds closed stderr categories for
+key-exchange/query timeout or rejection, response validation, interval and provider
+failures. It emits no source ID, endpoint, error text or packet; backoff-only polls
+stay silent. Stdout framing, signed policy, retries and authority predicates are
+unchanged. `nts-source-diagnostics-04` passed all8 Go tests and built Linux ARM64,
+native0. This source result does not prove the current acquisition failure's cause.
+
 Node `2a5f718` adds closed private recovery reasons without changing health JSON,
 authority, deadlines or native storage. Its source and unresolved regressions
 are recorded in [the operator guide](../../xnode/docs/operator.md).

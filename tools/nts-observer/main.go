@@ -48,6 +48,45 @@ type peer struct {
 	session *nts.Session
 	retry   time.Time
 	backoff time.Duration
+	failure observationFailure
+}
+
+type observationFailure uint8
+
+const (
+	noFailure observationFailure = iota
+	backoffFailure
+	keyExchangeTimeout
+	keyExchangeRejected
+	queryTimeoutFailure
+	queryRejected
+	validationRejected
+	intervalRejected
+	providerFailure
+)
+
+// Diagnostics are closed categories, never provider errors, endpoints or packets.
+func failureLabel(failure observationFailure) string {
+	switch failure {
+	case noFailure:
+		return "ready"
+	case backoffFailure:
+		return "backoff"
+	case keyExchangeTimeout:
+		return "key-exchange-timeout"
+	case keyExchangeRejected:
+		return "key-exchange-rejected"
+	case queryTimeoutFailure:
+		return "query-timeout"
+	case queryRejected:
+		return "query-rejected"
+	case validationRejected:
+		return "validation-rejected"
+	case intervalRejected:
+		return "interval-rejected"
+	default:
+		return "provider-failure"
+	}
 }
 
 var dnsLabel = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
@@ -205,14 +244,17 @@ func validatePacket(packet []byte) error {
 }
 
 func (p *peer) observe(s source) (o observation, err error) {
+	p.failure = noFailure
 	// Provider panic is not an observation and cannot leak an unauthenticated time.
 	defer func() {
 		if recover() != nil {
 			p.session = nil
+			p.failure = providerFailure
 			err = errors.New("provider failed")
 		}
 	}()
 	if time.Until(p.retry) > 0 {
+		p.failure = backoffFailure
 		return o, errors.New("backoff")
 	}
 	if p.session == nil {
@@ -233,6 +275,10 @@ func (p *peer) observe(s source) (o observation, err error) {
 				}},
 		})
 		if err != nil {
+			p.failure = keyExchangeRejected
+			if isTimeout(err) {
+				p.failure = keyExchangeTimeout
+			}
 			p.fail()
 			return o, err
 		}
@@ -253,8 +299,17 @@ func (p *peer) observe(s source) (o observation, err error) {
 	}
 	if err == nil {
 		err = r.Validate()
+		if err != nil {
+			p.failure = validationRejected
+		}
 	} // includes NTS authentication result
 	if err != nil {
+		if p.failure == noFailure {
+			p.failure = queryRejected
+			if isTimeout(err) {
+				p.failure = queryTimeoutFailure
+			}
+		}
 		p.queryFailed(err)
 		return o, err
 	}
@@ -262,6 +317,7 @@ func (p *peer) observe(s source) (o observation, err error) {
 	// Full RTT (including provider processing) bounds unknown one-way delay.
 	radius := r.RootDelay/2 + r.RootDispersion + r.Precision + elapsed + time.Second
 	if r.RootDelay < 0 || r.RootDispersion < 0 || r.Precision < 0 || radius < time.Second || radius > time.Duration(s.Radius)*time.Second || r.Time.Unix() <= 0 || r.Version != 4 {
+		p.failure = intervalRejected
 		p.fail()
 		return o, errors.New("source interval rejected")
 	}
@@ -348,6 +404,9 @@ func main() {
 		for i, o := range observations {
 			if ok[i] {
 				result.Observations = append(result.Observations, o)
+			} else if failure := peers[req.Sources[i].ID].failure; failure != backoffFailure {
+				// At most one fixed line per attempted source; backoff polls stay silent.
+				io.WriteString(os.Stderr, "NTS source unavailable ("+failureLabel(failure)+").\n")
 			}
 		}
 		if json.NewEncoder(writer).Encode(result) != nil || writer.Flush() != nil {
