@@ -17,7 +17,7 @@ Registry's closed authenticated-time acquisition logs contained quorum, interval
 and lower-floor denials. Publisher operational renewals still succeeded; offline
 policy expiry was not established and no policy/floor/account was replaced.
 
-Latest retained local activation: Node `0240120`, Registry `65b54f3`, DevOps
+Latest retained local image: Node `0240120`, Registry `2859756`, DevOps
 `f4a77ca`. Supported Build/Up completed without reset; the new exact private
 before/after mount comparison again matched all29 named-volume and25 bind
 bindings across nine services. Verify subsequently exited1, not accepted:
@@ -53,6 +53,19 @@ the original service windows. Broader unactivated candidate06 failed5 of56 and
 the earlier no-provider attempt failed14 prerequisites; both receipts remain.
 This is not full or physical acceptance. No public-source mount migration or
 security/clock-policy change was performed by the read-only diagnostics above.
+
+The `9136453` component build and Up matched all29/25 mounts; Registry returned
+readiness200 in2965ms, but supported Verify still exited1 on node mailbox health.
+Source `2859756` isolates signed-control reads from an unrelated readiness owner,
+without increasing the single control admission or five-second request budget.
+The actual concurrent-health red08 returned503; matching provider09 passed44.
+Its Registry-only image is active. The subsequent supported Up04 failed during
+retained observer admission (closed InvalidDataException), so activation is not
+accepted. New NTS labels are `observation-quorum` and `source-interval`; Registry
+returned503 and ONION also became unavailable. No client reset, new identity,
+signed-policy/window change or production deployment was performed. Stable time,
+mailbox catch-up and physical delivery remain open; source tests cannot supply
+those facts. All private failure evidence and original receipts are retained.
 
 Node `2a5f718` adds closed private recovery reasons without changing health JSON,
 authority, deadlines or native storage. Its source and unresolved regressions
