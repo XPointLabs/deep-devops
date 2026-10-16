@@ -7,6 +7,37 @@ historical receipts or physical/release acceptance.
 
 ## Current local update — 2026-10-16
 
+### Route admission contention
+
+APK29's retained attempt passed network verification and prekey publication,
+then failed ContactPublication. Exact packaged transport IL and closed server
+metadata locate a non-success response: relay504, exit backend503, Registry
+route `Admission/busy`. Registry `20be804` now shares the existing single
+private issuer waiter between route and current publication; its original30s
+deadline, complete authority verification and permanent journals are unchanged.
+Focused route HTTP/admission/distribution tests passed43/0/0/native0; the old
+immediate-rejection regression remains red1FAIL. No command retry was added.
+
+Component `s05-route-admission-20261016/registry-build-01` exited0 with no compiler
+warnings/errors at Protocol `cacbd67` / Shared `32de907`. The qualified image is
+`sha256:8ded5e66fa4cddda0314095ed5e9cf2036dda49c2c8c068e875fc2903bbb4133`.
+Supported Up02 completed (native terminal0), but its outer mount-identity
+comparison failed and remains unqualified. Its original pre-update snapshot
+was not retained, so exact before/after equality cannot be recovered or claimed.
+The script also assumed only Registry changes image, whereas the checked-in
+mailbox overlay deliberately shares it with deposit/retrieve signer services.
+The subsequent read-only mount-audit04 confirms9 services,29 existing volume
+bindings,25 scoped binds, all volumes predating the update and all three Registry
+family services on the qualified image. This is declared/current-state evidence,
+not a retroactive PASS for the failed comparison. Supported smoke03 exited0;
+all three nodes were ready/recovered in a separate snapshot. No reset or
+production change occurred. Sustained recovery and retained physical acceptance
+remain open; a single snapshot/smoke does not satisfy them.
+APK29 then completed one retained-account VerifyNetwork -> independent Inspect
+with `verified-publication/Verified`, recovery retained and unchanged package
+audits. This is local physical publication recovery, not a contact/message
+exchange or sustained release qualification.
+
 Node diagnostic `b8b7674` component build13 completed with native0 and a qualified
 image receipt. Supported Up14 checked this exact image on all three nodes,
 retained the exact Registry09 image, and preserved29 volume /25 bind bindings
