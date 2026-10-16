@@ -7,6 +7,18 @@ historical receipts or physical/release acceptance.
 
 ## Current local update — 2026-10-16
 
+Node diagnostic `b8b7674` component build13 completed with native0 and a qualified
+image receipt. Supported Up14 checked this exact image on all three nodes,
+retained the exact Registry09 image, and preserved29 volume /25 bind bindings
+across9 services. Supported smoke15 exited0. A subsequent closed snapshot showed
+all three mailbox hosts recovered and ONION/contact ready; this is one snapshot,
+not sustained qualification. Windows16's single incoming refresh at05:24Z
+completed with an empty list and no new closed failure. The earlier exit failure
+has not been reproduced or explained by the diagnostic-only source change.
+Android25's retained Verify03 still failed at the existing attempt bound. Its
+work-cost measurement candidate and physical acceptance belong to the device
+checkpoint linked below. Production remains unchanged and no reset occurred.
+
 The current images additionally compile Protocol `0867668` / Shared `104b24b`
 for [DR-0127](../../docs/survival-program/decisions/DR-0127-capped-contact-object-successor-validity.md).
 Registry component build09 and Node component build10 completed with0 compiler
