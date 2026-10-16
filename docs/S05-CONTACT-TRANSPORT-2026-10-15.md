@@ -7,13 +7,23 @@ historical receipts or physical/release acceptance.
 
 ## Current local update — 2026-10-16
 
-Current retained Node runtime is `71bcae3`, Registry `469460e`, Registry NTS
+Current retained Node runtime is `7520654`, Registry `469460e`, Registry NTS
 helper `dd36774`; publisher remains `f4a77ca`. Node fixes the reproduced early
 exit after Deposit exhausts64 steps, allowing Retrieve's batch within the same
 30-second flight while still denying admission for incomplete history. Exact
 red/green scope belongs to [Node operations](../../xnode/docs/operator.md#bounded-current-revocation-refresh):
 red13 native1/2FAIL, focused15 native0/42PASS, no skips or compiler warnings.
 Full source, sustained recovery and physical acceptance are still open.
+
+Diagnostic source `7520654` passed focused46/0/0/native0; component build09 had
+no compiler warnings/errors. Its private build image proof was checked before
+Up09, which verified exact image IDs on all three nodes and all29/25 retained
+mounts. Closed failed-flight metadata showed468/455, then Retrieve456, with
+occasional target-read I/O/cancellation rather than missing native enrollment.
+At03:00Z all three nodes reported recovered mailbox/ONION/contact; supported
+smoke09 exited0. Do not attribute this recovery to a diagnostic-only code change
+or claim a sustained gate. Android's next retained-account verification reached
+a local contact-object authoring rejection; see the [device checkpoint](../../deep-client-maui/docs/DID2-HTTPS-DEVICE-2026-09-28.md).
 
 Node component build07 completed, but its initial `node:candidate` label was not
 the Compose-owned `xnode:candidate`. Thus Up07 preserved mounts but still ran
