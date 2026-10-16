@@ -7,6 +7,32 @@ historical receipts or physical/release acceptance.
 
 ## Current local update — 2026-10-16
 
+Current retained Node runtime is `71bcae3`, Registry `469460e`, Registry NTS
+helper `dd36774`; publisher remains `f4a77ca`. Node fixes the reproduced early
+exit after Deposit exhausts64 steps, allowing Retrieve's batch within the same
+30-second flight while still denying admission for incomplete history. Exact
+red/green scope belongs to [Node operations](../../xnode/docs/operator.md#bounded-current-revocation-refresh):
+red13 native1/2FAIL, focused15 native0/42PASS, no skips or compiler warnings.
+Full source, sustained recovery and physical acceptance are still open.
+
+Node component build07 completed, but its initial `node:candidate` label was not
+the Compose-owned `xnode:candidate`. Thus Up07 preserved mounts but still ran
+the old Node; smoke07 exited1 and cannot qualify the new source. The same
+qualified image was retagged, without rebuild or reset. Supported Up08 then
+matched all29 volume/25 bind identities and explicitly checked that all three
+containers run the exact component image ID under the supported Compose tag.
+Smoke08 still exited1. Post-Up ONION/contact were ready, mailbox remained
+unavailable (one independent health request timed out), and closed recovery
+reasons included `revocation-context`/`observation-missing`.
+
+Supported FetchNodeMailboxControl subsequently captured both scope/signature-
+verified records through actual TLS in5.8 seconds, without native enrollment or
+floor changes. Public-codec-only diagnostics saw Deposit generation463 and
+Retrieve450; both windows contained the untrusted host clock. This is not a
+protected-time check, native floor observation or admission capability. Transport
+and signature success therefore do not establish currentness or catch-up; inspect
+the actual worker phase/native progress before attributing the remaining failure.
+
 Retained runtime diagnosis continued after matching Windows15/APK22 installation
 (MAUI `7cf9d21`, Shared `acc65f1`, Protocol `605090b`). Source test qualification
 belongs to [owned contact start](../../deep-client-shared/docs/architecture/owned-authored-counter-custody.md#current-same-command-proof-and-owned-transport-candidate);
@@ -17,7 +43,7 @@ Registry's closed authenticated-time acquisition logs contained quorum, interval
 and lower-floor denials. Publisher operational renewals still succeeded; offline
 policy expiry was not established and no policy/floor/account was replaced.
 
-Latest retained local image: Node `0240120`, Registry `2859756`, DevOps
+Earlier retained local image: Node `0240120`, Registry `2859756`, DevOps
 `f4a77ca`. Supported Build/Up completed without reset; the new exact private
 before/after mount comparison again matched all29 named-volume and25 bind
 bindings across nine services. Verify subsequently exited1, not accepted:
