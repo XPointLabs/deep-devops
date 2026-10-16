@@ -7,6 +7,27 @@ historical receipts or physical/release acceptance.
 
 ## Current local update — 2026-10-16
 
+The current images additionally compile Protocol `0867668` / Shared `104b24b`
+for [DR-0127](../../docs/survival-program/decisions/DR-0127-capped-contact-object-successor-validity.md).
+Registry component build09 and Node component build10 completed with0 compiler
+warnings/errors. Up11 used the supported retained wrapper, checked the exact
+Registry image plus all three exact node images against their qualified build
+proofs, and preserved all29 volume bindings /25 bind mounts across9 services.
+Supported smoke12 exited0. Keys, observer identity, floors and retained state
+were not reset; production was not changed. This is not sustained readiness.
+
+Matching Windows16/APK25 then completed explicit same-account verification,
+including Android verified-publication. Later Android contact retry remained
+blocked by unavailable network readiness, with repeated bounded local
+account/floor/compaction cancellation. Windows incoming synchronization returned
+OutcomeUnknown: bounded existing logs showed relay504/64-byte errors and the
+ContactResolve exit's custody-or-io failure. Precise inner cause is still open;
+these closed categories are not noncommit/delivery or current-time authority.
+Exact physical sources/results belong to the
+[device checkpoint](../../deep-client-maui/docs/DID2-HTTPS-DEVICE-2026-09-28.md).
+
+### Earlier revocation recovery receipts
+
 Current retained Node runtime is `7520654`, Registry `469460e`, Registry NTS
 helper `dd36774`; publisher remains `f4a77ca`. Node fixes the reproduced early
 exit after Deposit exhausts64 steps, allowing Retrieve's batch within the same
