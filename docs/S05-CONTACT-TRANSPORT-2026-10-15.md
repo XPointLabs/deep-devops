@@ -17,6 +17,43 @@ Registry's closed authenticated-time acquisition logs contained quorum, interval
 and lower-floor denials. Publisher operational renewals still succeeded; offline
 policy expiry was not established and no policy/floor/account was replaced.
 
+Latest retained local activation: Node `0240120`, Registry `65b54f3`, DevOps
+`f4a77ca`. Supported Build/Up completed without reset; the new exact private
+before/after mount comparison again matched all29 named-volume and25 bind
+bindings across nine services. Verify subsequently exited1, not accepted:
+Registry readiness exceeded its five-second HTTP probe budget and node recovery
+reported `observation-missing`/`revocation-context`. Later NTS logs reported the
+combined `scope-or-quorum` denial; no new floor-rollback was observed in that
+bounded log scope. The source fix and its37 tests do not close runtime readiness.
+
+Read-only diagnostics observed30 public file reads over the Windows bind mount
+at4002ms versus537ms for30 reads of a container-local control file. These are
+shell/process/file-system timings, not an isolated .NET request comparison or
+proof of the sole business bottleneck; mount topology has not been changed.
+Separate fresh pinned observer processes returned two authenticated observations
+for each of three sequential requests both on Windows and in the Registry
+container. Their source host/pins match both configured DTS1 sources (sample-age
+bound10s). This is connectivity evidence only: those processes neither supply
+Registry authority nor change its retained lower floor, and do not prove the
+long-lived observer's recovery. Registry `65b54f3` separates the combined denial
+into closed policy/age/quorum labels with identical rejection predicates;
+focused40 passed. That Registry-only component build and supported Up also
+completed with the exact29/25 retained mount match. No new NTS denial appeared
+in its initial bounded log scope, but mailbox was still unavailable and a
+read-only readiness request returned503 at9622ms. Allowing that diagnostic HTTP
+request to wait25s did not change the service's five-second mailbox deadline,
+perform issuance or establish readiness. Protected NTS floor metadata was being
+updated; metadata age is diagnostic only, never trusted-time authority.
+
+Registry source `9136453` narrows the next optimization to mailbox context's
+monotonic-clock adapter; [Registry operations](../../deep-registry-api/docs/DID2_DIRECTORY_CANDIDATE.md)
+owns its exact boundary. Its matching provider slice passed44/0/0/native0,
+including actual mailbox renewal and TLS proof/node consumers, without changing
+the original service windows. Broader unactivated candidate06 failed5 of56 and
+the earlier no-provider attempt failed14 prerequisites; both receipts remain.
+This is not full or physical acceptance. No public-source mount migration or
+security/clock-policy change was performed by the read-only diagnostics above.
+
 Node `2a5f718` adds closed private recovery reasons without changing health JSON,
 authority, deadlines or native storage. Its source and unresolved regressions
 are recorded in [the operator guide](../../xnode/docs/operator.md).
