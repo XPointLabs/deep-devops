@@ -24,8 +24,15 @@ actual Linux publisher DLL with no network or protected mounts. Those8 cover
 exact output, unknown-file exclusion, no rewrite of identical output, ordinary
 public-cache rebuild, malformed frame and both link/private-key refusals.
 
-Activation and measured CLI retry are separate subsequent evidence. The first
-mount transition must explicitly allow only the four public-source replacements
-and the publisher's additional public-output volume; all other mounts must
-remain byte-identical. This optimization creates no new service or node and
-does not replace final source/package, smoke, recovery or device gates.
+Supported Up completed with native0 in
+`artifacts/cli-public-native-20261018/activation-01`. The retained mount receipt
+confirms9 services,54→55 mounts: exactly four public-source replacements and
+one publisher public-output mount. All50 other mounts are identical; the built
+publisher is healthy. A separate read-back compared7 fixed public artifacts
+between host output and native output, all byte-identical. No protected state,
+account, key or floor was reset and production was not touched.
+
+Measured CLI retry is separate subsequent evidence: run35 resumes the same
+run34 pair and original contact intent. This optimization creates no new
+service or node and does not replace final source/package, smoke, recovery or
+device gates.
