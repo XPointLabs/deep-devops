@@ -14,6 +14,12 @@ Use the default when shared dependencies affect several images; an incremental
 build does not qualify stale consumers. `Up` and `Verify` remain separate and
 unchanged, with retained keys/volumes and the same physical-input validation.
 This option never resets state or bypasses TLS/authority/readiness checks.
+BuildKit also retains a locked NuGet package/public-feed metadata cache for the three
+image builds and native test targets. Source, compiled outputs, credentials and
+authority/runtime custody are not cache mounts. A cold/absent cache performs
+the normal restore; caching does not skip restore, audit, build or validation.
+Normal NuGet HTTP/audit metadata uses a subdirectory of that locked cache and
+retains NuGet's own expiry policy; audit checks are not disabled.
 
 The dev image build runs the pinned NTS helper's Go tests before compiling it.
 UDP loss retains session keys only during the existing bounded exponential

@@ -6,6 +6,18 @@ import { fileURLToPath } from 'node:url';
 
 const read = p => readFile(new URL(p, import.meta.url), 'utf8');
 
+test('dev builds cache only locked public packages, not source outputs or custody', async () => {
+  const dockerfile = await read('../docker/deep-dev.Dockerfile');
+  assert.match(dockerfile, /ENV NUGET_HTTP_CACHE_PATH=\/root\/\.nuget\/packages\/\.http-cache/);
+  assert.doesNotMatch(dockerfile, /NuGetAudit=false|NUGET_AUDIT_MODE=off|--ignore-failed-sources/);
+  const mounts = dockerfile.split('\n').filter(line => line.includes('--mount='));
+  assert.equal(mounts.length, 3);
+  for (const line of mounts) {
+    assert.match(line, /^RUN --mount=type=cache,id=deep-dev-nuget,target=\/root\/\.nuget\/packages,sharing=locked dotnet (publish|test) /);
+    assert.doesNotMatch(line, /type=(bind|secret|ssh)|--no-restore/);
+  }
+});
+
 test('physical ingress failure location is bounded owned metadata without exception text', async () => {
   const program = await read('../tools/deep-dev/Program.cs');
   const observation = program.split('var trace = new StackTrace(exception, false);')[1].split('Environment.ExitCode = 2;')[0];

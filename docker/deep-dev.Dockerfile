@@ -10,22 +10,27 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -o /deep-nts-observ
 FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk@sha256:ea8bde36c11b6e7eec2656d0e59101d4462f6bd630730f2c8201ed0572b295d5 AS build
 ARG PROJECT
 WORKDIR /src
+# Keep normal NuGet feed/audit metadata inside the same locked build cache.
+# This changes cache placement, not audit policy or package validation.
+ENV NUGET_HTTP_CACHE_PATH=/root/.nuget/packages/.http-cache
 COPY deep-protocol/ deep-protocol/
 COPY xnode/ xnode/
 COPY deep-registry-api/ deep-registry-api/
 COPY deep-client-shared/ deep-client-shared/
 COPY deep-devops/tools/deep-dev/ deep-devops/tools/deep-dev/
-RUN dotnet publish "$PROJECT" -c Release -o /app -p:DeepProtocolSourceCutover=true -p:DeepProtocolLocalCutover=true
+# Public package cache only: not a source/output/authority or credential mount.
+# Sharing is locked because the three images may restore concurrently.
+RUN --mount=type=cache,id=deep-dev-nuget,target=/root/.nuget/packages,sharing=locked dotnet publish "$PROJECT" -c Release -o /app -p:DeepProtocolSourceCutover=true -p:DeepProtocolLocalCutover=true
 
 FROM build AS protocol-tests
 # Executes the checked-in exact asset on the actual Linux ARM64 process. No
 # native compiler or source rebuild is used by this local validation target.
-RUN dotnet test deep-protocol/tests/Deep.Protocol.Tests/Deep.Protocol.Tests.csproj -c Release --filter 'FullyQualifiedName~DeepIdV2Root_RestoreRecreatesExactCredentialAndCommitment|FullyQualifiedName~DeepIdV2Genesis_UsesSamePhraseForAccountAndPqRoot_AndRestoresExactDid2|FullyQualifiedName~Dab2_RealNativeHybridSignaturesCloseOverExactDidAndAccount|FullyQualifiedName~Did2Verifier_RealPqGenesisClosesSignedCurrentProof|FullyQualifiedName~DeepMlDsa65NativeProviderTests|FullyQualifiedName~Did2Admission_AdvancesThresholdHeadAndRejectsChangedPrivateJournal|FullyQualifiedName~Did2Proof_EarlierLeafInSameBatchUsesFinalMapWithoutRewritingTransition'
+RUN --mount=type=cache,id=deep-dev-nuget,target=/root/.nuget/packages,sharing=locked dotnet test deep-protocol/tests/Deep.Protocol.Tests/Deep.Protocol.Tests.csproj -c Release --filter 'FullyQualifiedName~DeepIdV2Root_RestoreRecreatesExactCredentialAndCommitment|FullyQualifiedName~DeepIdV2Genesis_UsesSamePhraseForAccountAndPqRoot_AndRestoresExactDid2|FullyQualifiedName~Dab2_RealNativeHybridSignaturesCloseOverExactDidAndAccount|FullyQualifiedName~Did2Verifier_RealPqGenesisClosesSignedCurrentProof|FullyQualifiedName~DeepMlDsa65NativeProviderTests|FullyQualifiedName~Did2Admission_AdvancesThresholdHeadAndRejectsChangedPrivateJournal|FullyQualifiedName~Did2Proof_EarlierLeafInSameBatchUsesFinalMapWithoutRewritingTransition'
 
 FROM build AS mailbox-signer-tests
 # Actual protected Linux custody, signatures and Unix framing; no mock can
 # stand in for this lane. Not grant/authority/device activation evidence.
-RUN dotnet test deep-registry-api/tests/Deep.Registry.Api.Tests/Deep.Registry.Api.Tests.csproj -c Release -p:DeepProtocolSourceCutover=true -p:DeepProtocolLocalCutover=true --filter 'FullyQualifiedName~MailboxRoleSignerTests|FullyQualifiedName~UnixSocketEd25519ExternalSignerTests'
+RUN --mount=type=cache,id=deep-dev-nuget,target=/root/.nuget/packages,sharing=locked dotnet test deep-registry-api/tests/Deep.Registry.Api.Tests/Deep.Registry.Api.Tests.csproj -c Release -p:DeepProtocolSourceCutover=true -p:DeepProtocolLocalCutover=true --filter 'FullyQualifiedName~MailboxRoleSignerTests|FullyQualifiedName~UnixSocketEd25519ExternalSignerTests'
 
 FROM mcr.microsoft.com/dotnet/aspnet@sha256:e3736b0d423db99c6988e1ddf5ea725c14b12579bb120024e5ff7ff204a14080
 WORKDIR /app
