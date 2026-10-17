@@ -58,7 +58,10 @@ try
     Reject<IOException>(() => Sync()); Require(File.ReadAllText(canary) == "NONSECRET-LINK-CANARY");
     File.Delete(destination); Sync();
     var certificate = Path.Combine(source, "dev-ca.crt");
-    File.WriteAllText(certificate, "-----BEGIN PRIVATE KEY-----\nNONSECRET-TEST-CANARY");
+    // Keep a parseable PUBLIC certificate and append a non-secret keyword
+    // canary. Removing the explicit private-content guard would now accept it;
+    // a malformed PEM alone could fail parsing without testing that guard.
+    File.AppendAllText(certificate, "\nNONSECRET-TEST-CANARY: PRIVATE KEY");
     Reject<CryptographicException>(() => Sync()); Require(Digest() == digest);
     Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { passed, failed = 0, protectedDataTouched = false }));
     return passed == 8 ? 0 : 1;

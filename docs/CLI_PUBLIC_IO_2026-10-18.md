@@ -36,3 +36,24 @@ Measured CLI retry is separate subsequent evidence: run35 resumes the same
 run34 pair and original contact intent. This optimization creates no new
 service or node and does not replace final source/package, smoke, recovery or
 device gates.
+
+The first broad release-contracts01 attempt failed/native1: the secret scanner
+correctly rejected a secret-shaped but non-secret canary literal in the native
+probe source. The scanner was not weakened or excluded. The probe now appends
+a non-secret private-content keyword to a valid public certificate, so removing
+the explicit content guard would incorrectly accept the otherwise parseable
+certificate. Probe-build02 and native-contracts02 passed again (8/native0).
+Release-contracts02 subsequently passed51 commands/native0;01 remains a
+failure. Standalone readiness-status01 remains blocked/native1 with10 missing
+release/device/ops/security/GA evidence inputs; fixture contract PASS does not
+fabricate them. Supported test-env deep-dev-current smoke01 passed/native0,
+eventually verifying Registry proof and3 ONION nodes after32s. Two initial
+node-2 HTTP-health refusals are retained in its log; uninterrupted readiness
+is not claimed. There was no reset or production change.
+
+CLI run35 completed the original fresh pair's contact/text path (24 cold
+commands,0 failures, both verified Store/receive/ACK, histories/dedup PASS).
+After the separate Node descriptor-key fix and retained deploy21, run36 passed
+26 cold commands with0 failures and a new text pair. A separate cold retention
+check confirmed both original and new pairs on each client,0 pending. See
+[the CLI checkpoint](../../deep-cli/docs/testing/cli-contact-text-2026-10-18.md).
