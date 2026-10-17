@@ -538,6 +538,7 @@ if ($Action -eq 'ApplyOperational') {
         $preparedOperator = Join-Path $candidatePath 'operator'
         Run-Native docker @('run','--rm','--label',"deep.project=$ProjectName",'--network',"$($ProjectName)_dev",'--ulimit','core=0',
             '--mount',"type=bind,source=$custodyPath/public,target=/run/deep-public",'--mount',"type=bind,source=$custodyPath/operator,target=/run/deep-operator,readonly",
+            '--mount',"type=volume,source=$($ProjectName)_public-runtime,target=/run/deep-public-native",
             '--mount',"type=bind,source=$preparedOperator,target=/run/deep-renewal,readonly",'--mount',"type=volume,source=$($ProjectName)_publisher-state,target=/var/lib/deep-publisher",
             "$ProjectName/publisher:candidate",'Deep.Dev.dll','import-operational','/run/deep-public','/run/deep-operator','/run/deep-renewal','/usr/local/bin/deep-nts-observer')
         Run-Native docker (@('update','--restart','always') + $ids)

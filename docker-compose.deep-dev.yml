@@ -33,6 +33,7 @@ services:
     command: [Deep.Dev.dll, publish, /run/deep-public, /run/deep-operator, /usr/local/bin/deep-nts-observer]
     volumes:
       - ${DEEP_DEV_ROOT}/public:/run/deep-public
+      - public-runtime:/run/deep-public-native
       - ${DEEP_DEV_ROOT}/operator:/run/deep-operator:ro
       - publisher-state:/var/lib/deep-publisher
     networks: {dev: {ipv4_address: "${DEEP_DEV_IPV4_PREFIX:-172.31.240}.4"}}
@@ -70,9 +71,11 @@ services:
       args: {PROJECT: deep-registry-api/src/Deep.Registry.Api/Deep.Registry.Api.csproj}
     command: [Deep.Registry.Api.dll]
     ports: ["127.0.0.1:${DEEP_DEV_REGISTRY_PORT:-28443}:443"]
+    depends_on:
+      publisher: {condition: service_healthy}
     volumes:
       - ${DEEP_DEV_ROOT:?set the private dev custody root}/registry/appsettings.Development.json:/app/appsettings.Development.json:ro
-      - ${DEEP_DEV_ROOT}/public:/run/deep-public:ro
+      - public-runtime:/run/deep-public:ro
       - registry-secrets:/run/secrets:ro
       - registry-state:/var/lib/registry
     networks: {dev: {ipv4_address: "${DEEP_DEV_IPV4_PREFIX:-172.31.240}.2"}}
@@ -91,9 +94,11 @@ services:
       args: {PROJECT: xnode/src/XNode/XNode.csproj}
     command: [XNode.dll]
     ports: ["127.0.0.1:${DEEP_DEV_PORT_PREFIX:-281}91:8080", "127.0.0.1:${DEEP_DEV_PORT_PREFIX:-281}94:443"]
+    depends_on:
+      publisher: {condition: service_healthy}
     volumes:
       - ${DEEP_DEV_ROOT}/node-1/appsettings.Development.json:/app/appsettings.Development.json:ro
-      - ${DEEP_DEV_ROOT}/public:/run/deep-public:ro
+      - public-runtime:/run/deep-public:ro
       - node-1-secrets:/run/secrets:ro
       - node-1-state:/var/lib/xnode
     networks: {dev: {ipv4_address: "${DEEP_DEV_IPV4_PREFIX:-172.31.240}.11"}}
@@ -109,7 +114,7 @@ services:
     ports: ["127.0.0.1:${DEEP_DEV_PORT_PREFIX:-281}92:8080", "127.0.0.1:${DEEP_DEV_PORT_PREFIX:-281}95:443"]
     volumes:
       - ${DEEP_DEV_ROOT}/node-2/appsettings.Development.json:/app/appsettings.Development.json:ro
-      - ${DEEP_DEV_ROOT}/public:/run/deep-public:ro
+      - public-runtime:/run/deep-public:ro
       - node-2-secrets:/run/secrets:ro
       - node-2-state:/var/lib/xnode
     networks: {dev: {ipv4_address: "${DEEP_DEV_IPV4_PREFIX:-172.31.240}.12"}}
@@ -118,13 +123,14 @@ services:
     ports: ["127.0.0.1:${DEEP_DEV_PORT_PREFIX:-281}93:8080", "127.0.0.1:${DEEP_DEV_PORT_PREFIX:-281}96:443"]
     volumes:
       - ${DEEP_DEV_ROOT}/node-3/appsettings.Development.json:/app/appsettings.Development.json:ro
-      - ${DEEP_DEV_ROOT}/public:/run/deep-public:ro
+      - public-runtime:/run/deep-public:ro
       - node-3-secrets:/run/secrets:ro
       - node-3-state:/var/lib/xnode
     networks: {dev: {ipv4_address: "${DEEP_DEV_IPV4_PREFIX:-172.31.240}.13"}}
 networks:
   dev: {ipam: {config: [{subnet: "${DEEP_DEV_IPV4_PREFIX:-172.31.240}.0/24"}]}}
 volumes:
+  public-runtime:
   publisher-state:
   floor-data:
   floor-secrets: {external: true, name: "${DEEP_DEV_PROJECT:-deep-dev}_floor-secrets"}

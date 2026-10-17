@@ -189,6 +189,7 @@ internal static class DevPublisher
         Atomic(Path.Combine(root,"current.xnv1"),view.ToArray());
         if (!Bounded(file,XPointNetworkClosureWireCodec.MaximumResponseLength).AsSpan().SequenceEqual(journal.Bundle) ||
             !Bounded(Path.Combine(root,"current.xnv1"),65_535).AsSpan().SequenceEqual(view.Span)) throw new IOException("Published closure readback changed.");
+        DevPublicArtifactMirror.Synchronize(root, journal.Bundle);
     }
     // Distribution-state adoption only. The offline candidate is authenticated
     // by retained operator integrity custody and actual root signatures; every

@@ -21,6 +21,31 @@ the normal restore; caching does not skip restore, audit, build or validation.
 Normal NuGet HTTP/audit metadata uses a subdirectory of that locked cache and
 retains NuGet's own expiry policy; audit checks are not disabled.
 
+The existing publisher also exports byte-identical public artifacts into the
+project-scoped `public-runtime` Linux volume. Registry and the three nodes mount
+it read-only at their unchanged public-input path. The publisher retains its
+host public output and its original durable journal; native output completes
+before publisher readiness. No additional service, secret/state-volume move,
+config rewrite, new authority or longer signature/resource lease is involved.
+Consumers still execute all pin/signature/source/time/floor checks. This avoids
+repeating Windows bind-mount I/O inside every native mailbox guard.
+
+Only fixed public bootstrap/CA files and the bounded canonical signed closure
+are exported, never directory enumeration, operator inputs, keys, recovery or
+configuration. Links/private-key PEM and mismatching read-back reject. Unchanged
+bytes are not rewritten; a missing/corrupt ordinary public copy can be rebuilt
+from the same publisher output, not by re-enrolling private custody. Supported
+PKI/operational ceremonies stop/restart the publisher and export the new public
+bytes through that same owner. Do not manually edit the replica volume or remove
+private volumes to repair a public copy. This is distribution, not readiness or
+device/message acceptance.
+
+`node --test scripts/deep-dev.test.mjs` includes the rendered Compose/mount
+contracts. `tests/Deep.Dev.PublicOutput.Tests` is a native Linux disposable
+filesystem test against the actual publisher DLL, with only a read-only public
+fixture and tmpfs outputs: exact/idempotent copy, cache repair, malformed input,
+unknown-file exclusion, source/destination symlinks and private-key refusal.
+
 The dev image build runs the pinned NTS helper's Go tests before compiling it.
 UDP loss retains session keys only during the existing bounded exponential
 backoff; it does not mint time, waive quorum or change a signed lifetime. Other

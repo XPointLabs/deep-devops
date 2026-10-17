@@ -162,6 +162,27 @@ test('deep-dev keeps exactly six scoped native ARM64 services and durable custod
   assert.doesNotMatch(compose, /offline-root|privileged:|docker\.sock/);
 });
 
+test('native public output uses existing publisher and read-only consumers without moving custody', async () => {
+  const composePath = fileURLToPath(new URL('../docker-compose.deep-dev.yml', import.meta.url));
+  const c = JSON.parse(execFileSync('docker', ['compose', '--project-name', 'deep-dev-current', '-f', composePath,
+    'config', '--format', 'json'], {encoding: 'utf8', env: {...process.env,
+      DEEP_DEV_ROOT: 'C:/Work/DeepSession/secrets/dev/deep-dev-current', DEEP_DEV_PROJECT: 'deep-dev-current'}}));
+  assert.equal(Object.keys(c.services).length, 6);
+  const output = c.services.publisher.volumes.find(v => v.target === '/run/deep-public-native');
+  assert.equal(output.type, 'volume'); assert.equal(output.source, 'public-runtime'); assert.equal(Boolean(output.read_only), false);
+  for (const service of ['registry', 'node-1', 'node-2', 'node-3']) {
+    const input = c.services[service].volumes.find(v => v.target === '/run/deep-public');
+    assert.equal(input.type, 'volume'); assert.equal(input.source, 'public-runtime'); assert.equal(input.read_only, true);
+    assert.equal(c.services[service].depends_on.publisher.condition, 'service_healthy');
+  }
+  const mirror = await read('../tools/deep-dev/DevPublicArtifactMirror.cs');
+  assert.doesNotMatch(mirror, /EnumerateFiles|EnumerateFileSystemEntries|CopyDirectory|\.seed|\.key|SignDetached|Signer\.Load/);
+  assert.match(mirror, /RequireNoLinks/); assert.match(mirror, /Read\(file, XPointNetworkClosureWireCodec.MaximumResponseLength\)/);
+  assert.match(mirror, /PRIVATE KEY/); assert.match(mirror, /Copy\("network.ncp2", bundle\)/);
+  const publisher = await read('../tools/deep-dev/DevPublisher.cs');
+  assert.match(publisher, /DevPublicArtifactMirror.Synchronize\(root, journal.Bundle\)/);
+});
+
 test('recovery scripts do not reset custody and historical probe receives public inputs only', async () => {
   const script = await read('./deep-dev.ps1');
   assert.match(script, /ValidateSet\('deep-dev','deep-dev-current'\)/);
