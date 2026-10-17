@@ -6,6 +6,28 @@ import { fileURLToPath } from 'node:url';
 
 const read = p => readFile(new URL(p, import.meta.url), 'utf8');
 
+test('physical ingress failure location is bounded owned metadata without exception text', async () => {
+  const program = await read('../tools/deep-dev/Program.cs');
+  const observation = program.split('var trace = new StackTrace(exception, false);')[1].split('Environment.ExitCode = 2;')[0];
+  assert.match(observation, /GetFrames\(\)\.Take\(24\)/);
+  assert.match(observation, /"Deep.Dev" or "Deep.Protocol" or "Deep.Protocol.MembershipRoutes"/);
+  assert.match(observation, /location.Length <= 240/);
+  assert.match(observation, /Math.Clamp\(frame.GetILOffset\(\), -1, 1048575\)/);
+  assert.doesNotMatch(observation, /exception\.(Message|Data|ToString)|GetFileName|GetFileLineNumber/);
+});
+
+test('incremental dev build selects one closed service without changing default full build', async () => {
+  const script = await read('./deep-dev.ps1');
+  assert.match(script, /ValidateSet\('all','registry','node-1','publisher'\).*BuildService = 'all'/);
+  assert.match(script, /ContainsKey\('BuildService'\).*\$Action -cne 'Build'/);
+  const build = script.split("if ($Action -eq 'Build') {")[1].split('function Test-CurrentCapabilities')[0];
+  assert.match(build, /\$BuildService -ceq 'all'/);
+  assert.match(build, /@\('build','registry','node-1','publisher'\)/);
+  assert.match(build, /@\('build',\$BuildService\)/);
+  assert.ok(build.indexOf("'validate-physical-ingress'") < build.indexOf("@('build',$BuildService)"));
+  assert.doesNotMatch(build, /remove|down|--no-cache|--force-recreate/);
+});
+
 test('contact diagnostic explicitly selects another retained owner without fallback or reset', async () => {
   const script = await read('./deep-dev.ps1');
   const program = await read('../tools/deep-dev/Program.cs');

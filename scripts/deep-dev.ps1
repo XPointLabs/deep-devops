@@ -2,6 +2,7 @@
 param(
     [Parameter(Mandatory)][ValidateSet('Init','Build','PrepareAuthority','PrepareOperational','ApplyOperational','PrepareMailbox','ProvisionMailbox','ActivateMailbox','PrepareNodeMailbox','ProvisionNodeMailboxKeys','FetchNodeMailboxControl','EnrollNodeMailbox','ActivateNodeMailbox','ActivateNodeContact','ProvisionNodeContactKeys','EnrollNodeContact','PrepareContactCoordination','ProvisionContactCoordination','ActivateContactCoordination','PrepareDevPki','ApplyDevPki','PreparePhysicalIngress','ApplyPhysicalIngress','CacheWindowsDevCrl','ExerciseOwnedMailboxWindows','ExerciseOwnedMailbox','AdmitObserver','Provision','ProvisionFloor','Up','Status','Stop','Start','Verify','FaultMatrix','HistoryFault','StackFault','EngineFault','ExpiryFault')][string]$Action,
     [ValidateRange(1,3)][int]$NodeNumber = 1,
+    [ValidateSet('all','registry','node-1','publisher')][string]$BuildService = 'all',
     [string]$OperationalCandidate,
     [ValidateSet('primary','contact-diagnostic','contact-replication','contact-acceptance')][string]$OwnedClientScope = 'primary',
     [string]$IngressAddress,
@@ -14,6 +15,9 @@ param(
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+if ($PSBoundParameters.ContainsKey('BuildService') -and $Action -cne 'Build') {
+    throw 'BuildService is only supported by Build.'
+}
 if ($PSBoundParameters.ContainsKey('OwnedClientScope') -and $Action -cne 'ExerciseOwnedMailboxWindows') {
     throw 'OwnedClientScope is only supported by the retained Windows client exercise.'
 }
@@ -433,7 +437,12 @@ if ($Action -eq 'Build') {
     } else {
         Run-Native dotnet @('run','--project',(Join-Path $devopsRoot 'tools/deep-dev/Deep.Dev.csproj'),'-c','Debug','--','configure',$custodyPath)
     }
-    Run-Native docker ($compose + @('build','registry','node-1','publisher')); return
+    if ($BuildService -ceq 'all') {
+        Run-Native docker ($compose + @('build','registry','node-1','publisher'))
+    } else {
+        Run-Native docker ($compose + @('build',$BuildService))
+    }
+    return
 }
 function Test-CurrentCapabilities {
     $ready = $true

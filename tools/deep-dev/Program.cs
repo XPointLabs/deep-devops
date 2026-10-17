@@ -67,7 +67,23 @@ try {
 catch (Exception exception) {
     Console.Error.WriteLine($"Development provisioning failed closed ({exception.GetType().Name}); retained private staging is not deployment evidence.");
     if (args.Length > 0 && args[0].Contains("physical-ingress",StringComparison.Ordinal))
+    {
         Console.Error.WriteLine($"Physical ingress failure category: {DevPhysicalIngress.FailureCategory(exception)}.");
+        // Code-owned location only; no exception text/Data, source file path,
+        // authority bytes, endpoint or private staging content.
+        var trace = new StackTrace(exception, false);
+        foreach (var frame in trace.GetFrames().Take(24))
+        {
+            var method = frame.GetMethod(); var owner = method?.DeclaringType;
+            if (owner?.Assembly.GetName().Name is not ("Deep.Dev" or "Deep.Protocol" or "Deep.Protocol.MembershipRoutes")) continue;
+            var location = owner.FullName + "." + method!.Name;
+            if (location.Length <= 240 && location.All(ch => char.IsAsciiLetterOrDigit(ch) || "_.+<>`".Contains(ch)))
+            {
+                Console.Error.WriteLine($"Physical ingress failure location: method={location}; il={Math.Clamp(frame.GetILOffset(), -1, 1048575)}.");
+                break;
+            }
+        }
+    }
     Environment.ExitCode = 2;
 }
 

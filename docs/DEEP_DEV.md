@@ -7,6 +7,14 @@ release/device/message-delivery evidence profile. Production servers were not
 changed. Mr. X remains the single development operator; three signer keys are
 not three independent operators.
 
+For a node-only source change, `deep-dev.ps1 -Action Build -ProjectName
+deep-dev-current -BuildService node-1` builds the common image used by all three
+nodes. The closed alternatives are `registry`, `publisher`, and default `all`.
+Use the default when shared dependencies affect several images; an incremental
+build does not qualify stale consumers. `Up` and `Verify` remain separate and
+unchanged, with retained keys/volumes and the same physical-input validation.
+This option never resets state or bypasses TLS/authority/readiness checks.
+
 The dev image build runs the pinned NTS helper's Go tests before compiling it.
 UDP loss retains session keys only during the existing bounded exponential
 backoff; it does not mint time, waive quorum or change a signed lifetime. Other
