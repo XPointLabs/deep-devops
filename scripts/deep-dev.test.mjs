@@ -288,6 +288,7 @@ test('contact overlay composes the current resolver and private issuer with inde
     encoding:'utf8',env:{...process.env,DEEP_DEV_PROJECT:'deep-dev-current',DEEP_DEV_ROOT:'C:/Work/DeepSession/secrets/dev/deep-dev-current',
       DEEP_DEV_MAILBOX_NETWORK:'11'.repeat(16),DEEP_DEV_MAILBOX_POLICY:'22'.repeat(32),DEEP_DEV_IPV4_PREFIX:'172.31.241',DEEP_DEV_PORT_PREFIX:'282',DEEP_DEV_REGISTRY_PORT:'28543'}}));
   assert.equal(Object.keys(config.services).length,8);
+  assert.equal(config.services.registry.cpus,2);
   for(const i of [1,2,3]) {
     const node=config.services[`node-${i}`];
     for(const flag of ['GroupControlService__RuntimeActivation','GroupControlService__MapReplicaEndpoint','RequiredTerminals__GroupControl',

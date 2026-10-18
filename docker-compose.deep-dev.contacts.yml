@@ -1,5 +1,8 @@
 # Explicit dev resolver enrollment with original node identity/data; no new service.
 services:
+  registry:
+    # Signed proof/coordination fanout must not contend on one throttled worker.
+    cpus: 2.0
   node-1:
     environment: &contact-bindings
       ContactService__RuntimeActivation: "true"

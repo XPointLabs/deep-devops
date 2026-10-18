@@ -195,6 +195,14 @@ with current connected evidence in the
 [CLI GSR checkpoint](../../deep-cli/docs/testing/cli-gsr-groups-2026-10-18.md).
 Retention/rotation/handover and production/device acceptance remain separate.
 
+The contacts overlay reserves2 CPUs for Registry's concurrent signed-proof and
+coordination work (base-only topology remains1). Memory limits, signer/node
+budgets, TLS, authority windows and transport deadlines are unchanged. On the
+12-CPU local host, live quota1 throttled128 of377 sampled scheduler periods;
+quota2 was applied without restart during the CLI candidate, then matched in
+Compose. Image, mounts, ports, environment and memory were independently
+unchanged. This is explicit local capacity tuning, not a production SLO claim.
+
 ### Current-dev contact and issuer-connected client
 
 Once all mailbox hosts are enrolled, provision separate contact protection
