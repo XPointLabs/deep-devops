@@ -290,7 +290,8 @@ test('contact overlay composes the current resolver and private issuer with inde
   assert.equal(Object.keys(config.services).length,8);
   for(const i of [1,2,3]) {
     const node=config.services[`node-${i}`];
-    for(const flag of ['ContactService__RuntimeActivation','ContactService__MapReplicaEndpoint','RequiredTerminals__Contact','DeepIdV2ReplicaStage__Enabled',
+    for(const flag of ['GroupControlService__RuntimeActivation','GroupControlService__MapReplicaEndpoint','RequiredTerminals__GroupControl',
+      'ContactService__RuntimeActivation','ContactService__MapReplicaEndpoint','RequiredTerminals__Contact','DeepIdV2ReplicaStage__Enabled',
       'DeepIdV2PreKeyClaim__Enabled','DeepIdV2ContactResolver__Enabled','DeepIdV2ContactResolver__MailboxGrantEnabled'])assert.equal(node.environment[flag],'true');
     assert.equal(node.environment.DeepIdV2ContactResolver__MailboxGrantAuthorityOrigin,'https://registry/');
     for(const [target,source,readonly] of [['/var/lib/contact-custody',`node-${i}-contact-custody`,false],['/var/lib/contact-keys',`node-${i}-contact-keys`,true],

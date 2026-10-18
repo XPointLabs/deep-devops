@@ -179,6 +179,22 @@ requires `currentMailboxHost.recovered=true` and state `recovered` on every node
 memory alongside retained identity/role custody and mounts. This remains local
 dev infrastructure evidence, not XMC2 issuance, message delivery or device E2E.
 
+### Current-dev GSR1 candidate
+
+The contact overlay now also enables the production `GroupControlService`
+runtime and authenticated replica endpoint on all three retained nodes, and
+makes GroupControl a required terminal. It composes current DID2 authority,
+opaque placement, existing node receipt identity and the durable group-control
+store beneath each retained node data root. Admission/mutation/retention use
+DID2 authenticated service time; peer HTTP authentication keeps host time. There is no new operator signing
+key, direct client URL, volume reset or readiness waiver. Use the supported
+node-image `Build`, `Up`, then `Verify`; flags alone do not prove client E2E.
+The closed descriptor/key allocation belongs to
+[DR-0145](../../docs/survival-program/decisions/DR-0145-owned-group-control-rendezvous.md),
+with current connected evidence in the
+[CLI GSR checkpoint](../../deep-cli/docs/testing/cli-gsr-groups-2026-10-18.md).
+Retention/rotation/handover and production/device acceptance remain separate.
+
 ### Current-dev contact and issuer-connected client
 
 Once all mailbox hosts are enrolled, provision separate contact protection
