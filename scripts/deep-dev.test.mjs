@@ -6,6 +6,21 @@ import { fileURLToPath } from 'node:url';
 
 const read = p => readFile(new URL(p, import.meta.url), 'utf8');
 
+test('historical custody actions use one stopped retained owner and never provision or reset', async () => {
+  const script = await read('./deep-dev.ps1');
+  const recovery = script.split("if ($Action -in @('ExportStoreRecovery','ReconcileStoreCustody')) {")[1].split("if ($Action -eq 'Build') {")[0];
+  assert.match(recovery, /\$ProjectName -cne 'deep-dev-current'/);
+  assert.match(recovery, /secrets\/dev/);
+  assert.match(recovery, /ReparsePoint/);
+  assert.match(recovery, /Test-Path -LiteralPath \$proofPath/);
+  assert.match(recovery, /current-mailbox-export-store-recovery/);
+  assert.match(recovery, /current-mailbox-reconcile-store/);
+  assert.match(recovery, /\$inspection.State.Running/);
+  assert.ok(recovery.indexOf("@('stop','--timeout','10',$service)") < recovery.indexOf("@('run','--rm','--no-deps'"));
+  assert.match(recovery, /finally\s*\{[\s\S]*@\('start',\$service\)/);
+  assert.doesNotMatch(recovery, /@\('down'|--volumes|volume','rm|current-mailbox-enroll|provision-node|offline-root/);
+});
+
 test('dev builds cache only locked public packages, not source outputs or custody', async () => {
   const dockerfile = await read('../docker/deep-dev.Dockerfile');
   assert.match(dockerfile, /ENV NUGET_HTTP_CACHE_PATH=\/root\/\.nuget\/packages\/\.http-cache/);

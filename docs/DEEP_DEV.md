@@ -14,6 +14,33 @@ Use the default when shared dependencies affect several images; an incremental
 build does not qualify stale consumers. `Up` and `Verify` remain separate and
 unchanged, with retained keys/volumes and the same physical-input validation.
 This option never resets state or bypasses TLS/authority/readiness checks.
+
+### Explicit historical peer custody repair
+
+Root DR-0154/0155/0156 own the contract. `ExportStoreRecovery` and
+`ReconcileStoreCustody` are local operator actions, not a replacement Store,
+expired-grant exception or HTTP repair API. Each stops only the selected running
+node, uses the same native volumes/configuration in a listener-free command,
+and finally starts that exact pre-existing container. No root key is mounted,
+no enrollment/reset is performed, and ordinary Build/Up/Verify remain separate.
+
+Supply an exact retained original PRQ2 and a NEW private proof output in the
+same dedicated directory under private dev custody. Never place either in repo
+artifacts or logs. Example with operator-selected private variables:
+
+```powershell
+./scripts/deep-dev.ps1 -Action ExportStoreRecovery -ProjectName deep-dev-current -NodeNumber 1 -RecoveryRequestFile $request -RecoveryProofFile $proof
+./scripts/deep-dev.ps1 -Action ReconcileStoreCustody -ProjectName deep-dev-current -NodeNumber 3 -RecoveryProofFile $proof
+```
+
+The actual signed request determines the replica pair; example role numbers
+are not permission to repair another node. A source needs its independently
+protected completed Store/blob. A recipient needs one exact existing pre-effect
+Pending, no target/blob, valid source proof and complete other history. Missing
+or conflicting custody refuses. Repair produces no Store, client outcome, ACK,
+MRR2 or quorum. After expiry the old live Store still rejects; any delivery of
+the same retained ciphertext uses the ordinary currently admitted successor.
+
 BuildKit also retains a locked NuGet package/public-feed metadata cache for the three
 image builds and native test targets. Source, compiled outputs, credentials and
 authority/runtime custody are not cache mounts. A cold/absent cache performs

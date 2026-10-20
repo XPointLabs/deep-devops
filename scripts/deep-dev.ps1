@@ -1,9 +1,11 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('Init','Build','PrepareAuthority','PrepareOperational','ApplyOperational','PrepareMailbox','ProvisionMailbox','ActivateMailbox','PrepareNodeMailbox','ProvisionNodeMailboxKeys','FetchNodeMailboxControl','EnrollNodeMailbox','ActivateNodeMailbox','ActivateNodeContact','ProvisionNodeContactKeys','EnrollNodeContact','PrepareContactCoordination','ProvisionContactCoordination','ActivateContactCoordination','PrepareDevPki','ApplyDevPki','PreparePhysicalIngress','ApplyPhysicalIngress','CacheWindowsDevCrl','ExerciseOwnedMailboxWindows','ExerciseOwnedMailbox','AdmitObserver','Provision','ProvisionFloor','Up','Status','Stop','Start','Verify','FaultMatrix','HistoryFault','StackFault','EngineFault','ExpiryFault')][string]$Action,
+    [Parameter(Mandatory)][ValidateSet('Init','Build','ExportStoreRecovery','ReconcileStoreCustody','PrepareAuthority','PrepareOperational','ApplyOperational','PrepareMailbox','ProvisionMailbox','ActivateMailbox','PrepareNodeMailbox','ProvisionNodeMailboxKeys','FetchNodeMailboxControl','EnrollNodeMailbox','ActivateNodeMailbox','ActivateNodeContact','ProvisionContactCoordination','ProvisionNodeContactKeys','EnrollNodeContact','PrepareContactCoordination','ActivateContactCoordination','PrepareDevPki','ApplyDevPki','PreparePhysicalIngress','ApplyPhysicalIngress','CacheWindowsDevCrl','ExerciseOwnedMailboxWindows','ExerciseOwnedMailbox','AdmitObserver','Provision','ProvisionFloor','Up','Status','Stop','Start','Verify','FaultMatrix','HistoryFault','StackFault','EngineFault','ExpiryFault')][string]$Action,
     [ValidateRange(1,3)][int]$NodeNumber = 1,
     [ValidateSet('all','registry','node-1','publisher')][string]$BuildService = 'all',
     [string]$OperationalCandidate,
+    [string]$RecoveryRequestFile,
+    [string]$RecoveryProofFile,
     [ValidateSet('primary','contact-diagnostic','contact-replication','contact-acceptance')][string]$OwnedClientScope = 'primary',
     [string]$IngressAddress,
     [string]$CustodyRoot = 'C:\Work\DeepSession\secrets\dev\deep-dev',
@@ -21,6 +23,8 @@ if ($PSBoundParameters.ContainsKey('BuildService') -and $Action -cne 'Build') {
 if ($PSBoundParameters.ContainsKey('OwnedClientScope') -and $Action -cne 'ExerciseOwnedMailboxWindows') {
     throw 'OwnedClientScope is only supported by the retained Windows client exercise.'
 }
+if (($PSBoundParameters.ContainsKey('RecoveryRequestFile') -or $PSBoundParameters.ContainsKey('RecoveryProofFile')) -and
+    $Action -notin @('ExportStoreRecovery','ReconcileStoreCustody')) { throw 'Recovery files require an explicit historical custody action.' }
 if ($Action -eq 'EngineFault' -and -not $ConfirmEngineShutdown) {
     throw 'EngineFault requires explicit whole-Desktop shutdown approval and -ConfirmEngineShutdown. Use StackFault for routine recovery tests.'
 }
@@ -426,6 +430,53 @@ if ($Action -eq 'ExerciseOwnedMailbox') {
     Run-Native docker @('run','--rm','--network',"$($ProjectName)_dev",'--ulimit','core=0',
         '--mount',"type=bind,source=$custodyPath/public,target=/run/deep-public,readonly",
         "$ProjectName/publisher:candidate",'Deep.Dev.dll','exercise-owned-mailbox','/run/deep-public')
+    return
+}
+if ($Action -in @('ExportStoreRecovery','ReconcileStoreCustody')) {
+    if ($ProjectName -cne 'deep-dev-current' -or -not $nodeMailboxEnabled) { throw 'Historical repair requires the retained current dev node owners.' }
+    if (-not [IO.Path]::IsPathFullyQualified($RecoveryProofFile) -or
+        ($Action -ceq 'ExportStoreRecovery' -and -not [IO.Path]::IsPathFullyQualified($RecoveryRequestFile))) {
+        throw 'Absolute explicit private recovery paths required.'
+    }
+    $proofPath = [IO.Path]::GetFullPath($RecoveryProofFile)
+    $recoveryDirectory = [IO.Path]::GetDirectoryName($proofPath)
+    $privateRoot = [IO.Path]::GetFullPath('C:/Work/DeepSession/secrets/dev') + [IO.Path]::DirectorySeparatorChar
+    if (-not $recoveryDirectory.StartsWith($privateRoot,[StringComparison]::OrdinalIgnoreCase)) { throw 'Recovery evidence must stay in private dev custody.' }
+    $paths = @($proofPath)
+    if ($Action -ceq 'ExportStoreRecovery') {
+        $requestPath = [IO.Path]::GetFullPath($RecoveryRequestFile)
+        if ([IO.Path]::GetDirectoryName($requestPath) -cne $recoveryDirectory -or
+            -not (Test-Path -LiteralPath $requestPath -PathType Leaf) -or (Test-Path -LiteralPath $proofPath)) {
+            throw 'Exact original request and NEW proof output must share one private recovery directory.'
+        }
+        $paths += $requestPath
+        $command = @('current-mailbox-export-store-recovery','--request-file',('/run/peer-recovery/'+[IO.Path]::GetFileName($requestPath)),
+            '--output-file',('/run/peer-recovery/'+[IO.Path]::GetFileName($proofPath)))
+        $mount = $recoveryDirectory + ':/run/peer-recovery'
+    } else {
+        if ($RecoveryRequestFile -or -not (Test-Path -LiteralPath $proofPath -PathType Leaf)) { throw 'Reconciliation takes only the exact existing source proof.' }
+        $command = @('current-mailbox-reconcile-store','--forwarding-file',('/run/peer-recovery/'+[IO.Path]::GetFileName($proofPath)))
+        $mount = $recoveryDirectory + ':/run/peer-recovery:ro'
+    }
+    foreach ($file in $paths) {
+        for ($cursor=$file; $cursor; $cursor=[IO.Path]::GetDirectoryName($cursor)) {
+            if ((Test-Path -LiteralPath $cursor) -and ((Get-Item -LiteralPath $cursor).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+                throw 'Historical recovery paths cannot traverse links.'
+            }
+        }
+    }
+    $service = "node-$NodeNumber"
+    $inspection = @((& docker inspect "$ProjectName-$service-1" 2>$null | Out-String | ConvertFrom-Json))[0]
+    if ($LASTEXITCODE -ne 0 -or -not $inspection.State.Running) { throw 'Explicit retained running node required; no new node provisioning.' }
+    Run-Native docker ($compose + @('stop','--timeout','10',$service))
+    try {
+        Run-Native docker ($compose + @('run','--rm','--no-deps','--volume',$mount,$service,'XNode.dll') + $command)
+    } finally {
+        # Resume only the exact pre-existing container. No recreate/reset or
+        # implicit upgrade is mixed into metadata-only recovery.
+        Run-Native docker ($compose + @('start',$service))
+    }
+    Write-Host 'Exclusive historical custody command completed; no Store/ACK or quorum was authorized.'
     return
 }
 if ($Action -eq 'Build') {
