@@ -30,7 +30,10 @@ plus actual operation-scratch durability ordering and exact recovery after
 interruptions before/after replacement. It also covers bounded actual-byte
 mutation grammar reuse, changed warm files,
 authentic pre-ACK rollback, cache eviction, fresh native identity/floor joins
-and duplicate ACK-target conflict checks. The memo never substitutes actual
+and duplicate ACK-target conflict checks. Real HTTP recipient Store/ACK tests
+also require durable response custody before release and preserve the generic
+post-callback refusal after native, protected-document or authority changes.
+The memo never substitutes actual
 file reads, native inventories or current authority. This focused target
 does not start or reset the retained network and is not a full source,
 transport-rehearsal, device or release gate. Build/Up/Verify and business E2E

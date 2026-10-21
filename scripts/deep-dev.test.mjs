@@ -257,7 +257,7 @@ test('local builds use reviewed image digests and a prebuilt native asset, not C
   assert.match(dockerfile, /FullyQualifiedName~DeepIdV2NetworkPlacementRuntimeTests\|FullyQualifiedName~FileDeepIdV2DirectoryProtectedHeadStoreTests/);
   assert.match(dockerfile, /FullyQualifiedName~OperationGrammar\|FullyQualifiedName~GrammarMemoBudget/);
   assert.match(dockerfile, /FullyQualifiedName~CompleteOperationScratch/);
-  for (const regression of ['MutationGrammar', 'CurrentMailboxAckTargetGrammarTests', 'FreshNativeIdentityJoin',
+  for (const regression of ['MutationGrammar', 'CurrentMailboxAckTargetGrammarTests', 'FreshNativeIdentityJoin', 'RecipientFence_',
     'CurrentHostNativeRecoveryRejectsDamagedReplicaWithoutRepairOrHttp',
     'CurrentPeerColdRecoveryRejectsCoordinatedNativeLossOrAuthenticPreAckRollback',
     'CurrentHostRecoveryUsesOneAuthenticatedSnapshotForClientAndPeerJoin',
