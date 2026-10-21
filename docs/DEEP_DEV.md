@@ -27,7 +27,11 @@ including actual warm-file tampering and live/dangling symlink refusals. It
 also exercises operation-ledger grammar reuse after actual custody checks,
 alias isolation, closed leases, BOM and valid inputs above the memo budget,
 plus actual operation-scratch durability ordering and exact recovery after
-interruptions before/after replacement. It
+interruptions before/after replacement. It also covers bounded actual-byte
+mutation grammar reuse, changed warm files,
+authentic pre-ACK rollback, cache eviction, fresh native identity/floor joins
+and duplicate ACK-target conflict checks. The memo never substitutes actual
+file reads, native inventories or current authority. This focused target
 does not start or reset the retained network and is not a full source,
 transport-rehearsal, device or release gate. Build/Up/Verify and business E2E
 are still separate steps.
