@@ -245,6 +245,8 @@ test('local builds use reviewed image digests and a prebuilt native asset, not C
     assert.ok(dockerfile.includes(`${image}@sha256:`));
   assert.match(dockerfile, /GOARCH=arm64/);
   assert.match(dockerfile, /FROM build AS protocol-tests/);
+  assert.match(dockerfile, /FROM build AS node-authority-tests/);
+  assert.match(dockerfile, /FullyQualifiedName~DeepIdV2NetworkPlacementRuntimeTests\|FullyQualifiedName~FileDeepIdV2DirectoryProtectedHeadStoreTests/);
   assert.doesNotMatch(dockerfile, /cmake|g\+\+|clang|build-essential/);
   const testEnv = await read('./test-env.ps1');
   assert.match(testEnv, /\$BackendMode = .*else \{ "deep-dev" \}/);

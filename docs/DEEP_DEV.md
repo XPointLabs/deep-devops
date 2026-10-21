@@ -15,6 +15,19 @@ build does not qualify stale consumers. `Up` and `Verify` remain separate and
 unchanged, with retained keys/volumes and the same physical-input validation.
 This option never resets state or bypasses TLS/authority/readiness checks.
 
+For focused node authority/path validation on actual Linux ARM64, run from the
+workspace root (the same reviewed image pins and public package cache are used):
+
+```powershell
+docker build --target node-authority-tests --build-arg PROJECT=xnode/src/XNode/XNode.csproj -f deep-devops/docker/deep-dev.Dockerfile .
+```
+
+This executes the network-placement and protected-directory-head tests,
+including actual warm-file tampering and live/dangling symlink refusals. It
+does not start or reset the retained network and is not a full source,
+transport-rehearsal, device or release gate. Build/Up/Verify and business E2E
+are still separate steps.
+
 ### Explicit historical peer custody repair
 
 Root DR-0154/0155/0156 own the contract. `ExportStoreRecovery` and

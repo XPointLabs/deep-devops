@@ -32,6 +32,11 @@ FROM build AS mailbox-signer-tests
 # stand in for this lane. Not grant/authority/device activation evidence.
 RUN --mount=type=cache,id=deep-dev-nuget,target=/root/.nuget/packages,sharing=locked dotnet test deep-registry-api/tests/Deep.Registry.Api.Tests/Deep.Registry.Api.Tests.csproj -c Release -p:DeepProtocolSourceCutover=true -p:DeepProtocolLocalCutover=true --filter 'FullyQualifiedName~MailboxRoleSignerTests|FullyQualifiedName~UnixSocketEd25519ExternalSignerTests'
 
+FROM build AS node-authority-tests
+# Exercise actual Linux path/symlink/permission and protected-floor owners,
+# including warm reads. This is a focused lane, not full source qualification.
+RUN --mount=type=cache,id=deep-dev-nuget,target=/root/.nuget/packages,sharing=locked dotnet test xnode/tests/XNode.IntegrationTests/XNode.IntegrationTests.csproj -c Release -p:DeepProtocolSourceCutover=true -p:DeepProtocolLocalCutover=true --filter 'FullyQualifiedName~DeepIdV2NetworkPlacementRuntimeTests|FullyQualifiedName~FileDeepIdV2DirectoryProtectedHeadStoreTests'
+
 FROM mcr.microsoft.com/dotnet/aspnet@sha256:e3736b0d423db99c6988e1ddf5ea725c14b12579bb120024e5ff7ff204a14080
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && rm -rf /var/lib/apt/lists/*
