@@ -79,7 +79,8 @@ internal static class DevOfflineAuthorityRenewal
 
     internal static async Task<PreparedPair> AuthorPairAsync(XPointNetworkGenesisPin pin,
         IReadOnlyList<ReadOnlyMemory<byte>> xna, IReadOnlyList<ReadOnlyMemory<byte>> dts,
-        ulong observed, IXPointNetworkBootstrapRootSigner signer, string priorBundleSha256)
+        ulong observed, IXPointNetworkBootstrapRootSigner signer, string priorBundleSha256,
+        IReadOnlyList<AccountDirectoryDts1Source>? successorTimeSources = null)
     {
         if (priorBundleSha256.Length != 64 || priorBundleSha256.Any(c => !char.IsAsciiHexDigit(c)))
             throw new ArgumentException("Exact prior-public digest required.");
@@ -87,7 +88,7 @@ internal static class DevOfflineAuthorityRenewal
         var expiry = checked(observed + 7 * 86_400UL);
         var renewal = await XPointNetworkBootstrapAuthor.AuthorSameKeyRenewalAsync(
             RandomNumberGenerator.GetBytes(32), prior, dts, observed, observed,
-            Math.Max(prior.ExpiresAt, expiry), observed, expiry, [signer]);
+            Math.Max(prior.ExpiresAt, expiry), observed, expiry, [signer], successorTimeSources: successorTimeSources);
         ReadOnlyMemory<byte>[] nextXna = [.. xna, renewal.ExactXna1];
         ReadOnlyMemory<byte>[] nextDts = [.. dts, renewal.ExactDts1];
         var verified = XPointNetworkAuthorityVerifier.Verify(pin, nextXna, nextDts);

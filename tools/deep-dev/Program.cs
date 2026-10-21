@@ -52,8 +52,8 @@ try {
     else if (args.Length == 3 && args[0] == "exercise-owned-mailbox" && args[2] is ("contact-diagnostic" or "contact-replication" or "contact-acceptance"))
         await DevOwnedMailboxExercise.RunAsync(args[1], args[2]);
     else if (args.Length == 3 && args[0] == "admit-observer") await DevObserverAdmission.RunAsync(args[1], args[2]);
-    else if (args.Length == 3 && args[0] == "prepare-operational") {
-        _ = await DevOfflineOperationalRenewal.PrepareAsync(args[1], args[2], ReadNtsAsync);
+    else if ((args.Length == 3 || args.Length == 5 && args[3] == "--time-sources") && args[0] == "prepare-operational") {
+        _ = await DevOfflineOperationalRenewal.PrepareAsync(args[1], args[2], ReadNtsAsync, args.Length == 5 ? args[4] : null);
         Console.WriteLine("Offline development operational successor prepared with staged role/traffic/TLS custody; not activated.");
     }
     else if (args.Length == 5 && args[0] == "import-operational")
@@ -388,11 +388,12 @@ static string NewBlsScalar()
 }
 static async Task<ulong> ReadNtsAsync(string executable, AccountDirectoryDts1Source[] sources)
 {
+    var started = Stopwatch.GetTimestamp();
     using var process = new Process { StartInfo = new(Path.GetFullPath(executable)) { RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true } };
     if (!process.Start()) throw new IOException("NTS observation process did not start.");
     try
     {
-        var request = JsonSerializer.Serialize(new { sources = sources.Select(s => new { id = Convert.ToHexStringLower(s.SourceId.Span), host = s.HostAscii, port = s.Port, pin = Convert.ToHexStringLower(s.TlsSpkiSha256.Span), radius = 10 }) });
+        var request = JsonSerializer.Serialize(new { sources = sources.Select(s => new { id = Convert.ToHexStringLower(s.SourceId.Span), host = s.HostAscii, port = s.Port, pin = Convert.ToHexStringLower(s.TlsSpkiSha256.Span), radius = s.MaximumRadiusSeconds }) });
         await process.StandardInput.WriteLineAsync(request); await process.StandardInput.FlushAsync();
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         var buffer = new char[8192];
@@ -404,20 +405,7 @@ static async Task<ulong> ReadNtsAsync(string executable, AccountDirectoryDts1Sou
             if (buffer[length] == '\n') { line = new string(buffer, 0, length); break; }
         }
         if (line is null) throw new IOException("Authenticated NTS observation exceeds its bound.");
-        using var json = JsonDocument.Parse(line);
-        var entries = json.RootElement.GetProperty("observations").EnumerateArray().ToArray();
-        if (entries.Length != 2) throw new CryptographicException("Authenticated NTS quorum is incomplete.");
-        var lower = 0UL; var upper = ulong.MaxValue;
-        var ids = new HashSet<string>();
-        foreach (var e in entries) {
-            var id = e.GetProperty("id").GetString()!;
-            if (!sources.Any(s => Convert.ToHexStringLower(s.SourceId.Span) == id) || !ids.Add(id)) throw new CryptographicException("NTS source differs from the bootstrap policy.");
-            var time = e.GetProperty("unixSeconds").GetUInt64(); var radius = e.GetProperty("radiusSeconds").GetUInt32();
-            if (radius is < 1 or > 10 || time <= radius) throw new CryptographicException("NTS observation is unbounded.");
-            lower = Math.Max(lower, time - radius); upper = Math.Min(upper, checked(time + radius));
-        }
-        if (lower > upper) throw new CryptographicException("Authenticated NTS sources disagree.");
-        return lower + (upper - lower) / 2;
+        return DevNtsObservation.Parse(Encoding.UTF8.GetBytes(line), sources, Stopwatch.GetElapsedTime(started));
     }
     finally { if (!process.HasExited) process.Kill(entireProcessTree: true); await process.WaitForExitAsync(); }
 }

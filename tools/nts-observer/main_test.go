@@ -82,19 +82,31 @@ func TestFailureDiagnosticsAreClosedAndBackoffRemainsSilent(t *testing.T) {
 		t.Fatal("backoff did not retain its separately suppressed diagnostic category")
 	}
 }
-func TestQueryTimeoutRetainsSessionAndEnforcesExistingBackoff(t *testing.T) {
-	session := &nts.Session{}
-	p := peer{session: session}
-	p.queryFailed(fmt.Errorf("lost datagram: %w", os.ErrDeadlineExceeded))
-	if p.session != session || p.backoff != 10*time.Second || time.Until(p.retry) <= 0 {
-		t.Fatal("UDP timeout discarded keys or lost the existing retry backoff")
-	}
-	if _, err := p.observe(source{}); err == nil || p.session != session {
-		t.Fatal("backoff admitted a query or discarded the retained session")
-	}
-	p.queryFailed(os.ErrDeadlineExceeded)
-	if p.session != session || p.backoff != 15*time.Second {
-		t.Fatal("repeated timeout bypassed exponential backoff")
+func TestQueryTimeoutRetainsSessionWithoutChangingKeyExchangeBackoff(t *testing.T) {
+	for _, previous := range []time.Duration{0, 15 * time.Second} {
+		session := &nts.Session{}
+		p := peer{session: session, backoff: previous}
+		for attempt := 0; attempt < 2; attempt++ {
+			before := time.Now()
+			p.queryFailed(fmt.Errorf("lost datagram: %w", os.ErrDeadlineExceeded))
+			if p.session != session || p.backoff != previous || p.retry.Before(before.Add(queryRetryDelay)) ||
+				p.retry.After(time.Now().Add(queryRetryDelay)) {
+				t.Fatal("UDP timeout changed KE custody/backoff or escaped bounded normal-poll retry")
+			}
+			if _, err := p.observe(source{}); err == nil || p.session != session || p.failure != backoffFailure {
+				t.Fatal("normal-poll delay admitted a query or discarded the retained session")
+			}
+		}
+		// A later authentication/session failure still obeys the original KE
+		// minimum/exponent; UDP timeout never reset that independent history.
+		p.queryFailed(errors.New("authentication failed"))
+		expected := 10 * time.Second
+		if previous != 0 {
+			expected = previous * 3 / 2
+		}
+		if p.session != nil || p.backoff != expected || time.Until(p.retry) <= queryRetryDelay {
+			t.Fatal("session discard bypassed retained exponential key-exchange backoff")
+		}
 	}
 }
 func TestNonTimeoutQueryFailureStillDropsSession(t *testing.T) {

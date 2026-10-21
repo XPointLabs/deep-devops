@@ -4,6 +4,7 @@ param(
     [ValidateRange(1,3)][int]$NodeNumber = 1,
     [ValidateSet('all','registry','node-1','publisher')][string]$BuildService = 'all',
     [string]$OperationalCandidate,
+    [string]$TimeSourcesPath,
     [string]$RecoveryRequestFile,
     [string]$RecoveryProofFile,
     [ValidateSet('primary','contact-diagnostic','contact-replication','contact-acceptance')][string]$OwnedClientScope = 'primary',
@@ -17,6 +18,9 @@ param(
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+if ($PSBoundParameters.ContainsKey('TimeSourcesPath') -and $Action -cne 'PrepareOperational') {
+    throw 'TimeSourcesPath requires explicit PrepareOperational offline authoring.'
+}
 if ($PSBoundParameters.ContainsKey('BuildService') -and $Action -cne 'Build') {
     throw 'BuildService is only supported by Build.'
 }
@@ -175,8 +179,10 @@ if ($Action -in @('PrepareAuthority','PrepareOperational')) {
         Run-Native docker ($compose + @('stop','--timeout','10','publisher'))
         $operationalPrepared = $false
         try {
-            Run-Native dotnet @('run','--project',(Join-Path $devopsRoot 'tools/deep-dev/Deep.Dev.csproj'),'-c','Debug','--',
+            $prepareArguments = @('run','--project',(Join-Path $devopsRoot 'tools/deep-dev/Deep.Dev.csproj'),'-c','Debug','--',
                 'prepare-operational',$custodyPath,$observer)
+            if ($TimeSourcesPath) { $prepareArguments += @('--time-sources',[IO.Path]::GetFullPath($TimeSourcesPath)) }
+            Run-Native dotnet $prepareArguments
             $operationalPrepared = $true
             Write-Host 'Operational successor prepared. Publisher remains stopped for exact-predecessor activation; Start explicitly cancels this preparation.'
         } finally { if (-not $operationalPrepared) {

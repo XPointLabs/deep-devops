@@ -26,11 +26,15 @@ observations and do not alter the closed stdout response or any trust check.
 
 After the existing two bounded UDP attempts time out, the peer retains its
 negotiated session rather than treating packet loss as evidence that its keys
-are invalid. The same exponential retry backoff still applies, including the
-minimum10 seconds, factor1.5 and maximum5 days; no observation is emitted while
-waiting. Non-timeout authentication/framing/provider failures still discard the
+are invalid. It retries the SAME session after a bounded2-second delay, on the
+next ordinary Registry poll: no extra query is added inside a poll, and no
+timeout becomes an observation. Key-exchange backoff remains independent:
+minimum10 seconds, factor1.5 and maximum5 days. UDP loss neither resets nor
+increments that KE history; a later session-discard still obeys its original
+exponent. Non-timeout authentication/framing/provider failures still discard the
 session. Only a successfully authenticated and policy-bounded NTP response resets
-backoff. TLS, source pins, nonce/AEAD validation, per-query timeouts and signed
+KE backoff. This removes a liveness trap where a10-second UDP backoff already
+outlived the actual signed10-second sample age. TLS, source pins, nonce/AEAD validation, per-query timeouts and signed
 Registry interval/freshness checks are unchanged. The default dev Docker build
 now executes the checked-in Go tests before compiling the helper.
 

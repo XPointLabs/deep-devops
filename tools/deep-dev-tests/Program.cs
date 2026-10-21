@@ -10,10 +10,17 @@ using Deep.Protocol.XPointNetworkV1;
 using Sodium;
 
 // Isolated real-signature tests with fixed fixture time, not NTS/runtime evidence.
+if (args.Length != 0)
+{
+    if (args is not ["--time-sources-only"]) throw new ArgumentException("Unknown test selection.");
+    await DevTimeSourceTests.RunAsync();
+    return;
+}
 var directory = Path.Combine(Path.GetTempPath(), "deep-dev-offline-tests-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(directory);
 try
 {
+    await DevTimeSourceTests.RunAsync();
     var beforeForwardCalls=0;
     await DevOwnedMailboxExercise.StageAsync("ContactPublication",()=>{
         if(++beforeForwardCalls==1)throw new Deep.Client.Shared.Services.ClientMailboxTransportException(
@@ -357,9 +364,29 @@ static async Task TestFileCeremonyAsync(VerifiedXPointNetworkBootstrap bootstrap
             using var ca = caRequest.CreateSelfSigned(DateTimeOffset.FromUnixTimeSeconds(800), DateTimeOffset.FromUnixTimeSeconds(10_000));
             File.WriteAllText(Path.Combine(publicRoot, "dev-ca.crt"), ca.ExportCertificatePem());
             File.WriteAllText(Path.Combine(offline, "dev-ca.key"), caKey.ExportPkcs8PrivateKeyPem());
-            var candidate = await DevOfflineOperationalRenewal.PrepareAsync(fixture, "fixture-observer", (_, _) => Task.FromResult(1_800_000_000UL));
+            var sourcePath = Path.Combine(fixture, "time-sources.json");
+            var originalSources = AccountDirectoryDts1Codec.Decode(bootstrap.ExactDts1.Span).Sources;
+            var successorSources = originalSources.Append(new AccountDirectoryDts1Source(B(220), B(221), 1, "time3.invalid", 4460, B(222), 5)).ToArray();
+            var sourceBytes = JsonSerializer.SerializeToUtf8Bytes(new { schema = "deep-dev-time-sources.v1", sources = successorSources.Select(source => new {
+                id = Convert.ToHexStringLower(source.SourceId.Span), family = Convert.ToHexStringLower(source.FailureFamilyHash.Span),
+                protocol = source.Protocol, host = source.HostAscii, port = source.Port,
+                pin = Convert.ToHexStringLower(source.TlsSpkiSha256.Span), radius = source.MaximumRadiusSeconds }) });
+            File.WriteAllBytes(sourcePath, sourceBytes);
+            await Reject(() => DevOfflineOperationalRenewal.PrepareAsync(fixture, "fixture-observer", (_, observedSources) => {
+                Check(observedSources.Length == 2, "source addition authenticates ceremony with old signed sources only");
+                File.WriteAllBytes(sourcePath, [.. sourceBytes, (byte)' ']);
+                return Task.FromResult(1_800_000_000UL);
+            }, sourcePath), "source input mutation during old-policy observation");
+            File.WriteAllBytes(sourcePath, sourceBytes);
+            var candidate = await DevOfflineOperationalRenewal.PrepareAsync(fixture, "fixture-observer", (_, observedSources) => {
+                Check(observedSources.Length == 2 && observedSources.Select(source => source.HostAscii).SequenceEqual(originalSources.Select(source => source.HostAscii)),
+                    "new source is not trusted to establish its own ceremony time");
+                return Task.FromResult(1_800_000_000UL);
+            }, sourcePath);
             var next = XPointNetworkClosureWireCodec.DecodeResponse(File.ReadAllBytes(Path.Combine(candidate, "public/network.ncp2")));
             var nextAuthority = XPointNetworkAuthorityVerifier.Verify(bootstrap.GenesisPin, next.ExactAuthorityChain, next.ExactTimePolicyChain);
+            Check(AccountDirectoryDts1Codec.Decode(next.ExactTimePolicyChain[^1].Span).Sources.Count == 3,
+                "operational file candidate carries the root-signed three-source policy");
             Check(next.ExactViewChain.Count == 2 && next.ExactAuthorityChain.Count == 2 &&
                 next.ExactViewChain[0].Span.SequenceEqual(operational.ExactXnv1.Span) &&
                 next.ExactMailboxAuthorityChain[0].Span.SequenceEqual(operational.ExactPma2.Span), "operational file candidate retains complete original signed prefix");

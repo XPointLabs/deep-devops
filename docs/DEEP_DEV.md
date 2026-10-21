@@ -558,6 +558,12 @@ the same session; TLS 1.3, hostname validation, the exact SPKI pin, NTS
 authentication and the signed 10 second sample-age bound are unchanged. Any
 other failure still discards the session and backs off.
 
+Established-session UDP timeouts now wait only for the next normal bounded
+poll (minimum2s), without additional queries inside that poll. They neither
+reset nor increase KE backoff. Session-discard still enforces KE's minimum10s,
+factor1.5 and maximum5days; only authenticated NTP success resets it. Signed
+source age, pins, two independent families and interval checks are unchanged.
+
 The observer and directory-exercise accounts are disposable DEV fixtures,
 not recoverable user accounts. The development mailbox issuer is not a
 configured shipping MSG authority. File/call/push/bridge/message services must
@@ -609,6 +615,25 @@ It neither installs secrets/configuration nor publishes/adopts the candidate.
 It requires a running owned publisher and leaves that publisher stopped after
 success so its predecessor cannot advance. Failure restores only the publisher
 this command stopped.
+
+For explicit additive source redundancy, pass `-TimeSourcesPath <public-json>`
+ONLY to `PrepareOperational`. The closed file schema is
+`deep-dev-time-sources.v1`, with `sources` sorted by lowercase32-byte `id`:
+each entry has exactly `id`, `family`, `protocol`, `host`, `port`, `pin`, `radius`.
+Keep every old exact source tuple and add sources from independent operators;
+the successor requires at least three families and at most eight sources.
+The retained OLD signed sources authenticate ceremony time; file/source changes
+reject before candidate sealing. This preparation/activation ceremony supports
+only pre-mailbox custody. A mailbox-enabled contour rejects both actions:
+isolated role volumes, the issuer journal and node generation floors need a
+coordinated rollover that this ceremony does not implement. Do not bypass that
+guard or use its candidate as an activated policy. Never edit signed DTS1 bytes
+or mount a root online.
+The offline reader accepts two through the configured source count, verifies
+unique known IDs/two signed families and all authenticated intervals, and
+accounts monotonic acquisition age. A missing third response is availability
+redundancy, not a quorum or freshness exception.
+[Authoring/security owner](../../docs/survival-program/decisions/DR-0160-offline-additive-time-source-succession.md).
 The pending publisher uses `unless-stopped` so an engine restart cannot silently
 resume it. Failure restores its prior restart policy; explicit `Start` restores
 normal `always` policy and cancels preparation.

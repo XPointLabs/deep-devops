@@ -6,6 +6,16 @@ import { fileURLToPath } from 'node:url';
 
 const read = p => readFile(new URL(p, import.meta.url), 'utf8');
 
+test('time-source input is explicit offline operational authoring only', async () => {
+  const script = await read('./deep-dev.ps1');
+  assert.match(script, /ContainsKey\('TimeSourcesPath'\).*\$Action -cne 'PrepareOperational'/);
+  assert.match(script, /\$prepareArguments \+= @\('--time-sources',\[IO.Path\]::GetFullPath\(\$TimeSourcesPath\)\)/);
+  const source = await read('../tools/deep-dev/DevOfflineOperationalRenewal.cs');
+  assert.match(source, /DevTimeSourceUpdate.Capture\(timeSourcesPath, priorTimePolicy\)/);
+  assert.match(source, /observe\(executable, priorTimePolicy.Sources.ToArray\(\)\)/);
+  assert.match(source, /sourceUpdate\?\.RequireUnchanged\(\)/);
+});
+
 test('historical custody actions use one stopped retained owner and never provision or reset', async () => {
   const script = await read('./deep-dev.ps1');
   const recovery = script.split("if ($Action -in @('ExportStoreRecovery','ReconcileStoreCustody')) {")[1].split("if ($Action -eq 'Build') {")[0];

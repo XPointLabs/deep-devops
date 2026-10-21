@@ -92,11 +92,12 @@ func failureLabel(failure observationFailure) string {
 var dnsLabel = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
 
 const (
-	keTimeout     = 4 * time.Second
-	keStagger     = 400 * time.Millisecond
-	keMaxAddr     = 8
-	queryTimeout  = 2 * time.Second
-	queryAttempts = 2 // KE 4s + 2 x 2s stays inside the 10s signed sample-age bound
+	keTimeout       = 4 * time.Second
+	keStagger       = 400 * time.Millisecond
+	keMaxAddr       = 8
+	queryTimeout    = 2 * time.Second
+	queryAttempts   = 2               // KE 4s + 2 x 2s stays inside the 10s signed sample-age bound
+	queryRetryDelay = 2 * time.Second // retry an established session on the next normal Registry poll
 )
 
 func isTimeout(err error) bool {
@@ -329,9 +330,12 @@ func itoaPort(p uint16) string { return strconv.Itoa(int(p)) }
 func (p *peer) queryFailed(err error) {
 	if isTimeout(err) {
 		// No authenticated response means no evidence that the negotiated keys
-		// are invalid. Retain them for the next bounded query, but do not bypass
-		// the existing exponential backoff or emit an observation.
-		p.backOff()
+		// are invalid. Retry that SAME session on the next normal bounded poll,
+		// not after KE's exponential delay (which can outlive signed sample age).
+		// Do not reset/increment KE backoff: only authenticated Next Protocol
+		// success may reset it, and any session-discard still calls backOff().
+		// This adds no queries inside a poll and emits no timeout observation.
+		p.retry = time.Now().Add(queryRetryDelay)
 		return
 	}
 	p.fail()

@@ -15,7 +15,7 @@ using static DevOfflineAuthorityRenewal;
 internal static class DevOfflineOperationalRenewal
 {
     internal static async Task<string> PrepareAsync(string custodyRoot, string executable,
-        Func<string, AccountDirectoryDts1Source[], Task<ulong>> observe)
+        Func<string, AccountDirectoryDts1Source[], Task<ulong>> observe, string? timeSourcesPath = null)
     {
         var root = Path.GetFullPath(custodyRoot);
         if (!OperatingSystem.IsWindows() || !root.StartsWith(Path.GetFullPath("C:/Work/DeepSession/secrets/dev") + Path.DirectorySeparatorChar,
@@ -39,11 +39,16 @@ internal static class DevOfflineOperationalRenewal
         if (!prior.NetworkId.Span.SequenceEqual(network) || prior.ExactViewChain.Count >= XPointNetworkClosureWireCodec.MaximumChainCount)
             throw new InvalidDataException("Development history scope exhausted or different.");
         var priorAuthority = XPointNetworkAuthorityVerifier.Verify(pin, prior.ExactAuthorityChain, prior.ExactTimePolicyChain);
-        var observed = await observe(executable, AccountDirectoryDts1Codec.Decode(prior.ExactTimePolicyChain[^1].Span).Sources.ToArray());
+        var priorTimePolicy = AccountDirectoryDts1Codec.Decode(prior.ExactTimePolicyChain[^1].Span);
+        var sourceUpdate = DevTimeSourceUpdate.Capture(timeSourcesPath, priorTimePolicy);
+        var observationStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+        var observed = await observe(executable, priorTimePolicy.Sources.ToArray());
+        if (System.Diagnostics.Stopwatch.GetElapsedTime(observationStarted) > TimeSpan.FromSeconds(priorTimePolicy.MaximumSourceSampleAgeSeconds))
+            throw new CryptographicException("Offline ceremony observation exceeds the retained signed sample-age bound.");
         Unchanged();
         using var rootSigner = Signer.LoadRoot(Checked(Path.Combine(offline, "root.seed")));
         var pair = await AuthorPairAsync(pin, prior.ExactAuthorityChain, prior.ExactTimePolicyChain, observed, rootSigner,
-            Convert.ToHexStringLower(SHA256.HashData(priorBytes)));
+            Convert.ToHexStringLower(SHA256.HashData(priorBytes)), sourceUpdate?.Sources);
         var xna = pair.ExactAuthorityChain.Select(b => (ReadOnlyMemory<byte>)b).ToArray();
         var dts = pair.ExactTimePolicyChain.Select(b => (ReadOnlyMemory<byte>)b).ToArray();
         var authority = XPointNetworkAuthorityVerifier.Verify(pin, xna, dts);
@@ -132,6 +137,7 @@ internal static class DevOfflineOperationalRenewal
         finally { foreach (var signer in loaded) signer.Dispose(); CryptographicOperations.ZeroMemory(integrity); }
 
         void Unchanged() {
+            sourceUpdate?.RequireUnchanged();
             if (!Read(Path.Combine(publicRoot, "network.ncp2"), XPointNetworkClosureWireCodec.MaximumResponseLength).AsSpan().SequenceEqual(priorBytes) ||
                 !Read(Path.Combine(publicRoot, "deep-dev.json"), 16_384).AsSpan().SequenceEqual(manifestBytes))
                 throw new IOException("Development source changed; no activation is authorized.");
