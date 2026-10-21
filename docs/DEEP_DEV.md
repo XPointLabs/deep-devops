@@ -188,10 +188,9 @@ verification→node acceptance remains separate S05 work, followed by physical
 device qualification.
 
 Pre-mailbox PrepareOperational/ApplyOperational and first floor-provisioning
-commands deliberately reject once enabled: they do not yet atomically update
-role volumes and journal scopes. Do not bypass this fence with a manual partial
-rollover. Coordinated role rollover and uncertain first-provision recovery remain
-operator-workflow gates, not claims closed by the successful initial activation.
+commands deliberately reject once enabled. Do not bypass this fence with a
+manual partial rollover. The explicit retained current-dev source-renewal flight
+below is separate; uncertain first-provision recovery remains an operator gate.
 Exact runs/failures are recorded in the
 [S05 checkpoint](S05-AUTHORITY-HISTORY-2026-10-14.md#actual-protected-mailbox-issuer-activation).
 
@@ -623,12 +622,53 @@ each entry has exactly `id`, `family`, `protocol`, `host`, `port`, `pin`, `radiu
 Keep every old exact source tuple and add sources from independent operators;
 the successor requires at least three families and at most eight sources.
 The retained OLD signed sources authenticate ceremony time; file/source changes
-reject before candidate sealing. This preparation/activation ceremony supports
-only pre-mailbox custody. A mailbox-enabled contour rejects both actions:
-isolated role volumes, the issuer journal and node generation floors need a
-coordinated rollover that this ceremony does not implement. Do not bypass that
-guard or use its candidate as an activated policy. Never edit signed DTS1 bytes
-or mount a root online.
+reject before candidate sealing. Without the explicit retained flag this ceremony
+supports only pre-mailbox custody; mailbox-enabled contours still reject it.
+Never edit signed DTS1 bytes or mount a root online.
+
+### Retained current-mailbox source renewal
+
+Root DR-0161/0163 own this flight and historical issuer semantics. This is local
+`deep-dev-current` only, exactly three enrolled nodes, not a production installer.
+Build matching publisher and common node images first. Supply the explicit public
+source file and retain the exact completed private candidate selected by the
+offline operator, never an arbitrary latest directory:
+
+```powershell
+./scripts/deep-dev.ps1 -Action PrepareOperational -ProjectName deep-dev-current -RetainedMailboxTimeSourceRollover -TimeSourcesPath $sources
+./scripts/deep-dev.ps1 -Action ApplyOperational -ProjectName deep-dev-current -RetainedMailboxTimeSourceRollover -OperationalCandidate $candidate
+./scripts/deep-dev.ps1 -Action Up -ProjectName deep-dev-current
+./scripts/deep-dev.ps1 -Action Verify -ProjectName deep-dev-current
+```
+
+Preparation reuses the full offline operational renewal: fresh current/next
+TLS/traffic and separate issuer keys, same CA key, registered node identities,
+genesis, accounts and journals. Installed SAN/CRL-distribution extensions remain;
+CRL number advances without dropping old revocations. It freezes the actual
+publisher predecessor and seals bounded before/after installation images plus
+the mailbox extension. Failure before preparation completion restores the old
+publisher; success leaves it stopped until activation.
+
+Activation holds an exclusive maintenance lease, validates owned volumes, stops
+all affected writers and verifies exact before/after files. Only TLS files reach
+the filtered Registry volume, and one exact role seed reaches each separate
+signer volume. Floor data/password, node identities and key rings are not copied
+or reset. An insert-only SQL transaction checks both original issuer scopes and
+retains the network grant journal; only new policy role roots are appended.
+The retained publisher journal owner alone imports the signed complete prefix.
+Each listener-free node command checks both actual protected old MGR floors,
+enrolls only the genuinely new policy scopes and reauthenticates the existing
+native ledger. Completion markers schedule resumption, never confer authority.
+Normal startup/Verify still reject missing or altered floors/journals.
+
+Post-install failures remain stopped/unready; preserve the exact candidate and
+all volumes for inspection/resumption. Never run initial enrollment, reset a
+floor, erase a pending attempt or use down/volume removal to complete renewal.
+`Build` subsequently validates the sealed operational after-images and retained
+publication prefix instead of the superseded physical-install before-images.
+Historical issuer facts authenticate past settlement only; current grants and
+new Store/ACK always retain current policy/revocation/time checks. `Up`/`Verify`
+are readiness, not delivery evidence; run the same retained CLI profiles next.
 The offline reader accepts two through the configured source count, verifies
 unique known IDs/two signed families and all authenticated intervals, and
 accounts monotonic acquisition age. A missing third response is availability
@@ -637,8 +677,15 @@ redundancy, not a quorum or freshness exception.
 The pending publisher uses `unless-stopped` so an engine restart cannot silently
 resume it. Failure restores its prior restart policy; explicit `Start` restores
 normal `always` policy and cancels preparation.
-Explicit `Start` cancels the preparation by permitting
-new delegated publication; prepare a new candidate rather than force old import.
+It permits new delegated publication: prepare a new candidate rather than force
+an old import.
+
+### Pre-mailbox operational activation
+
+The following original activation flow is only for custody without the mailbox
+extension. An enrolled mailbox contour requires the explicit retained ceremony
+above; its guard is unchanged.
+
 After building the current publisher image, use `ApplyOperational
 -ProjectName deep-dev-current -OperationalCandidate <exact completed private directory>`.
 It validates the offline HMAC seal over the exact installation whitelist, PMA

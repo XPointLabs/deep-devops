@@ -36,7 +36,7 @@ test('dev builds cache only locked public packages, not source outputs or custod
   assert.match(dockerfile, /ENV NUGET_HTTP_CACHE_PATH=\/root\/\.nuget\/packages\/\.http-cache/);
   assert.doesNotMatch(dockerfile, /NuGetAudit=false|NUGET_AUDIT_MODE=off|--ignore-failed-sources/);
   const mounts = dockerfile.split('\n').filter(line => line.includes('--mount='));
-  assert.equal(mounts.length, 4); // publish + Protocol, signer and node-authority test targets
+  assert.equal(mounts.length, 6); // publish + Protocol, signer, node-authority and two source-succession checks
   for (const line of mounts) {
     assert.match(line, /^RUN --mount=type=cache,id=deep-dev-nuget,target=\/root\/\.nuget\/packages,sharing=locked dotnet (publish|test) /);
     assert.doesNotMatch(line, /type=(bind|secret|ssh)|--no-restore/);
@@ -83,7 +83,8 @@ test('rebuilding installed physical dev validates sealed images without reconfig
   const source = await read('./deep-dev.ps1');
   const build = source.split("if ($Action -eq 'Build') {")[1].split('function Test-CurrentCapabilities')[0];
   const physical = build.split('if ($physicalEnabled) {')[1].split('} else {')[0];
-  assert.match(physical, /'validate-physical-ingress'/);
+  assert.match(build, /'validate-physical-ingress'/);
+  assert.match(physical, /'validate-retained-operational'/);
   assert.doesNotMatch(physical, /'configure'|install-|prepare-|provision/);
   assert.ok(build.indexOf("'validate-physical-ingress'") < build.indexOf("@('build','registry','node-1','publisher')"));
 });

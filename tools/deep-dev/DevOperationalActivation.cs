@@ -96,6 +96,16 @@ internal static class DevOperationalActivation
             if (File.Exists(planFile)) plan = JsonSerializer.Deserialize<Plan>(Unprotect(Read(planFile, 4 * 1024 * 1024), integrity), Json)!;
             else {
                 if (digest != journal.PriorPublicHash) throw new CryptographicException("Missing installation custody after journal commit.");
+                System.Net.IPAddress? physicalAddress = null;
+                var physicalMarker = Path.Combine(root, "mailbox/physical-ingress.json");
+                if (File.Exists(physicalMarker))
+                {
+                    if (File.Exists(Path.Combine(root, "mailbox/operational-candidate.txt"))) DevTimeSourceRollover.ValidateInstalled(root);
+                    else _ = DevPhysicalIngress.Validate(root);
+                    using var physical = JsonDocument.Parse(Read(physicalMarker, 4096));
+                    if (physical.RootElement.GetProperty("schema").GetString() != "deep-dev-physical-config.v1") throw new CryptographicException("Physical configuration scope differs.");
+                    physicalAddress = DevPhysicalIngress.RequireAddress(physical.RootElement.GetProperty("address").GetString()!);
+                }
                 var replacements = new List<Replacement>();
                 foreach (var p in CandidateFiles.Where(p => p.StartsWith("online/", StringComparison.Ordinal))) {
                     var parts = p.Split('/'); Add($"{parts[1]}/secrets/{parts[2]}", Read(Path.Combine(candidate, p), Bound(p)));
@@ -112,7 +122,8 @@ internal static class DevOperationalActivation
                         throw new CryptographicException("Configuration identity differs.");
                     section["ExactAuthorityPaths"] = JsonSerializer.SerializeToNode(xna); section["ExactTimePolicyPaths"] = JsonSerializer.SerializeToNode(dts);
                     if (service != "registry") foreach (var peer in config["PrivacyRouting"]!["Peers"]!.AsArray()) {
-                        var matches = Enumerable.Range(1, 3).Where(i => peer!["BaseUrl"]!.GetValue<string>() == $"https://{topology.Ipv4Prefix}.{10 + i}/").ToArray();
+                        var matches = Enumerable.Range(1, 3).Where(i => peer!["BaseUrl"]!.GetValue<string>() ==
+                            (physicalAddress is null ? $"https://{topology.Ipv4Prefix}.{10 + i}/" : DevPhysicalIngress.NodeOrigin(physicalAddress, i))).ToArray();
                         if (matches.Length != 1) throw new InvalidDataException("Unknown retained peer.");
                         using var signer = Signer.Load(Path.Combine(root, $"operator/node-{matches[0]}.seed"), true);
                         if (!string.Equals(peer!["RouterId"]!.GetValue<string>(), Convert.ToHexString(signer.Ed25519PublicKey.Span), StringComparison.OrdinalIgnoreCase)) throw new CryptographicException("Peer identity differs.");

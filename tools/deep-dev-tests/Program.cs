@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Net;
 using Deep.Protocol.AccountDirectoryV1;
 using Deep.Protocol.ApplicationCore;
@@ -459,6 +460,61 @@ static async Task TestFileCeremonyAsync(VerifiedXPointNetworkBootstrap bootstrap
             File.WriteAllBytes(Path.Combine(publicRoot, "network.ncp2"), journal.Bundle);
             DevOperationalActivation.Execute(fixture, candidate, true);
             Check(true, "exact committed candidate installation can resume without a new generation");
+            // New narrow mailbox-enabled source succession, on this SAME isolated
+            // signed fixture after the older operational handover. No live dev state.
+            Directory.CreateDirectory(Path.Combine(fixture, "mailbox"));
+            File.WriteAllBytes(Path.Combine(fixture, "mailbox/nodes-enabled"), []);
+            using (var installedCa = X509Certificate2.CreateFromPemFile(Path.Combine(publicRoot, "dev-ca.crt"), Path.Combine(offline, "dev-ca.key")))
+                foreach (var service in DevPki.Services)
+                {
+                    using var oldLeaf = X509Certificate2.CreateFromPemFile(Path.Combine(fixture, service, "secrets/server.crt"), Path.Combine(fixture, service, "secrets/server.key"));
+                    using var leafKey = RSA.Create(); leafKey.ImportFromPem(File.ReadAllText(Path.Combine(fixture, service, "secrets/server.key")));
+                    using var physicalLeaf = DevPhysicalIngress.AuthorLeaf(installedCa, leafKey, oldLeaf, System.Net.IPAddress.Parse("192.168.99.77"));
+                    File.WriteAllText(Path.Combine(fixture, service, "secrets/server.crt"), physicalLeaf.ExportCertificatePem());
+                }
+            var retainedPolicy = Deep.Protocol.ContactV1.ContactCodec.Decode("PMA2", next.ExactMailboxAuthorityChain[^1].Span);
+            File.WriteAllBytes(Path.Combine(fixture, "mailbox/node-bindings.json"), JsonSerializer.SerializeToUtf8Bytes(new {
+                NetworkIdHex = Convert.ToHexStringLower(next.NetworkId.Span), MailboxAuthorityCoreHashHex = Convert.ToHexStringLower(retainedPolicy.CoreHash.Span) }));
+            var fourth = successorSources.Append(new AccountDirectoryDts1Source(B(230), B(231), 1, "time4.invalid", 4460, B(232), 5)).ToArray();
+            File.WriteAllBytes(sourcePath, JsonSerializer.SerializeToUtf8Bytes(new { schema="deep-dev-time-sources.v1", sources=fourth.Select(s=>new {
+                id=Convert.ToHexStringLower(s.SourceId.Span), family=Convert.ToHexStringLower(s.FailureFamilyHash.Span), protocol=s.Protocol,
+                host=s.HostAscii, port=s.Port, pin=Convert.ToHexStringLower(s.TlsSpkiSha256.Span), radius=s.MaximumRadiusSeconds }) }));
+            var retainedBundle = File.ReadAllBytes(Path.Combine(publicRoot, "network.ncp2"));
+            var retainedTls = File.ReadAllBytes(Path.Combine(fixture, "node-1/secrets/server.key"));
+            var retainedTraffic = File.ReadAllBytes(Path.Combine(fixture, "node-1/secrets/key_x25519"));
+            var timeCandidate = await DevTimeSourceRollover.PrepareAsync(fixture, "fixture-observer", (_, seen) => {
+                Check(seen.Length == 3, "mailbox source ceremony authenticates time with old signed sources"); return Task.FromResult(1_800_000_100UL);
+            }, sourcePath);
+            var timeBundle = XPointNetworkClosureWireCodec.DecodeResponse(File.ReadAllBytes(Path.Combine(timeCandidate, "public/network.ncp2")));
+            Check(AccountDirectoryDts1Codec.Decode(timeBundle.ExactTimePolicyChain[^1].Span).Sources.Count == 4 &&
+                timeBundle.ExactViewChain.Count == next.ExactViewChain.Count + 1 &&
+                timeBundle.ExactAuthorityChain[0].Span.SequenceEqual(next.ExactAuthorityChain[0].Span), "mailbox time-source candidate extends full signed history without new genesis");
+            var rootSql = File.ReadAllText(Path.Combine(timeCandidate, "operator/revocation-roots.sql"));
+            Check(rootSql.Split("INSERT INTO ").Length == 3 && !rootSql.Contains("DELETE", StringComparison.Ordinal) &&
+                !rootSql.Contains("UPDATE", StringComparison.Ordinal) && !rootSql.Contains("INSERT INTO deep_did2_grant_journal_network", StringComparison.Ordinal),
+                "time-source SQL appends two role roots without resetting network grant journal");
+            DevTimeSourceRollover.Install(fixture, timeCandidate, false);
+            var newRole = Path.Combine(timeCandidate, "online/registry/mailbox-deposit.seed"); var exactNewRole = File.ReadAllBytes(newRole);
+            File.WriteAllBytes(newRole, new byte[32]);
+            await Reject(() => { DevTimeSourceRollover.Install(fixture, timeCandidate, true); return Task.CompletedTask; }, "altered sealed time-source role key");
+            File.WriteAllBytes(newRole, exactNewRole);
+            DevTimeSourceRollover.Install(fixture, timeCandidate, true);
+            DevTimeSourceRollover.Install(fixture, timeCandidate, true);
+            Check(File.ReadAllBytes(Path.Combine(publicRoot, "network.ncp2")).AsSpan().SequenceEqual(retainedBundle) &&
+                !File.ReadAllBytes(Path.Combine(fixture, "node-1/secrets/server.key")).AsSpan().SequenceEqual(retainedTls) &&
+                !File.ReadAllBytes(Path.Combine(fixture, "node-1/secrets/key_x25519")).AsSpan().SequenceEqual(retainedTraffic) &&
+                File.ReadAllBytes(Path.Combine(offline, "root.seed")).AsSpan().SequenceEqual(root.Seed),
+                "repeatable time-source full renewal preserves publisher and root, rotates TLS and traffic keys");
+            using (var retainedLeaf = X509Certificate2.CreateFromPem(File.ReadAllText(Path.Combine(fixture, "node-1/secrets/server.crt"))))
+                Check(retainedLeaf.MatchesHostname("192.168.99.77") && retainedLeaf.Extensions["2.5.29.31"] is not null,
+                    "operational renewal preserves installed physical SAN and CRL distribution");
+            await Reject(() => { DevTimeSourceRollover.ValidateInstalled(fixture); return Task.CompletedTask; }, "installed validation before actual publication");
+            File.WriteAllBytes(Path.Combine(publicRoot, "network.ncp2"), File.ReadAllBytes(Path.Combine(timeCandidate, "public/network.ncp2")));
+            DevTimeSourceRollover.ValidateInstalled(fixture);
+            var installedConfig = File.ReadAllBytes(Path.Combine(fixture, "node-1/appsettings.Development.json"));
+            File.WriteAllText(Path.Combine(fixture, "node-1/appsettings.Development.json"), "{}");
+            await Reject(() => { DevTimeSourceRollover.ValidateInstalled(fixture); return Task.CompletedTask; }, "installed validation with altered peer config");
+            File.WriteAllBytes(Path.Combine(fixture, "node-1/appsettings.Development.json"), installedConfig);
         } finally { CryptographicOperations.ZeroMemory(integrity); }
     }
     finally

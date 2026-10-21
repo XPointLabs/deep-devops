@@ -15,7 +15,20 @@ using Deep.Protocol.XPointNetworkV1;
 using Sodium;
 
 try {
-    if (args.Length == 2 && args[0] == "configure") ConfigureAtomicBundle(args[1]);
+    if (args is ["prepare-time-sources", var timeRoot, var timeObserver, var timeFile]) {
+        _ = await DevTimeSourceRollover.PrepareAsync(timeRoot, timeObserver, ReadNtsAsync, timeFile);
+        Console.WriteLine("Offline current-dev time-source successor prepared; not installed or activated.");
+    }
+    else if (args is ["validate-time-sources" or "install-time-sources", var installRoot, var timeCandidate]) {
+        DevTimeSourceRollover.Install(installRoot, timeCandidate, args[0] == "install-time-sources");
+        Console.WriteLine("Sealed time-source installation checked; publisher and native owner activation remain separate.");
+    }
+    else if (args is ["validate-retained-operational", var retainedRoot, var retainedObserver]) {
+        DevTimeSourceRollover.ValidateInstalled(retainedRoot);
+        _ = await DevNodeMailboxProvisioning.PolicyAsync(Path.Combine(retainedRoot, "public"), retainedObserver, ReadNtsAsync);
+        Console.WriteLine("Retained operational images and current signed policy verified; runtime unchanged.");
+    }
+    else if (args.Length == 2 && args[0] == "configure") ConfigureAtomicBundle(args[1]);
     else if (args.Length == 3 && args[0] == "prepare-mailbox")
         await DevMailboxPreparation.PrepareAsync(args[1], args[2], ReadNtsAsync);
     else if (args.Length == 2 && args[0] == "provision-node-mailbox-keys")
@@ -66,9 +79,10 @@ try {
 }
 catch (Exception exception) {
     Console.Error.WriteLine($"Development provisioning failed closed ({exception.GetType().Name}); retained private staging is not deployment evidence.");
-    if (args.Length > 0 && args[0].Contains("physical-ingress",StringComparison.Ordinal))
+    if (args.Length > 0 && (args[0].Contains("physical-ingress",StringComparison.Ordinal) || args[0].Contains("time-sources", StringComparison.Ordinal)))
     {
-        Console.Error.WriteLine($"Physical ingress failure category: {DevPhysicalIngress.FailureCategory(exception)}.");
+        if (args[0].Contains("physical-ingress", StringComparison.Ordinal))
+            Console.Error.WriteLine($"Physical ingress failure category: {DevPhysicalIngress.FailureCategory(exception)}.");
         // Code-owned location only; no exception text/Data, source file path,
         // authority bytes, endpoint or private staging content.
         var trace = new StackTrace(exception, false);

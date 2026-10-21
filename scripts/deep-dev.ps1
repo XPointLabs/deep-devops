@@ -5,6 +5,7 @@ param(
     [ValidateSet('all','registry','node-1','publisher')][string]$BuildService = 'all',
     [string]$OperationalCandidate,
     [string]$TimeSourcesPath,
+    [switch]$RetainedMailboxTimeSourceRollover,
     [string]$RecoveryRequestFile,
     [string]$RecoveryProofFile,
     [ValidateSet('primary','contact-diagnostic','contact-replication','contact-acceptance')][string]$OwnedClientScope = 'primary',
@@ -146,6 +147,13 @@ if ($physicalEnabled) {
 $devServices = @('floor','registry','publisher','node-1','node-2','node-3')
 if ($mailboxEnabled) { $devServices += @('deposit-signer','retrieve-signer') }
 if ($physicalEnabled) { $devServices += 'ingress' }
+if ($RetainedMailboxTimeSourceRollover) {
+    if ($ProjectName -cne 'deep-dev-current' -or -not $mailboxEnabled -or -not $nodeMailboxEnabled -or
+        $Action -notin @('PrepareOperational','ApplyOperational')) { throw 'Explicit retained current-mailbox time-source ceremony required.' }
+    & (Join-Path $PSScriptRoot 'Invoke-TimeSourceRollover.ps1') -Phase $Action -CustodyRoot $custodyPath `
+        -ComposeArguments $compose -DevOpsRoot $devopsRoot -SourceFile $TimeSourcesPath -Candidate $OperationalCandidate
+    return
+}
 if ($mailboxEnabled -and $Action -in @('PrepareOperational','ApplyOperational','Provision','ProvisionFloor')) {
     throw 'Mailbox-enabled custody requires coordinated role-volume/journal rollover; these pre-mailbox ceremonies cannot mutate it.'
 }
@@ -489,8 +497,9 @@ if ($Action -eq 'Build') {
     if ($physicalEnabled) {
         # The installed peer/TLS images are sealed. Rebuilding binaries must not
         # rewrite their JSON representation or invalidate the retained ceremony.
+        $validation = if (Test-Path -LiteralPath (Join-Path $custodyPath 'mailbox/operational-candidate.txt') -PathType Leaf) { 'validate-retained-operational' } else { 'validate-physical-ingress' }
         Run-Native dotnet @('run','--project',(Join-Path $devopsRoot 'tools/deep-dev/Deep.Dev.csproj'),'-c','Debug','--',
-            'validate-physical-ingress',$custodyPath,(Join-Path $devopsRoot 'tools/nts-observer/deep-nts-observer.exe'))
+            $validation,$custodyPath,(Join-Path $devopsRoot 'tools/nts-observer/deep-nts-observer.exe'))
     } else {
         Run-Native dotnet @('run','--project',(Join-Path $devopsRoot 'tools/deep-dev/Deep.Dev.csproj'),'-c','Debug','--','configure',$custodyPath)
     }

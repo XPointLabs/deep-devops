@@ -126,8 +126,23 @@ internal static class DevOfflineOperationalRenewal
                 request.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, true));
                 request.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment, true));
                 request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(new OidCollection { new("1.3.6.1.5.5.7.3.1") }, true));
-                var san = new SubjectAlternativeNameBuilder(); san.AddDnsName(dns); san.AddDnsName("localhost"); san.AddIpAddress(address); san.AddIpAddress(IPAddress.Loopback);
-                request.CertificateExtensions.Add(san.Build());
+                var previousPath = Checked(Path.Combine(root, service, "secrets/server.crt"));
+                if (File.Exists(previousPath))
+                {
+                    using var previous = X509Certificate2.CreateFromPem(Encoding.ASCII.GetString(Read(previousPath, 16_384)));
+                    DevPki.VerifySigned(previous.RawData, oldCa);
+                    // Preserve installed LAN names and signed CRL distribution.
+                    var san = previous.Extensions["2.5.29.17"] ?? throw new CryptographicException("Retained TLS SAN missing.");
+                    request.CertificateExtensions.Add(new X509Extension(san.Oid!, san.RawData, san.Critical));
+                    if (previous.Extensions["2.5.29.31"] is { } cdp)
+                        request.CertificateExtensions.Add(new X509Extension(cdp.Oid!, cdp.RawData, cdp.Critical));
+                }
+                else
+                {
+                    if (File.Exists(Path.Combine(root, "mailbox/nodes-enabled"))) throw new CryptographicException("Enrolled TLS predecessor missing.");
+                    var san = new SubjectAlternativeNameBuilder(); san.AddDnsName(dns); san.AddDnsName("localhost"); san.AddIpAddress(address); san.AddIpAddress(IPAddress.Loopback);
+                    request.CertificateExtensions.Add(san.Build());
+                }
                 using var certificate = request.Create(ca, Time(observed - 30), Time(policyUntil + 3_600), RandomNumberGenerator.GetBytes(16));
                 Write($"online/{service}/server.crt", Encoding.ASCII.GetBytes(certificate.ExportCertificatePem()));
                 Write($"online/{service}/server.key", Encoding.ASCII.GetBytes(key.ExportPkcs8PrivateKeyPem()));
