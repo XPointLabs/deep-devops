@@ -24,6 +24,10 @@ docker build --target node-authority-tests --build-arg PROJECT=xnode/src/XNode/X
 
 This executes the network-placement and protected-directory-head tests,
 including actual warm-file tampering and live/dangling symlink refusals. It
+also exercises operation-ledger grammar reuse after actual custody checks,
+alias isolation, closed leases, BOM and valid inputs above the memo budget,
+plus actual operation-scratch durability ordering and exact recovery after
+interruptions before/after replacement. It
 does not start or reset the retained network and is not a full source,
 transport-rehearsal, device or release gate. Build/Up/Verify and business E2E
 are still separate steps.
@@ -100,6 +104,13 @@ readers. `deep-dev-current` permits a new current fixture alongside the preserve
 pre-cutover one: its custody defaults to `secrets/dev/deep-dev-current`, its named
 volumes/network are project-scoped, its subnet is `172.31.241.0/24`, and its host
 Registry/node ports are28543/28291–28296. The original defaults are unchanged.
+Registry HTTPS publishes its same project-specific port on both IPv4 and IPv6
+loopback. This keeps `localhost` reachable in either DNS address order without
+waiting for a refused IPv6 connection before IPv4. Neither binding exposes a
+public interface; the separately enabled physical overlay retains only its
+existing explicit LAN binding. TLS, HTTP/2, proxy policy, certificates, signed
+network records and retained state are unchanged. Apply with the ordinary
+retained `Up`, never `Init`/`Provision` or a volume reset.
 The manifest binds the exact project and container prefix; mutating actions
 reject an absent/mismatched binding rather than infer old configuration. Only
 Status/Stop can inspect/stop an older fixture without that binding. Wrapper

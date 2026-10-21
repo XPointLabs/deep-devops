@@ -26,7 +26,7 @@ test('dev builds cache only locked public packages, not source outputs or custod
   assert.match(dockerfile, /ENV NUGET_HTTP_CACHE_PATH=\/root\/\.nuget\/packages\/\.http-cache/);
   assert.doesNotMatch(dockerfile, /NuGetAudit=false|NUGET_AUDIT_MODE=off|--ignore-failed-sources/);
   const mounts = dockerfile.split('\n').filter(line => line.includes('--mount='));
-  assert.equal(mounts.length, 3);
+  assert.equal(mounts.length, 4); // publish + Protocol, signer and node-authority test targets
   for (const line of mounts) {
     assert.match(line, /^RUN --mount=type=cache,id=deep-dev-nuget,target=\/root\/\.nuget\/packages,sharing=locked dotnet (publish|test) /);
     assert.doesNotMatch(line, /type=(bind|secret|ssh)|--no-restore/);
@@ -99,6 +99,8 @@ test('physical current-dev overlay exposes exact LAN listeners without changing 
     DEEP_DEV_PHYSICAL_ADDRESS: '192.168.40.20' };
   const c = JSON.parse(execFileSync('docker', args, { encoding: 'utf8', env }));
   assert.equal(Object.keys(c.services).length, 9);
+  assert.deepEqual(c.services.registry.ports.map(p => [p.host_ip, Number(p.published), p.target]).sort(),
+    [['127.0.0.1', 28543, 443], ['::1', 28543, 443], [env.DEEP_DEV_PHYSICAL_ADDRESS, 28543, 443]].sort());
   for (const [service, port, target] of [['publisher', 28297, 8080], ['registry', 28543, 443],
     ['ingress', 28294, 43001], ['ingress', 28295, 43002], ['ingress', 28296, 43003]]) {
     const p = c.services[service].ports.filter(p => p.host_ip === env.DEEP_DEV_PHYSICAL_ADDRESS && Number(p.published) === port);
@@ -227,8 +229,14 @@ test('actual Compose rendering isolates current and retained project state, subn
     for (const service of ['floor', 'registry', 'node-1', 'node-2', 'node-3'])
       assert.equal(document.volumes[`${service}-secrets`].name, `${project}_${service}-secrets`);
     for (const volume of Object.values(document.volumes)) assert.ok(volume.name.startsWith(`${project}_`));
-    for (const service of Object.values(document.services)) {
-      for (const binding of service.ports ?? []) assert.equal(binding.host_ip, '127.0.0.1');
+    const registryPort = 28443 + index * 100;
+    assert.deepEqual(document.services.registry.ports.map(p => [p.host_ip, Number(p.published), p.target]).sort(),
+      [['127.0.0.1', registryPort, 443], ['::1', registryPort, 443]].sort());
+    for (const [name, service] of Object.entries(document.services)) {
+      for (const binding of service.ports ?? []) {
+        assert.ok(binding.host_ip === '127.0.0.1' || name === 'registry' && binding.host_ip === '::1');
+        assert.equal(binding.protocol, 'tcp');
+      }
       for (const binding of service.volumes ?? [])
         if (binding.type === 'bind') assert.ok(binding.source.replaceAll('\\', '/').includes(`/secrets/dev/${project}/`));
     }
@@ -247,6 +255,8 @@ test('local builds use reviewed image digests and a prebuilt native asset, not C
   assert.match(dockerfile, /FROM build AS protocol-tests/);
   assert.match(dockerfile, /FROM build AS node-authority-tests/);
   assert.match(dockerfile, /FullyQualifiedName~DeepIdV2NetworkPlacementRuntimeTests\|FullyQualifiedName~FileDeepIdV2DirectoryProtectedHeadStoreTests/);
+  assert.match(dockerfile, /FullyQualifiedName~OperationGrammar\|FullyQualifiedName~GrammarMemoBudget/);
+  assert.match(dockerfile, /FullyQualifiedName~CompleteOperationScratch/);
   assert.doesNotMatch(dockerfile, /cmake|g\+\+|clang|build-essential/);
   const testEnv = await read('./test-env.ps1');
   assert.match(testEnv, /\$BackendMode = .*else \{ "deep-dev" \}/);

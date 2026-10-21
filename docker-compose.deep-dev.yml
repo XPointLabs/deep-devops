@@ -70,7 +70,9 @@ services:
       dockerfile: deep-devops/docker/deep-dev.Dockerfile
       args: {PROJECT: deep-registry-api/src/Deep.Registry.Api/Deep.Registry.Api.csproj}
     command: [Deep.Registry.Api.dll]
-    ports: ["127.0.0.1:${DEEP_DEV_REGISTRY_PORT:-28443}:443"]
+    ports:
+      - "127.0.0.1:${DEEP_DEV_REGISTRY_PORT:-28443}:443"
+      - "[::1]:${DEEP_DEV_REGISTRY_PORT:-28443}:443"
     depends_on:
       publisher: {condition: service_healthy}
     volumes:
