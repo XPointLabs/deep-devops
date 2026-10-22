@@ -232,3 +232,12 @@ are never removed.
 ```powershell
 powershell -ExecutionPolicy Bypass -File ./scripts/production-ingress.integration.test.ps1
 ```
+
+Use `-HttpsPort <free-loopback-port>` for this isolated lab when its default
+28443 is already owned by another local contour; do not stop/reset that contour.
+Windows PowerShell preflight imports its own engine's ACL provider explicitly;
+inherited module paths never waive key-permission checks. Docker failures emit
+only a closed phase/code/category, not arguments, raw output or secret paths.
+The private contact replica allowlist follows [DR-0166](../../docs/survival-program/decisions/DR-0166-replica-assignment-and-local-admission.md)
+and accepts only its v2 endpoint. Real three-CLI delivery and this TLS/echo lab
+are distinct gates; one passing cannot substitute for the other failing.

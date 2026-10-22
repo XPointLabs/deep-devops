@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param()
+param([ValidateRange(1024,65535)][int]$HttpsPort = 28443)
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -9,7 +9,7 @@ $runId = [Guid]::NewGuid().ToString('N')
 $secretRoot = Join-Path $root ".secrets/production-ingress-lab/$runId"
 $evidenceRoot = Join-Path $root "artifacts/test-results/production-ingress/$runId"
 $project = "deep-ingress-$($runId.Substring(0, 12))"
-$port = 28443
+$port = $HttpsPort
 $compose = Join-Path $root 'docker-compose.node.prod.yml'
 $override = Join-Path $root 'docker-compose.production-ingress.lab.yml'
 $envFile = Join-Path $secretRoot 'lab.env'
@@ -34,9 +34,19 @@ function Assert-LabCleanupTarget {
 function Invoke-Docker([string[]]$Arguments) {
     $preference = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    try { & docker @Arguments 2>$null | Out-Null; $exitCode = $LASTEXITCODE }
+    try { $diagnostic = (& docker @Arguments 2>&1 | Out-String); $exitCode = $LASTEXITCODE }
     finally { $ErrorActionPreference = $preference }
-    if ($exitCode -ne 0) { throw 'Docker operation failed without exposing command arguments.' }
+    if ($exitCode -ne 0) {
+        $phase = if ($Arguments -contains 'config') { 'compose-config' } elseif ($Arguments -contains 'up') { 'compose-up' } else { 'certificate-tool' }
+        $category = if ($diagnostic -match 'port is already allocated|address already in use') { 'port-busy' }
+            elseif ($diagnostic -match 'required variable|variable .* is missing') { 'required-variable' }
+            elseif ($diagnostic -match 'invalid mount|not a directory|mount denied') { 'mount' }
+            elseif ($diagnostic -match 'pull access denied|failed to resolve reference|no matching manifest') { 'image' }
+            elseif ($diagnostic -match 'no such file|does not exist') { 'missing-file' }
+            elseif ($diagnostic -match 'timeout|timed out') { 'timeout' }
+            else { 'other' }
+        throw "Docker operation failed: phase=$phase; code=$exitCode; category=$category. Arguments and raw output withheld."
+    }
 }
 
 function Invoke-ExpectedFailure([scriptblock]$Action, [string]$FailureMessage) {
@@ -164,7 +174,7 @@ try {
     if ($managedJson.port -ne 8082 -or $managedJson.protocol -ne '2.0' -or $managedJson.innerScheme -ne 'http' -or $managedJson.forwardedProto -ne 'https' -or $null -ne $managedJson.forwardedHost) { throw 'Managed ingress did not preserve the dedicated HTTP2/TLS proxy boundary.' }
     $queried = & curl.exe -fsS --ssl-no-revoke --cacert $ca --resolve "node.deep.test:${port}:127.0.0.1" "https://node.deep.test:${port}/api/ingress/v1/capabilities?reject=1"
     if ($LASTEXITCODE -ne 0 -or ($queried | ConvertFrom-Json).requestTarget -ne '/api/ingress/v1/capabilities?reject=1') { throw 'The inner scheme rewrite removed a query that the application must reject.' }
-    foreach ($route in @('/api/ingress/v1/frame', '/api/peer/privacy/v1/frame', '/api/peer/contact-replica/v1/execute')) {
+    foreach ($route in @('/api/ingress/v1/frame', '/api/peer/privacy/v1/frame', '/api/peer/contact-replica/v2/execute')) {
         $expectedPort = if ($route -eq '/api/ingress/v1/frame') { 8082 } else { 8083 }
         $result = & curl.exe -fsS --ssl-no-revoke --cacert $ca --resolve "node.deep.test:${port}:127.0.0.1" -H 'content-type: application/octet-stream' -H 'X-Forwarded-For: attacker' -H 'X-Forwarded-Proto: http' -d '{}' "https://node.deep.test:${port}$route"
         if ($LASTEXITCODE -ne 0) { throw 'Dedicated HTTP2 POST backend route failed.' }

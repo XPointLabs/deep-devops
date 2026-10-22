@@ -15,6 +15,17 @@ build does not qualify stale consumers. `Up` and `Verify` remain separate and
 unchanged, with retained keys/volumes and the same physical-input validation.
 This option never resets state or bypasses TLS/authority/readiness checks.
 
+The [DR-0166](../../docs/survival-program/decisions/DR-0166-replica-assignment-and-local-admission.md)
+private contact replica clean break requires all three nodes to use the same
+CRQ2/CRS2 image. Upgrade retained nodes with `Build -BuildService node-1`, then
+`Up`; reload/restart the existing physical ingress after its route allowlist
+changes, then run `Verify`. Both development and production ingress templates
+allow only the new `/api/peer/contact-replica/v2/execute` route. Do not retain an
+old route fallback or reset accounts/keys/volumes to conceal an uncertain Store.
+The receiving node independently mints current authority; a foreign projection
+never supplies a local admission deadline. A recovered old business batch and
+a new first-attempt delivery round must be recorded separately.
+
 For focused node authority/path validation on actual Linux ARM64, run from the
 workspace root (the same reviewed image pins and public package cache are used):
 

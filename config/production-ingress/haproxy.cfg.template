@@ -68,7 +68,7 @@ frontend deep_https
   acl public_get path /api/bootstrap/client /api/network/privacy-contact /api/network/membership-route-catalog
   acl managed_get path /api/ingress/v1/capabilities
   acl public_post path /api/ingress/v1/frame
-  acl peer_post path /api/peer/privacy/v1/frame /api/peer/contact-replica/v1/execute /api/peer/mailbox/v2/store /api/peer/mailbox/v2/tombstone /api/peer/mailbox-authority/v1/store /api/peer/mailbox-authority/v1/retrieve /api/peer/mailbox-authority/v1/acknowledge
+  acl peer_post path /api/peer/privacy/v1/frame /api/peer/contact-replica/v2/execute /api/peer/mailbox/v2/store /api/peer/mailbox/v2/tombstone /api/peer/mailbox-authority/v1/store /api/peer/mailbox-authority/v1/retrieve /api/peer/mailbox-authority/v1/acknowledge
   acl quorum_post path /api/staking/quorum/sign
   acl quorum_source src ${DEEP_QUORUM_COORDINATOR_CIDR}
   http-request set-var(txn.is_public_post) bool(true) if post_method public_post

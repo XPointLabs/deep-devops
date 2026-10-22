@@ -29,6 +29,12 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+# A nested Windows PowerShell may inherit a newer engine's PSModulePath.
+# Load the ACL provider owned by THIS engine, never skip key ACL validation.
+if ($PSVersionTable.PSEdition -eq 'Desktop') {
+    Import-Module (Join-Path $PSHOME 'Modules/Microsoft.PowerShell.Security/Microsoft.PowerShell.Security.psd1') -ErrorAction Stop
+}
+
 function Resolve-ProtectedFile([string]$Path, [string]$Label) {
     $item = Get-Item -LiteralPath $Path -Force
     if (-not $item.PSIsContainer -and ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) {
