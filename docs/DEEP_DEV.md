@@ -641,9 +641,10 @@ Never edit signed DTS1 bytes or mount a root online.
 
 Root DR-0161/0163 own this flight and historical issuer semantics. This is local
 `deep-dev-current` only, exactly three enrolled nodes, not a production installer.
-Build matching publisher and common node images first. Supply the explicit public
-source file and retain the exact completed private candidate selected by the
-offline operator, never an arbitrary latest directory:
+Build matching publisher and common node images first. Omit `-TimeSourcesPath`
+to renew the existing exact signed source set, or supply an explicit public source
+file for additive redundancy. Retain the exact completed private candidate
+selected by the offline operator, never an arbitrary latest directory:
 
 ```powershell
 ./scripts/deep-dev.ps1 -Action PrepareOperational -ProjectName deep-dev-current -RetainedMailboxTimeSourceRollover -TimeSourcesPath $sources
@@ -651,6 +652,12 @@ offline operator, never an arbitrary latest directory:
 ./scripts/deep-dev.ps1 -Action Up -ProjectName deep-dev-current
 ./scripts/deep-dev.ps1 -Action Verify -ProjectName deep-dev-current
 ```
+
+For same-source renewal, run the preparation command without `-TimeSourcesPath`;
+the remaining activation steps are identical. An explicitly supplied empty,
+missing or invalid source file fails closed and never selects same-source renewal.
+Preparation rejects an `-OperationalCandidate` override; activation requires the
+exact sealed candidate and rejects any source input.
 
 Preparation reuses the full offline operational renewal: fresh current/next
 TLS/traffic and separate issuer keys, same CA key, registered node identities,
@@ -675,8 +682,13 @@ Normal startup/Verify still reject missing or altered floors/journals.
 Post-install failures remain stopped/unready; preserve the exact candidate and
 all volumes for inspection/resumption. Never run initial enrollment, reset a
 floor, erase a pending attempt or use down/volume removal to complete renewal.
-`Build` subsequently validates the sealed operational after-images and retained
-publication prefix instead of the superseded physical-install before-images.
+`Build` subsequently validates the sealed operational after-images, exact original
+genesis and complete retained signed publication history at its original artifact
+intervals instead of the superseded physical-install before-images. This Build-only
+check accepts cryptographically valid expired history so matching binaries can be
+built before offline renewal. It does not acquire live NTS evidence, mint current
+authority or establish readiness. Installation, publication, `Up`, `Verify` and
+issuance retain their actual current policy and trusted-time requirements.
 Historical issuer facts authenticate past settlement only; current grants and
 new Store/ACK always retain current policy/revocation/time checks. `Up`/`Verify`
 are readiness, not delivery evidence; run the same retained CLI profiles next.

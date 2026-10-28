@@ -84,7 +84,7 @@ test('rebuilding installed physical dev validates sealed images without reconfig
   const build = source.split("if ($Action -eq 'Build') {")[1].split('function Test-CurrentCapabilities')[0];
   const physical = build.split('if ($physicalEnabled) {')[1].split('} else {')[0];
   assert.match(build, /'validate-physical-ingress'/);
-  assert.match(physical, /'validate-retained-operational'/);
+  assert.match(physical, /'validate-build-retained-operational'/);
   assert.doesNotMatch(physical, /'configure'|install-|prepare-|provision/);
   assert.ok(build.indexOf("'validate-physical-ingress'") < build.indexOf("@('build','registry','node-1','publisher')"));
 });

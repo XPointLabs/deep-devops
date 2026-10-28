@@ -18,6 +18,23 @@ internal static class DevTimeSourceTests
             [new(root.RootKeyId.Span, 0, root.Ed25519PublicKey.Span, root.CustodyDomainHash.Span)], 1,
             witnesses, 2, sources[..2], 5, 10, 900, 900, 10_000, 900, 9_000, 1, 1), [root]);
         var oldPolicy = AccountDirectoryDts1Codec.Decode(genesis.ExactDts1.Span);
+        Check(DevTimeSourceUpdate.Capture(null, oldPolicy) is null, "omitted source file retains the exact existing signed sources");
+        var sameSources = await DevOfflineAuthorityRenewal.AuthorPairAsync(genesis.GenesisPin,
+            [genesis.ExactXna1], [genesis.ExactDts1], 20_000, root, new string('b', 64));
+        var samePolicy = AccountDirectoryDts1Codec.Decode(sameSources.ExactTimePolicyChain[^1]);
+        var sameAuthority = XPointNetworkAuthorityVerifier.Verify(genesis.GenesisPin,
+            sameSources.ExactAuthorityChain.Select(bytes => (ReadOnlyMemory<byte>)bytes).ToArray(),
+            sameSources.ExactTimePolicyChain.Select(bytes => (ReadOnlyMemory<byte>)bytes).ToArray());
+        Check(samePolicy.Sources.Count == oldPolicy.Sources.Count &&
+            samePolicy.Sources.Zip(oldPolicy.Sources).All(pair => SameSource(pair.First, pair.Second)) &&
+            samePolicy.RequiredSourceCount == oldPolicy.RequiredSourceCount &&
+            samePolicy.RequiredDistinctFailureFamilies == oldPolicy.RequiredDistinctFailureFamilies &&
+            samePolicy.MaximumSourceSampleAgeSeconds == oldPolicy.MaximumSourceSampleAgeSeconds &&
+            samePolicy.MaximumIntervalWidthSeconds == oldPolicy.MaximumIntervalWidthSeconds &&
+            sameAuthority.RootKeys[0].Ed25519PublicKey.Span.SequenceEqual(root.Ed25519PublicKey.Span) &&
+            sameSources.ExactAuthorityChain[0].AsSpan().SequenceEqual(genesis.ExactXna1.Span) &&
+            sameSources.ExactTimePolicyChain[0].AsSpan().SequenceEqual(genesis.ExactDts1.Span),
+            "same-source renewal after expiry preserves original keys, exact ancestry and every source tuple and limit");
         var sourceFile = EncodeSources(sources);
         var parsed = DevTimeSourceUpdate.Parse(sourceFile, oldPolicy);
         Check(parsed.Length == 3, "closed canonical three-source file");
@@ -47,15 +64,20 @@ internal static class DevTimeSourceTests
 
         var pair = await DevOfflineAuthorityRenewal.AuthorPairAsync(genesis.GenesisPin,
             [genesis.ExactXna1], [genesis.ExactDts1], 20_000, root, new string('a', 64), parsed);
+        await RejectAsync(() => DevOfflineAuthorityRenewal.AuthorPairAsync(genesis.GenesisPin,
+            [genesis.ExactXna1], [genesis.ExactDts1], 20_000, root, new string('a', 64), [sources[0], sources[2]]),
+            "provided successor sources cannot remove an original source");
         var verified = XPointNetworkAuthorityVerifier.Verify(genesis.GenesisPin,
             pair.ExactAuthorityChain.Select(bytes => (ReadOnlyMemory<byte>)bytes).ToArray(),
             pair.ExactTimePolicyChain.Select(bytes => (ReadOnlyMemory<byte>)bytes).ToArray());
         var nextPolicy = AccountDirectoryDts1Codec.Decode(pair.ExactTimePolicyChain[^1]);
-        Check(nextPolicy.Sources.Count == 3 && nextPolicy.RequiredSourceCount == 2 &&
+        Check(nextPolicy.Sources.Count == 3 && nextPolicy.Sources.Take(2).Zip(oldPolicy.Sources).All(pair => SameSource(pair.First, pair.Second)) &&
+            nextPolicy.RequiredSourceCount == 2 &&
             nextPolicy.RequiredDistinctFailureFamilies == 2 && nextPolicy.MaximumSourceSampleAgeSeconds == oldPolicy.MaximumSourceSampleAgeSeconds &&
             nextPolicy.MaximumIntervalWidthSeconds == oldPolicy.MaximumIntervalWidthSeconds &&
             verified.RootKeys[0].Ed25519PublicKey.Span.SequenceEqual(root.Ed25519PublicKey.Span) &&
-            pair.ExactAuthorityChain[0].AsSpan().SequenceEqual(genesis.ExactXna1.Span), "root-signed additive successor retains key genesis and limits");
+            pair.ExactAuthorityChain[0].AsSpan().SequenceEqual(genesis.ExactXna1.Span) &&
+            pair.ExactTimePolicyChain[0].AsSpan().SequenceEqual(genesis.ExactDts1.Span), "root-signed additive successor retains key genesis and limits");
         pair.ExactTimePolicyChain[^1][^1] ^= 1;
         Reject(() => XPointNetworkAuthorityVerifier.Verify(genesis.GenesisPin,
             pair.ExactAuthorityChain.Select(bytes => (ReadOnlyMemory<byte>)bytes).ToArray(),
@@ -65,6 +87,10 @@ internal static class DevTimeSourceTests
         Directory.CreateDirectory(temp);
         try {
             var path = Path.Combine(temp, "sources.json");
+            Reject(() => DevTimeSourceUpdate.Capture("", oldPolicy)!, "provided empty source path is not same-source renewal");
+            Reject(() => DevTimeSourceUpdate.Capture(path, oldPolicy)!, "provided absent source file is not same-source renewal");
+            File.WriteAllBytes(path, "{}"u8.ToArray());
+            Reject(() => DevTimeSourceUpdate.Capture(path, oldPolicy)!, "provided malformed source file is not same-source renewal");
             File.WriteAllBytes(path, sourceFile);
             var captured = DevTimeSourceUpdate.Capture(path, oldPolicy)!;
             captured.RequireUnchanged();
@@ -72,6 +98,7 @@ internal static class DevTimeSourceTests
             Reject(() => { captured.RequireUnchanged(); return 0; }, "source-file callback mutation");
         }
         finally { File.Delete(Path.Combine(temp, "sources.json")); Directory.Delete(temp); }
+        await DevRetainedBuildTests.RunAsync();
         Console.WriteLine("Offline time-source tests passed; synthetic signed fixtures are not live NTS or activation evidence.");
     }
 
@@ -87,11 +114,22 @@ internal static class DevTimeSourceTests
             protocol = source.Protocol, host = source.HostAscii, port = source.Port,
             pin = Convert.ToHexStringLower(source.TlsSpkiSha256.Span), radius = source.MaximumRadiusSeconds }) });
     private static AccountDirectoryDts1Source Source(int id, int family) => new(Bytes(id), Bytes(family), 1, $"time{id}.invalid", 4460, Bytes(id + 50), 10);
+    private static bool SameSource(AccountDirectoryDts1Source left, AccountDirectoryDts1Source right) =>
+        left.SourceId.Span.SequenceEqual(right.SourceId.Span) && left.FailureFamilyHash.Span.SequenceEqual(right.FailureFamilyHash.Span) &&
+        left.Protocol == right.Protocol && left.HostAscii == right.HostAscii && left.Port == right.Port &&
+        left.TlsSpkiSha256.Span.SequenceEqual(right.TlsSpkiSha256.Span) && left.MaximumRadiusSeconds == right.MaximumRadiusSeconds;
     private static byte[] Bytes(int value) => Enumerable.Repeat(checked((byte)value), 32).ToArray();
     private static void Check(bool condition, string name) { if (!condition) throw new InvalidOperationException(name); Console.WriteLine("PASS " + name); }
     private static void Reject(Func<object> action, string name)
     {
         try { _ = action(); }
+        catch (Exception error) when (error is ArgumentException or FormatException or CryptographicException or IOException or InvalidDataException or XPointNetworkAuthorityVerificationException)
+        { Console.WriteLine("PASS reject " + name); return; }
+        throw new InvalidOperationException("Hostile fixture accepted: " + name);
+    }
+    private static async Task RejectAsync(Func<Task> action, string name)
+    {
+        try { await action(); }
         catch (Exception error) when (error is ArgumentException or FormatException or CryptographicException or IOException or InvalidDataException or XPointNetworkAuthorityVerificationException)
         { Console.WriteLine("PASS reject " + name); return; }
         throw new InvalidOperationException("Hostile fixture accepted: " + name);

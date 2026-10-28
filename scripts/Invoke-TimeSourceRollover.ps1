@@ -24,14 +24,19 @@ if((Test-Path -LiteralPath $leasePath) -and ((Get-Item -LiteralPath $leasePath).
 $maintenanceLease=[IO.FileStream]::new($leasePath,[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
 try {
 if($Phase -ceq 'PrepareOperational') {
-    if(-not $SourceFile -or $Candidate) { throw 'Preparation requires explicit source input and no candidate override.' }
+    if($PSBoundParameters.ContainsKey('Candidate')) { throw 'Preparation does not accept a candidate override.' }
+    $prepareArguments=@('prepare-time-sources',$root,$observer)
+    if($PSBoundParameters.ContainsKey('SourceFile')) {
+        if([string]::IsNullOrWhiteSpace($SourceFile)) { throw 'Supplied source input must name a nonempty file path.' }
+        $prepareArguments += [IO.Path]::GetFullPath($SourceFile)
+    }
     $prior=@(& docker inspect --format '{{.HostConfig.RestartPolicy.Name}}' deep-dev-current-publisher-1)
     if($LASTEXITCODE -ne 0 -or $prior.Count -ne 1) { throw 'Cannot establish publisher restart custody.' }
     Invoke-Native docker @('update','--restart','unless-stopped','deep-dev-current-publisher-1')
     Invoke-Native docker ($ComposeArguments+@('stop','--timeout','10','publisher'))
     $prepared=$false
     try {
-        Invoke-Native dotnet ($tool+@('prepare-time-sources',$root,$observer,[IO.Path]::GetFullPath($SourceFile)))
+        Invoke-Native dotnet ($tool+$prepareArguments)
         $prepared=$true
     } finally {
         if(-not $prepared) {
@@ -42,7 +47,7 @@ if($Phase -ceq 'PrepareOperational') {
     Write-Host 'Sealed current-mailbox time-source successor prepared; publisher remains stopped. No policy activated.'
     return
 }
-if(-not $Candidate -or $SourceFile) { throw 'Activation requires one explicit sealed candidate, no new source input.' }
+if(-not $Candidate -or $PSBoundParameters.ContainsKey('SourceFile')) { throw 'Activation requires one explicit sealed candidate, no new source input.' }
 $candidatePath=[IO.Path]::GetFullPath($Candidate)
 Invoke-Native dotnet ($tool+@('validate-time-sources',$root,$candidatePath))
 foreach($name in @('floor-secrets','registry-mailbox-secrets','node-1-secrets','node-2-secrets','node-3-secrets','deposit-secrets','retrieve-secrets','publisher-state','public-runtime')) {

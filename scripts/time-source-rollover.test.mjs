@@ -9,6 +9,14 @@ test('retained time-source mode is explicit and does not remove the pre-mailbox 
   assert.match(s, /Mailbox-enabled custody requires coordinated role-volume\/journal rollover/);
   assert.match(s, /Invoke-TimeSourceRollover\.ps1/);
   assert.match(s, /\$ProjectName -cne 'deep-dev-current'.*?\$mailboxEnabled/s);
+  const retained = s.indexOf('if ($RetainedMailboxTimeSourceRollover) {');
+  const ordinary = s.indexOf("if ($mailboxEnabled -and $Action -in @('PrepareOperational','ApplyOperational','Provision','ProvisionFloor')) {");
+  assert.ok(retained >= 0 && retained < ordinary);
+  const dispatch = s.slice(retained, ordinary);
+  assert.match(dispatch, /-not \$nodeMailboxEnabled/);
+  assert.match(dispatch, /\$Action -notin @\('PrepareOperational','ApplyOperational'\)/);
+  assert.match(dispatch, /Invoke-TimeSourceRollover\.ps1[\s\S]*\n\s*return/);
+  assert.match(s.slice(ordinary), /throw 'Mailbox-enabled custody requires coordinated role-volume\/journal rollover/);
 });
 test('all writers stop before local, role-volume, SQL or publisher installation', async () => {
   const s = await read('./Invoke-TimeSourceRollover.ps1');
@@ -18,6 +26,52 @@ test('all writers stop before local, role-volume, SQL or publisher installation'
   assert.ok(s.indexOf("revocation-roots.sql") < s.indexOf("'import-operational'"));
   assert.match(s, /publisher','node-1','node-2','node-3','registry','deposit-signer','retrieve-signer/);
   assert.doesNotMatch(s, /Provision|provision-state|provision-floor|current-mailbox-enroll|--volumes|volume','rm/);
+});
+test('same-source preparation omits only unbound input and explicit bad paths never become omission', async () => {
+  const wrapper = await read('./Invoke-TimeSourceRollover.ps1');
+  const prepare = wrapper.split("if($Phase -ceq 'PrepareOperational') {")[1]
+    .split("if(-not $Candidate")[0];
+  assert.match(prepare, /\$prepareArguments=@\('prepare-time-sources',\$root,\$observer\)/);
+  assert.match(prepare, /ContainsKey\('SourceFile'\)[\s\S]*IsNullOrWhiteSpace\(\$SourceFile\)[\s\S]*throw[\s\S]*\$prepareArguments \+= \[IO.Path\]::GetFullPath\(\$SourceFile\)/);
+  assert.match(prepare, /ContainsKey\('Candidate'\).*throw/);
+  assert.ok(prepare.indexOf('IsNullOrWhiteSpace') < prepare.indexOf('docker inspect'));
+  assert.match(prepare, /Invoke-Native dotnet \(\$tool\+\$prepareArguments\)/);
+  assert.doesNotMatch(prepare, /catch|TimeSourcesPath|ReadNts|UtcNow|DateTime/);
+  assert.match(wrapper, /if\(-not \$Candidate -or \$PSBoundParameters.ContainsKey\('SourceFile'\)\)/);
+  const dispatch = await read('./deep-dev.ps1');
+  assert.match(dispatch, /ContainsKey\('TimeSourcesPath'\)\) \{ \$rolloverArguments.SourceFile=\$TimeSourcesPath \}/);
+  assert.match(dispatch, /ContainsKey\('OperationalCandidate'\)\) \{ \$rolloverArguments.Candidate=\$OperationalCandidate \}/);
+  const program = await read('../tools/deep-dev/Program.cs');
+  assert.match(program, /args.Length is 3 or 4 && args\[0\] == "prepare-time-sources"/);
+  assert.match(program, /PrepareAsync\(args\[1\], args\[2\], ReadNtsAsync, args.Length == 4 \? args\[3\] : null\)/);
+  const producer = await read('../tools/deep-dev/DevTimeSourceRollover.cs');
+  assert.match(producer, /string\? sourceFile = null/);
+  assert.match(producer, /DevOfflineOperationalRenewal.PrepareAsync\(root, observer, observe, sourceFile\)/);
+});
+test('retained Build authenticates sealed historical custody without observing or issuing current authority', async () => {
+  const script = await read('./deep-dev.ps1');
+  const build = script.split("if ($Action -eq 'Build') {")[1].split('function Test-CurrentCapabilities')[0];
+  assert.equal(script.split('validate-build-retained-operational').length - 1, 1);
+  assert.match(build, /@\('validate-build-retained-operational',\$custodyPath\)/);
+  assert.ok(build.indexOf('validate-build-retained-operational') < build.indexOf("@('build',$BuildService)"));
+  const program = await read('../tools/deep-dev/Program.cs');
+  const command = program.split('else if (args is ["validate-build-retained-operational", var retainedRoot]) {')[1].split('else if')[0];
+  assert.match(command, /DevTimeSourceRollover.ValidateInstalledForBuild\(retainedRoot\)/);
+  assert.doesNotMatch(command, /PolicyAsync|ReadNts|DateTime|\.Install\(|\.Execute\(|\.Publish\(/);
+  assert.doesNotMatch(program, /"validate-retained-operational"/);
+  const source = await read('../tools/deep-dev/DevTimeSourceRollover.cs');
+  const historical = source.split('internal static void ValidateInstalledForBuild(string root)')[1].split('internal static')[0];
+  assert.match(historical, /var installed = ValidateInstalledClosure\(root\)/);
+  assert.match(historical, /genesis\.xna1/); assert.match(historical, /genesis\.dts1/);
+  assert.match(historical, /XPointNetworkHistoricalClosureVerifier.Verify/);
+  assert.match(historical, /XPointNetworkHistoricalClosureVerifier.Verify\(pin, installed\)/);
+  assert.match(historical, /XPointNetworkHistoricalClosureVerifier.Verify\(pin, closure\)/);
+  assert.doesNotMatch(historical, /PolicyAsync|ReadNts|DateTime|DevOperationalActivation.Execute|File.Move|WriteNew/);
+  const current = await read('../tools/deep-dev/DevNodeMailboxProvisioning.cs');
+  const currentPolicy = current.split('internal static async Task<VerifiedMailboxAuthorityV2> PolicyAsync')[1].split('internal static async Task PrepareAsync')[0];
+  assert.match(currentPolicy, /await observe\(/);
+  assert.match(currentPolicy, /MailboxAuthorityV2Verifier.Verify\(root,[\s\S]*observed,checked\(observed\+1\)\)/);
+  assert.doesNotMatch(currentPolicy, /XPointNetworkHistoricalClosureVerifier|ValidateInstalledForBuild/);
 });
 test('online mount whitelist excludes offline root and complete private candidate', async () => {
   const s = await read('./Invoke-TimeSourceRollover.ps1');

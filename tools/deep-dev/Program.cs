@@ -15,18 +15,17 @@ using Deep.Protocol.XPointNetworkV1;
 using Sodium;
 
 try {
-    if (args is ["prepare-time-sources", var timeRoot, var timeObserver, var timeFile]) {
-        _ = await DevTimeSourceRollover.PrepareAsync(timeRoot, timeObserver, ReadNtsAsync, timeFile);
+    if (args.Length is 3 or 4 && args[0] == "prepare-time-sources") {
+        _ = await DevTimeSourceRollover.PrepareAsync(args[1], args[2], ReadNtsAsync, args.Length == 4 ? args[3] : null);
         Console.WriteLine("Offline current-dev time-source successor prepared; not installed or activated.");
     }
     else if (args is ["validate-time-sources" or "install-time-sources", var installRoot, var timeCandidate]) {
         DevTimeSourceRollover.Install(installRoot, timeCandidate, args[0] == "install-time-sources");
         Console.WriteLine("Sealed time-source installation checked; publisher and native owner activation remain separate.");
     }
-    else if (args is ["validate-retained-operational", var retainedRoot, var retainedObserver]) {
-        DevTimeSourceRollover.ValidateInstalled(retainedRoot);
-        _ = await DevNodeMailboxProvisioning.PolicyAsync(Path.Combine(retainedRoot, "public"), retainedObserver, ReadNtsAsync);
-        Console.WriteLine("Retained operational images and current signed policy verified; runtime unchanged.");
+    else if (args is ["validate-build-retained-operational", var retainedRoot]) {
+        DevTimeSourceRollover.ValidateInstalledForBuild(retainedRoot);
+        Console.WriteLine("Retained operational images and historical signed closure verified for Build; no current authority or readiness was established.");
     }
     else if (args.Length == 2 && args[0] == "configure") ConfigureAtomicBundle(args[1]);
     else if (args.Length == 3 && args[0] == "prepare-mailbox")

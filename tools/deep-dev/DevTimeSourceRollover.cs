@@ -16,7 +16,7 @@ internal static class DevTimeSourceRollover
     private static readonly string[] ExtensionFiles = ["public/prior.pma2", "public/dev-ca.crl", "operator/revocation-roots.sql"];
 
     internal static async Task<string> PrepareAsync(string root, string observer,
-        Func<string, AccountDirectoryDts1Source[], Task<ulong>> observe, string sourceFile)
+        Func<string, AccountDirectoryDts1Source[], Task<ulong>> observe, string? sourceFile = null)
     {
         root = Scope(root);
         var before = Read(Path.Combine(root, "public/network.ncp2"), XPointNetworkClosureWireCodec.MaximumResponseLength);
@@ -98,7 +98,9 @@ internal static class DevTimeSourceRollover
         finally { CryptographicOperations.ZeroMemory(key); }
     }
 
-    internal static void ValidateInstalled(string root)
+    internal static void ValidateInstalled(string root) => _ = ValidateInstalledClosure(root);
+
+    private static XPointNetworkClosureWireArtifacts ValidateInstalledClosure(string root)
     {
         root = Scope(root);
         var candidate = System.Text.Encoding.UTF8.GetString(Read(Path.Combine(root, "mailbox/operational-candidate.txt"), 4096));
@@ -129,10 +131,28 @@ internal static class DevTimeSourceRollover
             Prefix(installed.ExactNetworkPolicyChain, current.ExactNetworkPolicyChain); Prefix(installed.ExactViewChain, current.ExactViewChain);
             Prefix(installed.ExactHeadChain, current.ExactHeadChain); Prefix(installed.ExactMailboxAuthorityChain, current.ExactMailboxAuthorityChain);
             Prefix(installed.ExactPlacementTopologyChain, current.ExactPlacementTopologyChain);
+            return installed;
         }
         finally { CryptographicOperations.ZeroMemory(key); }
         static void Prefix(IReadOnlyList<ReadOnlyMemory<byte>> before, IReadOnlyList<ReadOnlyMemory<byte>> after)
         { if (after.Count < before.Count || before.Where((bytes, i) => !bytes.Span.SequenceEqual(after[i].Span)).Any()) throw new CryptographicException("Installed operational publication is not a retained prefix."); }
+    }
+
+    // Build admission only: authenticates retained custody and signed history,
+    // including expired artifacts, without observing time or minting authority.
+    internal static void ValidateInstalledForBuild(string root)
+    {
+        root = Scope(root);
+        var installed = ValidateInstalledClosure(root);
+        using var manifest = JsonDocument.Parse(Read(Path.Combine(root, "public/deep-dev.json"), 16_384));
+        var pin = Pin(manifest);
+        var closure = XPointNetworkClosureWireCodec.DecodeResponse(Read(Path.Combine(root, "public/network.ncp2"),
+            XPointNetworkClosureWireCodec.MaximumResponseLength));
+        if (!Read(Path.Combine(root, "public/genesis.xna1"), 65_535).AsSpan().SequenceEqual(closure.ExactAuthorityChain[0].Span) ||
+            !Read(Path.Combine(root, "public/genesis.dts1"), 65_535).AsSpan().SequenceEqual(closure.ExactTimePolicyChain[0].Span))
+            throw new CryptographicException("Retained original genesis files differ.");
+        XPointNetworkHistoricalClosureVerifier.Verify(pin, installed);
+        XPointNetworkHistoricalClosureVerifier.Verify(pin, closure);
     }
 
     internal static string RootSql(ContactRecord prior, VerifiedMailboxAuthorityV2 next)
