@@ -205,7 +205,7 @@ successor links verify from the original pin. Every prior authority/time-policy
 byte must remain an exact prefix of the candidate; missing intermediates,
 truncation and a different valid fork reject. It does not sign a renewal, rotate
 keys or turn that inventory into current authority. The
-[local regression](S05-AUTHORITY-HISTORY-2026-10-14.md) covers two same-key renewals
+[local regression](https://github.com/XPointLabs/deep-devops/blob/8e6abe81d00651753fdaa41420f3e269f0cb37d5/docs/S05-AUTHORITY-HISTORY-2026-10-14.md) covers two same-key renewals
 and69 retained views with delegated traffic-key rotation, not changed-root/
 witness custody, native client catch-up or physical acceptance.
 The output contains only the Protocol-owned eight public chains, including

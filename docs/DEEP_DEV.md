@@ -203,7 +203,7 @@ commands deliberately reject once enabled. Do not bypass this fence with a
 manual partial rollover. The explicit retained current-dev source-renewal flight
 below is separate; uncertain first-provision recovery remains an operator gate.
 Exact runs/failures are recorded in the
-[S05 checkpoint](S05-AUTHORITY-HISTORY-2026-10-14.md#actual-protected-mailbox-issuer-activation).
+[S05 checkpoint](https://github.com/XPointLabs/deep-devops/blob/8e6abe81d00651753fdaa41420f3e269f0cb37d5/docs/S05-AUTHORITY-HISTORY-2026-10-14.md#actual-protected-mailbox-issuer-activation).
 
 ### Explicit current-dev node mailbox enrollment
 
@@ -260,7 +260,7 @@ node-image `Build`, `Up`, then `Verify`; flags alone do not prove client E2E.
 The closed descriptor/key allocation belongs to
 [DR-0145](../../docs/survival-program/decisions/DR-0145-owned-group-control-rendezvous.md),
 with current connected evidence in the
-[CLI GSR checkpoint](../../deep-cli/docs/testing/cli-gsr-groups-2026-10-18.md).
+[CLI GSR checkpoint](https://github.com/XPointLabs/deep-cli/blob/7605758e033cadf29a7ae31aa91d994722c6ed22/docs/testing/cli-gsr-groups-2026-10-18.md).
 Retention/rotation/handover and production/device acceptance remain separate.
 
 The contacts overlay reserves2 CPUs for Registry's concurrent signed-proof and
@@ -326,7 +326,7 @@ are never printed. A successful authenticated empty mailbox page is a scoped
 issuer→owned-client→node read, not message delivery, durable probe recovery or
 physical Windows/Android acceptance. A failed stage does not pass this scenario.
 The exact receipts and remaining work belong to the
-[S05 checkpoint](S05-AUTHORITY-HISTORY-2026-10-14.md).
+[S05 checkpoint](https://github.com/XPointLabs/deep-devops/blob/8e6abe81d00651753fdaa41420f3e269f0cb37d5/docs/S05-AUTHORITY-HISTORY-2026-10-14.md).
 
 ### Current-dev TLS revocation distribution
 
@@ -508,7 +508,7 @@ This is an operator-owned runtime diagnostic, **not physical MAUI/device E2E**.
 Account admission/current network/pre-key publication and exact receipt-pair
 reopen have passed on Windows. The signed reachable origins and separated public
 H2 ingress supersede the earlier unusable Docker-bridge route; current evidence
-is [the S05 checkpoint](S05-PREKEY-LIFECYCLE-2026-10-15.md). A TCP connect or healthy
+is [the S05 checkpoint](https://github.com/XPointLabs/deep-devops/blob/8e6abe81d00651753fdaa41420f3e269f0cb37d5/docs/S05-PREKEY-LIFECYCLE-2026-10-15.md). A TCP connect or healthy
 capability alone is still insufficient evidence of publication/delivery.
 Do not silently translate sealed endpoints in the client, disable pins/TLS,
 change the profile on failure or reset genesis/floors. Pending contact-publication
@@ -552,7 +552,7 @@ import a new root bundle into the protected publisher journal or update TLS
 custody automatically. The retained deployment is still expired; source builds
 are not a recovered network. Follow
 [DR-0116](../../docs/survival-program/decisions/DR-0116-offline-root-continuity-after-expiry.md)
-and the [current source checkpoint](S05-AUTHORITY-HISTORY-2026-10-14.md).
+and the [current source checkpoint](https://github.com/XPointLabs/deep-devops/blob/8e6abe81d00651753fdaa41420f3e269f0cb37d5/docs/S05-AUTHORITY-HISTORY-2026-10-14.md).
 
 The 2026-10-14 read-only diagnosis additionally found a pre-cutover seven-chain
 NCP2 in this retained deployment (610 views/heads/topologies). The current
@@ -735,7 +735,7 @@ day number; the existing replay ledger correctly rejects it. Registry readiness
 must inspect that ledger without consuming a nonce or compacting it. This is an
 open S05 coordination requirement, not permission to erase the ledger, change
 the clock, backdate policy, weaken fork rejection or publish a release. See the
-[source/runtime checkpoint](S05-AUTHORITY-HISTORY-2026-10-14.md).
+[source/runtime checkpoint](https://github.com/XPointLabs/deep-devops/blob/8e6abe81d00651753fdaa41420f3e269f0cb37d5/docs/S05-AUTHORITY-HISTORY-2026-10-14.md).
 
 The coordinated consumer under
 [DR-0119](../../docs/survival-program/decisions/DR-0119-dtt1-same-day-authority-handover.md)

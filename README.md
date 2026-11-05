@@ -1,5 +1,7 @@
 # Deep DevOps
 
+Current architecture: [Deep / XPoint specification](../docs/architecture/README.md).
+
 Reproducible local, UAT and release orchestration for the Deep messenger stack.
 This repository owns topology, TLS/PKI, runtime gates, chaos controls and
 sanitized release evidence. Product runtime code stays in its service repo.

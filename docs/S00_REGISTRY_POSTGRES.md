@@ -66,7 +66,7 @@ successful baseline; inspect the TRX locally without committing machine paths.
 Tests create/drop their own GUID schemas; the whole container is discarded
 even if a case fails. Raw TRX may contain private machine paths; publish only
 sanitized case names/counts/hashes as in the
-[Registry checkpoint](../../deep-registry-api/docs/testing/s00-registry-baseline-2026-10-03.md).
+[Registry checkpoint](https://github.com/XPointLabs/deep-registry-api/blob/d825be4bb44ac0e6613c25dae36cdcdbdb6544f5/docs/testing/s00-registry-baseline-2026-10-03.md).
 
 ## What is proved
 
